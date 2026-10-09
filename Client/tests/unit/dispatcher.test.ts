@@ -70,6 +70,35 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
 }));
+// The handlers load the voice module lazily and fire-and-forget
+// (`void livekitSession().then(...)`). A dynamic import resolves through the
+// module runner's RPC, so one started by a test's last dispatch can still be in
+// flight when the file's environment is torn down — by then the `vi.mock`
+// registry above is gone and the REAL livekitSession graph loads and throws
+// (CI "Client Unit Tests": `Errors 4 errors`, all tests passing). This wrapper
+// repeats the helper's `import()` and counts the imports that have not yet
+// settled.
+const lazyVoiceImports = vi.hoisted(() => ({ inFlight: 0 }));
+vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/features/connection/dispatchContext")>();
+  return {
+    ...actual,
+    livekitSession: () => {
+      lazyVoiceImports.inFlight++;
+      const loading = import("@lib/livekitSession");
+      void loading.then(
+        () => {
+          lazyVoiceImports.inFlight--;
+        },
+        () => {
+          lazyVoiceImports.inFlight--;
+        },
+      );
+      return loading;
+    },
+  };
+});
 // screenShare.ts's rollback correlation is exercised at the unit level in
 // screen-share-tracks.test.ts; here only the dispatcher's own reaction to it
 // is under test, so the lookup itself is mocked and controlled per test.
@@ -227,6 +256,10 @@ describe("WS Dispatcher", () => {
   });
 
   afterEach(() => {
+    expect(
+      lazyVoiceImports.inFlight,
+      "a lazy voice-module import must settle before the test ends, or it outlives the environment (CI 'Errors 4 errors')",
+    ).toBe(0);
     cleanup();
     vi.useRealTimers();
   });
