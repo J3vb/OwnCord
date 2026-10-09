@@ -86,6 +86,13 @@ Each item links to the guidance that owns it.
   Windows follows Settings › Voice & Audio, and voice media itself is routed by
   the native engine and unaffected — see
   [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
+- **On Linux, mp4 video, colour emoji and PipeWire cameras come from distro
+  packages.** Video attachments and YouTube embeds that use H264/AAC play only
+  with `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`, emoji render in
+  colour only with `fonts-noto-color-emoji`, and a PipeWire-only camera needs
+  `gstreamer1.0-pipewire`. The `.deb` recommends all four, so apt installs them
+  by default (not with `--no-install-recommends`); on an AppImage, install the
+  same packages on the host — it carries its own base GStreamer, not these.
 
 ## Voice and video
 
