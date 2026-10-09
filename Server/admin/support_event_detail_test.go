@@ -288,6 +288,14 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 
 // A registered name made only of structural characters ("[]", "::") is
 // masked where it stands alone, not split into kept separators.
+func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
+	known := newSupportKnown([]string{":"})
+	in := "dial tcp [x]:7880: connect: connection refused"
+	if got := supportScrub(in, known); got != in {
+		t.Errorf("supportScrub(%q) = %q", in, got)
+	}
+}
+
 func TestSupportScrub_RedactsStructuralNames(t *testing.T) {
 	known := newSupportKnown([]string{"[]", "::"})
 	cases := []struct{ in, want string }{
@@ -310,7 +318,7 @@ func TestSupportScrub_MasksCompositeJSONValues(t *testing.T) {
 		{`kick {"participant_ids":[12,34,56],"error":"ice failed"}`, `kick {"participant_ids":"[x]","error":"ice failed"}`},
 		{`kick {"room":{"id":7,"n":[1,2]},"error":"ice failed"}`, `kick {"room":"[x]","error":"ice failed"}`},
 		{`kick {"error":{"room":"b","code":5}}`, `kick {"error":{"room":"[x]","code":5}}`},
-		{`kick name: 加藤 failed`, `kick name: [x] failed`},
+		{`kick {"name": 加藤}`, `kick {"name": "[x]"}`},
 		{`kick {"participant_ids":[12,"a]",34`, `kick {"participant_ids":"[x]"`},
 	}
 	for _, c := range cases {

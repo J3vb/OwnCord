@@ -219,7 +219,7 @@ func (k *supportKnown) scrubLiterals(s string) string {
 			if t = t.next[s[j:j+1]]; t == nil {
 				break
 			}
-			if t.end && ((leftOK && bounded(j+1)) || strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0) {
+			if t.end && ((leftOK && bounded(j+1)) || (j > i && strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0)) {
 				n = j + 1 - i
 			}
 		}
