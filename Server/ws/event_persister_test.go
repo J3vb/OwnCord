@@ -9,6 +9,7 @@ package ws
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -107,13 +108,19 @@ func TestEventPersisterDropsOnFullQueue(t *testing.T) {
 
 // slowEventStore wraps a real EventStore and adds an artificial delay to
 // PersistEvents, so tests can make an in-flight flush deterministically
-// outlast a short Stop context.
+// outlast a short Stop context. onPersist, when set, runs on entry to
+// PersistEvents before the delay: a test uses it as a sync point that fires
+// exactly when the flush is in flight.
 type slowEventStore struct {
 	EventStore
-	delay time.Duration
+	delay     time.Duration
+	onPersist func()
 }
 
 func (s *slowEventStore) PersistEvents(ctx context.Context, events []db.PersistedEvent) (int, error) {
+	if s.onPersist != nil {
+		s.onPersist()
+	}
 	time.Sleep(s.delay)
 	return s.EventStore.PersistEvents(ctx, events)
 }
@@ -125,6 +132,15 @@ func (s *slowEventStore) PersistEvents(ctx context.Context, events []db.Persiste
 // returned at ~20ms with nothing persisted, letting main.go's LIFO
 // database.Close() run underneath a still-flushing goroutine. The fix must
 // return only after the flush completes, with every event persisted.
+//
+// FLAKY, superseded by TestEventPersisterStopBlocksThroughFlushAfterCtxDone
+// below: the 20ms timer races the run goroutine's start. If run() reaches its
+// stop drain only after the timer has fired (slow runner, -race, first-time
+// telemetry.NewAppMetrics()), <-p.queue and <-p.stopCtxDone are both ready and
+// select picks one at random; taking stopCtxDone flushes an empty batch and
+// returns, so Stop comes back in ~40ms with persisted=0 (CI: "Stop returned
+// after 41.8149ms" / "persisted=0, want 5"). That is the test racing the
+// scheduler, not the production contract.
 func TestEventPersisterStopWaitsForGoroutineExit(t *testing.T) {
 	mem := openPersisterTestDB(t)
 	store := &slowEventStore{EventStore: mem, delay: 200 * time.Millisecond}
@@ -152,6 +168,46 @@ func TestEventPersisterStopWaitsForGoroutineExit(t *testing.T) {
 	persisted, _, _, _ := p.Stats()
 	if persisted != 5 {
 		t.Errorf("persisted=%d, want 5 (Stop must wait for the in-flight flush to finish)", persisted)
+	}
+}
+
+// TestEventPersisterStopBlocksThroughFlushAfterCtxDone pins the contract that
+// Stop never abandons an in-flight flush: main.go closes the database right
+// after Stop returns, so Stop must outlast a flush even when its context is
+// already done. The context is cancelled from inside PersistEvents, so the
+// order is fixed regardless of scheduling: Stop closes p.stop, run() drains
+// the five queued events (ctx not yet done, so stopCtxDone is not ready),
+// falls into default, flushes, PersistEvents cancels ctx and sleeps, and
+// only then does run() exit and Stop return.
+func TestEventPersisterStopBlocksThroughFlushAfterCtxDone(t *testing.T) {
+	mem := openPersisterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := &slowEventStore{EventStore: mem, delay: 200 * time.Millisecond, onPersist: cancel}
+	// Neither the batch (1024) nor the ticker (1h) can flush before Stop is
+	// called; only Stop's drain flushes, so the in-flight flush is
+	// deterministic.
+	p := NewEventPersister(store, 64, 1024, time.Hour)
+	p.Start(context.Background())
+	for i := range 5 {
+		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
+	}
+
+	start := time.Now()
+	p.Stop(ctx)
+	elapsed := time.Since(start)
+
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("Stop returned after %v, want it to block for the ~200ms flush "+
+			"(it must not abandon the goroutine when ctx expires — main.go closes "+
+			"the DB right after Stop returns)", elapsed)
+	}
+	persisted, _, _, _ := p.Stats()
+	if persisted != 5 {
+		t.Errorf("persisted=%d, want 5 (Stop must wait for the in-flight flush to finish)", persisted)
+	}
+	if err := ctx.Err(); !errors.Is(err, context.Canceled) {
+		t.Errorf("ctx.Err()=%v, want context.Canceled (ctx must have been done while the flush was in flight)", err)
 	}
 }
 
