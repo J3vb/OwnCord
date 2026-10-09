@@ -456,6 +456,13 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
+  /** On the tile and on its video, so a video in its pop-out window hides
+   *  its stalled frame too. */
+  function setTrackMuted(entry: CellEntry, muted: boolean): void {
+    entry.el.classList.toggle("track-muted", muted);
+    entry.video.classList.toggle("track-muted", muted);
+  }
+
   function attachTrackLifecycle(userId: number, stream: MediaStream): void {
     // Clean up previous listeners for this tile
     const prev = cells.get(userId);
@@ -467,7 +474,7 @@ export function createVideoGrid(): VideoGridComponent {
     const track = stream.getVideoTracks()[0];
     // A replacement can already be live without ever emitting `unmute`.
     // Reset the old track's CSS state and seed it from this track instead.
-    prev?.el.classList.toggle("track-muted", track?.muted === true);
+    if (prev !== undefined) setTrackMuted(prev, track?.muted === true);
     if (track === undefined) return;
 
     const onTrackEnded = (): void => {
@@ -476,11 +483,11 @@ export function createVideoGrid(): VideoGridComponent {
     const onTrackMute = (): void => {
       // Temporarily hide video — track may unmute after network recovery
       const cell = cells.get(userId);
-      if (cell !== undefined) cell.el.classList.add("track-muted");
+      if (cell !== undefined) setTrackMuted(cell, true);
     };
     const onTrackUnmute = (): void => {
       const cell = cells.get(userId);
-      if (cell !== undefined) cell.el.classList.remove("track-muted");
+      if (cell !== undefined) setTrackMuted(cell, false);
     };
     track.addEventListener("ended", onTrackEnded);
     track.addEventListener("mute", onTrackMute);

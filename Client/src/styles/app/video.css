@@ -248,6 +248,9 @@
   height: 100%;
   object-fit: contain;
 }
+.video-popout video.track-muted {
+  visibility: hidden;
+}
 .video-popout__fullscreen {
   position: absolute;
   right: 12px;

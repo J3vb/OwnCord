@@ -1944,6 +1944,21 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector(".video-stopped")).toBeNull();
     });
 
+    it("hides a muted track's stalled frame in the window too", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      control(SCREEN, "pip").click();
+      const video = popup.doc.querySelector("video")!;
+
+      track.dispatchEvent("mute");
+      expect(video.classList.contains("track-muted")).toBe(true);
+      expect(keyword(cascadedDeclaration(".video-popout video.track-muted", "visibility"))).toBe(
+        "hidden",
+      );
+      track.dispatchEvent("unmute");
+      expect(video.classList.contains("track-muted")).toBe(false);
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });
