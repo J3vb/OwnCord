@@ -221,6 +221,9 @@ const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES);
  *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
  *  clear ask again. */
 const missingImages = new Set<string>();
+/** Bounds the set above: one entry per refused URL would otherwise grow for
+ *  the whole session. Oldest dropped first. */
+const MISSING_IMAGES_MAX = 1000;
 const DEFINITE_FAILURES = new Set([403, 404, 410]);
 let attachmentCacheGeneration = 0;
 
@@ -606,6 +609,10 @@ async function fetchImageBlob(url: string, generation: number): Promise<Blob | n
     if (!res.ok) {
       if (DEFINITE_FAILURES.has(res.status) && generation === attachmentCacheGeneration) {
         missingImages.add(url);
+        if (missingImages.size > MISSING_IMAGES_MAX) {
+          const oldest = missingImages.values().next().value;
+          if (oldest !== undefined) missingImages.delete(oldest);
+        }
       }
       return null;
     }
@@ -698,7 +705,8 @@ export function externalPartition(): string {
 }
 
 /** blob: URLs for broker-fetched images, keyed by handle or URL. */
-const externalObjectUrls = new Map<string, string>();
+const externalObjectUrls = new Map<string, { url: string; bytes: number }>();
+let externalBytes = 0;
 /** The subset of those URLs whose bytes are a GIF — the ones that get the
  *  freeze/play control. */
 const externalGifUrls = new Set<string>();
@@ -707,6 +715,10 @@ const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>
  *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
  *  because an image is far smaller than a clip. */
 export const EXTERNAL_IMAGE_CACHE_MAX = 100;
+/** What those copies may pin in total: a broker image can be 16 MB, so the
+ *  count cap alone allows ~1.6 GB of blob memory. Mirrors the server-image
+ *  cache's budget. */
+export const EXTERNAL_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Drop every broker-fetched image and move to a fresh broker partition.
  *  Called on page teardown and from the manual "clear cache" action. */
@@ -716,10 +728,11 @@ export function clearExternalImageCache(): void {
   // drops a partition's cache the moment another one is named, and an empty
   // URL is refused before any network work, so this costs one IPC call.
   void desktop.externalContent?.preview(externalPartition(), "");
-  for (const objectUrl of externalObjectUrls.values()) {
-    revokeObjectUrl(objectUrl);
+  for (const entry of externalObjectUrls.values()) {
+    revokeObjectUrl(entry.url);
   }
   externalObjectUrls.clear();
+  externalBytes = 0;
   externalGifUrls.clear();
   externalInFlight.clear();
 }
@@ -745,7 +758,10 @@ export function isExternalGif(objectUrl: string): boolean {
 
 /** Whether a blob: URL is one an image cache still holds (not revoked). */
 function isLiveImageUrl(objectUrl: string): boolean {
-  return imageCache.holds(objectUrl) || [...externalObjectUrls.values()].includes(objectUrl);
+  return (
+    imageCache.holds(objectUrl) ||
+    [...externalObjectUrls.values()].some((entry) => entry.url === objectUrl)
+  );
 }
 
 /** Load `source` again the way it first came: a server image through its own
@@ -800,7 +816,7 @@ export function loadExternalImage(
   // B9-8: nothing is fetched for an item the viewer has not consented to.
   if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
-  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached });
+  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached.url });
   const existing = externalInFlight.get(key);
   if (existing !== undefined) return existing;
 
@@ -817,18 +833,20 @@ export function loadExternalImage(
       revokeObjectUrl(objectUrl);
       return { ok: false, failure: "unavailable" };
     }
-    if (externalObjectUrls.size >= EXTERNAL_IMAGE_CACHE_MAX) {
-      const firstKey = externalObjectUrls.keys().next().value;
-      if (firstKey !== undefined) {
-        const evicted = externalObjectUrls.get(firstKey);
-        externalObjectUrls.delete(firstKey);
-        if (evicted !== undefined) {
-          externalGifUrls.delete(evicted);
-          revokeObjectUrl(evicted);
-        }
-      }
+    externalObjectUrls.set(key, { url: objectUrl, bytes: result.value.size });
+    externalBytes += result.value.size;
+    // Oldest first; the entry just added stays even when it alone is over.
+    while (
+      externalObjectUrls.size > 1 &&
+      (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
+        externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
+    ) {
+      const [oldKey, evicted] = externalObjectUrls.entries().next().value!;
+      externalObjectUrls.delete(oldKey);
+      externalBytes -= evicted.bytes;
+      externalGifUrls.delete(evicted.url);
+      revokeObjectUrl(evicted.url);
     }
-    externalObjectUrls.set(key, objectUrl);
     if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
     return { ok: true, value: objectUrl };
   })();
