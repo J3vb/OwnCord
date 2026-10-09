@@ -172,6 +172,7 @@ export const voiceText = defineCatalog("voice", {
   "key.unknown": "Key 0x{code}",
 
   "join.connectionError": "Failed to join voice — connection error",
+  "join.backoff": "Voice join failed — try again in {seconds} s",
   "mic.stillUnavailable": "Microphone still unavailable — check your browser permissions",
   "mic.unavailableMuted": "Microphone unavailable — you are muted",
   "session.listenOnlyPermission": "Microphone permission denied — joined in listen-only mode",

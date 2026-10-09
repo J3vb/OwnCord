@@ -27,6 +27,7 @@ import {
   finishJoinAttempt,
   setJoinUrlKind,
 } from "../../lib/voiceJoinTrace";
+import { noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -297,6 +298,7 @@ export class JoinOrchestration {
         // SRE-M2: the key exchange is a real failure stage (timeout / aborted
         // exchange), recorded so a report can place it.
         failJoinAttempt(traceId);
+        noteJoinFailed();
         return false;
       }
 
@@ -470,6 +472,7 @@ export class JoinOrchestration {
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);
+        noteJoinSucceeded();
         return true;
       }
       return false;
@@ -485,6 +488,7 @@ export class JoinOrchestration {
         (localRoom !== null && this.isStateConnected(channelId, localRoom))
       ) {
         failJoinAttempt(traceId);
+        noteJoinFailed();
       }
       if (localRoom !== null) {
         // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected

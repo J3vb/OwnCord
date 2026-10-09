@@ -77,6 +77,11 @@ and only when it changes something a contributor or fork holder must do
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
 - Scrolling a long channel no longer redraws every message on screen each time the view moves; only the rows that come into view are built.
 - Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
+### Fixed
+
+**Voice**
+
+- A voice join that kept failing could be retried several times a second, churning join/leave on the server — after a failed join the next one now waits 2 s, doubling up to 30 s, and says so.
 
 **Linux desktop**
 

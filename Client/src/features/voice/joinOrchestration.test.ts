@@ -16,6 +16,7 @@ vi.mock("../../lib/logger", () => ({
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
+import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 
 function fakeRoom(state = "connected"): Room {
   return {
@@ -39,7 +40,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     nextJoinGeneration: vi.fn(() => ++generation),
     getRoom: () => (state.type === "connected" ? state.room : null),
     getE2EE: () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) }),
-    getAudioPipeline: () => ({ setRoom: vi.fn() }),
+    getAudioPipeline: () => ({ setRoom: vi.fn(), setupAudioPipeline: vi.fn() }),
     getAudioElements: () => ({ setRoom: vi.fn() }),
     getDeviceManager: () => ({
       setRoom: vi.fn(),
@@ -66,6 +67,7 @@ function setup(initial: SessionState = { type: "idle" }) {
 
 beforeEach(() => {
   store.currentChannelId = null;
+  noteJoinSucceeded();
 });
 
 describe("isStateConnected", () => {
@@ -149,6 +151,27 @@ describe("connectAndSetup", () => {
       succeeded: false,
       stage: "activate",
     });
+  });
+
+  it("backs off the next join after the key exchange gives up, and clears it on a success", async () => {
+    const { host, join } = setup();
+    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => false) });
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
+    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+
+    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) });
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("backs off the next join after a connect failure", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 8)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
   });
 
   it("leaves no devicechange listener behind for a Room superseded before connect", async () => {

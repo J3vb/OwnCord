@@ -7,6 +7,9 @@ import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
+import { showToast } from "@lib/toast";
+import { voiceText } from "../../i18n/voice";
+import { joinRetryInMs } from "../../features/voice/joinBackoff";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,
@@ -189,6 +192,11 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       // that used to hand-check this (ChannelSidebar's item click / stream
       // watch) stay correct since the guard is idempotent with theirs.
       if (voiceStore.getState().currentChannelId === channelId) return;
+      const waitMs = joinRetryInMs();
+      if (waitMs > 0) {
+        showToast(voiceText("join.backoff", { seconds: Math.ceil(waitMs / 1000) }), "error");
+        return;
+      }
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
       ws.send({ type: "voice_join", payload: { channel_id: channelId } });
