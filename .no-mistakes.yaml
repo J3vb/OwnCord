@@ -45,6 +45,8 @@ ci:
 
 # Checklists the reviewer applies to changed files under each path. They target
 # the finding classes that kept surviving review; AGENTS.md has the full rules.
+# Like test.instructions, path_instructions is read only from origin/main, so it
+# takes effect once this file reaches main with the next release.
 review:
   path_instructions:
     - path: "Server/**"
@@ -70,7 +72,8 @@ review:
           must be cancelled or made unique; flag stale callbacks firing on the
           new owner.
         - New or extracted client code belongs under src/features/ with relative
-          imports, store mutators come from the @stores facade, and WebSocket
+          imports, messages.store mutators come from the @stores/messages.store
+          facade (never its reducer modules), and WebSocket
           events reach stores only via src/lib/dispatcher.ts (see AGENTS.md).
         - When rebasing or merging, keep values the base already has; do not
           overwrite them with the stale branch copy.
