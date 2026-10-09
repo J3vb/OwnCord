@@ -47,7 +47,7 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras; on an AppImage, install them by hand.
+- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
 
 ## v2.2.0-beta.2
 
