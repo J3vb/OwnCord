@@ -68,10 +68,11 @@ const EXPECTED_CONSOLE_ERRORS = [
   // SDK's own console line, whose cause prints as `error: ConnectionError: WS closed`.
   /error reading from signal stream \{room: channel-\d+/,
   // livekit-client's own log of a receive-side key race at join (OC-0452).
-  // Anchored to its bare message: the app's judgement of it is the
+  // Matches the bare message or the SDK's `[timestamp] [ERROR] [livekit]`
+  // logger prefix, never the app's judgement of it: the
   // `[roomEventHandlers] LiveKit E2EE encryption error` line, which a race
   // that persists still prints and this list does not excuse.
-  /^InvalidKey: Decryption failed: /,
+  /^(?:\[[^\]]+\] \[ERROR\] \[livekit\] )?InvalidKey: Decryption failed: /,
 ];
 
 const test = base.extend<{ alice: Page }>({
