@@ -1017,7 +1017,7 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"svg declared, comment-first body", "image/svg+xml", []byte("<!-- c --><svg/>"), true},
 		{"xml declared, comment-first body", "text/xml", []byte("<!-- c --><a/>"), true},
 		{"json declared, comment-first body", "application/json", []byte("<!-- c -->"), false},
-		{"css declared, comment-first body", "text/css", []byte("<!--\na{color:red}\n-->"), true},
+		{"css declared, comment-first body", "text/css", []byte("<!-- c -->\na{color:red}"), true},
 		{"svg declared, html body", "image/svg+xml", []byte("<html><body>x</body></html>"), false},
 		{"xml declared, html body", "application/xml", []byte("<html><body>x</body></html>"), false},
 		{"plain declared, html body", "text/plain", []byte("<!DOCTYPE html><html></html>"), false},
