@@ -200,3 +200,34 @@ func TestSupportEvents_RedactsNamePastTenThousand(t *testing.T) {
 		t.Fatalf("err = %q", got)
 	}
 }
+
+func TestSupportScrub_KnownNamesCannotBreakStructuralRedaction(t *testing.T) {
+	cases := []struct{ name, in, notWant string }{
+		{".", "dial tcp 203.0.113.5:7880: connect: connection refused", "203"},
+		{".", "lookup turn.example.com: no such host", "turn"},
+		{"/", "open /home/alice/x: permission denied", "alice"},
+		{"-", "bad token 123e4567-e89b-12d3-a456-426614174000", "e89b"},
+		{"1", "dial 203.0.113.1: refused", "203"},
+		{"home", "open /home/alice/x: permission denied", "alice"},
+	}
+	for _, c := range cases {
+		got := supportScrub(c.in, newSupportKnown([]string{c.name}))
+		if strings.Contains(got, c.notWant) {
+			t.Errorf("name %q: supportScrub(%q) = %q leaks %q", c.name, c.in, got, c.notWant)
+		}
+	}
+}
+
+func TestSupportEvents_LongLiveKitLineKeepsTrailingError(t *testing.T) {
+	line := `2026-10-08T12:00:00.000Z	WARN	livekit	rtc/transport.go:88	failed to negotiate	{"room": "[redacted]", "roomID": "[redacted]", "participant": "[redacted]", "pID": "[redacted]", "remote": "[redacted]", "transport": "SUBSCRIBER", "trackID": "[redacted]", "kind": "video", "error": "no candidate pairs"}`
+	line = strings.Replace(line, "failed to negotiate", strings.Repeat("negotiation detail ", 60), 1)
+	attrs, _ := json.Marshal(map[string]any{"line": line})
+	rb := NewRingBuffer(10)
+	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "livekit companion output", Attrs: string(attrs)})
+
+	got, _ := supportEvents(rb)[0].Detail["line"].(string)
+
+	if !strings.Contains(got, "…") || !strings.Contains(got, `"error": "no candidate pairs"`) || len(got) > supportDetailMaxValue+4 {
+		t.Fatalf("line = %q", got)
+	}
+}

@@ -34,7 +34,7 @@ import (
 
 const (
 	supportDetailMaxKeys  = 8
-	supportDetailMaxValue = 256
+	supportDetailMaxValue = 1024
 	// supportDetailBudget bounds the serialized detail across all of
 	// events.json, so supportMaxBytes is never reached however long or
 	// numerous the attributes are. Newer events keep their detail first.
@@ -218,7 +218,6 @@ func supportScrubCredentials(s string) string {
 func supportScrub(s string, known supportKnown) string {
 	s = supportURLPattern.ReplaceAllString(s, "[url]")
 	s = supportEmailPattern.ReplaceAllString(s, "[email]")
-	s = known.scrub(s)
 	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportJSONKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
@@ -246,12 +245,13 @@ func supportScrub(s string, known supportKnown) string {
 	s = supportScrubCredentials(s)
 	s = supportHostPortPattern.ReplaceAllString(s, "${1}[host]:${3}")
 	s = supportLocalhost.ReplaceAllString(s, "[host]")
-	return supportHostPattern.ReplaceAllStringFunc(s, func(m string) string {
+	s = supportHostPattern.ReplaceAllStringFunc(s, func(m string) string {
 		if slices.Contains(supportFileExtensions, strings.ToLower(m[strings.LastIndexByte(m, '.')+1:])) {
 			return m
 		}
 		return "[host]"
 	})
+	return known.scrub(s)
 }
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil
@@ -286,15 +286,20 @@ func supportDetail(attrs string, known supportKnown) map[string]any {
 	return out
 }
 
+// supportTruncate keeps the head and the tail of an over-long value, since a
+// log line carries its error field last.
 func supportTruncate(s string) string {
 	if len(s) <= supportDetailMaxValue {
 		return s
 	}
-	cut := supportDetailMaxValue
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
+	head, tail := supportDetailMaxValue/2, len(s)-supportDetailMaxValue/2
+	for head > 0 && !utf8.RuneStart(s[head]) {
+		head--
 	}
-	return s[:cut] + "…"
+	for tail < len(s) && !utf8.RuneStart(s[tail]) {
+		tail++
+	}
+	return s[:head] + "…" + s[tail:]
 }
 
 // supportAttachDetail fills Detail on events, newest first, until
