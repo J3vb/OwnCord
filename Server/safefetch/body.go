@@ -176,11 +176,14 @@ func compatible(declared, sniffed string, body []byte) bool {
 		return strings.HasPrefix(declared, "text/") || textual[declared]
 	case sniffed == "text/xml":
 		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
+	case sniffed == "text/html" && declared == "application/xhtml+xml":
+		// XHTML is HTML: the declared type already admits the markup.
+		return true
 	case sniffed == "text/html":
 		// A leading "<!--" sniffs as HTML but is equally a valid XML/SVG/CSS
 		// comment, so the markup and stylesheet types stay compatible — but
 		// only for that comment: what follows it is judged on its own.
-		if !strings.HasPrefix(declared, "text/") && declared != "application/xml" && declared != "application/xhtml+xml" && declared != "image/svg+xml" {
+		if !strings.HasPrefix(declared, "text/") && declared != "application/xml" && declared != "image/svg+xml" {
 			return false
 		}
 		rest, ok := skipLeadingComments(body)

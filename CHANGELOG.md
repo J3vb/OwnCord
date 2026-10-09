@@ -50,7 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - Unblocking someone you had not blocked cleared an ignored Message Request, so their next message raised it again — unblock is now a no-op unless a block was removed.
-- A plugin HTTP response that is really HTML could pass as SVG, XML or plain text — the HTML-sniff allowance now applies only to a body that opens with a comment and is otherwise valid for its declared type.
+- Plugin HTTP responses are checked more strictly against their declared content type.
 
 ## v2.2.0-beta.2
 
