@@ -10,7 +10,7 @@ the existing unit harness (jsdom) and the bundle budget script. No desktop was
 available, so there are no wall-clock numbers from a real build; every finding
 below names the code that causes it and the count or byte figure that shows it.
 **Versions read:** `livekit-client` 2.22.3 (`Client/package.json`), LiveKit
-server v1.13.7 (`Server/docker-compose.yml`), Node 26.11.1, Vite 7.
+server v1.13.7 (`Server/docker-compose.yml`), Node 26.11.1, Vite 8.3.1.
 **Fix PRs:** the five findings marked **fix** have a PR each, listed in
 section 8; everything else is a note, a follow-up, or a product decision.
 
@@ -19,9 +19,11 @@ section 8; everything else is a note, a follow-up, or a product decision.
 The client is in better shape than a first read suggests. The message list is
 virtualized (a Fenwick tree over measured row heights, 20 rows of overscan),
 store updates patch rows in place (P4-01/P4-02), the startup JavaScript is
-budgeted and ratcheted (76,612 B gzip against 77,000 B), the emoji set and the
-settings tabs load lazily, and the lifecycle ownership tests plus the CDP soak
-keep listeners, timers, sockets and tracks from leaking.
+budgeted and ratcheted (76,612 B gzip against 77,000 B), the emoji set loads
+lazily, the settings tabs build their UI only when opened (their code, like
+LiveKit's, is in the main page's static closure; see A2), and the lifecycle
+ownership tests plus the CDP soak keep listeners, timers, sockets and tracks
+from leaking.
 
 What remains is specific:
 
@@ -258,13 +260,16 @@ titles and image heights in bounded LRUs; message parsing in a bounded LRU.
   inside `createTracks`, so with enhanced noise suppression on it sits on the
   critical path of the first microphone publish on every join and every
   connect retry.
-- **Fix.** Fetch and `WebAssembly.compile` once per process, keep the
-  `WebAssembly.Module`, and post the module (structured-cloneable) to each new
-  worklet; the worklet accepts a module as well as bytes. `addModule` stays per
+- **Fix.** Fetch the bytes once per process and hand each new worklet its own
+  transferred copy; the worklet compiles as before. A compiled
+  `WebAssembly.Module` cannot be handed over instead: in Chromium a module
+  posted to an AudioWorklet port is silently never delivered (verified in the
+  real-browser suite, which timed out on it). `addModule` stays per
   `AudioContext`.
-- **Expected gain.** The wasm fetch and compile leave the join path after the
-  first join. The voice-join budget test (`phaseMedians.localTrackMs`) is the
-  place to see it.
+- **Expected gain.** The wasm fetch leaves the join path after the first join;
+  the compile stays in the worklet, where Chromium's in-process compilation
+  cache serves repeat compiles of identical bytes. The voice-join budget test
+  (`phaseMedians.localTrackMs`) is the place to see it.
 
 ### D2 — the pre-connect steps run serially (product / engineering decision)
 
@@ -356,13 +361,13 @@ preview image; it carries safety semantics, so bounding it is a product call.
 
 One PR per finding, each with a test that fails on `dev` before the fix.
 
-| Finding | PR branch                        | Risk   |
-| ------- | -------------------------------- | ------ |
-| C1      | `perf/message-list-window-reuse` | medium |
-| A1      | `perf/image-cache-idb`           | medium |
-| B4 + C2 | `perf/media-discard-no-reload`   | low    |
-| E1      | `perf/bound-external-caches`     | low    |
-| D1      | `perf/rnnoise-module-cache`      | low    |
+| Finding | Pull request                                       | Risk   |
+| ------- | -------------------------------------------------- | ------ |
+| C1      | [#2238](https://github.com/J3vb/OwnCord/pull/2238) | medium |
+| A1      | [#2240](https://github.com/J3vb/OwnCord/pull/2240) | medium |
+| B4 + C2 | [#2235](https://github.com/J3vb/OwnCord/pull/2235) | low    |
+| E1      | [#2237](https://github.com/J3vb/OwnCord/pull/2237) | low    |
+| D1      | [#2236](https://github.com/J3vb/OwnCord/pull/2236) | low    |
 
 ## 9. Needs a product decision
 
