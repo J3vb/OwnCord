@@ -595,6 +595,10 @@ pub struct NativeSession {
     camera_capture: Option<CameraShare>,
     screen: Option<ScreenShare>,
     screen_publication: VideoSlot,
+    /// The sid each slot last unpublished, for the next publish to refuse
+    /// that publication's delayed republish even across a disable/re-enable.
+    camera_stale: Option<TrackSid>,
+    screen_stale: Option<TrackSid>,
     next_capture: u64,
     next_camera: u64,
     on_event: EventSink,
@@ -664,6 +668,8 @@ impl NativeSession {
             camera_capture: None,
             screen: None,
             screen_publication,
+            camera_stale: None,
+            screen_stale: None,
             next_capture: 0,
             next_camera: 0,
             on_event,
@@ -858,7 +864,8 @@ impl NativeSession {
         {
             return Err(format!("camera capture {capture} is not running"));
         }
-        let stale = self.release_camera_publication().await;
+        self.release_camera_publication().await;
+        let stale = self.camera_stale.take();
         *self.camera.lock().unwrap() = Some(VideoPublication::pending(stale));
         let source = NativeVideoSource::new(
             VideoResolution {
@@ -908,8 +915,10 @@ impl NativeSession {
     /// stays live).
     /// Returns the sid it unpublished, so a replacing publish can tell that
     /// publication's delayed republish from its own.
-    async fn release_camera_publication(&mut self) -> Option<TrackSid> {
-        let camera = self.camera.lock().unwrap().take()?;
+    async fn release_camera_publication(&mut self) {
+        let Some(camera) = take_publication(&self.camera, &mut self.camera_stale) else {
+            return;
+        };
         if let Err(e) = self
             .room
             .local_participant()
@@ -918,7 +927,6 @@ impl NativeSession {
         {
             log::warn!("[native_voice] camera unpublish: {e}");
         }
-        Some(camera.live)
     }
 
     /// Stop capture `capture` if it is still the running one (a stale id is a
@@ -978,7 +986,8 @@ impl NativeSession {
         if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
             return Err(format!("screen capture {capture} is not running"));
         }
-        let stale = self.unpublish_screen().await;
+        self.unpublish_screen().await;
+        let stale = self.screen_stale.take();
         *self.screen_publication.lock().unwrap() = Some(VideoPublication::pending(stale));
         let source = NativeVideoSource::new(
             VideoResolution {
@@ -1019,11 +1028,14 @@ impl NativeSession {
         }
     }
 
-    async fn unpublish_screen(&mut self) -> Option<TrackSid> {
+    async fn unpublish_screen(&mut self) {
         if let Some(screen) = &self.screen {
             screen.capture.set_source(None);
         }
-        let publication = self.screen_publication.lock().unwrap().take()?;
+        let Some(publication) = take_publication(&self.screen_publication, &mut self.screen_stale)
+        else {
+            return;
+        };
         if let Err(e) = self
             .room
             .local_participant()
@@ -1032,7 +1044,6 @@ impl NativeSession {
         {
             log::warn!("[native_voice] screen unpublish: {e}");
         }
-        Some(publication.live)
     }
 
     async fn release_screen(&mut self) {
@@ -1225,6 +1236,13 @@ impl MicWithdrawn {
     fn take(&self) -> bool {
         self.0.swap(false, Ordering::SeqCst)
     }
+}
+
+/// Empties `slot` for an unpublish, remembering the sid it held in `stale`.
+fn take_publication(slot: &VideoSlot, stale: &mut Option<TrackSid>) -> Option<VideoPublication> {
+    let publication = slot.lock().unwrap().take()?;
+    *stale = Some(publication.live.clone());
+    Some(publication)
 }
 
 /// A video slot's (camera or screen share) response to a local track's
@@ -1592,6 +1610,27 @@ mod tests {
         let camera = slot.as_mut().unwrap();
         camera.settle(sid("TR_new"));
         assert_eq!(camera.live, sid("TR_new2"));
+    }
+
+    #[test]
+    fn a_re_enabled_camera_ignores_the_disabled_publications_republish() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let slot = VideoSlot::default();
+        *slot.lock().unwrap() = Some(VideoPublication::new(sid("TR_old")));
+        let mut stale = None;
+        // Disable, then re-enable before the SDK's republish event arrives.
+        assert!(take_publication(&slot, &mut stale).is_some());
+        *slot.lock().unwrap() = Some(VideoPublication::pending(stale.take()));
+        assert_eq!(
+            apply_republish(
+                &mut slot.lock().unwrap(),
+                TrackSource::Camera,
+                &sid("TR_old"),
+                &sid("TR_old2")
+            ),
+            Some(sid("TR_old2")),
+            "the disabled camera's republish must be unpublished, not adopted"
+        );
     }
 
     #[test]
