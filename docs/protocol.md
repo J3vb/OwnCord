@@ -2028,7 +2028,8 @@ from a caller who is not in that DM's voice channel is refused with `VOICE_ERROR
 and nobody is rung. The client sends the ring once the voice session
 is connected, not while it is still securing (so none goes out if the join is
 refused or the caller leaves first), and holds it back so it never goes out
-within 3 seconds of the previous ring.
+within 3 seconds (plus transport slack) of the previous ring. It drops a
+held-back ring if the socket has disconnected.
 
 A callee who had closed the DM gets it reopened: the server sends them a
 `dm_channel_open` for the channel just before the `call_incoming`, so the DM is
