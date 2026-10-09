@@ -184,6 +184,21 @@ describe("connectAndSetup", () => {
     expect(joinRetryInMs()).toBe(0);
   });
 
+  it("does not count a second failure when a connect failure finds a switch already queued", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockImplementationOnce(async () => {
+      host.setState({
+        type: "connecting",
+        joinGeneration: 1,
+        pendingJoin: { token: "t2", url: "u2", channelId: 4 },
+      });
+      throw new Error("proxy refused");
+    });
+
+    await expect(join.connectAndSetup("t", "/livekit", 8)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
   it("backs off the next join after a connect failure", async () => {
     const { host, join } = setup();
     host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));

@@ -488,7 +488,9 @@ export class JoinOrchestration {
         (localRoom !== null && this.isStateConnected(channelId, localRoom))
       ) {
         failJoinAttempt(traceId);
-        noteJoinFailed();
+        if (this._state.type !== "connecting" || this._state.pendingJoin === null) {
+          noteJoinFailed();
+        }
       }
       if (localRoom !== null) {
         // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected
