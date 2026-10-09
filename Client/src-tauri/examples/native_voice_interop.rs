@@ -171,6 +171,45 @@ mod linux {
         }
     }
 
+    /// Waits for a subscriber to bind `camera_sid`, then a short settle.
+    // A subscriber that needs a negotiation of its own (the
+    // browser peer) must finish it before the camera it just
+    // subscribed to goes away: livekit-server answers the
+    // collision (its PeerConnection drops a sender while the
+    // subscriber's offer is being applied) with a full
+    // reconnect of that subscriber, and the browser then
+    // never sees the final camera. Wait for the subscription,
+    // then a short settle: the server reports it before the
+    // subscriber's offer lands. Other events are kept for the
+    // main loop below.
+    async fn await_camera_bound(
+        room_events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+        pending_events: &mut std::collections::VecDeque<RoomEvent>,
+        camera_sid: &str,
+    ) -> Result<(), String> {
+        let bound = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
+            loop {
+                match room_events.recv().await {
+                    Some(RoomEvent::LocalTrackSubscribed { track })
+                        if track.sid().to_string() == camera_sid =>
+                    {
+                        return true
+                    }
+                    Some(ev) => pending_events.push_back(ev),
+                    None => return false,
+                }
+            }
+        })
+        .await;
+        if bound != Ok(true) {
+            return Err(format!(
+                "no subscriber bound camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
+            ));
+        }
+        tokio::time::sleep(CAMERA_CYCLE_SETTLE).await;
+        Ok(())
+    }
+
     /// Start a synthetic native camera capture and publish it, as the app's
     /// `native_voice_start_camera` then `native_voice_publish_camera` do.
     /// Returns the capture id and the publication sid.
@@ -379,9 +418,11 @@ mod linux {
                 .parse()
                 .map_err(|_| "--camera-cycles")?;
             if camera_cycles > 0 {
-                // Settle as for the after sample, so the first camera's
-                // sender threads are counted in the baseline too.
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                // The first camera is subscribed too, and its subscriber
+                // must be done negotiating before the first cycle removes
+                // it. The wait also settles its sender threads into the
+                // baseline.
+                await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
                 );
@@ -395,37 +436,7 @@ mod linux {
                     (capture, camera_sid) =
                         start_camera(&mut session, width, height, simulcast).await?;
                     session.unpublish_camera(&stale).await;
-                    // A subscriber that needs a negotiation of its own (the
-                    // browser peer) must finish it before the camera it just
-                    // subscribed to goes away: livekit-server answers the
-                    // collision (its PeerConnection drops a sender while the
-                    // subscriber's offer is being applied) with a full
-                    // reconnect of that subscriber, and the browser then
-                    // never sees the final camera. Wait for the subscription,
-                    // then a short settle: the server reports it before the
-                    // subscriber's offer lands. Other events are kept for the
-                    // main loop below.
-                    let bound = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
-                        loop {
-                            match room_events.recv().await {
-                                Some(RoomEvent::LocalTrackSubscribed { track })
-                                    if track.sid().to_string() == camera_sid =>
-                                {
-                                    return true
-                                }
-                                Some(ev) => pending_events.push_back(ev),
-                                None => return false,
-                            }
-                        }
-                    })
-                    .await;
-                    if bound != Ok(true) {
-                        return Err(format!(
-                            "no subscriber bound camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
-                        )
-                        .into());
-                    }
-                    tokio::time::sleep(CAMERA_CYCLE_SETTLE).await;
+                    await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(
