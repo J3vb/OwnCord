@@ -1970,6 +1970,20 @@ describe("VideoGrid", () => {
       expect(document.activeElement).toBe(control(SCREEN, "pip"));
     });
 
+    it("takes the covered tile controls out of reach while popped out, Bring back aside", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+
+      for (const name of ["select", "stop", "pip", "fullscreen"]) {
+        expect(control(SCREEN, name).closest("[inert]"), name).not.toBeNull();
+      }
+      expect(cell(SCREEN).querySelector(".tile-mute-btn")!.closest("[inert]")).not.toBeNull();
+      expect(control(SCREEN, "pop-in").closest("[inert]")).toBeNull();
+
+      control(SCREEN, "pop-in").click();
+      expect(cell(SCREEN).querySelector("[inert]")).toBeNull();
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });

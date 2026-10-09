@@ -961,6 +961,9 @@ export function createVideoGrid(): VideoGridComponent {
       entry.popout?.close();
     });
     appendChildren(cover, createElement("div", {}, voiceText("tile.poppedOut")), back);
+    // The cover hides the tile's own controls: out of the tab order and
+    // inactive until the stream comes back, Bring back the one way in.
+    for (const child of entry.el.children) child.toggleAttribute("inert", true);
     entry.el.appendChild(cover);
     entry.el.querySelector("[data-tile-control='pip']")?.setAttribute("aria-pressed", "true");
     syncViews();
@@ -973,6 +976,7 @@ export function createVideoGrid(): VideoGridComponent {
     // Bring back goes with its cover: keep a keyboard user on the tile.
     const hadFocus = cover?.contains(document.activeElement) === true;
     cover?.remove();
+    for (const child of entry.el.children) child.removeAttribute("inert");
     const pip = entry.el.querySelector<HTMLElement>("[data-tile-control='pip']");
     pip?.setAttribute("aria-pressed", "false");
     if (hadFocus) pip?.focus();

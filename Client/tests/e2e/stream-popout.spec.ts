@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithVoice, navigateToMainPageReady } from "./helpers";
-import { findUnnamedControls } from "./support/b9-accessibility";
+import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
 
 const TILE = 42;
 
@@ -122,8 +122,15 @@ test.describe("stream pop-out window", () => {
     ]);
     await expect(popup.locator(".video-popout video")).toHaveCount(1);
 
+    // Tab reaches Bring back, not the tile controls under the cover.
+    const popIn = tile(page).locator("[data-tile-control='pop-in']");
+    expect(await keyboardReachable(page, popIn)).toBe(true);
+    expect(
+      await keyboardReachable(page, tile(page).locator("[data-tile-control='fullscreen']")),
+    ).toBe(false);
+
     // By keyboard: focus stays on the tile, on its Pop out control.
-    await tile(page).locator("[data-tile-control='pop-in']").focus();
+    await popIn.focus();
     await page.keyboard.press("Enter");
 
     await expect.poll(() => popup.isClosed()).toBe(true);
