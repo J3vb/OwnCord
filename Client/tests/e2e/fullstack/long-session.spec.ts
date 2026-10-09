@@ -298,11 +298,13 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         await expect(alice.locator(".reconnecting-banner")).toBeVisible();
         aliceTransport.online();
         await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
-        duringReconnect = false;
         await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);
         await expect
           .poll(async () => (await mediaStats(alice)).liveCapture, { timeout: 30_000 })
           .toBe(0);
+        // The SDK logs the dropped signal socket when its room tears down, which
+        // can land after the banner clears; the window ends once capture is released.
+        duringReconnect = false;
       }
 
       await runCycle(alice, bob, cycle, purgeMessages, general.id);
