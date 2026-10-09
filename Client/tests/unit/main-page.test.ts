@@ -1272,8 +1272,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(container.querySelector('[data-testid="toast"]')).toBeNull();
 
     vi.mocked(ws.send).mockClear();
-    // Past the server's 3s ring window, so the redial goes out at once.
-    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 3000);
+    // Past the server's 3s ring window plus slack, so the redial goes out at once.
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4000);
     (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
     now.mockRestore();
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
@@ -1403,7 +1403,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         start();
         expect(rings(ws)).toHaveLength(1);
 
-        vi.advanceTimersByTime(1999);
+        // Held back the server's 3 s window plus transport slack.
+        vi.advanceTimersByTime(2249);
         expect(rings(ws)).toHaveLength(1);
         vi.advanceTimersByTime(1);
         expect(rings(ws)).toHaveLength(2);
@@ -1412,6 +1413,84 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("drops a waiting ring when the socket drops before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        // An unplanned drop keeps the voice channel, so only the status says so.
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a waiting ring across a drop that reconnects before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+        uiStore.flush();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+        uiStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a margin over the server's 3 s window for transport jitter", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+
+        vi.advanceTimersByTime(2000);
+        expect(rings(ws)).toHaveLength(1);
+        vi.advanceTimersByTime(500);
+        expect(rings(ws)).toHaveLength(2);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a ring the server rate-limits ends the outgoing call", async () => {
+      const { ws, panel } = await mountCaller();
+      vi.mocked(ws.send).mockImplementation((m) =>
+        (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+      );
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      finishCallJoin();
+      expect(panel.dataset.state).toBe("outgoing");
+
+      ws.emit("error", { code: "RATE_LIMITED", message: "too many call attempts" }, "other-id");
+      expect(panel.dataset.state).toBe("outgoing");
+      ws.emit("error", { code: "RATE_LIMITED", message: "too many call attempts" }, "ring-id");
+      expect(panel.dataset.state).not.toBe("outgoing");
+      page.destroy?.();
     });
 
     it("drops a waiting ring when the caller leaves before it fires", async () => {
@@ -1912,12 +1991,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
-    const preview = vi.spyOn(desktop.externalContent!, "preview").mockResolvedValue({
+    const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
     });
     const image = vi
-      .spyOn(desktop.externalContent!, "image")
+      .spyOn(desktop.externalContent, "image")
       .mockResolvedValue({ ok: true, value: new Blob(["x"]) });
     const createObjectURL = URL.createObjectURL;
     const revokeObjectURL = URL.revokeObjectURL;
