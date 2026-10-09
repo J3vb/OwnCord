@@ -47,6 +47,8 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+- Images loaded through the app's content broker (GIF picker, linked images) no longer turn into garbage if the Linux webview falls back to its slower internal message channel; the log now says when that happens.
+
 ## v2.2.0-beta.2
 
 **OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.

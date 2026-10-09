@@ -24,6 +24,9 @@ export interface NativeControl {
   /** What the native broker was asked for, in call order: the partition and
    *  the URL or handle. */
   asked(): readonly { readonly partition: string; readonly target: string }[];
+  /** Claim the one-time notice a host may log when it first sees a
+   *  number-array answer (the postMessage IPC fallback). */
+  claimFallbackNotice?(): void;
 }
 
 export interface ExternalContentSubject {
@@ -113,6 +116,24 @@ export function describeExternalContentSuite(
         expect(blob).toBeInstanceOf(Blob);
         expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(new Uint8Array([71, 73, 70, 56]));
       });
+
+      check(
+        "resolves the same bytes when the native host answers a plain number array",
+        async () => {
+          // The postMessage IPC fallback delivers a raw-bytes response as a
+          // JSON number array, not an ArrayBuffer.
+          ctx.native.answers([71, 73, 70, 56]);
+          const result = await ctx.subject.image(partition, { handle });
+          ctx.native.claimFallbackNotice?.();
+          expect(result.ok).toBe(true);
+          const blob = result.ok ? result.value : null;
+          expect(blob).toBeInstanceOf(Blob);
+          expect(blob!.type).toBe("image/gif");
+          expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(
+            new Uint8Array([71, 73, 70, 56]),
+          );
+        },
+      );
 
       check("asks for a handle or a URL, whichever the caller holds", async () => {
         ctx.native.answers(new Uint8Array([1]).buffer);
