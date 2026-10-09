@@ -8,8 +8,7 @@ import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
-import { voiceText } from "../../i18n/voice";
-import { joinRetryInMs, noteJoinFailed } from "../../features/voice/joinBackoff";
+import { joinBackoffText, noteJoinFailed } from "../../features/voice/joinBackoff";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,
@@ -193,16 +192,16 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       // watch) stay correct since the guard is idempotent with theirs.
       const { currentChannelId, voiceStatus } = voiceStore.getState();
       if (currentChannelId === channelId) return;
-      const waitMs = joinRetryInMs();
-      if (waitMs > 0) {
-        showToast(voiceText("join.backoff", { seconds: Math.ceil(waitMs / 1000) }), "error");
+      const backoffText = joinBackoffText();
+      if (backoffText !== null) {
+        showToast(backoffText, "error");
         return;
       }
       // Switching away from a join still in flight abandons it before it
       // reached the SFU, so it backs off like a failure: alternating channels
       // cannot cycle voice_join/voice_leave several times a second.
       if (currentChannelId !== null && (voiceStatus === "joining" || voiceStatus === "securing")) {
-        noteJoinFailed();
+        noteJoinFailed(Date.now(), true);
       }
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);

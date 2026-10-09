@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
+import { joinBackoffText, joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 beforeEach(() => noteJoinSucceeded());
 
@@ -29,5 +29,16 @@ describe("joinBackoff", () => {
     expect(joinRetryInMs(0)).toBe(0);
     noteJoinFailed(0);
     expect(joinRetryInMs(0)).toBe(2_000);
+  });
+
+  it("words the refusal by what armed the wait", () => {
+    expect(joinBackoffText(0)).toBeNull();
+    noteJoinFailed(0);
+    expect(joinBackoffText(0)).toBe("Voice join failed — try again in 2 s");
+    noteJoinFailed(0, true);
+    expect(joinBackoffText(0)).toBe("Please wait 4 s before switching voice channels");
+    noteJoinFailed(0);
+    expect(joinBackoffText(0)).toBe("Voice join failed — try again in 8 s");
+    expect(joinBackoffText(8_000)).toBeNull();
   });
 });

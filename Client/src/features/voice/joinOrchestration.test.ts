@@ -166,6 +166,24 @@ describe("connectAndSetup", () => {
     expect(joinRetryInMs()).toBe(0);
   });
 
+  it("does not count a second failure when the give-up finds a switch already queued", async () => {
+    const { host, join } = setup();
+    host.getE2EE = () => ({
+      clearState: vi.fn(),
+      setupKeyExchange: vi.fn(async () => {
+        host.setState({
+          type: "connecting",
+          joinGeneration: 1,
+          pendingJoin: { token: "t2", url: "u2", channelId: 4 },
+        });
+        return false;
+      }),
+    });
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
   it("backs off the next join after a connect failure", async () => {
     const { host, join } = setup();
     host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));

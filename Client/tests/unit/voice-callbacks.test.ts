@@ -464,7 +464,10 @@ describe("createSidebarVoiceCallbacks", () => {
     );
     cbs.onVoiceJoin(10);
     expect(ws.send).toHaveBeenCalledOnce();
-    expect(mockShowToast).toHaveBeenCalledWith("Voice join failed — try again in 2 s", "error");
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "Please wait 2 s before switching voice channels",
+      "error",
+    );
   });
 
   it("a switch from a connected call is not backed off", () => {

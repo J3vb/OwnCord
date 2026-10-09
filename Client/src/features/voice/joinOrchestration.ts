@@ -287,6 +287,7 @@ export class JoinOrchestration {
           // key-holder election.
           this.leaveVoice(true);
           leaveVoiceChannel();
+          noteJoinFailed();
         } else {
           // Leave state as "connecting" with pendingJoin intact so the finally
           // block and handleVoiceToken's drain loop can run the queued join.
@@ -298,7 +299,6 @@ export class JoinOrchestration {
         // SRE-M2: the key exchange is a real failure stage (timeout / aborted
         // exchange), recorded so a report can place it.
         failJoinAttempt(traceId);
-        noteJoinFailed();
         return false;
       }
 

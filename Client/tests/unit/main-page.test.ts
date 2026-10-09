@@ -877,6 +877,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(banner.style.display).not.toBe("none");
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(document.body.textContent).toContain("Voice join failed — try again in 2 s");
+
+    noteJoinFailed(Date.now(), true);
+    acceptBtn.click();
+    expect(document.body.textContent).toContain("Please wait 4 s before switching voice channels");
 
     noteJoinSucceeded();
     acceptBtn.click();
