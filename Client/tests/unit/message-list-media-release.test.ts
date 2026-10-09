@@ -16,12 +16,12 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 // Spy on the media-visibility manager: MessageList must release every tracked
-// <img> (unobserveMedia) before discarding rendered rows, otherwise the
+// <img> (discardMedia) before discarding rendered rows, otherwise the
 // IntersectionObserver + allTracked set + pending timers retain every GIF
 // ever rendered.
-const { observeMediaMock, unobserveMediaMock } = vi.hoisted(() => ({
+const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
   observeMediaMock: vi.fn(),
-  unobserveMediaMock: vi.fn(),
+  discardMediaMock: vi.fn(),
 }));
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
@@ -32,7 +32,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
 
 vi.mock("@lib/media-visibility", () => ({
   observeMedia: observeMediaMock,
-  unobserveMedia: unobserveMediaMock,
+  discardMedia: discardMediaMock,
 }));
 
 import { createMessageList } from "@components/MessageList";
@@ -91,7 +91,7 @@ describe("MessageList media release (GIF observer leak fix)", () => {
   beforeEach(() => {
     resetStores();
     observeMediaMock.mockClear();
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
     options = {
@@ -120,14 +120,14 @@ describe("MessageList media release (GIF observer leak fix)", () => {
 
     const img = container.querySelector(".virtual-content img");
     expect(img).not.toBeNull();
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
 
     // Reorder the rows — the row patch leaves a reorder to the full-rebuild
     // path that tears the rendered rows down.
     setMessages(1, [later, makeMessage({ id: 2, content: "look https://example.com/anim.gif" })]);
     messagesStore.flush();
 
-    expect(unobserveMediaMock).toHaveBeenCalledWith(img);
+    expect(discardMediaMock).toHaveBeenCalledWith(img);
   });
 
   it("unobserves rendered <img> elements on destroy", () => {
@@ -136,11 +136,11 @@ describe("MessageList media release (GIF observer leak fix)", () => {
 
     const img = container.querySelector(".virtual-content img");
     expect(img).not.toBeNull();
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
 
     msgList.destroy?.();
 
-    expect(unobserveMediaMock).toHaveBeenCalledWith(img);
+    expect(discardMediaMock).toHaveBeenCalledWith(img);
   });
 
   it("does not unobserve retained rows on the incremental append fast path", () => {
@@ -148,7 +148,7 @@ describe("MessageList media release (GIF observer leak fix)", () => {
     setMessages(1, [gifMessage]);
     msgList.mount(container);
     expect(container.querySelector(".virtual-content img")).not.toBeNull();
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
 
     // Suffix extension (same leading references) → rows are kept, so nothing
     // must be released.
@@ -158,6 +158,6 @@ describe("MessageList media release (GIF observer leak fix)", () => {
     ]);
     messagesStore.flush();
 
-    expect(unobserveMediaMock).not.toHaveBeenCalled();
+    expect(discardMediaMock).not.toHaveBeenCalled();
   });
 });
