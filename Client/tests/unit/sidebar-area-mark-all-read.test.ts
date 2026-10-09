@@ -70,6 +70,9 @@ const CHANNELS: ReadyChannel[] = [
   { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0 },
 ];
 
+/** Whether the header button is displayed (SidebarArea toggles `display`, as for Audit Log). */
+const shown = (el: HTMLElement): boolean => el.style.display !== "none";
+
 function opts(): SidebarAreaOptions {
   return {
     ws: { send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() } as never,
@@ -128,8 +131,6 @@ describe("SidebarArea — Mark All as Read", () => {
     expect(el).not.toBeNull();
     return el!;
   }
-
-  const shown = (el: HTMLElement): boolean => el.style.display !== "none";
 
   it("sits in the unified header's action row, not in the channel list's own header", () => {
     mount(CHANNELS);
