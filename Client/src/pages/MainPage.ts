@@ -460,8 +460,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   /** The server allows one call_ring per user per 3s (Server/ws/handlers_call.go);
-   *  a refused ring's error frame would also roll back a join still in flight. */
-  const RING_SPACING_MS = 3000;
+   *  a refused ring's error frame would also roll back a join still in flight.
+   *  The extra 250ms covers transport jitter: lastRingAt is stamped before the
+   *  async send, so two rings exactly 3s apart here can land under the window. */
+  const RING_SPACING_MS = 3250;
   let lastRingAt = Number.NEGATIVE_INFINITY;
   /** Envelope id of the newest call_ring, so a refusal answering an earlier
    *  ring cannot clear a newer outgoing call. */
@@ -521,6 +523,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   function sendRing(channelId: number): void {
+    // An unplanned drop keeps the voice channel, so a ring queued before it
+    // would otherwise show "Calling…" for 30s with nobody notified.
+    if (uiStore.getState().connectionStatus !== "connected") return;
     lastRingAt = Date.now();
     lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
@@ -1170,6 +1175,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.activeView === null && !s.settingsOpen,
         () => syncRingSurfaces(),
       ),
+      // A queued ring must not outlive a drop, even one that reconnects before
+      // the timer fires: voice has not rejoined yet, so it would ring an empty room.
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus !== "connected",
+        (down) => {
+          if (down) cancelPendingRing();
+        },
+      ),
     );
 
     // The outgoing ring is over once anyone else is in the room, or once
@@ -1265,12 +1278,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       }),
     );
-    // A first-contact 1:1 ring is refused at once and never delivered (D-03):
-    // end the caller's "Calling…" now. The dispatcher shows the server's
-    // explanation as the toast; the caller stays in the room.
+    // A first-contact 1:1 ring is refused at once and never delivered (D-03),
+    // as is one the server rate-limits: end the caller's "Calling…" now. The
+    // dispatcher shows the server's explanation as the toast; the caller stays
+    // in the room.
     unsubscribers.push(
       ws.on("error", (payload, id) => {
-        if (payload.code === "CALL_REQUIRES_ACCEPTANCE" && id === lastRingId) outgoingCall?.clear();
+        // RATE_LIMITED: the server dropped this ring too, nobody was notified.
+        const refused =
+          payload.code === "CALL_REQUIRES_ACCEPTANCE" || payload.code === "RATE_LIMITED";
+        if (refused && id === lastRingId) outgoingCall?.clear();
       }),
     );
     unsubscribers.push(() => {
