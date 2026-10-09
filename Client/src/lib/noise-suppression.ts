@@ -15,11 +15,26 @@ export interface RNNoiseNode {
   destroy(): void;
 }
 
+let rnnoiseModule: Promise<WebAssembly.Module> | null = null;
+
+/** Fetch and compile rnnoise.wasm once; later joins reuse the compiled module. */
+function loadRNNoiseModule(): Promise<WebAssembly.Module> {
+  if (rnnoiseModule === null) {
+    const loading = fetch("/rnnoise.wasm")
+      .then((response) => response.arrayBuffer())
+      .then((wasmBytes) => WebAssembly.compile(wasmBytes));
+    rnnoiseModule = loading;
+    loading.catch(() => {
+      if (rnnoiseModule === loading) rnnoiseModule = null;
+    });
+  }
+  return rnnoiseModule;
+}
+
 /** Load the worklet and WASM into `audioContext` and return a ready node. */
 export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNNoiseNode> {
   await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
-  const wasmResponse = await fetch("/rnnoise.wasm");
-  const wasmBytes = await wasmResponse.arrayBuffer();
+  const wasmModule = await loadRNNoiseModule();
 
   const node = new AudioWorkletNode(audioContext, "rnnoise-processor", {
     numberOfInputs: 1,
@@ -35,7 +50,7 @@ export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNN
     };
   });
   // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-  node.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
+  node.port.postMessage({ type: "init", wasmModule });
   await initPromise;
 
   log.info("RNNoise AudioWorklet processing active");

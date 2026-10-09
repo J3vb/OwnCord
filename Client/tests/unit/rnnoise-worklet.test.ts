@@ -126,4 +126,28 @@ describe("rnnoise-worklet", () => {
     expect(processor._ready).toBe(false);
     expectConsole("error", "WASM module missing required RNNoise exports");
   });
+
+  it("init accepts a precompiled module without compiling again", async () => {
+    // @ts-expect-error — worklet script has no module exports
+    await import("../../public/rnnoise-worklet.js");
+    const { readFileSync } = await import("node:fs");
+    const wasmModule = await WebAssembly.compile(readFileSync("public/rnnoise.wasm"));
+    const compileSpy = vi.spyOn(WebAssembly, "compile");
+
+    expect(processorCtor).not.toBeNull();
+    const processor = new processorCtor!() as unknown as {
+      port: {
+        onmessage: ((event: { data: unknown }) => void) | null;
+        postMessage: ReturnType<typeof vi.fn>;
+      };
+      _ready: boolean;
+    };
+    processor.port.onmessage!({ data: { type: "init", wasmModule } });
+
+    await vi.waitFor(() => expect(processor.port.postMessage).toHaveBeenCalled());
+    expect(compileSpy).not.toHaveBeenCalled();
+    expect(processor.port.postMessage).toHaveBeenCalledWith({ type: "ready" });
+    expect(processor._ready).toBe(true);
+    compileSpy.mockRestore();
+  });
 });

@@ -12,6 +12,9 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+// The smallest valid module: createRNNoiseNode now compiles what it fetches.
+const EMPTY_WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]).buffer;
+
 async function started() {
   const processor = createMicProcessor();
   await processor.init({ kind: Track.Kind.Audio, track: fakeMediaStreamTrack("mic") } as never);
@@ -99,7 +102,7 @@ describe("createMicProcessor", () => {
     vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+      vi.fn(async () => ({ arrayBuffer: async () => EMPTY_WASM })),
     );
     const { processor, ctx, entry } = await started();
     ctx.audioWorklet.addModule.mockResolvedValue(undefined);
@@ -126,7 +129,7 @@ describe("createMicProcessor", () => {
       vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
       vi.stubGlobal(
         "fetch",
-        vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+        vi.fn(async () => ({ arrayBuffer: async () => EMPTY_WASM })),
       );
     });
 
