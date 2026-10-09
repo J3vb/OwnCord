@@ -1435,6 +1435,28 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       }
     });
 
+    it("drops a waiting ring across a drop that reconnects before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+        uiStore.flush();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+        uiStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("keeps a margin over the server's 3 s window for transport jitter", async () => {
       vi.useFakeTimers();
       try {

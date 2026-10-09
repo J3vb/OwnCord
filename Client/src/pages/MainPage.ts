@@ -1175,6 +1175,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.activeView === null && !s.settingsOpen,
         () => syncRingSurfaces(),
       ),
+      // A queued ring must not outlive a drop, even one that reconnects before
+      // the timer fires: voice has not rejoined yet, so it would ring an empty room.
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus !== "connected",
+        (down) => {
+          if (down) cancelPendingRing();
+        },
+      ),
     );
 
     // The outgoing ring is over once anyone else is in the room, or once
