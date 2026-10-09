@@ -1439,6 +1439,31 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
+  it("a ring refused because the callee has not accepted ends the outgoing call at once (D-03)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    vi.mocked(stopRingback).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("error", {
+      code: "CALL_REQUIRES_ACCEPTANCE",
+      message: "calls work after the other person accepts your message request",
+    });
+
+    expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(panel.dataset.state).not.toBe("outgoing");
+    expect(panel.dataset.state).not.toBe("unanswered");
+    page.destroy?.();
+  });
+
   it("a callee's decline while the caller is on another channel shows one toast", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -1621,7 +1646,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
-  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", () => {
+  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -1631,6 +1656,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // Alice (10) rings this client's DM (channel 50).
     ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
 
+    vi.mocked(alertMissedCall).mockClear();
     const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
     expect(banner.style.display).not.toBe("none");
 
@@ -1646,6 +1672,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).toBe("none");
+    // The ringer hanging up first is a missed call, same notice as a timeout (D-07).
+    await vi.waitFor(() => expect(alertMissedCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
   });
 
   it("does not cancel a group-DM ring when the ringer leaves voice but another callee is still in the call (OC-0235)", () => {

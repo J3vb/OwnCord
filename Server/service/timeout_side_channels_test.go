@@ -76,7 +76,9 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	if _, err := dms.RenameGroupDM(ctx, fixtureMember2, group.Channel.ID, "renamed"); err != nil {
 		t.Errorf("RenameGroupDM by a participant who is not timed out = %v", err)
 	}
-	if _, err := dms.RingTargets(ctx, fixtureMember2, direct.Channel.ID); err != nil {
+	// The 1:1 recipient here has not accepted member2 (D-03 refuses that
+	// ring); what matters is that the refusal is not the timeout's.
+	if _, err := dms.RingTargets(ctx, fixtureMember2, direct.Channel.ID); err != nil && !errors.Is(err, ErrCallNeedsAcceptance) {
 		t.Errorf("RingTargets by a participant who is not timed out = %v", err)
 	}
 	if err := f.messages.SetMessagePinned(ctx, fixtureMember2, direct.Channel.ID, sent.MessageID, true); err != nil {

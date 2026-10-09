@@ -1258,8 +1258,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         const othersStillIn =
           roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);
         if (!othersStillIn) {
-          ringCtrl?.cancel(payload.channel_id);
+          ringCtrl?.cancel(payload.channel_id, "ringer-left");
         }
+      }),
+    );
+    // A first-contact 1:1 ring is refused at once and never delivered (D-03):
+    // end the caller's "Calling…" now. The dispatcher shows the server's
+    // explanation as the toast; the caller stays in the room.
+    unsubscribers.push(
+      ws.on("error", (payload) => {
+        if (payload.code === "CALL_REQUIRES_ACCEPTANCE") outgoingCall?.clear();
       }),
     );
     unsubscribers.push(() => {

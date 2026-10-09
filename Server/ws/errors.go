@@ -30,6 +30,11 @@ const (
 	// call ring or custom status refused by an active moderator timeout
 	// (B5-9).
 	ErrCodeTimedOut = "TIMED_OUT"
+	// ErrCodeCallRequiresAcceptance answers a 1:1 call_ring whose recipient
+	// has not accepted the caller's message request. One code for every
+	// untrusted state, so it reveals nothing the caller's own request does
+	// not; the ring is never delivered (DM call review D-03).
+	ErrCodeCallRequiresAcceptance = "CALL_REQUIRES_ACCEPTANCE"
 	// ErrCodeSessionReplaced is sent to a connection the hub displaces
 	// because the same user connected from another device. The client stops
 	// reconnecting on it; without it the displaced device cannot tell the

@@ -165,7 +165,7 @@ describe("ring controller — timeout", () => {
 // the timeout is a missed call: every other exit is the user (or the ringer)
 // acting on the call, and a redial or a newer call is still a live ring.
 describe("ring controller — missed call", () => {
-  it("a ring that times out reports a missed call once, and an accepted, declined or ringer-left ring does not", () => {
+  it("a ring that times out or whose ringer left reports a missed call once; an accepted, declined or superseded ring does not", () => {
     const timedOut = harness();
     timedOut.ctrl.incoming(ring(5));
     timedOut.fireTimeout();
@@ -188,7 +188,14 @@ describe("ring controller — missed call", () => {
     ringerLeft.ctrl.incoming(ring(5));
     ringerLeft.ctrl.cancel(5, "ringer-left");
     ringerLeft.fireTimeout();
-    expect(ringerLeft.missed).toEqual([]);
+    expect(ringerLeft.missed).toEqual([ring(5)]);
+
+    // A cancel that names no reason (a call_declined, or the room joined)
+    // is not a miss either.
+    const plainCancel = harness();
+    plainCancel.ctrl.incoming(ring(5));
+    plainCancel.ctrl.cancel(5);
+    expect(plainCancel.missed).toEqual([]);
   });
 
   it("a redial or a newer call is not a missed call", () => {
