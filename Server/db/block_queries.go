@@ -46,7 +46,8 @@ func (d *DB) BlockUser(ctx context.Context, blockerID, blockedID int64) error {
 // already-decided message request from the unblocked user: message_requests
 // keeps one row per pair forever, so a decided row would swallow their next
 // first message instead of letting a fresh request form. A still-pending
-// request is kept. Idempotent — unblocking a non-blocked user is a no-op.
+// request is kept. Idempotent — unblocking a non-blocked user is a no-op and
+// leaves any decided request (e.g. ignored) in place.
 func (d *DB) UnblockUser(ctx context.Context, blockerID, blockedID int64) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -55,11 +56,15 @@ func (d *DB) UnblockUser(ctx context.Context, blockerID, blockedID int64) error 
 	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
-	if err := q.UnblockUser(ctx, dbgen.UnblockUserParams{
+	removed, err := q.UnblockUser(ctx, dbgen.UnblockUserParams{
 		BlockerID: blockerID,
 		BlockedID: blockedID,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("UnblockUser: %w", err)
+	}
+	if removed == 0 {
+		return nil
 	}
 	if err := q.DeleteDecidedMessageRequestByPair(ctx, dbgen.DeleteDecidedMessageRequestByPairParams{
 		SenderID:    blockedID,

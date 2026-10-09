@@ -1,7 +1,7 @@
 -- name: BlockUser :exec
 INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?);
 
--- name: UnblockUser :exec
+-- name: UnblockUser :execrows
 DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?;
 
 -- name: IsBlocked :one

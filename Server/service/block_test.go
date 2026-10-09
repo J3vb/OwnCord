@@ -241,3 +241,33 @@ func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
 		t.Errorf("RequestCreatedFor = %v, want a fresh request", again.RequestCreatedFor)
 	}
 }
+
+// Unblocking someone who is not blocked is a no-op: it must not erase an
+// ignored request, or the sender's next message would raise a fresh one.
+func TestUnblockUser_NotBlockedKeepsIgnoredRequest(t *testing.T) {
+	_, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil || len(first.RequestCreatedFor) != 1 {
+		t.Fatalf("first send: %v, RequestCreatedFor=%v", err, first.RequestCreatedFor)
+	}
+	if _, err := svc.MessageRequests.Ignore(ctx, 2, first.RequestCreatedFor[0].ID); err != nil {
+		t.Fatalf("Ignore: %v", err)
+	}
+
+	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("UnblockUser: %v", err)
+	}
+
+	again, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage after no-op unblock: %v", err)
+	}
+	if len(again.RequestCreatedFor) != 0 {
+		t.Errorf("RequestCreatedFor = %v, want none (request stays ignored)", again.RequestCreatedFor)
+	}
+}
