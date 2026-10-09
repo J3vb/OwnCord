@@ -269,11 +269,7 @@ describe("AudioPipeline", () => {
       FakeAudioContext.workletsLoad = true;
       vi.stubGlobal(
         "fetch",
-        // The smallest valid module: createRNNoiseNode now compiles what it fetches.
-        vi.fn(async () => ({
-          arrayBuffer: async () =>
-            new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]).buffer,
-        })),
+        vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
       );
       const pipeline = new AudioPipeline();
       const track = micTrack();

@@ -66,7 +66,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (event) => {
       if (event.data.type === "init") {
-        this._initWasm(event.data.wasmModule ?? event.data.wasmBytes);
+        this._initWasm(event.data.wasmBytes);
       } else if (event.data.type === "destroy") {
         this._cleanup();
       }
@@ -86,16 +86,13 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
 
   /**
    * Initializes the WASM module and RNNoise state.
-   * @param {WebAssembly.Module | ArrayBuffer} wasmSource - Precompiled module, or raw WASM bytes to compile
+   * @param {ArrayBuffer} wasmBytes - Raw WASM module bytes
    * @private
    */
-  async _initWasm(wasmSource) {
+  async _initWasm(wasmBytes) {
     let allocated = false;
     try {
-      const module =
-        wasmSource instanceof WebAssembly.Module
-          ? wasmSource
-          : await WebAssembly.compile(wasmSource);
+      const module = await WebAssembly.compile(wasmBytes);
       const present = new Set(WebAssembly.Module.exports(module).map((entry) => entry.name));
       const missing = Object.entries(EXPORT_NAMES)
         .filter(([, exportName]) => !present.has(exportName))

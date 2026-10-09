@@ -5,19 +5,16 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-const SENTINEL = { compiled: true } as unknown as WebAssembly.Module;
+const WASM_LENGTH = 8;
 
 interface PostedInit {
-  type: string;
-  wasmModule?: unknown;
-  wasmBytes?: unknown;
+  message: { type: string; wasmBytes?: ArrayBuffer };
+  transfer: unknown[] | undefined;
 }
 
-describe("createRNNoiseNode module cache", () => {
+describe("createRNNoiseNode bytes cache", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
-  let compileMock: ReturnType<typeof vi.fn>;
   let posted: PostedInit[];
-  const realCompile = WebAssembly.compile;
   const realFetch = globalThis.fetch;
 
   function makeContext(): AudioContext {
@@ -29,19 +26,17 @@ describe("createRNNoiseNode module cache", () => {
   beforeEach(() => {
     vi.resetModules();
     posted = [];
-    fetchMock = vi.fn(async () => new Response(new ArrayBuffer(8)));
-    compileMock = vi.fn(async () => SENTINEL);
+    fetchMock = vi.fn(async () => new Response(new Uint8Array(WASM_LENGTH).buffer));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    WebAssembly.compile = compileMock as unknown as typeof WebAssembly.compile;
     class FakeAudioWorkletNode {
       readonly port: {
         onmessage: ((event: MessageEvent) => void) | null;
-        postMessage: (message: PostedInit) => void;
+        postMessage: (message: PostedInit["message"], transfer?: unknown[]) => void;
       } = {
         onmessage: null,
-        postMessage: (message) => {
+        postMessage: (message, transfer) => {
           if (message.type !== "init") return;
-          posted.push(message);
+          posted.push({ message, transfer });
           queueMicrotask(() => this.port.onmessage?.({ data: { type: "ready" } } as MessageEvent));
         },
       };
@@ -52,11 +47,10 @@ describe("createRNNoiseNode module cache", () => {
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    WebAssembly.compile = realCompile;
     delete (globalThis as Record<string, unknown>).AudioWorkletNode;
   });
 
-  it("fetches and compiles the wasm once across joins and posts the module", async () => {
+  it("fetches the wasm once across joins and gives each node its own transferred copy", async () => {
     const { createRNNoiseNode } = await import("@lib/noise-suppression");
     const first = makeContext();
     const second = makeContext();
@@ -65,14 +59,17 @@ describe("createRNNoiseNode module cache", () => {
     await createRNNoiseNode(second);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(compileMock).toHaveBeenCalledTimes(1);
     expect(first.audioWorklet.addModule).toHaveBeenCalledTimes(1);
     expect(second.audioWorklet.addModule).toHaveBeenCalledTimes(1);
     expect(posted).toHaveLength(2);
-    for (const message of posted) {
-      expect(message.wasmModule).toBe(SENTINEL);
-      expect(message.wasmBytes).toBeUndefined();
-    }
+    const [one, two] = posted.map((entry) => entry.message.wasmBytes);
+    expect(one).toBeInstanceOf(ArrayBuffer);
+    expect(two).toBeInstanceOf(ArrayBuffer);
+    expect(one!.byteLength).toBe(WASM_LENGTH);
+    expect(two!.byteLength).toBe(WASM_LENGTH);
+    expect(one).not.toBe(two);
+    expect(posted[0]!.transfer).toEqual([one]);
+    expect(posted[1]!.transfer).toEqual([two]);
   });
 
   it("does not cache a failed fetch", async () => {
@@ -83,7 +80,6 @@ describe("createRNNoiseNode module cache", () => {
     await createRNNoiseNode(makeContext());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(compileMock).toHaveBeenCalledTimes(1);
     expect(posted).toHaveLength(1);
   });
 });

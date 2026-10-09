@@ -15,26 +15,24 @@ export interface RNNoiseNode {
   destroy(): void;
 }
 
-let rnnoiseModule: Promise<WebAssembly.Module> | null = null;
+let rnnoiseBytes: Promise<ArrayBuffer> | null = null;
 
-/** Fetch and compile rnnoise.wasm once; later joins reuse the compiled module. */
-function loadRNNoiseModule(): Promise<WebAssembly.Module> {
-  if (rnnoiseModule === null) {
-    const loading = fetch("/rnnoise.wasm")
-      .then((response) => response.arrayBuffer())
-      .then((wasmBytes) => WebAssembly.compile(wasmBytes));
-    rnnoiseModule = loading;
+/** Fetch rnnoise.wasm once; later joins reuse the bytes (each node gets its own copy). */
+function loadRNNoiseBytes(): Promise<ArrayBuffer> {
+  if (rnnoiseBytes === null) {
+    const loading = fetch("/rnnoise.wasm").then((response) => response.arrayBuffer());
+    rnnoiseBytes = loading;
     loading.catch(() => {
-      if (rnnoiseModule === loading) rnnoiseModule = null;
+      if (rnnoiseBytes === loading) rnnoiseBytes = null;
     });
   }
-  return rnnoiseModule;
+  return rnnoiseBytes;
 }
 
 /** Load the worklet and WASM into `audioContext` and return a ready node. */
 export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNNoiseNode> {
   await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
-  const wasmModule = await loadRNNoiseModule();
+  const cachedBytes = await loadRNNoiseBytes();
 
   const node = new AudioWorkletNode(audioContext, "rnnoise-processor", {
     numberOfInputs: 1,
@@ -49,8 +47,9 @@ export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNN
       else if (event.data.type === "error") reject(new Error(event.data.message));
     };
   });
+  const wasmBytes = cachedBytes.slice(0);
   // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-  node.port.postMessage({ type: "init", wasmModule });
+  node.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
   await initPromise;
 
   log.info("RNNoise AudioWorklet processing active");

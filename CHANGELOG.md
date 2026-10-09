@@ -51,7 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- With enhanced noise suppression on, joining voice no longer downloads and compiles the noise model every time; it is loaded once and reused for later joins.
+- With enhanced noise suppression on, joining voice no longer downloads the noise model every time; it is fetched once and reused for later joins.
 
 ## v2.2.0-beta.2
 
