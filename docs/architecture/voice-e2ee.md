@@ -357,9 +357,9 @@ E2EE for the soak window and asserts both decode and the process closes
 cleanly — the regression guard for the silent camera-plus-screen crash
 (#2095), and where a crash-log line would surface as evidence.
 
-The camera-cycle case waits for each new camera to be bound by a subscriber
-(`RoomEvent::LocalTrackSubscribed`, 5 s at most) before unpublishing the
-previous one, and the spec asserts the browser peer saw 0 reconnects: the SFU
+The camera-cycle case waits for each camera to be bound by a subscriber
+(`RoomEvent::LocalTrackSubscribed`, 5 s at most, then a 250 ms settle) before
+it is unpublished, and the spec asserts the browser peer saw 0 reconnects: the SFU
 answers an unpublish that collides with a subscriber's own negotiation with a
 full reconnect, which showed up as 0 decoded frames.
 
