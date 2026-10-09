@@ -921,6 +921,18 @@ describe("NativeRoom camera", () => {
     expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
   });
 
+  it("caps the host capture at the selected preset's resolution", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await room.localParticipant.createCameraTracks({
+      ...cameraOptions,
+      resolution: { width: 1280, height: 720 },
+    });
+    expect(host.calls.filter(([n]) => n === "startCamera")).toEqual([
+      ["startCamera", [1, "", { fps: 30, maxWidth: 1280, maxHeight: 720 }]],
+    ]);
+  });
+
   it("refuses a browser camera track and a capture without a session", async () => {
     const room = createNativeRoom(audio);
     await expect(room.localParticipant.createCameraTracks(cameraOptions)).rejects.toThrow(

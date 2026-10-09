@@ -248,11 +248,11 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   const cdp = await alice.context().newCDPSession(alice);
   const samples: Awaited<ReturnType<typeof sampleLifecycle>>[] = [];
 
-  const consoleErrors: ConsoleEntry[] = [];
+  const consoleEntries: ConsoleEntry[] = [];
   let duringReconnect = false;
   const pageErrors: string[] = [];
   alice.on("console", (message: ConsoleMessage) => {
-    if (message.type() === "error") consoleErrors.push({ text: message.text(), duringReconnect });
+    consoleEntries.push({ text: message.text(), duringReconnect, type: message.type() });
   });
   alice.on("pageerror", (error: Error) => pageErrors.push(String(error)));
 
@@ -361,7 +361,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   console.log(`lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
 
   expect(pageErrors, "no page errors across the run").toEqual([]);
-  expect(unexpectedConsoleErrors(consoleErrors), "no unexpected console.error lines").toEqual([]);
+  expect(unexpectedConsoleErrors(consoleEntries), "no unexpected console.error lines").toEqual([]);
 
   // Every metric is asserted at the plan's bar.
   expect(
