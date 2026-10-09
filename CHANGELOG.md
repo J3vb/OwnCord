@@ -47,97 +47,95 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-### Removed
+## v2.2.0-beta.2
 
-- **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
+**OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
+
+It is still a **beta and a hobby project** — don't use it for anything sensitive. Update the server and the desktop app together.
+
+### Highlights
+
+- **Clearer voice**: the robot-voice and chopped-quiet-mic problems are fixed, and the speaking ring lights up at normal speaking volume.
+- **Pop-out window for streams and cameras**, like Discord's, with full screen.
+- **Steadier DM calls**: rings arrive in order, cancel cleanly and no longer show a false "Missed call".
+- **Screen share you can pick and trust**: a source picker on Windows, and a share that lowers quality on a weak link instead of freezing.
+- **Linux voice** keeps working through odd audio devices, moderator mutes and quiet mics, and the Linux camera now captures at the resolution you picked.
 
 ### Added
 
-- **Pop-out window for streams and cameras**: Pop out now opens a stream or camera in a window of its own, like Discord, that you can move, maximise or put in full screen (its own button, F or a double-click). The Linux app gets Pop out for the first time. Closing the window, or Bring back on the tile, returns the stream to the grid.
+**Voice and video**
+
+- **Pop-out window**: Pop out opens a stream or camera in a window of its own that you can move, maximise or put in full screen (its own button, F or a double-click). Closing it, or Bring back on the tile, returns the stream to the grid. Linux gets Pop out for the first time.
+- A screen and window picker when you share your screen on Windows.
+- The camera defaults to 720p, and a 1080p camera also sends a 720p layer so viewers on slower links still get video.
+- Screen-share audio is encoded for music instead of as a voice microphone.
 
 ### Changed
 
-- **Ring no longer cancelled by an older hang-up**: a DM call ring could reach the callee ahead of the caller's earlier leave after a quick leave and re-ring, so the stale leave cancelled the new ring and showed a false "Missed call". Call signals now arrive in order with voice events.
-- **Linux camera honours the 720p default**: the native camera now captures at the selected quality's resolution, so the 720p default no longer encodes a 1080p source on Linux. Choosing 1080p still captures 1080p.
-- **Screen-share audio sounds like music**: audio shared with a screen is now sent in stereo at music quality, with echo cancellation, noise suppression and auto-gain off and silence suppression disabled, so game and music audio no longer pumps or gets voice-processed.
-- **First-contact calls say why they cannot ring**: calling someone who has not accepted your message request now tells you straight away that calls work after they accept, instead of ringing for 30 seconds unheard. The ring is still never delivered to them.
-- **Missed-call notice when the caller hangs up early**: if the caller gives up or drops before the ring times out, the person being called now gets the same "Missed call" notice as for a timeout.
-- **Camera defaults to 720p**: a new camera now sends 720p instead of 1080p, with half the CPU cost. Choosing 1080p in Voice settings still works and now also sends a 720p layer, so viewers on a slow link get a sharp 720p picture rather than a blurry 360p one. A quality you already chose is kept.
+- The stream and camera hover preview in the voice sidebar is removed. The indicators and click-to-watch are unchanged.
+- Per-user and output volume are capped at 100%, so joining a voice channel cannot fail on an out-of-range level.
+- Linux: the camera is captured at the resolution of the preset you picked.
+- The voice sidebar's channel categories reorder live when an admin moves them.
+- Add Server creates your first saved profile on a fresh install.
+- **For server owners:** `.html`, `.svg`, `.sh`, `.docm`, `.xlsm`, `.desktop` and `.command` uploads are refused by default (edit `upload.blocked_extensions` to allow them).
+- **For server owners:** `plugins.directory` must be a folder that neither is nor holds your data, uploads or backups folder. In a container, `plugins.directory`, `tls.cert_file` and `tls.key_file` must all sit under the data folder, so move them before upgrading.
+- **For server owners:** the generated LiveKit config (and `livekit.yaml.example`) detects speakers faster, which is what lights the speaking ring sooner. A hand-managed `livekit.yaml` needs the same change.
+- Update checks fetch release files only from GitHub over https, redirects included.
+- Adding a server whose address is already in your list is refused with a message; profiles you already have are left as they are.
 
 ### Fixed
 
-- **Calls queued during a connection drop**: a call ring that was waiting to be sent when the connection dropped is no longer sent afterwards, so "Calling…" no longer shows for 30 seconds with nobody notified. Pressing Call again within a few seconds now waits a little longer so the server does not refuse the second ring, and a ring the server does refuse ends "Calling…".
-- **DM call state**: a group ring now stops when the last person leaves, even after the caller hung up first; the camera and screen-share buttons wait until the call has connected instead of failing with "Join a voice channel first"; after the other person hangs up you see "<name> left the call" with Ring again; and a group call whose online members all declined no longer waits out the 30 s timer for offline members.
-- **Linux input sensitivity**: on the Linux desktop app the Input Sensitivity slider is back in Voice settings and now works as on Windows: speech above the threshold is sent and lights your speaking ring promptly, quieter sound is neither sent nor shown. The level bar beside it stays empty on Linux for now.
-- **Choppy or robotic voice on a quiet microphone**: the sensitivity gate now reads a smoothed ~10 ms level instead of single 2.7 ms blocks, holds 320 ms before closing (it was 200 ms) so it no longer closes between words, and measures the microphone after the Input Volume slider, so raising Input Volume lifts a quiet microphone over the gate. The settings meter shows the same level the gate uses.
-- **Voice stuck on "reconnecting"**: when the voice connection dropped and did not come back, the badge stayed on "reconnecting" and streams stayed frozen for minutes until you rejoined by hand. After 10 seconds the app now drops that connection and reconnects (or rejoins) on its own.
-- **Linux microphone quality**: the Linux desktop app now sends the microphone at the bitrate the server's `voice.quality` sets, instead of a fixed 48 kbps, so `high` takes effect there too.
-- **Screen share on a weak connection**: a viewer whose connection could not carry a screen share saw a frozen frame for as long as it stayed weak, and their requests for fresh frames made the stream heavier for everyone else. A screen share now also sends a lighter 720p copy at 15 fps, which such a viewer gets instead. The default screen share is now 720p at 30 fps, which keeps scrolling text smooth on slower connections; 1080p is still there as High. Camera and screen share now have separate quality settings under Voice & Audio: your saved choice stays with the camera, and the screen share starts at the new default.
-- **Microphone after a rejoin**: joining or rejoining voice no longer turns on the browser's voice isolation, which Settings never showed and could make a voice sound robotic; every capture now asks for exactly the processing Settings show, and a microphone the client reopened on its own gets the saved processing back.
-- **Default microphone after a replug**: with the microphone set to Default, unplugging and replugging it moves the call back to the system default instead of staying on the device it fell back to, and Settings name the device the call captures next to "Default".
-- **Voice support logs**: support bundles now carry LiveKit's own warnings and errors (reconnect attempts and why they failed) and the applied microphone settings.
-- **Calling again no longer drops your own call**: pressing Call twice within three seconds, or right after hanging up, threw you out of the call with "Too many requests". The ring now goes out only after your join has succeeded and inside the server's one-ring-per-three-seconds limit, so the other person is not rung for a call that failed to start, and Ring again no longer shows a false "Calling…".
-- **Add Server on a fresh install**: the placeholder `localhost:8443` entry no longer counts as an already-saved server, so it can be added as the first profile.
-- **Calling someone who closed the DM**: a call ring now reopens the DM for the person being called, so accepting lands in the call panel with the DM in the sidebar. The server also refuses a ring from someone who is not in the call.
-- **Full screen for a popped-out stream**: full screen on a popped-out stream or camera showed an empty tile while the video stayed in the pop-out window — fullscreen from a popped-out stream moves it into the main window's fullscreen view; leaving fullscreen returns it to the grid (Pop out re-pops it).
-- **Voice join**: a saved per-user or output volume above 100% could make joining a voice channel fail. Volumes now top out at 100%: the sliders end there, and older saved values above it play at 100%.
-- **Nightly mutation score**: the nightly run now adds the six shard reports into one full-surface mutation score, published as a job summary and artifact (both record the pinned dev revision), and fails when a shard report is missing.
-- **Speaking ring**: the voice ring now lights about half a second sooner and at normal speaking volume. The LiveKit config OwnCord generates (and `livekit.yaml.example`) sets faster, more sensitive speaker detection; a hand-managed `livekit.yaml` needs the new `audio:` block copied in. Your own ring now follows the input-sensitivity gate directly, so it lights when speech crosses the slider's threshold and not below it.
-- **Release gate evidence**: the pre-release check now ignores results from pull request runs of the tagged commit and refuses a commit that has no push-to-main CI run, so only the full-matrix run counts.
-- **Channel order**: moving a channel's position in the admin panel now reorders the sidebar categories live, matching what a restart shows; equal positions fall back to channel id like the server.
-- **Screen share on Windows**: starting a share now shows WebView2's screen and window picker instead of silently sharing the primary screen. The `--use-fake-ui-for-media-stream` flag that hid it is replaced by Chromium's `--auto-accept-camera-and-microphone-capture`, so microphone and camera stay prompt-free. Shared system audio now excludes OwnCord's own call audio instead of capturing the microphone, which made viewers hear the sharer twice.
-- **Default blocked upload types**: `.html`, `.svg`, `.sh`, `.docm`, `.xlsm`, `.desktop` and `.command` files are now refused by default; an owner who wants them can edit `upload.blocked_extensions`.
-- **Plugins folder setting**: `plugins.directory` must now be a folder that neither is nor holds the data, uploads or backups folder, and in a container it must sit under the data folder.
-- **Self-signed certificate paths in a container**: `tls.cert_file` and `tls.key_file` must sit under the data folder, like every other path the server writes there.
-- **Update checks**: release files are fetched only from GitHub over https, redirects included.
-- **Image thumbnails**: the memory a thumbnail decode may take is now capped at 96 MiB instead of 160 MiB; larger images are shown as the original, and 24-megapixel photos still get a thumbnail.
-- **Bundle budgets**: the Settings, pop-out window and screen-share lazy chunks now have their own size budgets in `Client/bundle-budgets.json`, so growth in them fails CI instead of going unnoticed.
-- **Saved servers**: adding a server whose address is already in your list is now refused with a message, so two profiles can no longer share (and overwrite) one saved sign-in. Profiles you already have are left as they are.
-- **Advisory gate**: the dependency audit check no longer treats a 401, 403 or 404 from the audit endpoint as a registry outage, so a broken registry or credentials setup fails the job instead of passing with a warning; only 5xx answers and network failures are still forgiven.
-- **Mocked end-to-end checks**: the slow-mode exemption, note privacy, volume reset, auto-login handover, large-font size, OS motion sync, search debounce, paste upload and avatar decode tests now assert the behaviour itself instead of a marker that would pass without it
-- **Lifecycle soak bars**: the soak now fails on any open socket, peer connection or track after the voice leave and on any change in the number of audio contexts, instead of forgiving a one-unit move, and a run with no comparable samples no longer passes with every bar green.
-- **Moderation queue ordering**: a new appeal is announced to moderators before it can be assigned, and a report's history entries (assigned, noted, closed) are now saved together with the change itself, so none is lost, reordered or credited to an account that no longer exists.
-- **Push notifications**: a mention that finds no usable device no longer silences the next mention for a minute, a failed cleanup of a dead device is no longer counted as removed, and a subscription whose key is not a valid P-256 point is refused when it is registered.
-- **Uploads and storage quota**: an upload's trailing form parts are now read to the end, so a body padded past the size limit is refused with 413 and a malformed tail with 400, and neither leaves a file behind. A failed avatar change now gives back the stored row and its quota charge at once, and a user's first storage counter starts from the files they already hold.
-- **Search with accents**: searching for a word typed with separate accent marks (for example a decomposed "résumé") now finds the same word stored with precomposed accents instead of splitting it in two.
-- **Certificate error log**: the "clients cannot connect" certificate message is now logged only for handshakes that ask for your configured domain, so unrelated probes no longer use up the once-per-ten-minutes slot.
-- **Message requests**: opening a conversation with someone whose message request you have not answered now accepts that request, and blocking someone removes your trust in them so their messages arrive as a request again after an unblock (unblocking also clears a decided request so a new one can form).
-- **Message requests**: a one-time cleanup removes the trust you already held in people you currently block, so their messages arrive as a request after an unblock.
-- **Plugins that fail to start**: a plugin whose command list traps or times out while enabling now fails to enable, and the memory it compiled is released instead of staying held until restart.
-- **Timeouts and voice mutes**: replacing a timeout when you cannot moderate voice now releases the mute the old timeout held, and the retention sweep no longer removes a timeout that still holds a voice mute.
-- **First-run setup**: the owner's own setup login no longer shows up as an unreviewed new login, and setting up shares the same limit on simultaneous password checks as sign-in, answering "try again later" when the server is busy.
-- **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
-- **Plugin and push fetches check the content type**: a response whose declared type disagrees with what its bytes look like (for example JSON declared, HTML body) is now refused.
-- **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.
-- **Your own moderation history**: the list of warnings, timeouts, removals and bans shown to you now returns the newest 200 entries instead of every row ever recorded. Reading it needs a signed-in session; an API token is refused.
+**Voice**
 
-- **Permission checks**: asking whether a member holds an empty permission set now always answers no, administrators included, matching the other permission helpers.
-- **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
-- **Server support bundle detail**: `events.json` kept only an event name per record, so a bundle showed that something failed (for example a LiveKit participant removal) but never why. Each record now also carries its error reason and other detail, with ids, usernames, names, addresses, hostnames, paths and tokens removed.
-- **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
-- **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
-- **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
-- **Unread count while scrolled back**: messages that arrive while you are scrolled up in the open channel now count as unread (the channel shows a badge) until you reach the bottom.
-- **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
-- **Linux voice on plain ALSA**: a microphone or speaker that offers no float audio format (common without PipeWire or PulseAudio) now opens; a device with no 48 kHz format reports that instead of a generic error.
-- **Voice "Secured" badge**: repeated decrypt failures from a participant now degrade it even when they arrive in short bursts; the grace window restarts only after a new room key is installed.
-- **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
-- **Recovery kit and codes**: Settings now stays open until a new recovery kit or set of recovery codes is shown, so the one-time secret is never lost by closing Settings mid-request.
-- **New channels after a reconnect**: a client that reconnects while a channel is being created now always gets that channel in its sidebar, instead of occasionally missing it until the next restart.
-- **Release smoke drill (Docker)**: a disk-full copy that had already written part of its filler file now has that file shrunk again before setup continues, instead of running setup on a full tmpfs.
+- Robot-sounding or choppy voice: the input-sensitivity gate no longer chops quiet microphones.
+- The "Secured" badge degrades on repeated decrypt failures even in short bursts; its grace window restarts only after a new key is installed.
+- Rejoining voice no longer switches on the browser's voice isolation, which Settings never showed and could make a voice sound robotic; your saved microphone processing settings are applied every time.
+- With the microphone set to Default, unplugging and replugging it moves the call back to the system default instead of staying on the device it fell back to.
+- The speaking ring lights up at normal speaking volume.
+- Screen share degrades instead of freezing on a weak link.
+- A stalled voice connection that fails to resume now escalates to a full reconnect.
+- Linux: audio devices open in any sample format at 48 kHz, the mic is republished after a moderator unmutes you, the server's voice-quality bitrate applies, and the sensitivity gate works on the native path.
+- Voice sockets behind a reverse proxy are accepted when the origin names port `:443`.
 
-### Login & connection
+**Direct-message calls**
 
-- Signing out no longer waits forever on a server that never answers; the request is dropped after 10 seconds.
-- Cancel is greyed out while an account recovery is being sent, so the result is never hidden.
-- Switching back to a server resumes its saved sign-in only when "remember password" is on, and no longer overrides a login you started yourself.
-- Picking a server whose "remember password" is off no longer loads or fills in its saved password.
+- A call now rings the callee only after the caller's voice session is connected.
+- A stale hang-up could cancel a new ring and show a false "Missed call"; call signals now arrive in order with voice events.
+- A first-contact call tells the caller at once, and the callee is told if the caller hangs up early.
+- A closed DM reopens on a ring, and a ring from someone who is not in the call is refused.
+- Queued rings are dropped when you disconnect, and redialling has a little slack.
+- Fixes for ring cancel, connect gating and the caption after leaving a call.
 
-### Login & connection
+**Messages, servers and accounts**
 
-- Registering on a server you typed in (not a saved one) now checks that server's sign-up rules, so an open server no longer asks for an invite code.
-- A server reporting degraded health still gets its version-compatibility check.
-- "Choose another server" now clears the leftover version-mismatch error from the login form.
+- A reply's snippet refreshes when the original message is edited.
+- The unread bar stays until you reach the real bottom, announces its count, and arrivals while scrolled away are counted.
+- Typing a server address probes the server correctly, and a stale refusal error clears when you leave.
+- Logout is time-limited, Cancel locks during recovery, and Settings stays open while a recovery key is requested.
+- Opening a DM accepts a pending request; blocking someone revokes trust and unblocking clears old requests.
+- A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. Each member's own moderation history (warnings, timeouts, removals, bans) shows the newest 200 entries.
+- Link and image previews have a fetch deadline and a length limit on image URLs.
+- Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+
+**Support bundles**
+
+- Support bundles keep the redacted detail of error events, and their wording and log writes are cleaner.
+
+### Known issues
+
+- **Not yet tested on a real machine:** the Windows screen-share picker, the pop-out window on Windows and Linux, and how Linux voice handles device changes.
+- **Linux camera with screen share:** the crash seen in beta 1 when both are on has not been retested. If the app closes without warning, send the support bundle.
+- **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Go toolchain 1.27.2 and `golang.org/x/net` 0.60.0; the auth and database coverage floors are restored.
+- A large batch of new client tests: soak runs that hold media counters flat, stricter mocked end-to-end assertions, a console guard, and a tray menu mapping test.
+- CI and repository guards are tighter: the npm audit gate, release gate, per-chunk size budgets, nightly mutation scores, and the Claude shell hook.
+- Docs and plans are corrected, including data-lifecycle restore, operator guidance and Dependabot notes; no-mistakes review instructions were added.
 
 ## v2.2.0-beta.1
 
