@@ -1991,12 +1991,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
-    const preview = vi.spyOn(desktop.externalContent!, "preview").mockResolvedValue({
+    const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
     });
     const image = vi
-      .spyOn(desktop.externalContent!, "image")
+      .spyOn(desktop.externalContent, "image")
       .mockResolvedValue({ ok: true, value: new Blob(["x"]) });
     const createObjectURL = URL.createObjectURL;
     const revokeObjectURL = URL.revokeObjectURL;
