@@ -172,16 +172,16 @@ mod linux {
     }
 
     /// Waits for a subscriber to bind `camera_sid`, then a short settle.
-    // A subscriber that needs a negotiation of its own (the
-    // browser peer) must finish it before the camera it just
-    // subscribed to goes away: livekit-server answers the
-    // collision (its PeerConnection drops a sender while the
-    // subscriber's offer is being applied) with a full
-    // reconnect of that subscriber, and the browser then
-    // never sees the final camera. Wait for the subscription,
-    // then a short settle: the server reports it before the
-    // subscriber's offer lands. Other events are kept for the
-    // main loop in `run`.
+    /// A subscriber that needs a negotiation of its own (the
+    /// browser peer) must finish it before the camera it just
+    /// subscribed to goes away: livekit-server answers the
+    /// collision (its PeerConnection drops a sender while the
+    /// subscriber's offer is being applied) with a full
+    /// reconnect of that subscriber, and the browser then
+    /// never sees the final camera. Wait for the subscription,
+    /// then a short settle: the server reports it before the
+    /// subscriber's offer lands. Other events are kept for the
+    /// main loop in `run`.
     async fn await_camera_bound(
         room_events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
         pending_events: &mut std::collections::VecDeque<RoomEvent>,
