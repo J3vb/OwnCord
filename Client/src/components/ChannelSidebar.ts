@@ -13,9 +13,7 @@ import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore, getChannelsByCategory, categoryLabel } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
-import { markAllRead, unreadChannelIds } from "@lib/read-state";
 import { isChannelMuted } from "@lib/channel-mutes";
-import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
@@ -790,7 +788,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
-  let markAllBtn: HTMLButtonElement | null = null;
 
   const unsubscribers: Array<() => void> = [];
 
@@ -816,13 +813,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
   }
 
-  /** Hide Mark All as Read while nothing is unread — a header button that can
-   *  never do anything is worse than no button. */
-  function updateMarkAllBtn(): void {
-    if (markAllBtn === null) return;
-    markAllBtn.classList.toggle("visible", unreadChannelIds().length > 0);
-  }
-
   /**
    * Listener owners for every keyed group and row. A reused element keeps its
    * owner; a replaced or removed one has its owner aborted before it detaches,
@@ -842,7 +832,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   /** `voiceChanged` is true for the refreshes that can alter a voice row's
    *  rendered state; they bump `voiceTick` so those rows rebuild. */
   function renderChannels(voiceChanged = false): void {
-    updateMarkAllBtn();
     if (channelList === null) {
       return;
     }
@@ -1068,26 +1057,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     );
     header.appendChild(serverNameEl);
 
-    // Mark All as Read lives on the server header — it is a server-wide action,
-    // and it only appears while something is actually unread so the header does
-    // not carry a permanently dead button.
-    markAllBtn = createElement("button", {
-      class: "sidebar-mark-all-read",
-      title: shellText("channel.markAllRead"),
-      "aria-label": shellText("channel.markAllRead"),
-      "data-testid": "mark-all-read",
-    });
-    markAllBtn.appendChild(createIcon("check", 16));
-    markAllBtn.addEventListener(
-      "click",
-      (e: Event) => {
-        e.stopPropagation();
-        markAllRead();
-      },
-      { signal: disposable.signal },
-    );
-    header.appendChild(markAllBtn);
-
     // Channel list
     channelList = createElement("div", { class: "channel-list" });
 
@@ -1101,10 +1070,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     // Initial render
     renderChannels();
-
-    // DM badges live in dm.store, and Mark All as Read covers them too, so the
-    // header button's visibility has to track that store as well.
-    unsubscribers.push(dmStore.subscribeSelector((s) => s.channels, updateMarkAllBtn));
 
     // Subscribe to channels store changes (channels map OR active channel)
     const unsubChannelsMap = channelsStore.subscribeSelector(
@@ -1236,7 +1201,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     channelList = null;
     serverNameEl = null;
-    markAllBtn = null;
   }
 
   return { mount, destroy };
