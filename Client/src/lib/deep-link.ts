@@ -117,6 +117,17 @@ function hostParam(query: string): string {
 }
 
 /**
+ * Build the shareable link for an invite: `owncord://invite/<code>`, with
+ * `?host=<host>` naming the server when it is known. The inverse of
+ * {@link parseInviteLink}.
+ */
+export function formatInviteLink(code: string, host?: string): string {
+  const base = `${PREFIX}invite/${encodeURIComponent(code)}`;
+  const trimmed = host?.trim() ?? "";
+  return trimmed === "" ? base : `${base}?host=${encodeURIComponent(trimmed)}`;
+}
+
+/**
  * Parse an owncord:// invite link. Returns null if the URL isn't an owncord://
  * link, is a different route (e.g. a message permalink), or carries no code.
  * Pure — no side effects, safe to unit test.

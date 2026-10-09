@@ -146,10 +146,6 @@ function makeMockApi(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeMockToast() {
-  return { show: vi.fn() };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -169,7 +165,6 @@ describe("createInviteManagerController", () => {
 
   it("opens invite manager and mounts to root", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -236,7 +231,6 @@ describe("createInviteManagerController", () => {
     const api = makeMockApi({
       revokeInvite: vi.fn().mockRejectedValue(new Error("network error")),
     });
-    const toast = makeMockToast();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -259,7 +253,6 @@ describe("createInviteManagerController", () => {
 
   it("onRevokeInvite succeeds normally when API works", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -280,7 +273,6 @@ describe("createInviteManagerController", () => {
     const api = makeMockApi({
       getInvites: vi.fn().mockRejectedValue(new Error("load failed")),
     });
-    const toast = makeMockToast();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -308,7 +300,6 @@ describe("createPinnedPanelController", () => {
 
   it("toggles pinned panel open and mounts to root", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
 
     const controller = createPinnedPanelController({
       api: api as never,
@@ -378,7 +369,6 @@ describe("createPinnedPanelController", () => {
     const api = makeMockApi({
       unpinMessage: vi.fn().mockRejectedValue(new Error("unpin failed")),
     });
-    const toast = makeMockToast();
 
     const controller = createPinnedPanelController({
       api: api as never,
@@ -409,7 +399,6 @@ describe("createPinnedPanelController", () => {
 
   it("onUnpin closes panel on success", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
 
     const controller = createPinnedPanelController({
       api: api as never,
@@ -444,7 +433,6 @@ describe("createPinnedPanelController", () => {
 
   it("onJumpToMessage forwards the panel's own channel id (captured at open time), not just the message id", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
     const mockScrollToMessage = vi.fn().mockReturnValue(true);
 
     const controller = createPinnedPanelController({
@@ -472,7 +460,6 @@ describe("createPinnedPanelController", () => {
 
   it("closes and delegates even for a message outside the loaded window", async () => {
     const api = makeMockApi();
-    const toast = makeMockToast();
     const mockJump = vi.fn();
 
     const controller = createPinnedPanelController({
@@ -503,7 +490,6 @@ describe("createPinnedPanelController", () => {
     const api = makeMockApi({
       getPins: vi.fn().mockRejectedValue(new Error("load failed")),
     });
-    const toast = makeMockToast();
 
     const controller = createPinnedPanelController({
       api: api as never,
@@ -1308,8 +1294,8 @@ describe("createInviteManagerController (additional)", () => {
     expect((result as { code: string }).code).toBe("new123");
   });
 
-  it("onCopyLink copies code to clipboard", async () => {
-    const api = makeMockApi();
+  it("onCopyLink copies an invite link to clipboard", async () => {
+    const api = makeMockApi({ getConfig: vi.fn().mockReturnValue({ host: "chat.example.com" }) });
     const mockWriteText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, {
       clipboard: { writeText: mockWriteText },
@@ -1327,7 +1313,59 @@ describe("createInviteManagerController (additional)", () => {
     };
 
     opts.onCopyLink("test-code");
-    expect(mockWriteText).toHaveBeenCalledWith("test-code");
+    expect(mockWriteText).toHaveBeenCalledWith("owncord://invite/test-code?host=chat.example.com");
+  });
+
+  describe("onCopyLink builds a shareable owncord:// link", () => {
+    async function openAndGetCopy(host: string | undefined) {
+      const api = makeMockApi({ getConfig: vi.fn().mockReturnValue({ host }) });
+      const controller = createInviteManagerController({
+        api: api as never,
+        getRoot: () => root,
+      });
+      await controller.open();
+      const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+        onCopyLink: (code: string) => void;
+      };
+      return opts.onCopyLink;
+    }
+
+    it("writes owncord://invite/<code>?host=<encoded host> and toasts success", async () => {
+      const mockWriteText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText: mockWriteText } });
+      const copy = await openAndGetCopy("chat.example.com:8443");
+
+      copy("ABCD");
+
+      expect(mockWriteText).toHaveBeenCalledWith(
+        "owncord://invite/ABCD?host=chat.example.com%3A8443",
+      );
+      await vi.waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith("Invite link copied", "success");
+      });
+    });
+
+    it("falls back to owncord://invite/<code> when no host is known", async () => {
+      const mockWriteText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText: mockWriteText } });
+      const copy = await openAndGetCopy(undefined);
+
+      copy("ABCD");
+
+      expect(mockWriteText).toHaveBeenCalledWith("owncord://invite/ABCD");
+    });
+
+    it("shows the error toast when the clipboard write is refused", async () => {
+      const mockWriteText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.assign(navigator, { clipboard: { writeText: mockWriteText } });
+      const copy = await openAndGetCopy("chat.example.com:8443");
+
+      copy("ABCD");
+
+      await vi.waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith("Couldn't copy the invite link", "error");
+      });
+    });
   });
 
   it("onClose callback destroys instance and allows re-open", async () => {

@@ -20,6 +20,7 @@ import { setMessagePinned } from "@stores/messages.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
+import { formatInviteLink } from "@lib/deep-link";
 import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "./GlobalKeybinds";
 
@@ -284,7 +285,8 @@ export function createInviteManagerController(opts: {
         onCopyLink: (code: string) => {
           // No silent success: a copy the user can't see is indistinguishable
           // from a clipboard permission failure.
-          void navigator.clipboard.writeText(code).then(
+          const link = formatInviteLink(code, opts.api.getConfig().host);
+          void navigator.clipboard.writeText(link).then(
             () => showToast(shellText("invite.copied"), "success"),
             () => showToast(shellText("invite.copyFailed"), "error"),
           );

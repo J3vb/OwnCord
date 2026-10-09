@@ -103,6 +103,16 @@ export function canViewAuditLog(): boolean {
 }
 
 /**
+ * Whether the signed-in user's role holds MANAGE_INVITES (ADMINISTRATOR implies
+ * it). The server gates every `/api/v1/invites` route on this bit, so the
+ * header Invite button is only offered to roles that can use it.
+ */
+export function canManageInvites(): boolean {
+  const roleName = authStore.getState().user?.role ?? "";
+  return roleHasPermission(roleName, Permission.MANAGE_INVITES);
+}
+
+/**
  * Whether the signed-in user's role holds MODERATE_MEMBERS. Gates the
  * Moderation Center entry (B9-4, Q2); the server re-checks the bit on every
  * queue read and action.
