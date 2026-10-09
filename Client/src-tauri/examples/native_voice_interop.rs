@@ -67,6 +67,8 @@ mod linux {
     use tokio_tungstenite::tungstenite::Message;
 
     const SAMPLE_RATE: u32 = 48_000;
+    /// Pause between camera off/on cycles; see the comment in `run`.
+    const CAMERA_CYCLE_GAP: Duration = Duration::from_millis(500);
     const FRAME_MS: u64 = 10;
     const SINE_AMPLITUDE: f64 = 8000.0;
 
@@ -388,7 +390,15 @@ mod linux {
                     (capture, camera_sid) =
                         start_camera(&mut session, width, height, simulcast).await?;
                     session.unpublish_camera(&stale).await;
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    // A subscriber that needs a negotiation of its own (the
+                    // browser peer) must finish it before the camera it just
+                    // subscribed to goes away: livekit-server answers the
+                    // collision (its PeerConnection drops a sender while the
+                    // subscriber's offer is being applied) with a full
+                    // reconnect of that subscriber, and the browser then
+                    // never sees the final camera. Measured 2026-10-09: a
+                    // 50 ms gap forced a reconnect in 2 of 22 runs.
+                    tokio::time::sleep(CAMERA_CYCLE_GAP).await;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(

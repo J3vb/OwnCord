@@ -157,7 +157,7 @@ async function joinBrowserPeer(
         .LivekitClient;
       const meters = new Map<string, { sumSq: number; samples: number }>();
       const videos = new Map<string, { frames: number; width: number; height: number }>();
-      const state = { encErrors: 0, subscribed: [] as string[], meters, videos };
+      const state = { encErrors: 0, reconnects: 0, subscribed: [] as string[], meters, videos };
       (window as unknown as { __interop: typeof state }).__interop = state;
       const keyProvider = new lk.ExternalE2EEKeyProvider();
       await keyProvider.setKey(keyBase64);
@@ -167,6 +167,11 @@ async function joinBrowserPeer(
       await room.setE2EEEnabled(true);
       room.on(lk.RoomEvent.EncryptionError, () => {
         state.encErrors++;
+      });
+      // The SFU can answer a failed negotiation with a full reconnect, which
+      // drops every subscription until the peer republishes.
+      room.on(lk.RoomEvent.Reconnecting, () => {
+        state.reconnects++;
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
       room.on(lk.RoomEvent.TrackSubscribed, (track, pub, participant) => {
@@ -224,6 +229,7 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
       window as unknown as {
         __interop: {
           encErrors: number;
+          reconnects: number;
           subscribed: string[];
           meters: Map<string, { sumSq: number; samples: number }>;
           videos: Map<string, { frames: number; width: number; height: number }>;
@@ -234,6 +240,7 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
     const v = state.videos.get(identity);
     return {
       encErrors: state.encErrors,
+      reconnects: state.reconnects,
       subscribed: state.subscribed,
       rms: m && m.samples > 0 ? Math.sqrt(m.sumSq / m.samples) : 0,
       samples: m?.samples ?? 0,
@@ -462,6 +469,7 @@ test("native and browser peers decode each other's video with the same key", asy
   console.log(
     `browser decoded native video: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
   );
+  expect(browser.reconnects, "the SFU forced the browser peer to reconnect").toBe(0);
   expect(browser.videoFrames).toBeGreaterThan(5 * 10);
   expect([browser.videoWidth, browser.videoHeight]).toEqual([640, 360]);
   expect(browser.encErrors).toBe(0);
