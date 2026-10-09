@@ -146,19 +146,6 @@ function fireImgError(parent: HTMLElement): void {
   img.dispatchEvent(new Event("error"));
 }
 
-/** Create a MouseEvent with specified client coordinates. */
-function mouseEvent(
-  type: string,
-  opts: { clientX?: number; clientY?: number; deltaY?: number } = {},
-): MouseEvent {
-  return new MouseEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: opts.clientX ?? 0,
-    clientY: opts.clientY ?? 0,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
