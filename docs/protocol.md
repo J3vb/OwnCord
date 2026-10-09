@@ -1839,7 +1839,7 @@ Delivered only to `target_user_id`, with the sender attached:
 
 ### dm_channel_open (Server -> Client)
 
-Sent when a DM is opened, created, auto-reopened by an incoming message, or has
+Sent when a DM is opened, created, auto-reopened by an incoming message or call ring, or has
 its membership changed (a group created, renamed, or left).
 
 The payload is the same shape as one entry of the `ready` payload's
