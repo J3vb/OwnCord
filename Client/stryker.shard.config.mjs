@@ -90,6 +90,7 @@ export const shards = {
     "src/lib/constants.ts",
     "src/lib/context-menu.ts",
     "src/lib/deep-link.ts",
+    "src/lib/dialogOpen.ts",
     "src/lib/disposable.ts",
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
