@@ -4,6 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -1114,6 +1115,26 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       },
       { signal },
     );
+
+    // Files dragged in from the OS: accepted over the channel view only, and
+    // never while an overlay covers it. Other drops are left to the app-wide
+    // fileDropGuard, which cancels them without uploading.
+    if (options.onUploadFile !== undefined) {
+      document.addEventListener(
+        "drop",
+        (e: DragEvent) => {
+          const dt = e.dataTransfer;
+          if (dt === null || !dt.types.includes("Files")) return;
+          const target = e.target;
+          if (!(target instanceof Element)) return;
+          if (target.closest(".messages-slot, .typing-slot, .input-slot") === null) return;
+          if (dialogOpen()) return;
+          e.preventDefault();
+          for (const file of dt.files) void handlePasteFile(file);
+        },
+        { signal },
+      );
+    }
 
     // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
     // decide the popup's fate — without this, completing a mention/emoji
