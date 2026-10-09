@@ -1931,6 +1931,19 @@ describe("VideoGrid", () => {
       expect(second).not.toBe(first);
     });
 
+    it("a stopped tile pops out watching again, not as a blank window", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "stop").click();
+
+      control(SCREEN, "pip").click();
+
+      expect(popup.doc.body.contains(video)).toBe(true);
+      expect(video.hidden).toBe(false);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell(SCREEN).querySelector(".video-stopped")).toBeNull();
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });

@@ -926,6 +926,8 @@ export function createVideoGrid(): VideoGridComponent {
       return;
     }
     if (isFullscreen(tileId)) leaveFullscreen();
+    // Popping out a stopped tile means watching it: its video is hidden.
+    if (entry.el.classList.contains("video-cell--stopped")) setStopped(tileId, false);
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
     const popout = openPopout({
       title: voiceText("tile.popoutTitle", { name: username }),
