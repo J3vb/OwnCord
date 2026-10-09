@@ -2,8 +2,13 @@
 //! `window.open("about:blank#owncord-popout-<tile>")` and moves the tile's own
 //! `<video>` into it (`src/components/video-grid/popout.ts`), so the window
 //! must share the main webview's process: `window_features` carries the
-//! opener's WebView2 environment / WebKitGTK related view. No capability names
-//! these windows, so they have no IPC.
+//! opener's WebView2 environment / WebKitGTK related view.
+//!
+//! Capability and CSP decision: no capability names these windows, on purpose.
+//! A window needs none to exist; capabilities only grant IPC, and a pop-out
+//! gets none (the main window drives its full screen through its own
+//! `core:window:allow-set-fullscreen`, by label). The about:blank popup
+//! inherits the opener's CSP (HTML policy-container inheritance).
 //!
 //! Every other `window.open` is denied, as it was before this handler existed
 //! (wry denies new windows when a webview has no handler).

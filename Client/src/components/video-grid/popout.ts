@@ -8,6 +8,13 @@
  * webview's own process. So the tile's own <video> moves across with its
  * MediaStream: no second subscription, no new transport. Nothing runs in the
  * window but the DOM drawn here; it has no IPC of its own.
+ *
+ * Capability and CSP decision: no capability names `owncord-popout-*` on
+ * purpose. A window needs none to exist; capabilities only grant IPC, and the
+ * pop-out gets none (the main window drives its full screen through its own
+ * `core:window:allow-set-fullscreen`, by label). The about:blank popup inherits
+ * the opener's CSP (HTML policy-container inheritance), so it runs under the
+ * app's policy; tests/e2e/stream-popout.spec.ts checks that.
  */
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";

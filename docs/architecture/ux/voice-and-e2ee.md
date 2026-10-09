@@ -143,7 +143,9 @@ theatre view fills the window instead (Escape or F leaves it). A full-screen til
 moves the tile's own video into a desktop window of its own (Discord-style; `window.open`
 accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's process, so no
 second subscription), which can be maximised or go full screen from its own control, F or a
-double-click; the tile shows **Bring back**, and closing the window returns the video. Where
+double-click. No capability names the pop-out label on purpose (capabilities only grant IPC;
+the pop-out has none, and the main window drives its full screen by label), and the about:blank
+popup inherits the app's CSP. The tile shows **Bring back**, and closing the window returns the video. Where
 no window opens it falls back to the platform's picture-in-picture. Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover

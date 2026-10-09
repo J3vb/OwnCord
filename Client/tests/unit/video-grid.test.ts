@@ -1999,6 +1999,43 @@ describe("VideoGrid", () => {
       expect(popup.win.close).toHaveBeenCalledTimes(1);
     });
 
+    describe("teardown of the pop-out's listeners and poll", () => {
+      const closers: Array<[string, () => void]> = [
+        [
+          "the user closes the window",
+          () => {
+            popup.win.closed = true;
+            vi.advanceTimersByTime(1000);
+          },
+        ],
+        ["Bring back", () => control(SCREEN, "pop-in").click()],
+        ["the stream is removed", () => grid.removeStream(SCREEN)],
+        ["the grid is destroyed", () => grid.destroy?.()],
+      ];
+
+      it.each(closers)("leaves nothing alive when %s", async (_name, close) => {
+        const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+        grid.setCallbacks({ setWindowFullscreen });
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        const before = vi.getTimerCount();
+        control(SCREEN, "pip").click();
+        expect(vi.getTimerCount()).toBeGreaterThan(before);
+        const oldDoc = popup.doc;
+
+        close();
+        expect(vi.getTimerCount()).toBeLessThanOrEqual(before);
+        popup.win.close.mockClear();
+        setWindowFullscreen.mockClear();
+
+        window.dispatchEvent(new Event("pagehide"));
+        oldDoc.body.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+        oldDoc.dispatchEvent(new Event("fullscreenchange"));
+        await Promise.resolve();
+        expect(popup.win.close).not.toHaveBeenCalled();
+        expect(setWindowFullscreen).not.toHaveBeenCalled();
+      });
+    });
+
     it("full screen on a popped-out tile brings it back first", async () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
       const video = cell(SCREEN).querySelector("video")!;

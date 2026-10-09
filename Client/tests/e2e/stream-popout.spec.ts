@@ -9,12 +9,17 @@
  * no LiveKit track). The production preview serves only the bundle, so there
  * the test skips.
  */
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithVoice, navigateToMainPageReady } from "./helpers";
 import { findUnnamedControls } from "./support/b9-accessibility";
 
 const TILE = 42;
+
+const APP_CSP: string = JSON.parse(
+  readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
+).app.security.csp;
 
 async function mountGrid(page: Page): Promise<void> {
   await mockTauriFullSessionWithVoice(page);
@@ -121,5 +126,45 @@ test.describe("stream pop-out window", () => {
 
     await expect.poll(() => popup.isClosed()).toBe(true);
     await expect(tile(page).locator("video")).toHaveCount(1);
+  });
+
+  test("the popup document runs under the app's CSP, styled and playing", async ({ page }) => {
+    await page.route("**/*", async (route) => {
+      if (route.request().resourceType() !== "document") return route.fallback();
+      const res = await route.fetch();
+      await route.fulfill({
+        response: res,
+        headers: { ...res.headers(), "content-security-policy": APP_CSP },
+      });
+    });
+    await mountGrid(page);
+    await tile(page).hover();
+    const [popup] = await Promise.all([
+      page.waitForEvent("popup"),
+      tile(page).locator("[data-tile-control='pip']").click(),
+    ]);
+    const video = popup.locator(".video-popout video");
+    await expect(video).toHaveCount(1);
+
+    const outcome = await popup.evaluate(
+      () =>
+        new Promise<{ violated: boolean; ran: boolean }>((resolve) => {
+          const w = window as unknown as { __inlineRan?: boolean };
+          let violated = false;
+          document.addEventListener("securitypolicyviolation", () => {
+            violated = true;
+          });
+          const script = document.createElement("script");
+          script.textContent = "window.__inlineRan = true";
+          document.head.appendChild(script);
+          setTimeout(() => resolve({ violated, ran: w.__inlineRan === true }), 100);
+        }),
+    );
+    expect(outcome).toEqual({ violated: true, ran: false });
+
+    await expect(popup.locator(".video-popout")).toHaveCSS("background-color", "rgb(0, 0, 0)");
+    await expect
+      .poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.readyState >= 2))
+      .toBe(true);
   });
 });
