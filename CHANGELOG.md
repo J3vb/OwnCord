@@ -53,6 +53,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- **Ring no longer cancelled by an older hang-up**: a DM call ring could reach the callee ahead of the caller's earlier leave after a quick leave and re-ring, so the stale leave cancelled the new ring and showed a false "Missed call". Call signals now arrive in order with voice events.
 - **Linux camera honours the 720p default**: the native camera now captures at the selected quality's resolution, so the 720p default no longer encodes a 1080p source on Linux. Choosing 1080p still captures 1080p.
 - **Screen-share audio sounds like music**: audio shared with a screen is now sent in stereo at music quality, with echo cancellation, noise suppression and auto-gain off and silence suppression disabled, so game and music audio no longer pumps or gets voice-processed.
 - **First-contact calls say why they cannot ring**: calling someone who has not accepted your message request now tells you straight away that calls work after they accept, instead of ringing for 30 seconds unheard. The ring is still never delivered to them.
