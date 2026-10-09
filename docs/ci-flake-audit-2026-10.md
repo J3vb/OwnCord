@@ -31,19 +31,19 @@ proves the cause is runner infrastructure.
 
 Rate is flaked runs per 1,000 completed CI runs (1,778).
 
-| Check                                | Flaked runs | Rate | Failing step                                               | Cause (section)                                                           |
-| ------------------------------------ | ----------: | ---: | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Client E2E (real server and media)   |          22 | 12.4 | Test two clients, real server and encrypted decoded media  | LiveKit signal-stream line outside a fixed 5 s window (§3.7)              |
-| Server Build & Test (windows-latest) |          20 | 11.2 | race leg (14), deadlock leg (4), build (1)                 | Go 1.26.8 runtime faults (§3.8); one real test race (§3.5)                |
-| Client E2E (Windows native)          |          17 |  9.6 | Rust transport/WebView2 (9), suites (4), NSIS (2), updater | WebView2 lifecycle on `windows-latest` (§3.9)                             |
-| Rust Unit Tests                      |           9 |  5.1 | Native-voice E2EE interop test                             | Out of scope: being fixed elsewhere                                       |
-| Client E2E (parity subset, blocking) |           9 |  5.1 | Install Playwright browser / production specs (cancelled)  | apt mirror hang hits the job timeout (§3.4)                               |
-| Client E2E (Playwright)              |          11 |  6.2 | Install Playwright browser (5, cancelled); full suite (4)  | apt mirror hang (§3.4); Vite dev server V8 abort (§3.3)                   |
-| Server Build & Test (ubuntu-latest)  |           7 |  3.9 | deadlock leg (5), tag-gated tests (2)                      | restart health polls, upload floor test (§3.8)                            |
-| Client Unit Tests                    |           5 |  2.8 | Run unit tests with coverage (3), half-hour-offset leg (2) | late lazy import after teardown (§3.1, 4 of 5); jitter boundary (§3.2, 1) |
-| Admin Panel E2E (real server)        |           2 |  1.1 | Install Playwright browser (cancelled)                     | apt mirror hang (§3.4)                                                    |
-| Repository Hygiene, Docs & Ledger    |       2 + 2 |  2.2 | `actions/setup-node` (cancelled)                           | runner provisioning; one-offs                                             |
-| Tauri Full Build (ubuntu-22.04)      |           1 |  0.6 | Install Linux system dependencies (cancelled)              | same apt class as §3.4                                                    |
+| Check                                | Flaked runs | Rate | Failing step                                                                                          | Cause (section)                                                             |
+| ------------------------------------ | ----------: | ---: | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Client E2E (real server and media)   |          22 | 12.4 | Test two clients, real server and encrypted decoded media                                             | LiveKit signal-stream line outside a fixed 5 s window (§3.7)                |
+| Server Build & Test (windows-latest) |          20 | 11.2 | race leg (14), deadlock leg (4), build (1), no failing step recorded (1)                              | Go 1.26.8 runtime faults (§3.8); one real test race (§3.5); one runner loss |
+| Client E2E (Windows native)          |          17 |  9.6 | Rust transport/WebView2 (9), suites (4), NSIS (2), updater (1), Tauri build (1)                       | WebView2 lifecycle on `windows-latest` (§3.9)                               |
+| Client E2E (Playwright)              |          11 |  6.2 | Install Playwright browser (5, cancelled); full suite (4); cancelled test step (1); none recorded (1) | apt mirror hang (§3.4); Vite dev server V8 abort (§3.3)                     |
+| Rust Unit Tests                      |           9 |  5.1 | Native-voice E2EE interop test                                                                        | Out of scope: being fixed elsewhere                                         |
+| Client E2E (parity subset, blocking) |           9 |  5.1 | production specs cancelled (4), Install Playwright browser cancelled (1), none recorded (4)           | apt mirror hang and new-push cancellations (§3.4)                           |
+| Server Build & Test (ubuntu-latest)  |           7 |  3.9 | deadlock leg (5), tag-gated tests (2)                                                                 | restart health polls, upload floor test (§3.8)                              |
+| Client Unit Tests                    |           5 |  2.8 | Run unit tests with coverage (3), half-hour-offset leg (2)                                            | late lazy import after teardown (§3.1, 4 of 5); jitter boundary (§3.2, 1)   |
+| Repository Hygiene + Docs & Ledger   |       2 + 2 |  2.2 | `actions/setup-node` (cancelled)                                                                      | runner provisioning; one-offs                                               |
+| Admin Panel E2E (real server)        |           2 |  1.1 | Install Playwright browser (cancelled)                                                                | apt mirror hang (§3.4)                                                      |
+| Tauri Full Build (ubuntu-22.04)      |           1 |  0.6 | Install Linux system dependencies (cancelled)                                                         | same apt class as §3.4                                                      |
 
 Not flakes, listed so they are not mistaken for one: `Lint`, `Go vulnerability
 check` and `Client Static Checks` failures in the window were all genuine
@@ -280,8 +280,9 @@ than on a timer.
   ([run 35921740934](https://github.com/J3vb/OwnCord/actions/runs/35921740934/job/107387226693)),
   all on `go1.26.8 windows/amd64`. CI has built with Go 1.27.1 and then 1.27.2
   since the bump; none of these signatures appears on 1.27 in the window. The
-  ci-check skill's known-flake table gains the second signature next to the
-  first.
+  ci-check skill's known-flake table lists only the GC signature; the
+  nil-dereference one is recorded here and should be added next to it once
+  #2242 and #2243, which both re-pad that table, have landed.
 - **`internal/app` restart tests (Windows, race leg).**
   `TestAppRun_RestartReleasesManagedCompanionBeforeHandoff` and
   `TestRun_RestartRequest_DrainsCleanly` fail with `server never became
