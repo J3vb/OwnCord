@@ -286,8 +286,8 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 	}
 }
 
-// A one-character separator name identifies no one, so it is never masked and
-// cannot damage prose or embedded JSON detail.
+// A one-rune name that is not a separator, such as an emoji, is still masked
+// under the boundary rule.
 func TestSupportScrub_SingleSymbolNameStillMasked(t *testing.T) {
 	for _, name := range []string{"😀", "★"} {
 		known := newSupportKnown([]string{name})
@@ -297,6 +297,8 @@ func TestSupportScrub_SingleSymbolNameStillMasked(t *testing.T) {
 	}
 }
 
+// A one-character separator name identifies no one, so it is never masked and
+// cannot damage prose or embedded JSON detail.
 func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
 	for _, name := range []string{":", ",", `"`} {
 		known := newSupportKnown([]string{name})
