@@ -20,7 +20,10 @@ let rnnoiseBytes: Promise<ArrayBuffer> | null = null;
 /** Fetch rnnoise.wasm once; later joins reuse the bytes (each node gets its own copy). */
 function loadRNNoiseBytes(): Promise<ArrayBuffer> {
   if (rnnoiseBytes === null) {
-    const loading = fetch("/rnnoise.wasm").then((response) => response.arrayBuffer());
+    const loading = fetch("/rnnoise.wasm").then((response) => {
+      if (response.ok === false) throw new Error(`rnnoise.wasm: HTTP ${response.status}`);
+      return response.arrayBuffer();
+    });
     rnnoiseBytes = loading;
     loading.catch(() => {
       if (rnnoiseBytes === loading) rnnoiseBytes = null;

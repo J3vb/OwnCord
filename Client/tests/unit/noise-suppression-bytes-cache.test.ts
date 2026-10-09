@@ -72,6 +72,18 @@ describe("createRNNoiseNode bytes cache", () => {
     expect(posted[1]!.transfer).toEqual([two]);
   });
 
+  it("does not cache a non-OK response", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 503 }));
+    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+
+    await expect(createRNNoiseNode(makeContext())).rejects.toThrow("503");
+    await createRNNoiseNode(makeContext());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.message.wasmBytes!.byteLength).toBe(WASM_LENGTH);
+  });
+
   it("does not cache a failed fetch", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
     const { createRNNoiseNode } = await import("@lib/noise-suppression");
