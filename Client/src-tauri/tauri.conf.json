@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "2.2.0-beta.1",
+  "version": "2.2.0-beta.2",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
