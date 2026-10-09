@@ -57,7 +57,7 @@ const notAuthenticated = (): Promise<never> =>
   Promise.reject(new Error(connectText("settings.notAuthenticated")));
 
 const defaultProfiles = (): readonly SimpleProfile[] => [
-  { name: connectText("profiles.defaultName"), host: "localhost:8443" },
+  { name: connectText("profiles.defaultName"), host: "localhost:8443", synthetic: true },
 ];
 
 // ---------------------------------------------------------------------------

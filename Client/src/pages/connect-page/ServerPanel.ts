@@ -21,6 +21,8 @@ const log = createLogger("server-panel");
 export interface SimpleProfile {
   readonly name: string;
   readonly host: string;
+  /** An unsaved placeholder (fresh install); it never blocks adding the same host. */
+  readonly synthetic?: boolean;
 }
 
 /** Color palette for server icons. */
@@ -526,7 +528,7 @@ export function createServerPanel(
       }
       // Credentials are stored per host, so a second profile for the same host
       // would share (and overwrite) the first one's saved sign-in.
-      if (knownProfiles.some((p) => p.host.toLowerCase() === addr.toLowerCase())) {
+      if (knownProfiles.some((p) => !p.synthetic && p.host.toLowerCase() === addr.toLowerCase())) {
         hostAddrInput.setCustomValidity(connectText("servers.add.duplicateHost"));
         hostAddrInput.reportValidity();
         return;

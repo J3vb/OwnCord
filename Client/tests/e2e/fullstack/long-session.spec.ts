@@ -41,6 +41,7 @@ import {
   type SlopeCeilings,
 } from "../support/lifecycle-probe";
 import { quiesce } from "../support/quiesce";
+import { unexpectedConsoleErrors, type ConsoleEntry } from "../support/soak-console";
 import { openSettings, switchSettingsTab } from "../helpers";
 
 const CYCLES = Number(process.env.OWNCORD_SOAK_CYCLES ?? 20);
@@ -55,25 +56,8 @@ const PENDING_METRICS: SlopeCeilings = {};
 const AUTO_IDLE_MS = 10 * 60_000;
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
 const WITHIN_PAGE_PHASES = new Set([6, 9]);
-
-// The reconnect and logout steps deliberately drop the socket, so the client
-// logs its own transport failure while it is offline. Only the exact messages
-// those steps emit are expected; a genuine error that merely mentions
-// "reconnect" must still fail the run. Both were observed in calibration runs
-// and are listed by their real text.
-const EXPECTED_CONSOLE_ERRORS = [
-  // `ws_send` on a closed socket (lib/ws.ts:539).
-  /\[ws\] ws_send failed \{error: WS is not open/,
-  // LiveKit's signaling socket, dropped by the every-5th-cycle reconnect; the
-  // SDK's own console line, whose cause prints as `error: ConnectionError: WS closed`.
-  /error reading from signal stream \{room: channel-\d+/,
-  // livekit-client's own log of a receive-side key race at join (OC-0452).
-  // Matches the bare message or the SDK's `[timestamp] [ERROR] [livekit]`
-  // logger prefix, never the app's judgement of it: the
-  // `[roomEventHandlers] LiveKit E2EE encryption error` line, which a race
-  // that persists still prints and this list does not excuse.
-  /^(?:\[[^\]]+\] \[ERROR\] \[livekit\] )?InvalidKey: Decryption failed: /,
-];
+/** How long the reconnect step's LiveKit signal-stream errors may trail the banner. */
+const SIGNAL_SETTLE_MS = 5_000;
 
 const test = base.extend<{ alice: Page }>({
   alice: async ({ page, server, aliceTransport }, use) => {
@@ -264,10 +248,11 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   const cdp = await alice.context().newCDPSession(alice);
   const samples: Awaited<ReturnType<typeof sampleLifecycle>>[] = [];
 
-  const consoleErrors: string[] = [];
+  const consoleErrors: ConsoleEntry[] = [];
+  let duringReconnect = false;
   const pageErrors: string[] = [];
   alice.on("console", (message: ConsoleMessage) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() === "error") consoleErrors.push({ text: message.text(), duringReconnect });
   });
   alice.on("pageerror", (error: Error) => pageErrors.push(String(error)));
 
@@ -310,6 +295,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
       // same); Alice is out of voice here, having left at the previous cycle's
       // end.
       if (cycle % 5 === 0) {
+        duringReconnect = true;
         await aliceTransport.offline();
         await expect(alice.locator(".reconnecting-banner")).toBeVisible();
         aliceTransport.online();
@@ -318,6 +304,11 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         await expect
           .poll(async () => (await mediaStats(alice)).liveCapture, { timeout: 30_000 })
           .toBe(0);
+        // The SDK logs the dropped signal socket when its room tears down, and
+        // the failed signal reconnect after it, both after the banner clears;
+        // the window ends once that settles.
+        await alice.waitForTimeout(SIGNAL_SETTLE_MS);
+        duringReconnect = false;
       }
 
       await runCycle(alice, bob, cycle, purgeMessages, general.id);
@@ -370,10 +361,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
   console.log(`lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
 
   expect(pageErrors, "no page errors across the run").toEqual([]);
-  expect(
-    consoleErrors.filter((line) => !EXPECTED_CONSOLE_ERRORS.some((p) => p.test(line))),
-    "no unexpected console.error lines",
-  ).toEqual([]);
+  expect(unexpectedConsoleErrors(consoleErrors), "no unexpected console.error lines").toEqual([]);
 
   // Every metric is asserted at the plan's bar.
   expect(

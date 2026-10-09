@@ -378,9 +378,9 @@ func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
 
 // TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns pins, column by
 // column, what the surviving row of an erased SUBJECT keeps. "No identity" in
-// Decision 7 means no identity of the erased subject: the reporter, the
-// assigned moderator and the channel stay, each unlinked only by its own
-// principal's erasure.
+// Decision 7 means no identity of the erased subject: the reporter and the
+// assigned moderator stay, each unlinked only by its own erasure. The channel
+// is not a principal and has no erasure path; its id simply stays.
 func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
@@ -388,10 +388,23 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	subject := seedUser(t, database, "subject-cleared")
 	moderator := seedUser(t, database, "mod-kept")
 	channel := seedChannel(t, database, "report-channel")
+	// source_nsfw is stamped when the report is filed, so label the channel first.
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, channel); err != nil {
+		t.Fatalf("label channel nsfw: %v", err)
+	}
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO reports (id, public_id, reporter_id, subject_id, assignee_id, channel_id, target_type, target_ref, reason, detail) VALUES (970, 'pub-970', ?, ?, ?, ?, 'user', 'ref', 'spam', 'the detail')`,
 		reporter, subject, moderator, channel); err != nil {
 		t.Fatalf("seed report: %v", err)
+	}
+	// Backdate updated_at so a stamp by the erasure is distinguishable from the column default.
+	const backdated = "2000-01-01 00:00:00"
+	if _, err := database.ExecContext(ctx, `UPDATE reports SET updated_at = ? WHERE id = 970`, backdated); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
+	var createdBefore string
+	if err := database.QueryRowContext(ctx, `SELECT created_at FROM reports WHERE id = 970`).Scan(&createdBefore); err != nil {
+		t.Fatalf("read created_at before erasure: %v", err)
 	}
 	if _, err := database.EraseAccount(ctx, subject, "marker-tok-columns"); err != nil {
 		t.Fatalf("EraseAccount(subject): %v", err)
@@ -399,11 +412,25 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	var reporterID, subjectID, assigneeID int64
 	var channelID sql.NullInt64
 	var subjectToken, reporterToken sql.NullString
-	var publicID, targetType, reason, state, outcome, detail, targetRef string
+	var publicID, targetType, reason, state, outcome, detail, targetRef, createdAt, updatedAt string
+	var closedAt sql.NullString
+	var sourceNSFW sql.NullInt64
 	if err := database.QueryRowContext(ctx,
-		`SELECT public_id, reporter_id, reporter_token, subject_id, subject_token, assignee_id, channel_id, target_type, reason, state, outcome, detail, target_ref FROM reports WHERE id = 970`,
-	).Scan(&publicID, &reporterID, &reporterToken, &subjectID, &subjectToken, &assigneeID, &channelID, &targetType, &reason, &state, &outcome, &detail, &targetRef); err != nil {
+		`SELECT public_id, reporter_id, reporter_token, subject_id, subject_token, assignee_id, channel_id, target_type, reason, state, outcome, detail, target_ref, created_at, updated_at, closed_at, source_nsfw FROM reports WHERE id = 970`,
+	).Scan(&publicID, &reporterID, &reporterToken, &subjectID, &subjectToken, &assigneeID, &channelID, &targetType, &reason, &state, &outcome, &detail, &targetRef, &createdAt, &updatedAt, &closedAt, &sourceNSFW); err != nil {
 		t.Fatalf("read report 970: %v", err)
+	}
+	// created_at is the retained report time ListReportsMine returns; the
+	// report was open, so erasure closes it (closed_at set, updated_at stamped).
+	if createdAt != createdBefore {
+		t.Errorf("created_at = %q, want %q unchanged", createdAt, createdBefore)
+	}
+	if !closedAt.Valid || closedAt.String == "" || updatedAt == "" || updatedAt == backdated {
+		t.Errorf("closed_at/updated_at = %v/%q, want closed_at set and updated_at advanced past the backdated value", closedAt, updatedAt)
+	}
+	// Sticky source metadata shares the row's lifecycle, so it survives.
+	if !sourceNSFW.Valid || sourceNSFW.Int64 != 1 {
+		t.Errorf("source_nsfw = %v, want 1 unchanged", sourceNSFW)
 	}
 	// ListReportsMine returns these to the reporter, so they must survive.
 	if publicID != "pub-970" || targetType != "user" || reason != "spam" {
@@ -429,7 +456,7 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	if assigneeID != moderator {
 		t.Errorf("assignee_id = %d, want %d unchanged", assigneeID, moderator)
 	}
-	// A channel is not a person.
+	// A channel is not a principal: erasure never touches its id.
 	if !channelID.Valid || channelID.Int64 != channel {
 		t.Errorf("channel_id = %v, want %d unchanged", channelID, channel)
 	}

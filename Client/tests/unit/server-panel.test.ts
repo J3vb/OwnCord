@@ -1039,6 +1039,23 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).not.toBeNull();
     });
 
+    it("lets the synthetic localhost fallback be added as the first saved profile", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), [
+        { name: "Local", host: "localhost:8443", synthetic: true },
+      ]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".btn-add-server") as HTMLElement).click();
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "Local";
+      inputs[1]!.value = "localhost:8443";
+
+      (container.querySelector(".modal-footer .btn-primary") as HTMLElement).click();
+
+      expect(onAddProfile).toHaveBeenCalledWith("Local", "localhost:8443");
+    });
+
     it("does NOT call onAddProfile when name is empty", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);

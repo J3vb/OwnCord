@@ -41,6 +41,12 @@ export function writeSummary(path, summary) {
   writeFileSync(path, JSON.stringify(summary, null, 2) + "\n");
 }
 
+/** The job-summary markdown. `revision` is the pinned dev SHA the shards ran on (the workflow run's own SHA is main's). */
+export function jobSummary({ pct, configured, files, shards, scored, totals, revision }) {
+  const rows = Object.entries(totals).map(([s, n]) => `| ${s} | ${n} |`);
+  return `## Full-surface mutation score: ${pct} %\n\nRevision: ${revision}\n\n${configured} configured files (${files} with mutants) across ${shards} shards, ${scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`;
+}
+
 function main() {
   const clientDir = fileURLToPath(new URL("..", import.meta.url));
   const reportsDir = join(clientDir, "reports/mutation");
@@ -57,12 +63,15 @@ function main() {
       console.error(`missing mutation.json for shard(s): ${missing.join(", ")}`);
       process.exit(1);
     }
+    // The pinned dev SHA (needs.pin.outputs.sha); empty when run by hand.
+    const revision = process.env.PIN_SHA ?? "";
     const result = aggregate(paths.map((p) => JSON.parse(readFileSync(p, "utf8"))));
     // Configured files that emit no mutants (constants.ts, protocolTypes.ts) appear in no report.
     const configured = Object.values(shards).flat().length;
     writeSummary(join(reportsDir, "summary.json"), {
       shards: names,
       configuredFiles: configured,
+      revision,
       ...result,
     });
     const pct = (result.score * 100).toFixed(2);
@@ -72,10 +81,17 @@ function main() {
     ];
     console.log(lines.join("\n"));
     if (process.env.GITHUB_STEP_SUMMARY) {
-      const rows = Object.entries(result.totals).map(([s, n]) => `| ${s} | ${n} |`);
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
-        `## Full-surface mutation score: ${pct} %\n\n${configured} configured files (${result.files} with mutants) across ${names.length} shards, ${result.scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`,
+        jobSummary({
+          pct,
+          configured,
+          files: result.files,
+          shards: names.length,
+          scored: result.scored,
+          totals: result.totals,
+          revision,
+        }),
       );
     }
   });
