@@ -297,6 +297,7 @@ interface NativeCameraParticipant {
   createCameraTracks(options: {
     source?: string;
     simulcast?: boolean;
+    resolution?: { width: number; height: number };
     videoEncoding?: { maxBitrate: number; maxFramerate?: number };
   }): Promise<NativeCameraTrack[]>;
 }
@@ -374,6 +375,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
             await room.localParticipant.createCameraTracks({
               source: Track.Source.Camera,
               simulcast: quality !== "source",
+              resolution: CAMERA_PRESETS[quality].resolution,
               videoEncoding: {
                 maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
                 maxFramerate: quality === "low" ? 15 : 30,

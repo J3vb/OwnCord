@@ -177,6 +177,8 @@ interface PublishableTrack {
 interface PublishOptions {
   source?: string;
   simulcast?: boolean;
+  /** The selected preset's capture size; the host downscales a larger source. */
+  resolution?: { width: number; height: number };
   videoEncoding?: { maxBitrate: number; maxFramerate?: number };
 }
 
@@ -444,8 +446,8 @@ export class NativeRoom {
     const started = await desktop.nativeVoice
       .startCamera(session, savedDevice, {
         fps: options.videoEncoding?.maxFramerate ?? 30,
-        maxWidth: 0,
-        maxHeight: 0,
+        maxWidth: options.resolution?.width ?? 0,
+        maxHeight: options.resolution?.height ?? 0,
       })
       .catch((err: unknown) => {
         throw startError(err);
