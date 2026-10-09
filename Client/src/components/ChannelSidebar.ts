@@ -193,6 +193,8 @@ async function openIdentityMismatchModal(
 export interface ChannelReorderData {
   readonly channelId: number;
   readonly newPosition: number;
+  /** Position before the optimistic move, so a failed save can roll back. */
+  readonly previousPosition: number;
 }
 
 /** Moderator actions on another user's voice session. Supplied by the page,

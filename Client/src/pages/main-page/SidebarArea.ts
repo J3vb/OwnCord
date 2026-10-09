@@ -48,7 +48,7 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -459,13 +459,22 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above — instead of a bare `void` per call, which left a rejected or
-        // failed write unreported and the sidebar showing an order the
-        // server never accepted.
+        // above. On any failure, roll the whole batch back so the sidebar
+        // does not keep an order the server never accepted.
         void Promise.allSettled(
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
           if (results.some((r) => r.status === "rejected")) {
+            // Restore every entry (not only the failed one) so the order stays
+            // internally consistent, but skip a channel whose position no
+            // longer equals what this batch set: a channel_update broadcast
+            // for a successful PATCH has already moved it, and restoring
+            // would fight the server's value.
+            for (const r of reorders) {
+              if (channelsStore.getState().channels.get(r.channelId)?.position === r.newPosition) {
+                updateChannelPosition(r.channelId, r.previousPosition);
+              }
+            }
             getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });
