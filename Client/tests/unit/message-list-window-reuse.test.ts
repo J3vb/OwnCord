@@ -24,9 +24,9 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-const { observeMediaMock, unobserveMediaMock } = vi.hoisted(() => ({
+const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
   observeMediaMock: vi.fn(),
-  unobserveMediaMock: vi.fn(),
+  discardMediaMock: vi.fn(),
 }));
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
@@ -34,7 +34,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
 }));
 vi.mock("@lib/media-visibility", () => ({
   observeMedia: observeMediaMock,
-  unobserveMedia: unobserveMediaMock,
+  discardMedia: discardMediaMock,
 }));
 
 import { createMessageList } from "@components/MessageList";
@@ -107,7 +107,7 @@ describe("MessageList incremental window shift", () => {
   beforeEach(async () => {
     resetStores();
     observeMediaMock.mockClear();
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
     options = {
@@ -153,7 +153,7 @@ describe("MessageList incremental window shift", () => {
     const before = [...content.children];
     const beforeTop = parseFloat(topSpacer.style.height);
     expect(before.length).toBeGreaterThan(30);
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
 
     await scrollTo(ROW_H * 151);
     const after = [...content.children];
@@ -179,7 +179,7 @@ describe("MessageList incremental window shift", () => {
     const before = [...content.children];
     // Give every rendered row a tracked image, as a media message would have.
     for (const row of before) row.appendChild(document.createElement("img"));
-    unobserveMediaMock.mockClear();
+    discardMediaMock.mockClear();
 
     await scrollTo(ROW_H * 151);
     const after = new Set(content.children);
@@ -193,7 +193,7 @@ describe("MessageList incremental window shift", () => {
     expect(stayedImgs.length).toBeGreaterThan(0);
     expect(leftImgs.length).toBeGreaterThan(0);
     // Compare by identity: toHaveBeenCalledWith would match any empty <img>.
-    const released = unobserveMediaMock.mock.calls.map((call) => call[0]);
+    const released = discardMediaMock.mock.calls.map((call) => call[0]);
     for (const img of stayedImgs) expect(released).not.toContain(img);
     for (const img of leftImgs) expect(released).toContain(img);
   });
