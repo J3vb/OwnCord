@@ -52,7 +52,7 @@ describe("SESSION_REPLACED stops the two-device reconnect fight", () => {
     eventHandlers.clear();
     setSessionReplaced(false);
     setConnectionStatus("disconnected");
-    client = createWsClient();
+    client = createWsClient({ random: () => 0 });
     cleanups = [wireDispatcher(client), wireConnectionStatus(client)];
     authStore.setState((prev) => ({ ...prev, token: "t", isAuthenticated: true }));
     client.connect({ host: "localhost:8443", token: "t" });
