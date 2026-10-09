@@ -2023,8 +2023,9 @@ The client joins the DM's voice channel **before** ringing: the ring is only
 truthful once the caller is actually there, and the server enforces it — a ring
 from a caller who is not in that DM's voice channel is refused with `VOICE_ERROR`
 and nobody is rung. The client sends the ring once the voice session
-is connected, not while it is still securing (none if the join is refused or the caller leaves first) and holds it
-back so it never goes out within 3 seconds of the previous ring.
+is connected, not while it is still securing (so none goes out if the join is
+refused or the caller leaves first), and holds it back so it never goes out
+within 3 seconds of the previous ring.
 
 A callee who had closed the DM gets it reopened: the server sends them a
 `dm_channel_open` for the channel just before the `call_incoming`, so the DM is
