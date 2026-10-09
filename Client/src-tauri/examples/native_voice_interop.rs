@@ -31,7 +31,8 @@
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
-//! new frame cryptor.
+//! new frame cryptor. Each cycle waits (5 s at most, else the example fails)
+//! for a subscriber to bind the new camera, so a peer must be subscribed.
 //! `--screen WxH` also shares the screen the way the app does, through the
 //! same capture thread and publish, from a synthetic source (moving bars:
 //! CI has no display, so neither the X11 capturer nor the Wayland portal
@@ -67,8 +68,11 @@ mod linux {
     use tokio_tungstenite::tungstenite::Message;
 
     const SAMPLE_RATE: u32 = 48_000;
-    /// Pause between camera off/on cycles; see the comment in `run`.
-    const CAMERA_CYCLE_GAP: Duration = Duration::from_millis(500);
+    /// How long a camera cycle waits for a subscriber to bind the new camera.
+    const CAMERA_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
+    /// livekit-server reports the subscription about 40 ms before the
+    /// subscriber's own offer lands; see the comment in `run`.
+    const CAMERA_CYCLE_SETTLE: Duration = Duration::from_millis(250);
     const FRAME_MS: u64 = 10;
     const SINE_AMPLITUDE: f64 = 8000.0;
 
@@ -352,6 +356,7 @@ mod linux {
         let mut session =
             NativeSession::connect(&url, &token, shared_key_material(&key), sink()).await?;
         let mut room_events = session.subscribe_room_events();
+        let mut pending_events = std::collections::VecDeque::new();
         emit(
             serde_json::json!({ "event": { "type": "joined", "identity": session.local_identity() } }),
         );
@@ -396,9 +401,31 @@ mod linux {
                     // collision (its PeerConnection drops a sender while the
                     // subscriber's offer is being applied) with a full
                     // reconnect of that subscriber, and the browser then
-                    // never sees the final camera. Measured 2026-10-09: a
-                    // 50 ms gap forced a reconnect in 2 of 22 runs.
-                    tokio::time::sleep(CAMERA_CYCLE_GAP).await;
+                    // never sees the final camera. Wait for the subscription,
+                    // then a short settle: the server reports it before the
+                    // subscriber's offer lands. Other events are kept for the
+                    // main loop below.
+                    let bound = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
+                        loop {
+                            match room_events.recv().await {
+                                Some(RoomEvent::LocalTrackSubscribed { track })
+                                    if track.sid().to_string() == camera_sid =>
+                                {
+                                    return true
+                                }
+                                Some(ev) => pending_events.push_back(ev),
+                                None => return false,
+                            }
+                        }
+                    })
+                    .await;
+                    if bound != Ok(true) {
+                        return Err(format!(
+                            "no subscriber bound camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
+                        )
+                        .into());
+                    }
+                    tokio::time::sleep(CAMERA_CYCLE_SETTLE).await;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(
@@ -477,7 +504,12 @@ mod linux {
         loop {
             tokio::select! {
                 _ = &mut deadline => break,
-                ev = room_events.recv() => match ev {
+                ev = async {
+                    match pending_events.pop_front() {
+                        Some(ev) => Some(ev),
+                        None => room_events.recv().await,
+                    }
+                } => match ev {
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), participant, .. }) => {
                         if let Some(v) = volume {
                             session.set_volume(participant.identity().as_str(), v);
