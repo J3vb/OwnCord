@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
+import { expectConsole } from "../helpers/console";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -75,6 +76,50 @@ function fakeStreamWithTrack(): {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** What window.open hands back for a pop-out: a window with its own
+ *  document, open until close() or the user closes it. */
+function fakePopup() {
+  let doc = document.implementation.createHTMLDocument("");
+  let fullscreenElement: Element | null = null;
+  const exitFullscreen = vi.fn(() => {
+    fullscreenElement = null;
+    doc.dispatchEvent(new Event("fullscreenchange"));
+    return Promise.resolve();
+  });
+  const fit = (d: Document): void => {
+    Object.defineProperty(d, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    Object.defineProperty(d, "exitFullscreen", { configurable: true, value: exitFullscreen });
+  };
+  fit(doc);
+  const win = Object.assign(new EventTarget(), {
+    closed: false,
+    close: vi.fn(() => {
+      win.closed = true;
+    }),
+  });
+  Object.defineProperty(win, "document", { get: () => doc });
+  return {
+    win,
+    get doc() {
+      return doc;
+    },
+    exitFullscreen,
+    enterFullscreen(el: Element): void {
+      fullscreenElement = el;
+      doc.dispatchEvent(new Event("fullscreenchange"));
+    },
+    /** The window loads its page after open() returned: a fresh document. */
+    reload(): void {
+      doc = document.implementation.createHTMLDocument("");
+      fit(doc);
+      win.dispatchEvent(new Event("load"));
+    },
+  };
+}
 
 function makeTileConfig(overrides: Partial<TileConfig> = {}): TileConfig {
   return {
@@ -1411,7 +1456,6 @@ describe("VideoGrid", () => {
       delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
       delete (document as { exitFullscreen?: unknown }).exitFullscreen;
       delete (document as { fullscreenElement?: unknown }).fullscreenElement;
-      delete (document as { pictureInPictureEnabled?: unknown }).pictureInPictureEnabled;
       vi.useRealTimers();
     });
 
@@ -1627,90 +1671,17 @@ describe("VideoGrid", () => {
       );
     });
 
-    it("offers Pop out only where picture-in-picture works", async () => {
-      Object.defineProperty(document, "pictureInPictureEnabled", {
-        configurable: true,
-        value: false,
-      });
-      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
-      expect(control(SCREEN, "pip").hidden).toBe(true);
-
-      grid.removeStream(SCREEN);
-      Object.defineProperty(document, "pictureInPictureEnabled", {
-        configurable: true,
-        value: true,
-      });
-      const requestPip = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
-        configurable: true,
-        value: requestPip,
-      });
-      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
-      const pip = control(SCREEN, "pip");
-      expect(pip.hidden).toBe(false);
-      expect(pip.getAttribute("aria-label")).toBe("Pop out");
-      pip.click();
-      expect(requestPip).toHaveBeenCalledTimes(1);
-      delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
-        .requestPictureInPicture;
-    });
-
-    it("brings a popped-out stream into full screen, and leaves it in the grid after", async () => {
-      let pipElement: Element | null = null;
-      const popOut = (el: Element): void => {
-        pipElement = el;
-      };
-      const requestPip = vi.fn(function (this: HTMLVideoElement) {
-        popOut(this);
-        return Promise.resolve();
-      });
-      const exitPip = vi.fn(() => {
-        pipElement = null;
-        return Promise.resolve();
-      });
-      Object.defineProperty(document, "pictureInPictureElement", {
-        configurable: true,
-        get: () => pipElement,
-      });
-      Object.defineProperty(document, "exitPictureInPicture", {
-        configurable: true,
-        value: exitPip,
-      });
-      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
-        configurable: true,
-        value: requestPip,
-      });
+    it("leaves the video in its tile when no pop-out window opens", () => {
+      vi.stubGlobal("open", () => null);
       try {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
         control(SCREEN, "pip").click();
-        expect(pipElement).toBe(cell(SCREEN).querySelector("video"));
-
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(exitPip).toHaveBeenCalledTimes(1);
-        expect(pipElement).toBeNull();
-        expect(fullscreenElement).toBe(cell(SCREEN));
-
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(fullscreenElement).toBeNull();
-        expect(requestPip).toHaveBeenCalledTimes(1);
-        expect(pipElement).toBeNull();
-        expect(cell(SCREEN).isConnected).toBe(true);
-
-        exitPip.mockClear();
-        requestPip.mockClear();
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(exitPip).not.toHaveBeenCalled();
-        expect(requestPip).not.toHaveBeenCalled();
+        expectConsole("warn", "Pop out window refused");
+        expect(cell(SCREEN).querySelector("video")).not.toBeNull();
+        expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
+        expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
       } finally {
-        delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
-          .requestPictureInPicture;
-        delete (document as { exitPictureInPicture?: unknown }).exitPictureInPicture;
-        delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
+        vi.unstubAllGlobals();
       }
     });
 
@@ -1767,6 +1738,344 @@ describe("VideoGrid", () => {
       await vi.advanceTimersByTimeAsync(6000);
       expect(getStreamStats.mock.calls.length).toBe(calls);
       container.remove();
+    });
+  });
+
+  describe("pop-out window (Discord-style)", () => {
+    const SCREEN = 2 + 1_000_000;
+    const screenCfg: TileConfig = {
+      isSelf: false,
+      audioUserId: 2,
+      isScreenshare: true,
+      name: "Otto",
+    };
+    const cell = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const control = (id: number, name: string) =>
+      cell(id).querySelector<HTMLButtonElement>(`[data-tile-control='${name}']`)!;
+    let popup: ReturnType<typeof fakePopup>;
+    let open: ReturnType<typeof vi.fn>;
+    let requestFullscreen: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      popup = fakePopup();
+      open = vi.fn(() => popup.win as unknown as Window);
+      vi.stubGlobal("open", open);
+      requestFullscreen = vi.fn(function (this: Element) {
+        popup.enterFullscreen(this);
+        return Promise.resolve();
+      });
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+        configurable: true,
+        value: requestFullscreen,
+      });
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+    });
+
+    it("moves the tile's own video into a window of its own", () => {
+      const stream = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+
+      control(SCREEN, "pip").click();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      const label = String(open.mock.calls[0]![1]);
+      expect(label).toMatch(/^owncord-popout-\d+$/);
+      expect(open.mock.calls[0]![0]).toBe(`about:blank#${label}`);
+      expect(popup.doc.body.contains(video)).toBe(true);
+      expect(video.srcObject).toBe(stream);
+      expect(popup.doc.title).toBe("Otto (Screen) — OwnCord");
+      expect(cell(SCREEN).querySelector("video")).toBeNull();
+      expect(cell(SCREEN).querySelector(".video-popped")).not.toBeNull();
+      expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("offers Pop out where picture-in-picture is missing too (WebKitGTK)", () => {
+      Object.defineProperty(document, "pictureInPictureEnabled", {
+        configurable: true,
+        value: false,
+      });
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        expect(control(SCREEN, "pip").hidden).toBe(false);
+      } finally {
+        delete (document as { pictureInPictureEnabled?: unknown }).pictureInPictureEnabled;
+      }
+    });
+
+    it("puts the video back in its tile when the window is closed", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(1000);
+
+      expect(cell(SCREEN).contains(video)).toBe(true);
+      expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
+      expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("Bring back closes the window and returns the video", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+
+      control(SCREEN, "pop-in").click();
+
+      expect(popup.win.close).toHaveBeenCalledTimes(1);
+      expect(cell(SCREEN).contains(video)).toBe(true);
+
+      // Pop out again, and back with the same toggle.
+      control(SCREEN, "pip").click();
+      expect(open).toHaveBeenCalledTimes(2);
+      control(SCREEN, "pip").click();
+      expect(cell(SCREEN).contains(video)).toBe(true);
+    });
+
+    it("pops the same tile out again right after Bring back, under a new window label", () => {
+      // The old window may still be registered while it closes: reusing its
+      // label would make the desktop refuse the new one.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      control(SCREEN, "pop-in").click();
+      popup = fakePopup();
+      open.mockReturnValue(popup.win as unknown as Window);
+      control(SCREEN, "pip").click();
+
+      expect(open).toHaveBeenCalledTimes(2);
+      const [first, second] = open.mock.calls.map((c) => String(c[0]));
+      expect(first).toMatch(/^about:blank#owncord-popout-\d+$/);
+      expect(second).toMatch(/^about:blank#owncord-popout-\d+$/);
+      expect(second).not.toBe(first);
+    });
+
+    it("a stopped tile pops out watching again, not as a blank window", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "stop").click();
+
+      control(SCREEN, "pip").click();
+
+      expect(popup.doc.body.contains(video)).toBe(true);
+      expect(video.hidden).toBe(false);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell(SCREEN).querySelector(".video-stopped")).toBeNull();
+    });
+
+    it("hides a muted track's stalled frame in the window too", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      control(SCREEN, "pip").click();
+      const video = popup.doc.querySelector("video")!;
+
+      track.dispatchEvent("mute");
+      expect(video.classList.contains("track-muted")).toBe(true);
+      expect(keyword(cascadedDeclaration(".video-popout video.track-muted", "visibility"))).toBe(
+        "hidden",
+      );
+      track.dispatchEvent("unmute");
+      expect(video.classList.contains("track-muted")).toBe(false);
+    });
+
+    it("keeps keyboard focus on the tile when Bring back goes", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      const back = control(SCREEN, "pop-in");
+      back.focus();
+
+      back.click();
+
+      expect(document.activeElement).toBe(control(SCREEN, "pip"));
+    });
+
+    it("takes the covered tile controls out of reach while popped out, Bring back aside", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+
+      for (const name of ["select", "stop", "pip", "fullscreen"]) {
+        expect(control(SCREEN, name).closest("[inert]"), name).not.toBeNull();
+      }
+      expect(cell(SCREEN).querySelector(".tile-mute-btn")!.closest("[inert]")).not.toBeNull();
+      expect(control(SCREEN, "pop-in").closest("[inert]")).toBeNull();
+
+      control(SCREEN, "pop-in").click();
+      expect(cell(SCREEN).querySelector("[inert]")).toBeNull();
+    });
+
+    it("puts keyboard focus back on the tile when the window is closed from outside", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").focus();
+      control(SCREEN, "pip").click();
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(1000);
+
+      expect(document.activeElement).toBe(control(SCREEN, "pip"));
+    });
+
+    it("leaves focus where it is when it is elsewhere as the window closes", () => {
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        control(SCREEN, "pip").click();
+        input.focus();
+
+        popup.win.closed = true;
+        vi.advanceTimersByTime(1000);
+
+        expect(document.activeElement).toBe(input);
+      } finally {
+        input.remove();
+      }
+    });
+
+    it("goes full screen in the window, and takes the window itself with it", async () => {
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      const label = String(open.mock.calls[0]![1]);
+      const fs = popup.doc.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!;
+      expect(fs.getAttribute("aria-label")).toBe("Full screen");
+
+      fs.click();
+      await Promise.resolve();
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(popup.doc.contains(requestFullscreen.mock.contexts[0] as Node)).toBe(true);
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, label);
+      expect(fs.getAttribute("aria-label")).toBe("Exit full screen");
+
+      // F in the window toggles it back, as on a tile.
+      popup.doc.body.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await Promise.resolve();
+      expect(popup.exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false, label);
+      expect(fs.getAttribute("aria-label")).toBe("Full screen");
+
+      // Double-click on the video goes full screen too.
+      popup.doc
+        .querySelector("video")!
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await Promise.resolve();
+      expect(requestFullscreen).toHaveBeenCalledTimes(2);
+    });
+
+    it("fills the screen with the window alone where the page cannot go full screen", async () => {
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      const label = String(open.mock.calls[0]![1]);
+
+      popup.doc.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!.click();
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, label);
+      popup.doc.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false, label);
+    });
+
+    it("a new track reaches the popped-out video", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStreamWithTrack().stream, screenCfg);
+      control(SCREEN, "pip").click();
+      const next = fakeStreamWithTrack().stream;
+
+      grid.addStream(SCREEN, "Otto (Screen)", next, screenCfg);
+
+      expect(popup.doc.querySelector("video")!.srcObject).toBe(next);
+    });
+
+    it("draws the window again when it loads its page after opening", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+
+      popup.reload();
+
+      expect(popup.doc.body.contains(video)).toBe(true);
+      expect(popup.doc.title).toBe("Otto (Screen) — OwnCord");
+    });
+
+    it("closes the window with its stream, the grid, or the app page", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      grid.removeStream(SCREEN);
+      expect(popup.win.close).toHaveBeenCalledTimes(1);
+
+      popup = fakePopup();
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      grid.destroy?.();
+      expect(popup.win.close).toHaveBeenCalledTimes(1);
+
+      grid = createVideoGrid();
+      grid.mount(container);
+      popup = fakePopup();
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      window.dispatchEvent(new Event("pagehide"));
+      expect(popup.win.close).toHaveBeenCalledTimes(1);
+    });
+
+    describe("teardown of the pop-out's listeners and poll", () => {
+      const closers: Array<[string, () => void]> = [
+        [
+          "the user closes the window",
+          () => {
+            popup.win.closed = true;
+            vi.advanceTimersByTime(1000);
+          },
+        ],
+        ["Bring back", () => control(SCREEN, "pop-in").click()],
+        ["the stream is removed", () => grid.removeStream(SCREEN)],
+        ["the grid is destroyed", () => grid.destroy?.()],
+      ];
+
+      it.each(closers)("leaves nothing alive when %s", async (_name, close) => {
+        const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+        grid.setCallbacks({ setWindowFullscreen });
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        const before = vi.getTimerCount();
+        control(SCREEN, "pip").click();
+        expect(vi.getTimerCount()).toBeGreaterThan(before);
+        const oldDoc = popup.doc;
+
+        close();
+        expect(vi.getTimerCount()).toBeLessThanOrEqual(before);
+        popup.win.close.mockClear();
+        setWindowFullscreen.mockClear();
+
+        window.dispatchEvent(new Event("pagehide"));
+        oldDoc.body.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+        oldDoc.dispatchEvent(new Event("fullscreenchange"));
+        await Promise.resolve();
+        expect(popup.win.close).not.toHaveBeenCalled();
+        expect(setWindowFullscreen).not.toHaveBeenCalled();
+      });
+    });
+
+    it("full screen on a popped-out tile brings it back first", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+
+      control(SCREEN, "fullscreen").click();
+
+      expect(popup.win.close).toHaveBeenCalledTimes(1);
+      expect(cell(SCREEN).contains(video)).toBe(true);
+      expect(requestFullscreen.mock.contexts[0]).toBe(cell(SCREEN));
     });
   });
 
@@ -1856,7 +2165,6 @@ describe("VideoGrid", () => {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
       delete (document as { hidden?: unknown }).hidden;
-      delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
     });
 
     function addCameras(): void {
@@ -1949,20 +2257,22 @@ describe("VideoGrid", () => {
       expect(enabled(2)).toBe(true);
     });
 
-    it("a popped-out tile keeps its video at the top layer while the grid is hidden", () => {
+    it("a tile popped out to a window keeps its video at the top layer while the grid is hidden", () => {
       addCameras();
-      const video = cellOf(2).querySelector("video")!;
-      Object.defineProperty(document, "pictureInPictureElement", {
-        configurable: true,
-        get: () => video,
-      });
-      video.dispatchEvent(new Event("enterpictureinpicture"));
+      const popup = fakePopup();
+      vi.stubGlobal("open", () => popup.win);
+      cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='pip']")!.click();
       resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
       hidden = true;
       document.dispatchEvent(new Event("visibilitychange"));
       expect(enabled(2)).toBe(true);
       expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
       expect(enabled(3)).toBe(false);
+
+      // Back in a hidden grid, it stops like the others.
+      popup.win.closed = true;
+      vi.advanceTimersByTime(1000);
+      expect(enabled(2)).toBe(false);
     });
 
     it("asks a replacement publication (after a reconnect) for the tile's view again", () => {

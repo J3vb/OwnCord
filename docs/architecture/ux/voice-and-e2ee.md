@@ -140,7 +140,13 @@ double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
 WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
 theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
-is the platform's picture-in-picture, hidden where it is unavailable; full screen on a
+moves the tile's own video into a desktop window of its own (Discord-style; `window.open`
+accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's process, so no
+second subscription), which can be maximised or go full screen from its own control, F or a
+double-click. No capability names the pop-out label on purpose (capabilities only grant IPC;
+the pop-out has none, and the main window drives its full screen by label), and the about:blank
+popup inherits the app's CSP. The tile shows **Bring back**, and closing the window returns the video; closing the main window closes every pop-out. Where
+no window opens the video stays in the grid. Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from

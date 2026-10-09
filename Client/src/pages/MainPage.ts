@@ -1396,8 +1396,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
       },
       // HTML full screen fills only the webview in WebView2: take the window
-      // along (a no-op where the webview already filled it).
-      setWindowFullscreen: (on) => desktop.window.setFullscreen(on),
+      // along (a no-op where the webview already filled it), or a stream
+      // pop-out window by its label.
+      setWindowFullscreen: (...args) => desktop.window.setFullscreen(...args),
       callControls: {
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),

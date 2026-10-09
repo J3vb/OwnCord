@@ -51,6 +51,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
 
+### Added
+
+- **Pop-out window for streams and cameras**: Pop out now opens a stream or camera in a window of its own, like Discord, that you can move, maximise or put in full screen (its own button, F or a double-click). The Linux app gets Pop out for the first time. Closing the window, or Bring back on the tile, returns the stream to the grid.
+
 ### Changed
 
 - **Ring no longer cancelled by an older hang-up**: a DM call ring could reach the callee ahead of the caller's earlier leave after a quick leave and re-ring, so the stale leave cancelled the new ring and showed a false "Missed call". Call signals now arrive in order with voice events.
