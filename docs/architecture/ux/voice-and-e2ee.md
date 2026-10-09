@@ -83,7 +83,7 @@ stateDiagram-v2
 > a persistent "Secured" chip (shield icon) once the room key is ready and the room is
 > connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
-> badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves
+> badge. An E2EE-timeout still shows the "couldn't secure the voice call" message and auto-leaves
 > (`features/voice/joinOrchestration.ts` `connectAndSetup`). **Code vs. diagram note:** the client
 > actually runs the ECDH key exchange _before_ `room.connect()`, so `securing`
 > spans the key wait and the media connect; the state diagram below draws them in
