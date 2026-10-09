@@ -59,7 +59,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - **Pop-out window for streams and cameras**, like Discord's, with full screen.
 - **Steadier DM calls**: rings arrive in order, cancel cleanly and no longer show a false "Missed call".
 - **Screen share you can pick and trust**: a source picker on Windows, and a share that lowers quality on a weak link instead of freezing.
-- **Linux voice and camera** keep working through device changes, moderator mutes and quiet mics.
+- **Linux voice** keeps working through odd audio devices, moderator mutes and quiet mics, and the Linux camera now captures at the resolution you picked.
 
 ### Added
 
