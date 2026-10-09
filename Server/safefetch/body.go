@@ -1,6 +1,7 @@
 package safefetch
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -148,7 +149,7 @@ func (f *Fetcher) checkContentType(declared string, body []byte) (string, string
 	if !f.typeAllowed(sniffed) {
 		return "", "", fmt.Errorf("%w: declared %s but the body sniffs as %s", ErrContentType, media, sniffed)
 	}
-	if !compatible(media, sniffed) {
+	if !compatible(media, sniffed, body) {
 		return "", "", fmt.Errorf("%w: declared %s but the body sniffs as %s", ErrContentType, media, sniffed)
 	}
 	return media, sniffed, nil
@@ -167,7 +168,7 @@ var textual = map[string]bool{
 
 // compatible reports whether a sniffed type can be what the response declared.
 // Each type passing the allowlist alone is not enough: the pair must agree.
-func compatible(declared, sniffed string) bool {
+func compatible(declared, sniffed string, body []byte) bool {
 	switch {
 	case declared == sniffed, declared == "application/octet-stream":
 		return true
@@ -177,10 +178,36 @@ func compatible(declared, sniffed string) bool {
 		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
 	case sniffed == "text/html":
 		// A leading "<!--" sniffs as HTML but is equally a valid XML/SVG/CSS
-		// comment, so the markup and stylesheet types stay compatible.
-		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
+		// comment, so the markup and stylesheet types stay compatible — but
+		// only for that comment: what follows it is judged on its own.
+		if !strings.HasPrefix(declared, "text/") && declared != "application/xml" && declared != "application/xhtml+xml" && declared != "image/svg+xml" {
+			return false
+		}
+		rest, ok := skipLeadingComments(body)
+		if !ok {
+			return false
+		}
+		return len(rest) == 0 || compatible(declared, normaliseType(http.DetectContentType(rest)), rest)
 	}
 	return false
+}
+
+// skipLeadingComments strips the whitespace-separated "<!-- ... -->" comments
+// a body opens with. ok is false when it opens with none or one never closes.
+func skipLeadingComments(body []byte) (rest []byte, ok bool) {
+	rest = body
+	for {
+		// The whitespace http.DetectContentType skips before sniffing.
+		rest = bytes.TrimLeft(rest, "\t\n\x0c\r ")
+		after, found := bytes.CutPrefix(rest, []byte("<!--"))
+		if !found {
+			return rest, ok
+		}
+		if _, rest, found = bytes.Cut(after, []byte("-->")); !found {
+			return nil, false
+		}
+		ok = true
+	}
 }
 
 // normaliseType strips parameters and folds case, so "Application/JSON;

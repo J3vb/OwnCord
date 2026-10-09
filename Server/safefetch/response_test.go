@@ -996,7 +996,7 @@ func TestFetch_HTTPSRedirectToHTTPSIsFollowed(t *testing.T) {
 // allowlist on their own in every row, so only the pairing is under test.
 func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 	f := newFetcher(t, stub(t, func(http.ResponseWriter, *http.Request) {}), func(p *Policy) {
-		p.ContentTypes = []string{"application/json", "application/octet-stream", "text/plain", "text/html", "text/xml", "image/png", "image/svg+xml"}
+		p.ContentTypes = []string{"application/json", "application/octet-stream", "text/plain", "text/html", "text/xml", "image/png", "image/svg+xml", "application/xml", "text/css"}
 	})
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	tests := []struct {
@@ -1017,6 +1017,12 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"svg declared, comment-first body", "image/svg+xml", []byte("<!-- c --><svg/>"), true},
 		{"xml declared, comment-first body", "text/xml", []byte("<!-- c --><a/>"), true},
 		{"json declared, comment-first body", "application/json", []byte("<!-- c -->"), false},
+		{"css declared, comment-first body", "text/css", []byte("<!--\na{color:red}\n-->"), true},
+		{"svg declared, html body", "image/svg+xml", []byte("<html><body>x</body></html>"), false},
+		{"xml declared, html body", "application/xml", []byte("<html><body>x</body></html>"), false},
+		{"plain declared, html body", "text/plain", []byte("<!DOCTYPE html><html></html>"), false},
+		{"svg declared, html after a comment", "image/svg+xml", []byte("<!-- c --><html></html>"), false},
+		{"svg declared, unterminated comment", "image/svg+xml", []byte("<!-- c <html></html>"), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
