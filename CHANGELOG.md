@@ -125,6 +125,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Unblocking someone you had not blocked no longer clears an ignored Message Request, so their next message does not raise it again.
 - Plugin HTTP responses are checked more strictly against their declared content type.
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+- **GIFs and linked images load on Linux again**: the desktop client's security policy now allows the app's own internal channel on Linux, so image bytes reach the picker and message embeds intact.
 
 **Support bundles**
 
