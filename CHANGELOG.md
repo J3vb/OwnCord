@@ -78,7 +78,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - The voice sidebar's channel categories reorder live when an admin moves them.
 - Add Server creates your first saved profile on a fresh install.
 - **For server owners:** `.html`, `.svg`, `.sh`, `.docm`, `.xlsm`, `.desktop` and `.command` uploads are refused by default (edit `upload.blocked_extensions` to allow them).
-- **For server owners:** `plugins.directory` must be a folder that neither is nor holds your data, uploads or backups folder, and `tls.cert_file` and `tls.key_file` must sit under the data folder in a container.
+- **For server owners:** `plugins.directory` must be a folder that neither is nor holds your data, uploads or backups folder. In a container, `plugins.directory`, `tls.cert_file` and `tls.key_file` must all sit under the data folder, so move them before upgrading.
 - **For server owners:** the generated LiveKit config (and `livekit.yaml.example`) detects speakers faster, which is what lights the speaking ring sooner. A hand-managed `livekit.yaml` needs the same change.
 - Update checks fetch release files only from GitHub over https, redirects included.
 - Adding a server whose address is already in your list is refused with a message; profiles you already have are left as they are.
@@ -112,7 +112,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Typing a server address probes the server correctly, and a stale refusal error clears when you leave.
 - Logout is time-limited, Cancel locks during recovery, and Settings stays open while a recovery key is requested.
 - Opening a DM accepts a pending request; blocking someone revokes trust and unblocking clears old requests.
-- A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. A moderator's own list is capped at 200 rows.
+- A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. Each member's own moderation history (warnings, timeouts, removals, bans) shows the newest 200 entries.
 - Link and image previews have a fetch deadline and a length limit on image URLs.
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
 
