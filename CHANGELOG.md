@@ -126,6 +126,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Plugin HTTP responses are checked more strictly against their declared content type.
 - Dragging files or images from your file manager onto OwnCord did nothing. They now attach to the message you are writing (desktop app and browser).
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+- **GIFs and linked images load on Linux again**: the desktop client's security policy now allows the app's own internal channel on Linux, so image bytes reach the picker and message embeds intact.
 
 **Support bundles**
 
