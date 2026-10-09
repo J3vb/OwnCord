@@ -36,6 +36,7 @@ export const shards = {
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/uiSounds.ts",
+    "src/features/voice/popout.ts",
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
