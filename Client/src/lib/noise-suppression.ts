@@ -21,6 +21,7 @@ let rnnoiseBytes: Promise<ArrayBuffer> | null = null;
 function loadRNNoiseBytes(): Promise<ArrayBuffer> {
   if (rnnoiseBytes === null) {
     const loading = fetch("/rnnoise.wasm").then((response) => {
+      // i18n-exempt: internal diagnostic, logged by micProcessor, never rendered
       if (response.ok === false) throw new Error(`rnnoise.wasm: HTTP ${response.status}`);
       return response.arrayBuffer();
     });
