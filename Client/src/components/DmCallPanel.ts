@@ -109,7 +109,7 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
       kind: "connected",
       dm,
       inRoom: [selfId, ...others],
-      peerLeft: others.length === 0 && input.peerWasHere === true,
+      peerLeft: !dm.isGroup && others.length === 0 && input.peerWasHere === true,
     };
   }
   if (others.length > 0) {

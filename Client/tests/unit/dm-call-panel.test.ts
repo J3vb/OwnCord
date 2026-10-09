@@ -264,6 +264,13 @@ describe("deriveCallView", () => {
       voice: { currentChannelId: DM, voiceUsers: room(SELF) },
     });
     expect(fresh).toMatchObject({ kind: "connected", peerLeft: false });
+    const group = deriveCallView({
+      ...base,
+      dms: [dm({ isGroup: true })],
+      voice: { currentChannelId: DM, voiceUsers: room(SELF) },
+      peerWasHere: true,
+    });
+    expect(group).toMatchObject({ kind: "connected", peerLeft: false });
   });
 });
 
