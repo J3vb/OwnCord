@@ -1098,6 +1098,30 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  // D-08: a camera or share press before the room exists bounced off with a
+  // "Join a voice channel first" toast; the controls wait for the connection.
+  it("disables camera and screen share until the join has connected", () => {
+    setVoiceChannel(1, []);
+    setVoiceStatus("joining");
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
+    expect(cameraBtn.disabled).toBe(true);
+    expect(cameraBtn.title).toBe("Connecting…");
+
+    setVoiceStatus("connected");
+    expect(cameraBtn.disabled).toBe(false);
+    expect(cameraBtn.title).toBe("");
+
+    widget.destroy?.();
+  });
+
   // OC-0225: the Grant-Microphone retry's `.finally` used to hardcode
   // `grantMicBtn.disabled = false`, undoing updateFrozen's socket-down
   // freeze if the WS socket dropped while the permission request was in

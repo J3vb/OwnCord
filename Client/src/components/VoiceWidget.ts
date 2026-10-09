@@ -59,6 +59,11 @@ export function headerStatusText(status: VoiceStatus): string {
   return t(`status.${status}`);
 }
 
+/** The join has not reached the room yet: camera and share have nothing to attach to. */
+export function isConnecting(status: VoiceStatus): boolean {
+  return status === "joining" || status === "securing";
+}
+
 /** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
 export function formatElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -299,6 +304,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : "";
+    }
+    // Camera and share need the room, which exists only once the join has
+    // connected; before that the press would bounce off (D-08).
+    const joining = isConnecting(voiceStore.getState().voiceStatus);
+    for (const btn of [cameraBtn, shareBtn]) {
+      if (btn === null || frozen || !joining) continue;
+      btn.disabled = true;
+      btn.title = t("status.joining");
     }
   }
 

@@ -251,6 +251,20 @@ describe("deriveCallView", () => {
     });
     expect(v).toMatchObject({ kind: "connected", inRoom: [SELF, OTTO] });
   });
+
+  it("keeps a connected view, flagged, when the only other person has left (D-11)", () => {
+    const v = deriveCallView({
+      ...base,
+      voice: { currentChannelId: DM, voiceUsers: room(SELF) },
+      peerWasHere: true,
+    });
+    expect(v).toMatchObject({ kind: "connected", inRoom: [SELF], peerLeft: true });
+    const fresh = deriveCallView({
+      ...base,
+      voice: { currentChannelId: DM, voiceUsers: room(SELF) },
+    });
+    expect(fresh).toMatchObject({ kind: "connected", peerLeft: false });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -546,6 +560,37 @@ describe("DmCallPanel — connected", () => {
     expect(root.hidden).toBe(false);
     setVoice(null, []);
     expect(root.hidden).toBe(true);
+  });
+});
+
+describe("DmCallPanel — after the other person leaves (D-11)", () => {
+  it("says who left and offers Ring again once you are alone again", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    expect(q(root, "dcp-ring-again")).toBeNull();
+
+    setVoice(DM, [vu(SELF)]);
+    expect(root.dataset.state).toBe("connected");
+    expect(root.textContent).toContain("Otto left the call");
+    q(root, "dcp-ring-again")!.click();
+    expect(opts.onRingAgain).toHaveBeenCalledWith(DM);
+  });
+});
+
+describe("DmCallPanel — controls while the call connects (D-08)", () => {
+  it("disables camera and share until the voice session is connected", () => {
+    setVoice(DM, [vu(SELF)]);
+    patchVoice({ voiceStatus: "joining" });
+    const { opts, root } = mount();
+    expect(q(root, "dcp-camera")!.disabled).toBe(true);
+    expect(q(root, "dcp-share")!.disabled).toBe(true);
+    expect(q(root, "dcp-camera")!.title).toBe("Connecting…");
+
+    patchVoice({ voiceStatus: "connected" });
+    expect(q(root, "dcp-camera")!.disabled).toBe(false);
+    expect(q(root, "dcp-share")!.disabled).toBe(false);
+    q(root, "dcp-camera")!.click();
+    expect(opts.onCameraToggle).toHaveBeenCalledTimes(1);
   });
 });
 

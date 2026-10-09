@@ -1283,6 +1283,34 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("a group call is declined once every online callee declined; offline members are not waited on (D-12)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        isGroup: true,
+        participants: [
+          ...c.participants,
+          { id: 12, username: "dan", avatar: "", status: "offline" as const },
+        ],
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    expect(panel.dataset.state).toBe("unanswered");
+    page.destroy?.();
+  });
+
   describe("ringing the callee (D-01, D-02, D-05)", () => {
     const rings = (ws: FakeWsClient): unknown[] =>
       vi.mocked(ws.send).mock.calls.filter(([m]) => (m as { type: string }).type === "call_ring");
@@ -1667,6 +1695,41 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("stops a group ring when the last person leaves after the ringer did (D-06)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+
+    const carol = {
+      userId: 11,
+      username: "carol",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    };
+    const roster = (users: (typeof carol)[]) => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([[50, new Map(users.map((u) => [u.userId, u]))]]),
+      }));
+      voiceStore.flush();
+    };
+    // alice leaves while carol stays: the ring stays (OC-0235).
+    roster([carol]);
+    ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
+    expect(banner.style.display).not.toBe("none");
+
+    // carol, not the ringer, empties the room: the ring is over.
+    roster([]);
+    ws.emit("voice_leave", { channel_id: 50, user_id: 11 });
+    expect(banner.style.display).toBe("none");
   });
 
   it("silently ends an incoming ring once this client is in the ringing channel by any path", () => {
