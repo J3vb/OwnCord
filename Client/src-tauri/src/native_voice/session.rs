@@ -511,6 +511,7 @@ struct VideoPublication {
 }
 
 impl VideoPublication {
+    #[cfg(test)]
     fn new(sid: TrackSid) -> Self {
         Self {
             issued: sid.to_string(),
