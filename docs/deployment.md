@@ -1512,13 +1512,16 @@ architecture), `configuration.json` (an explicit scalar allowlist from the
 running startup configuration), `database.json` (applied migration names,
 table names and row counts), `health.json` (a database, memory and hub
 snapshot), `events.json` (up to 200 recent log records, each mapped to a fixed
-event code; Warn/Error records are kept in preference to lower levels, so a
-routine INFO burst cannot push a failure out of the bundle) and
+event code with its redacted detail, such as an error's reason; Warn/Error
+records are kept in preference to lower levels, so a routine INFO burst cannot
+push a failure out of the bundle) and
 `manifest.json` (sizes, hashes and the omission report).
 What it deliberately does not hold: no message content, no attachments or
 avatars, no backups, no raw log lines, and no names, paths, addresses, URLs
 or credentials — the configuration item structurally omits every one of
-those, and table counts are counts, never rows.
+those, log detail drops identifying attributes and keeps only error vocabulary
+from the rest (every other word, path, host and address becomes `[x]`), and
+table counts are counts, never rows.
 
 Nothing uploads: the bundle is a local download, and sharing that file
 remains your decision. Confirming a download writes a `support_bundle_create`

@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -81,5 +83,8 @@ func TestSupportEventTimeline_UsesFixedCodesAndDropsMalformedFields(t *testing.T
 	events := supportEvents(rb)
 	if len(events) != 2 || events[0].Event != "livekit_process_exited" || events[1].Level != "unspecified" || events[1].Event != "log_event" {
 		t.Fatalf("unexpected sanitized timeline: %+v", events)
+	}
+	if data, _ := json.Marshal(events); strings.Contains(string(data), "private-token") {
+		t.Fatalf("short credential leaked into the timeline: %s", data)
 	}
 }

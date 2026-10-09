@@ -701,7 +701,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	// second, unbounded copy of free text that could quote a message.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, "user banned")
 
-	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
+	slog.Info("user banned", "actor_id", actorID, "target_id", targetID)
 	return nil
 }
 

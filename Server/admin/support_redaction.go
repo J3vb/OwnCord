@@ -68,9 +68,10 @@ func supportBuild(version string) map[string]any {
 }
 
 type supportEvent struct {
-	Timestamp string `json:"timestamp"`
-	Level     string `json:"level"`
-	Event     string `json:"event"`
+	Timestamp string         `json:"timestamp"`
+	Level     string         `json:"level"`
+	Event     string         `json:"event"`
+	Detail    map[string]any `json:"detail,omitempty"`
 }
 
 // supportEventsMax bounds events.json. SRE-03: the bundle used to keep the
@@ -80,22 +81,23 @@ type supportEvent struct {
 // records.
 const supportEventsMax = 200
 
-// Free-form messages, source paths and attributes are always omitted. Exact
-// known application messages become fixed event codes; unknown messages only
-// contribute their timestamp and normalized level. No pattern can accidentally
-// preserve an unrecognized password, address, message or key.
+// Free-form messages and source paths are always omitted. Exact known
+// application messages become fixed event codes; unknown messages only
+// contribute their timestamp and normalized level. Attributes survive only as
+// redacted detail (support_event_detail.go).
 //
 // Selection (SRE-03): the last supportEventsMax records that are WARN or above
 // are kept, and any remaining slots are filled with the most recent
 // lower-level records, so a routine INFO burst can never evict a failure. The
 // result is returned in chronological order.
-func supportEvents(rb *RingBuffer) []supportEvent {
+func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 	if rb == nil {
 		return []supportEvent{}
 	}
 	entries := rb.supportSnapshot()
 	type candidate struct {
 		event supportEvent
+		attrs string
 		warn  bool
 	}
 	valid := make([]candidate, 0, len(entries))
@@ -107,33 +109,35 @@ func supportEvents(rb *RingBuffer) []supportEvent {
 		level := supportEnum(entry.Level, "DEBUG", "INFO", "WARN", "ERROR")
 		valid = append(valid, candidate{
 			event: supportEvent{Timestamp: ts.UTC().Format(time.RFC3339Nano), Level: level, Event: supportEventCode(entry.Message)},
+			attrs: entry.Attrs,
 			warn:  level == "WARN" || level == "ERROR",
 		})
 	}
-	if len(valid) <= supportEventsMax {
-		out := make([]supportEvent, len(valid))
-		for i, c := range valid {
-			out[i] = c.event
-		}
-		return out
-	}
-	// Walk from the newest backwards, keeping WARN+ first until the cap is hit.
 	keep := make([]int, 0, supportEventsMax)
-	for i := len(valid) - 1; i >= 0 && len(keep) < supportEventsMax; i-- {
-		if valid[i].warn {
+	if len(valid) <= supportEventsMax {
+		for i := range valid {
 			keep = append(keep, i)
 		}
-	}
-	for i := len(valid) - 1; i >= 0 && len(keep) < supportEventsMax; i-- {
-		if !valid[i].warn {
-			keep = append(keep, i)
+	} else {
+		// Walk from the newest backwards, keeping WARN+ first until the cap is hit.
+		for i := len(valid) - 1; i >= 0 && len(keep) < supportEventsMax; i-- {
+			if valid[i].warn {
+				keep = append(keep, i)
+			}
 		}
+		for i := len(valid) - 1; i >= 0 && len(keep) < supportEventsMax; i-- {
+			if !valid[i].warn {
+				keep = append(keep, i)
+			}
+		}
+		slices.Sort(keep)
 	}
-	slices.Sort(keep)
-	out := make([]supportEvent, 0, len(keep))
-	for _, i := range keep {
-		out = append(out, valid[i].event)
+	out := make([]supportEvent, len(keep))
+	attrs := make([]string, len(keep))
+	for j, i := range keep {
+		out[j], attrs[j] = valid[i].event, valid[i].attrs
 	}
+	supportAttachDetail(out, attrs, newSupportKnown(known))
 	return out
 }
 
@@ -170,7 +174,7 @@ func supportRedactions() []supportRedaction {
 	return []supportRedaction{
 		{"configuration.json", "structural allowlist", "all credentials, tokens, TOTP/environment values, keys, names, paths, addresses, URLs, contacts, plugin allowlists and live database settings omitted; unrecognized enum values replaced with unspecified"},
 		{"database.json", "counts and compiled names only", "all row contents, SQL definitions/defaults, custom schema names, unknown migration names, plugin storage and search index excluded"},
-		{"events.json", "fixed event codes only; up to 200 records, Warn/Error kept in preference to lower levels", "all free-form messages, attributes, usernames, identifiers, addresses and source paths omitted; invalid timestamps excluded"},
+		{"events.json", "fixed event codes plus non-identifying attribute detail; up to 200 records, Warn/Error kept in preference to lower levels", "free-form messages, source paths, nested attributes and every attribute keyed as an identifier, user, name, address, host, path, URL, token, key or other credential omitted; kept text reduced to a fixed error-word vocabulary, short numbers and punctuation, with every other word, path, host, address, credential and the server's registered usernames, display names, server name and configured hosts replaced by [x]; invalid timestamps excluded"},
 		{"health.json", "aggregate numeric metrics only", "no per-user, session, channel or host labels"},
 	}
 }

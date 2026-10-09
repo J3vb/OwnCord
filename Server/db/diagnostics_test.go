@@ -59,3 +59,33 @@ func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
 		t.Fatal("canceled diagnostic query succeeded")
 	}
 }
+
+func TestDiagnosticNames_ReturnsUsernamesDisplayNamesAndServerName(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.MigrateFS(database, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO users(username,password,role_id,display_name) VALUES('alice','x',4,'Ally Smith')`,
+		`INSERT INTO users(username,password,role_id) VALUES('bob','x',4)`,
+		`INSERT OR REPLACE INTO settings(key,value) VALUES('server_name','Nas Chat')`,
+	} {
+		if _, err := database.SQLDb().Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names, err := database.DiagnosticNames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(names, "|")
+	for _, want := range []string{"alice", "Ally Smith", "bob", "Nas Chat"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in %q", want, got)
+		}
+	}
+}
