@@ -463,6 +463,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  a refused ring's error frame would also roll back a join still in flight. */
   const RING_SPACING_MS = 3000;
   let lastRingAt = Number.NEGATIVE_INFINITY;
+  /** Envelope id of the newest call_ring, so a refusal answering an earlier
+   *  ring cannot clear a newer outgoing call. */
+  let lastRingId: string | null = null;
   let ringTimer: ReturnType<typeof setTimeout> | null = null;
   let ringJoinWatch: (() => void) | null = null;
 
@@ -519,7 +522,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function sendRing(channelId: number): void {
     lastRingAt = Date.now();
-    ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+    lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
@@ -1266,8 +1269,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // end the caller's "Calling…" now. The dispatcher shows the server's
     // explanation as the toast; the caller stays in the room.
     unsubscribers.push(
-      ws.on("error", (payload) => {
-        if (payload.code === "CALL_REQUIRES_ACCEPTANCE") outgoingCall?.clear();
+      ws.on("error", (payload, id) => {
+        if (payload.code === "CALL_REQUIRES_ACCEPTANCE" && id === lastRingId) outgoingCall?.clear();
       }),
     );
     unsubscribers.push(() => {

@@ -326,7 +326,7 @@ function resetStores(): void {
 
 type FakeWsClient = WsClient & {
   /** Test-only: drive a registered `ws.on(type, ...)` listener directly. */
-  emit: (type: ServerMessage["type"], payload: unknown) => void;
+  emit: (type: ServerMessage["type"], payload: unknown, id?: string) => void;
 };
 
 /** The caller's voice join succeeding: startCall rings only after that. */
@@ -349,9 +349,9 @@ function fakeWs(): FakeWsClient {
         listeners.get(type)?.delete(listener as unknown as WsListener<ServerMessage["type"]>);
       };
     },
-    emit(type: ServerMessage["type"], payload: unknown) {
+    emit(type: ServerMessage["type"], payload: unknown, id?: string) {
       for (const listener of listeners.get(type) ?? []) {
-        (listener as (p: unknown, id?: string) => void)(payload);
+        (listener as (p: unknown, id?: string) => void)(payload, id);
       }
     },
     onStateChange: vi.fn(() => () => {}),
@@ -1448,15 +1448,25 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     await vi.dynamicImportSettled();
     vi.mocked(stopRingback).mockClear();
 
+    vi.mocked(ws.send).mockImplementation((m) =>
+      (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+    );
     mockCreateChatArea.mock.calls[0]![0].onStartCall();
     finishCallJoin();
     const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
     expect(panel.dataset.state).toBe("outgoing");
 
-    ws.emit("error", {
+    const refusal = {
       code: "CALL_REQUIRES_ACCEPTANCE",
       message: "calls work after the other person accepts your message request",
-    });
+    };
+    // A refusal answering an earlier ring (another envelope id) leaves this
+    // newer outgoing call alone.
+    ws.emit("error", refusal, "an-earlier-ring");
+    expect(stopRingback).not.toHaveBeenCalled();
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("error", refusal, "ring-id");
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
     expect(panel.dataset.state).not.toBe("outgoing");
