@@ -99,6 +99,7 @@ interface VoiceStateStub {
   localServerMuted: boolean;
   localServerDeafened: boolean;
   pttGated?: boolean;
+  voiceStatus?: string;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -444,6 +445,40 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
     expect(ws.send).not.toHaveBeenCalled();
     expect(mockShowToast).toHaveBeenCalledWith("Voice join failed — try again in 2 s", "error");
+  });
+
+  it("a switch away from a join still in flight backs off the next one", () => {
+    // Alternating channels while a join is joining/securing would otherwise
+    // cycle pre-SFU voice_join/voice_leave pairs at the server's join limit.
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "securing" }),
+    );
+
+    cbs.onVoiceJoin(42);
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 42 } });
+
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),
+    );
+    cbs.onVoiceJoin(10);
+    expect(ws.send).toHaveBeenCalledOnce();
+    expect(mockShowToast).toHaveBeenCalledWith("Voice join failed — try again in 2 s", "error");
+  });
+
+  it("a switch from a connected call is not backed off", () => {
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "connected" }),
+    );
+    cbs.onVoiceJoin(42);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),
+    );
+    cbs.onVoiceJoin(10);
+    expect(ws.send).toHaveBeenCalledTimes(2);
   });
 
   it("onVoiceJoin does not send over a down socket", () => {
