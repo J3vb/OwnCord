@@ -202,7 +202,7 @@ func (k *supportKnown) scrub(s string) string {
 
 // scrubLiterals masks the names with no letters or digits. One is masked only
 // between structural separators or the ends of s, so it never splits a
-// compound: a name "." or "/" cannot unjoin a host or path, and a name "[]" or
+// compound (a name of only separators is masked anywhere): a name "." or "/" cannot unjoin a host or path, and a name "[]" or
 // "::" is masked before supportAllowlist splits it into kept separators.
 func (k *supportKnown) scrubLiterals(s string) string {
 	bounded := func(i int) bool {
@@ -213,14 +213,14 @@ func (k *supportKnown) scrubLiterals(s string) string {
 	last := 0
 	for i := 0; i < len(s); {
 		n := 0
-		if r, _ := utf8.DecodeLastRuneInString(s[:i]); i == 0 || supportStructural(r) {
-			for j, t := i, &k.literals; j < len(s); j++ {
-				if t = t.next[s[j:j+1]]; t == nil {
-					break
-				}
-				if t.end && bounded(j+1) {
-					n = j + 1 - i
-				}
+		r, _ := utf8.DecodeLastRuneInString(s[:i])
+		leftOK := i == 0 || supportStructural(r)
+		for j, t := i, &k.literals; j < len(s); j++ {
+			if t = t.next[s[j:j+1]]; t == nil {
+				break
+			}
+			if t.end && ((leftOK && bounded(j+1)) || strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0) {
+				n = j + 1 - i
 			}
 		}
 		if n == 0 {
@@ -279,7 +279,7 @@ func supportJSONValueLen(s string) int {
 			if depth--; depth == 0 {
 				return i + 1
 			}
-		case depth == 0 && (c == ',' || unicode.IsSpace(rune(c))):
+		case depth == 0 && (c == ',' || c == ' ' || (c >= '\t' && c <= '\r')):
 			return i
 		}
 	}

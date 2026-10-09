@@ -295,6 +295,7 @@ func TestSupportScrub_RedactsStructuralNames(t *testing.T) {
 		{`user "::" not found`, `user "[x]" not found`},
 		{"user []: not found", "user [x]: not found"},
 		{"dial tcp [x]:7880: i/o timeout", "dial tcp [x]:7880: i/o timeout"},
+		{"mention @:: not resolved", "mention [x][x] not resolved"},
 	}
 	for _, c := range cases {
 		if got := supportScrub(c.in, known); got != c.want {
@@ -309,6 +310,7 @@ func TestSupportScrub_MasksCompositeJSONValues(t *testing.T) {
 		{`kick {"participant_ids":[12,34,56],"error":"ice failed"}`, `kick {"participant_ids":"[x]","error":"ice failed"}`},
 		{`kick {"room":{"id":7,"n":[1,2]},"error":"ice failed"}`, `kick {"room":"[x]","error":"ice failed"}`},
 		{`kick {"error":{"room":"b","code":5}}`, `kick {"error":{"room":"[x]","code":5}}`},
+		{`kick name: 加藤 failed`, `kick name: [x] failed`},
 		{`kick {"participant_ids":[12,"a]",34`, `kick {"participant_ids":"[x]"`},
 	}
 	for _, c := range cases {
