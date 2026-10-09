@@ -49,7 +49,9 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
-- **Messages**: Scrolling a long channel no longer redraws every message on screen each time the view moves; only the rows that come into view are built.
+**Messages**
+
+- Scrolling a long channel no longer redraws every message on screen each time the view moves; only the rows that come into view are built.
 
 ## v2.2.0-beta.2
 
