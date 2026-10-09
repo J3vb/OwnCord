@@ -189,6 +189,14 @@ async function joinBrowserPeer(
               ? `${participant.identity}#screen`
               : participant.identity;
           videos.set(key, v);
+          // Tells a peer cycling its camera that this subscription is fully
+          // negotiated, so it may unpublish the camera (see the native
+          // example's `--camera-cycles`).
+          if (pub.source === lk.Track.Source.Camera)
+            void room.localParticipant.publishData(new TextEncoder().encode(pub.trackSid), {
+              reliable: true,
+              topic: "camera-subscribed",
+            });
           const onFrame = (_now: number, meta: { width: number; height: number }) => {
             v.frames++;
             v.width = meta.width;

@@ -31,8 +31,10 @@
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
-//! new frame cryptor. Each cycle waits (5 s at most, else the example fails)
-//! for a subscriber to bind the new camera, so a peer must be subscribed.
+//! new frame cryptor. Each camera (the first included) is kept until a
+//! subscriber acknowledges it with a data message on topic
+//! `camera-subscribed` whose payload is the camera's sid (5 s at most, else
+//! the example fails), so a peer must be subscribed and send that.
 //! `--screen WxH` also shares the screen the way the app does, through the
 //! same capture thread and publish, from a synthetic source (moving bars:
 //! CI has no display, so neither the X11 capturer nor the Wayland portal
@@ -68,11 +70,10 @@ mod linux {
     use tokio_tungstenite::tungstenite::Message;
 
     const SAMPLE_RATE: u32 = 48_000;
-    /// How long a camera cycle waits for a subscriber to bind the new camera.
+    /// How long a camera cycle waits for a subscriber to acknowledge the new camera.
     const CAMERA_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
-    /// livekit-server reports the subscription about 40 ms before the
-    /// subscriber's own offer lands; see the comment on `await_camera_bound`.
-    const CAMERA_CYCLE_SETTLE: Duration = Duration::from_millis(250);
+    /// Data topic on which a subscriber acknowledges a camera by its sid.
+    const CAMERA_ACK_TOPIC: &str = "camera-subscribed";
     const FRAME_MS: u64 = 10;
     const SINE_AMPLITUDE: f64 = 8000.0;
 
@@ -171,27 +172,26 @@ mod linux {
         }
     }
 
-    /// Waits for a subscriber to bind `camera_sid`, then a short settle.
-    /// A subscriber that needs a negotiation of its own (the
-    /// browser peer) must finish it before the camera it just
-    /// subscribed to goes away: livekit-server answers the
-    /// collision (its PeerConnection drops a sender while the
-    /// subscriber's offer is being applied) with a full
-    /// reconnect of that subscriber, and the browser then
-    /// never sees the final camera. Wait for the subscription,
-    /// then a short settle: the server reports it before the
-    /// subscriber's offer lands. Other events are kept for the
-    /// main loop in `run`.
+    /// Waits for a subscriber to acknowledge `camera_sid` on `CAMERA_ACK_TOPIC`.
+    /// A subscriber that needs a negotiation of its own (the browser peer)
+    /// must finish it before the camera it just subscribed to goes away:
+    /// livekit-server answers the collision (its PeerConnection drops a
+    /// sender while the subscriber's offer is being applied) with a full
+    /// reconnect of that subscriber, and the browser then never sees the
+    /// final camera. The server's own "subscribed" event precedes that offer,
+    /// so the subscriber acknowledges once its track is attached, which is
+    /// after the negotiation. Other events are kept for the main loop in `run`.
     async fn await_camera_bound(
         room_events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
         pending_events: &mut std::collections::VecDeque<RoomEvent>,
         camera_sid: &str,
     ) -> Result<(), String> {
-        let bound = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
+        let acked = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
             loop {
                 match room_events.recv().await {
-                    Some(RoomEvent::LocalTrackSubscribed { track })
-                        if track.sid().to_string() == camera_sid =>
+                    Some(RoomEvent::DataReceived { payload, topic, .. })
+                        if topic.as_deref() == Some(CAMERA_ACK_TOPIC)
+                            && payload.as_slice() == camera_sid.as_bytes() =>
                     {
                         return true
                     }
@@ -201,12 +201,11 @@ mod linux {
             }
         })
         .await;
-        if bound != Ok(true) {
+        if acked != Ok(true) {
             return Err(format!(
-                "no subscriber bound camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
+                "no subscriber acknowledged camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
             ));
         }
-        tokio::time::sleep(CAMERA_CYCLE_SETTLE).await;
         Ok(())
     }
 
