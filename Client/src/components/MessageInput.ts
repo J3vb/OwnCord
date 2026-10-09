@@ -4,6 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -261,9 +262,6 @@ function appendFileLabel(item: HTMLDivElement, filename: string): void {
   const nameEl = createElement("span", { class: "attachment-preview-name" }, filename);
   appendChildren(item, icon, nameEl);
 }
-
-const OPEN_OVERLAYS =
-  ".modal-overlay, .settings-overlay.open, .search-overlay, .quick-switcher-overlay, .upp-overlay, .msg-media-overlay";
 
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const disposable = new Disposable();
@@ -1127,14 +1125,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         (e: DragEvent) => {
           const dt = e.dataTransfer;
           if (dt === null || !dt.types.includes("Files")) return;
-          const channelView = root?.closest(".chat-area") ?? null;
-          if (
-            channelView === null ||
-            !(e.target instanceof Node) ||
-            !channelView.contains(e.target)
-          )
-            return;
-          if (document.querySelector(OPEN_OVERLAYS) !== null) return;
+          const target = e.target;
+          if (!(target instanceof Element)) return;
+          if (target.closest(".messages-slot, .typing-slot, .input-slot") === null) return;
+          if (dialogOpen()) return;
           e.preventDefault();
           for (const file of dt.files) void handlePasteFile(file);
         },

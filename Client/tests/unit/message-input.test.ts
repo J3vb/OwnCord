@@ -2051,11 +2051,20 @@ describe("MessageInput", () => {
   function mountInChatArea(onUploadFile: NonNullable<MessageInputOptions["onUploadFile"]>) {
     const chatArea = document.createElement("div");
     chatArea.className = "chat-area";
+    const messages = document.createElement("div");
+    messages.className = "messages-slot";
+    const input = document.createElement("div");
+    input.className = "input-slot";
+    const videoGrid = document.createElement("div");
+    videoGrid.className = "video-grid-slot";
+    chatArea.append(messages, input, videoGrid);
     container.appendChild(chatArea);
     const comp = createMessageInput(makeOptions({ onUploadFile }));
-    comp.mount(chatArea);
-    return { comp, chatArea };
+    comp.mount(input);
+    return { comp, chatArea, messages, input, videoGrid };
   }
+
+  const pngDrop = () => fileDrop([new File(["a"], "a.png", { type: "image/png" })]);
 
   it("dropping files over the channel view uploads each of them", async () => {
     const onUploadFile = vi.fn(async (file: File) => ({
@@ -2063,12 +2072,12 @@ describe("MessageInput", () => {
       url: "http://x",
       filename: file.name,
     }));
-    const { comp, chatArea } = mountInChatArea(onUploadFile);
+    const { comp, input } = mountInChatArea(onUploadFile);
 
     const a = new File(["a"], "a.png", { type: "image/png" });
     const b = new File(["b"], "b.txt", { type: "text/plain" });
     const drop = fileDrop([a, b]);
-    chatArea.dispatchEvent(drop);
+    input.dispatchEvent(drop);
 
     expect(drop.defaultPrevented).toBe(true);
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
@@ -2088,29 +2097,64 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("ignores a drop while the settings overlay is open", () => {
+  it("ignores a drop over the video grid, whose composer is hidden", () => {
     const onUploadFile = vi.fn();
-    const { comp, chatArea } = mountInChatArea(onUploadFile);
-    const settings = document.createElement("div");
-    settings.className = "settings-overlay open";
-    document.body.appendChild(settings);
+    const { comp, videoGrid } = mountInChatArea(onUploadFile);
 
-    const drop = fileDrop([new File(["a"], "a.png", { type: "image/png" })]);
-    settings.dispatchEvent(drop);
-    chatArea.dispatchEvent(fileDrop([new File(["a"], "a.png", { type: "image/png" })]));
+    const drop = pngDrop();
+    videoGrid.dispatchEvent(drop);
 
     expect(drop.defaultPrevented).toBe(false);
     expect(onUploadFile).not.toHaveBeenCalled();
-    settings.remove();
+    comp.destroy?.();
+  });
+
+  it("ignores a drop while the settings overlay is open, accepts it once closed", async () => {
+    const onUploadFile = vi.fn(async (file: File) => ({
+      id: file.name,
+      url: "http://x",
+      filename: file.name,
+    }));
+    const { comp, input } = mountInChatArea(onUploadFile);
+    const overlay = document.createElement("div");
+    const panel = document.createElement("div");
+    panel.setAttribute("aria-modal", "true");
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    input.dispatchEvent(pngDrop());
+    expect(onUploadFile).not.toHaveBeenCalled();
+
+    overlay.style.display = "none";
+    input.dispatchEvent(pngDrop());
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
+    overlay.remove();
+    comp.destroy?.();
+  });
+
+  it("still accepts a drop when a video attachment sits in the message list", async () => {
+    const onUploadFile = vi.fn(async (file: File) => ({
+      id: file.name,
+      url: "http://x",
+      filename: file.name,
+    }));
+    const { comp, messages, input } = mountInChatArea(onUploadFile);
+    const media = document.createElement("div");
+    media.className = "msg-media-overlay";
+    messages.appendChild(media);
+
+    input.dispatchEvent(pngDrop());
+
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
     comp.destroy?.();
   });
 
   it("ignores a drop that carries no files (a dragged text selection)", () => {
     const onUploadFile = vi.fn();
-    const { comp, chatArea } = mountInChatArea(onUploadFile);
+    const { comp, input } = mountInChatArea(onUploadFile);
 
     const drop = fileDrop([], ["text/plain"]);
-    chatArea.dispatchEvent(drop);
+    input.dispatchEvent(drop);
 
     expect(drop.defaultPrevented).toBe(false);
     expect(onUploadFile).not.toHaveBeenCalled();
@@ -2119,10 +2163,10 @@ describe("MessageInput", () => {
 
   it("stops listening for drops once the composer is destroyed", () => {
     const onUploadFile = vi.fn();
-    const { comp, chatArea } = mountInChatArea(onUploadFile);
+    const { comp, input } = mountInChatArea(onUploadFile);
     comp.destroy?.();
 
-    chatArea.dispatchEvent(fileDrop([new File(["a"], "a.png", { type: "image/png" })]));
+    input.dispatchEvent(fileDrop([new File(["a"], "a.png", { type: "image/png" })]));
 
     expect(onUploadFile).not.toHaveBeenCalled();
   });
