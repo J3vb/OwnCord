@@ -30,6 +30,7 @@ import {
   incrementUnread,
 } from "@stores/channels.store";
 import { setMarkReadSender } from "@lib/read-state";
+import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
 import { formatMessageTimestamp } from "@lib/formatting";
@@ -785,6 +786,22 @@ describe("MessageList — unread navigation (P4-03)", () => {
 
       expect(sendMarkRead).not.toHaveBeenCalled();
       expect(unreadCount()).toBe(1);
+    });
+
+    // The list stays mounted and the window stays focused behind the full-screen
+    // Settings overlay, so isChannelAway is false although nothing is on screen.
+    it("sends nothing while the Settings overlay covers the chat", () => {
+      mountAtBottom();
+      openSettings();
+
+      try {
+        arrive(51);
+        vi.advanceTimersByTime(2000);
+
+        expect(sendMarkRead).not.toHaveBeenCalled();
+      } finally {
+        closeSettings();
+      }
     });
 
     it("sends nothing for a detached history window", () => {

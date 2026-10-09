@@ -56,6 +56,7 @@ import {
   markChannelRead,
   hasUnread,
   isChannelAway,
+  isChannelCovered,
   noteLiveMessageSeen,
   setLiveTailInView,
 } from "@lib/read-state";
@@ -615,12 +616,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * A live message was appended while the reader had the live tail in view. The
    * dispatcher does not count it unread, so markReadIfSeen (gated on a local
    * unread count) never sends for it; tell the server it was seen, throttled
-   * (lib/read-state.ts). Same away and deferred-divider checks as above.
+   * (lib/read-state.ts). Same away and deferred-divider checks as above, plus
+   * the Settings overlay and content views, which cover a still-mounted list.
    */
   function markLiveArrivalSeen(): void {
     if (root === null) return;
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
-    if (isChannelAway(options.channelId)) return;
+    if (isChannelAway(options.channelId) || isChannelCovered()) return;
     if (newDividerDeferred) return;
     noteLiveMessageSeen(options.channelId, disposable.signal);
   }

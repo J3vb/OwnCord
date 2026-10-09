@@ -21,6 +21,7 @@ import {
   incrementUnread,
 } from "@stores/channels.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";
+import { closeSettings, openSettings, setActiveView } from "@stores/ui.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
 
@@ -419,6 +420,34 @@ describe("markActiveChannelReadOnUnload", () => {
     markActiveChannelReadOnUnload();
 
     expect(sent).toEqual([]);
+  });
+
+  it("sends nothing while the Settings overlay covers the chat", () => {
+    setChannels([channel(1, 0)]);
+    setActiveChannel(1);
+    openSettings();
+
+    try {
+      markActiveChannelReadOnUnload();
+
+      expect(sent).toEqual([]);
+    } finally {
+      closeSettings();
+    }
+  });
+
+  it("sends nothing while a content view replaces the chat", () => {
+    setChannels([channel(1, 0)]);
+    setActiveChannel(1);
+    setActiveView("moderation");
+
+    try {
+      markActiveChannelReadOnUnload();
+
+      expect(sent).toEqual([]);
+    } finally {
+      setActiveView(null);
+    }
   });
 
   it("leaves an unseen unread alone", () => {

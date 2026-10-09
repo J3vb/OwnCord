@@ -11,6 +11,7 @@
 import { channelsStore, clearUnread } from "@stores/channels.store";
 import { dmStore, clearDmUnread } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
+import { uiStore } from "@stores/ui.store";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();
@@ -35,6 +36,18 @@ export function setLiveTailInView(channelId: number, inView: boolean): void {
  */
 export function isChannelAway(channelId: number): boolean {
   return !document.hasFocus() || isWindowDetached(channelId) || liveTailOutOfView.has(channelId);
+}
+
+/**
+ * Whether something full-screen sits over the chat although the channel is
+ * still active: the Settings overlay (the list stays mounted and the window
+ * stays focused behind it) or a content view. `isChannelAway` cannot see
+ * either, and must not change (it decides unread counting), so the paths that
+ * mark a channel read for messages "seen live" ask this as well.
+ */
+export function isChannelCovered(): boolean {
+  const { settingsOpen, activeView } = uiStore.getState();
+  return settingsOpen || activeView !== null;
 }
 
 /** Sends one `mark_read` over the socket. */
@@ -223,11 +236,12 @@ export function noteLiveMessageSeen(channelId: number, signal: AbortSignal): voi
  * usually read live and the throttled send above may not have fired yet; a
  * channel switch marks the old channel read but closing the window does not.
  * Same predicate as the live path: the active channel, with the reader not away
- * from it and no unread badge (a badge means something arrived unseen).
+ * from it, nothing covering the chat, and no unread badge (a badge means
+ * something arrived unseen).
  */
 export function markActiveChannelReadOnUnload(): void {
   const active = channelsStore.getState().activeChannelId;
-  if (active === null || isChannelAway(active) || hasUnread(active)) return;
+  if (active === null || isChannelAway(active) || isChannelCovered() || hasUnread(active)) return;
   cancelPendingLiveSeen();
   markChannelRead(active);
 }
