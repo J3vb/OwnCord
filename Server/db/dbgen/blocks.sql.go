@@ -119,7 +119,7 @@ func (q *Queries) ListBlockersOfUser(ctx context.Context, blockedID int64) ([]in
 	return items, nil
 }
 
-const unblockUser = `-- name: UnblockUser :exec
+const unblockUser = `-- name: UnblockUser :execrows
 DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?
 `
 
@@ -128,7 +128,10 @@ type UnblockUserParams struct {
 	BlockedID int64 `json:"blockedId"`
 }
 
-func (q *Queries) UnblockUser(ctx context.Context, arg UnblockUserParams) error {
-	_, err := q.db.ExecContext(ctx, unblockUser, arg.BlockerID, arg.BlockedID)
-	return err
+func (q *Queries) UnblockUser(ctx context.Context, arg UnblockUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, unblockUser, arg.BlockerID, arg.BlockedID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -104,7 +104,10 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - A first-contact call tells the caller at once, and the callee is told if the caller hangs up early.
 - A closed DM reopens on a ring, and a ring from someone who is not in the call is refused.
 - Queued rings are dropped when you disconnect, and redialling has a little slack.
-- Fixes for ring cancel, connect gating and the caption after leaving a call.
+- In a group call where the caller leaves first, the ring now stops once the last person has left too, instead of ringing on into an empty call.
+- Members who are offline no longer hold a ring open, so it ends once everyone who was online has declined.
+- Camera and screen-share buttons now wait until the call has connected, instead of failing with "Join a voice channel first".
+- Left alone in a 1:1 call after the other person leaves, you see `<name> left the call` with a Ring again button.
 
 **Messages, servers and accounts**
 
@@ -115,11 +118,20 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Opening a DM accepts a pending request; blocking someone revokes trust and unblocking clears old requests.
 - A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. Each member's own moderation history (warnings, timeouts, removals, bans) shows the newest 200 entries.
 - Link and image previews have a fetch deadline and a length limit on image URLs.
+- Uploads with padded or malformed trailing data now return 413 or 400 and leave no file behind.
+- A failed avatar change now gives back its storage quota at once instead of holding it until the next cleanup.
+- Replacing a timeout as someone who cannot moderate voice now releases the voice mute the old timeout held, instead of leaving it on.
+- First-run setup waits its turn for password checks like sign-in does and says "try again later" when the server is busy, and the owner's setup login no longer shows as an unreviewed new login.
+- Unblocking someone you had not blocked no longer clears an ignored Message Request, so their next message does not raise it again.
+- Plugin HTTP responses are checked more strictly against their declared content type.
+- Dragging files or images from your file manager onto OwnCord did nothing. They now attach to the message you are writing (desktop app and browser).
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+- **GIFs and linked images load on Linux again**: the desktop client's security policy now allows the app's own internal channel on Linux, so image bytes reach the picker and message embeds intact.
 
 **Support bundles**
 
 - Support bundles keep the redacted detail of error events, and their wording and log writes are cleaner.
+- Support bundles also hide names made only of punctuation and whole JSON lists or objects under identifying fields, and the preview no longer slows down on servers with thousands of similar names.
 
 ### Known issues
 

@@ -996,7 +996,7 @@ func TestFetch_HTTPSRedirectToHTTPSIsFollowed(t *testing.T) {
 // allowlist on their own in every row, so only the pairing is under test.
 func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 	f := newFetcher(t, stub(t, func(http.ResponseWriter, *http.Request) {}), func(p *Policy) {
-		p.ContentTypes = []string{"application/json", "application/octet-stream", "text/plain", "text/html", "text/xml", "image/png", "image/svg+xml"}
+		p.ContentTypes = []string{"application/json", "application/octet-stream", "text/plain", "text/html", "text/xml", "image/png", "image/svg+xml", "application/xml", "text/css", "application/xhtml+xml"}
 	})
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	tests := []struct {
@@ -1017,6 +1017,18 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"svg declared, comment-first body", "image/svg+xml", []byte("<!-- c --><svg/>"), true},
 		{"xml declared, comment-first body", "text/xml", []byte("<!-- c --><a/>"), true},
 		{"json declared, comment-first body", "application/json", []byte("<!-- c -->"), false},
+		{"css declared, comment-first body", "text/css", []byte("<!-- c -->\na{color:red}"), true},
+		{"svg declared, html body", "image/svg+xml", []byte("<html><body>x</body></html>"), false},
+		{"xml declared, html body", "application/xml", []byte("<html><body>x</body></html>"), false},
+		{"plain declared, html body", "text/plain", []byte("<!DOCTYPE html><html></html>"), false},
+		{"svg declared, html after a comment", "image/svg+xml", []byte("<!-- c --><html></html>"), false},
+		{"svg declared, unterminated comment", "image/svg+xml", []byte("<!-- c <html></html>"), false},
+		{"plain declared, empty-comment opener before html", "text/plain", []byte("<!--><h1>x</h1><!-- -->"), false},
+		{"svg declared, empty-comment opener before html", "image/svg+xml", []byte("<!--><h1>x</h1><!-- -->"), false},
+		{"svg declared, bang-terminated comment before html", "image/svg+xml", []byte("<!-- a --!><h1>x</h1><!-- -->"), false},
+		{"plain declared, bang-terminated comment before html", "text/plain", []byte("<!-- a --!><h1>x</h1><!-- -->"), false},
+		{"xhtml declared, html body", "application/xhtml+xml", []byte("<html xmlns=\"http://www.w3.org/1999/xhtml\"></html>"), true},
+		{"xhtml declared, comment-first html body", "application/xhtml+xml", []byte("<!-- generated --><html xmlns=\"http://www.w3.org/1999/xhtml\"></html>"), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

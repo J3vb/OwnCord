@@ -74,8 +74,8 @@ func supportIdentifyingKey(key string) bool {
 }
 
 var (
-	supportJSONKVPattern = regexp.MustCompile(`"([A-Za-z0-9_.-]+)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\s]+)`)
-	supportKVPattern     = regexp.MustCompile(`\b([A-Za-z0-9_.-]+)=("(?:[^"\\]|\\.)*"|[^\s,]+)`)
+	supportJSONKeyPattern = regexp.MustCompile(`"([A-Za-z0-9_.-]+)"\s*:\s*`)
+	supportKVPattern      = regexp.MustCompile(`\b([A-Za-z0-9_.-]+)=("(?:[^"\\]|\\.)*"|[^\s,]+)`)
 	// A credential after its label runs to the next "," or ";", so a
 	// password with spaces is masked whole; after an auth scheme it is the
 	// next word.
@@ -112,39 +112,70 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 	return out
 }
 
-// supportKnown holds the identifying values to redact, each split into
-// lowercase word tokens and indexed by its first token, so any number of names
-// costs O(words) per value. Matching is by whole words, so a name of any
-// length is redacted without mangling the words that contain it. It catches a
-// name that is also a vocabulary word, which the allowlist would keep.
-type supportKnown map[string][][]string
+// supportKnown holds the identifying values to redact in two tries: names
+// split into lowercase word tokens, and names with no letters or digits ("!!",
+// "[]", an emoji; not a lone separator) by their bytes. A match walks one trie path, so any number
+// of names, however many share a first word, costs O(name length) per
+// position. Matching is by whole words, so a name of any length is redacted
+// without mangling the words that contain it. It catches a name that is also a
+// vocabulary word, which the allowlist would keep.
+type supportKnown struct {
+	words, literals supportTrie
+}
+
+type supportTrie struct {
+	next map[string]*supportTrie
+	end  bool
+}
+
+func (t *supportTrie) add(keys ...string) {
+	for _, key := range keys {
+		if t.next[key] == nil {
+			if t.next == nil {
+				t.next = map[string]*supportTrie{}
+			}
+			t.next[key] = &supportTrie{}
+		}
+		t = t.next[key]
+	}
+	t.end = true
+}
 
 var (
 	supportWordPattern  = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 	supportAlnumPattern = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
 
+// supportSingleSeparator reports a value that is one separator rune, which
+// identifies no one and would only damage the text around every occurrence.
+func supportSingleSeparator(v string) bool {
+	r, size := utf8.DecodeRuneInString(v)
+	return size == len(v) && supportStructural(r)
+}
+
 // newSupportKnown returns nil when no value is left.
-func newSupportKnown(values []string) supportKnown {
-	k := supportKnown{}
+func newSupportKnown(values []string) *supportKnown {
+	k := &supportKnown{}
 	for _, v := range values {
 		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
-		// A name with no letters or digits ("!!", an emoji) is kept whole
-		// under "" and masked by supportAllowlist when it is a whole compound.
-		if v = strings.TrimSpace(v); len(words) == 0 && v != "" {
-			k[""] = append(k[""], []string{v})
+		if v = strings.TrimSpace(v); len(words) == 0 && !supportSingleSeparator(v) && v != "" {
+			bytes := make([]string, len(v))
+			for i := 0; i < len(v); i++ {
+				bytes[i] = v[i : i+1]
+			}
+			k.literals.add(bytes...)
 		} else if len(words) > 0 {
-			k[words[0]] = append(k[words[0]], words)
+			k.words.add(words...)
 		}
 	}
-	if len(k) == 0 {
+	if k.words.next == nil && k.literals.next == nil {
 		return nil
 	}
 	return k
 }
 
-func (k supportKnown) scrub(s string) string {
-	if len(k) == 0 {
+func (k *supportKnown) scrub(s string) string {
+	if k == nil {
 		return s
 	}
 	spans := supportWordPattern.FindAllStringIndex(s, -1)
@@ -156,9 +187,12 @@ func (k supportKnown) scrub(s string) string {
 	last := 0
 	for i := 0; i < len(words); i++ {
 		n := 0
-		for _, name := range k[words[i]] {
-			if len(name) > n && i+len(name) <= len(words) && slices.Equal(name, words[i:i+len(name)]) {
-				n = len(name)
+		for j, t := i, &k.words; j < len(words); j++ {
+			if t = t.next[words[j]]; t == nil {
+				break
+			}
+			if t.end {
+				n = j - i + 1
 			}
 		}
 		if n == 0 {
@@ -170,17 +204,98 @@ func (k supportKnown) scrub(s string) string {
 		i += n - 1
 	}
 	b.WriteString(s[last:])
+	return k.scrubLiterals(b.String())
+}
+
+// scrubLiterals masks the names with no letters or digits. One is masked only
+// between structural separators or the ends of s, so it never splits a
+// compound: a name "!!" or an emoji cannot unjoin a host or path. A single
+// separator is never a literal; a name of two or more separators ("[]", "::") is masked anywhere, before supportAllowlist
+// splits it into kept separators.
+func (k *supportKnown) scrubLiterals(s string) string {
+	bounded := func(i int) bool {
+		r, _ := utf8.DecodeRuneInString(s[i:])
+		return i == len(s) || supportStructural(r)
+	}
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(s); {
+		n := 0
+		r, _ := utf8.DecodeLastRuneInString(s[:i])
+		leftOK := i == 0 || supportStructural(r)
+		for j, t := i, &k.literals; j < len(s); j++ {
+			if t = t.next[s[j:j+1]]; t == nil {
+				break
+			}
+			if t.end && ((leftOK && bounded(j+1)) || (strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0)) {
+				n = j + 1 - i
+			}
+		}
+		if n == 0 {
+			_, size := utf8.DecodeRuneInString(s[i:])
+			i += size
+			continue
+		}
+		b.WriteString(s[last:i])
+		b.WriteString("[x]")
+		i += n
+		last = i
+	}
+	b.WriteString(s[last:])
 	return b.String()
 }
 
-func supportScrub(s string, known supportKnown) string {
-	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
-		sub := supportJSONKVPattern.FindStringSubmatch(m)
-		if !supportIdentifyingKey(sub[1]) {
-			return m
+// supportMaskJSON masks the value of each identifying key embedded in s as
+// JSON, an array or object whole.
+func supportMaskJSON(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range supportJSONKeyPattern.FindAllStringSubmatchIndex(s, -1) {
+		if m[0] < last || !supportIdentifyingKey(s[m[2]:m[3]]) {
+			continue
 		}
-		return `"` + sub[1] + `"` + sub[2] + `"[x]"`
-	})
+		b.WriteString(s[last:m[1]])
+		b.WriteString(`"[x]"`)
+		last = m[1] + supportJSONValueLen(s[m[1]:])
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// supportJSONValueLen returns the length of the JSON value s starts with: a
+// string, an array or object to its closing bracket (all of s when it is
+// unclosed), or a bare scalar up to a comma, closing bracket or space.
+func supportJSONValueLen(s string) int {
+	depth, quoted := 0, false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case quoted && c == '\\':
+			i++
+		case quoted:
+			quoted = c != '"'
+			if !quoted && depth == 0 {
+				return i + 1
+			}
+		case c == '"':
+			quoted = true
+		case c == '[' || c == '{':
+			depth++
+		case c == ']' || c == '}':
+			if depth == 0 {
+				return i
+			}
+			if depth--; depth == 0 {
+				return i + 1
+			}
+		case depth == 0 && (c == ',' || c == ' ' || (c >= '\t' && c <= '\r')):
+			return i
+		}
+	}
+	return len(s)
+}
+
+func supportScrub(s string, known *supportKnown) string {
+	s = supportMaskJSON(s)
 	s = supportKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
@@ -197,7 +312,7 @@ func supportScrub(s string, known supportKnown) string {
 		}
 		return "[x]"
 	})
-	return supportAllowlist(known.scrub(s), known[""])
+	return supportAllowlist(known.scrub(s))
 }
 
 // supportStructural separators, like spaces, split a value into compounds;
@@ -219,10 +334,7 @@ var (
 	supportSlashWords    = []string{"i/o", "n/a", "and/or"}
 )
 
-func supportKeepCompound(c string, literals [][]string) bool {
-	if slices.ContainsFunc(literals, func(l []string) bool { return l[0] == c }) {
-		return false
-	}
+func supportKeepCompound(c string) bool {
 	if supportJoinedPattern.MatchString(c) && !slices.Contains(supportSlashWords, strings.ToLower(c)) {
 		return false
 	}
@@ -231,7 +343,7 @@ func supportKeepCompound(c string, literals [][]string) bool {
 
 // supportAllowlist replaces each compound that is not kept with [x]; masked
 // compounds separated only by spaces ("Private Project") become one [x].
-func supportAllowlist(s string, literals [][]string) string {
+func supportAllowlist(s string) string {
 	var b strings.Builder
 	spaces := ""    // spaces after a masked compound, written only if a kept one follows
 	masked := false // the last compound written was [x]
@@ -253,7 +365,7 @@ func supportAllowlist(s string, literals [][]string) string {
 		compound := s[:end]
 		s = s[end:]
 		switch {
-		case supportKeepCompound(compound, literals):
+		case supportKeepCompound(compound):
 			b.WriteString(spaces + compound)
 			masked = false
 		case !masked:
@@ -268,7 +380,7 @@ func supportAllowlist(s string, literals [][]string) string {
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil
 // when none survive.
-func supportDetail(attrs string, known supportKnown) map[string]any {
+func supportDetail(attrs string, known *supportKnown) map[string]any {
 	var raw map[string]any
 	if attrs == "" || json.Unmarshal([]byte(attrs), &raw) != nil {
 		return nil
@@ -316,7 +428,7 @@ func supportTruncate(s string) string {
 
 // supportAttachDetail fills Detail on events, newest first, until
 // supportDetailBudget is spent; older events past it keep only their code.
-func supportAttachDetail(events []supportEvent, attrs []string, known supportKnown) {
+func supportAttachDetail(events []supportEvent, attrs []string, known *supportKnown) {
 	used := 0
 	for i := len(events) - 1; i >= 0; i-- {
 		detail := supportDetail(attrs[i], known)
