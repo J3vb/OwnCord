@@ -104,10 +104,10 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - A first-contact call tells the caller at once, and the callee is told if the caller hangs up early.
 - A closed DM reopens on a ring, and a ring from someone who is not in the call is refused.
 - Queued rings are dropped when you disconnect, and redialling has a little slack.
-- In a group call, the ring now stops when the caller leaves first while others stay in the call.
+- In a group call where the caller leaves first, the ring now stops once the last person has left too, instead of ringing on into an empty call.
 - Members who are offline no longer hold a ring open, so it ends once everyone who was online has declined.
 - Camera and screen-share buttons stay disabled until the call has connected, so pressing them early does nothing.
-- Left alone in a 1:1 call after the other person leaves, you see "<name> left the call" with a Ring again button.
+- Left alone in a 1:1 call after the other person leaves, you see `<name> left the call` with a Ring again button.
 
 **Messages, servers and accounts**
 
