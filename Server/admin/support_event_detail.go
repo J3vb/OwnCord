@@ -151,7 +151,7 @@ func newSupportKnown(values []string) *supportKnown {
 	k := &supportKnown{}
 	for _, v := range values {
 		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
-		if v = strings.TrimSpace(v); len(words) == 0 && v != "" {
+		if v = strings.TrimSpace(v); len(words) == 0 && utf8.RuneCountInString(v) > 1 {
 			bytes := make([]string, len(v))
 			for i := 0; i < len(v); i++ {
 				bytes[i] = v[i : i+1]
@@ -202,7 +202,7 @@ func (k *supportKnown) scrub(s string) string {
 
 // scrubLiterals masks the names with no letters or digits. One is masked only
 // between structural separators or the ends of s, so it never splits a
-// compound: a name "." or "/" cannot unjoin a host or path. A name of two or
+// compound: a name "!!" cannot unjoin a host or path. A name of two or
 // more separators ("[]", "::") is masked anywhere, before supportAllowlist
 // splits it into kept separators.
 func (k *supportKnown) scrubLiterals(s string) string {

@@ -286,13 +286,19 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 	}
 }
 
-// A one-character separator name follows the boundary rule, so it cannot
-// mask every colon in a detail string.
+// A one-character separator name identifies no one, so it is never masked and
+// cannot damage prose or embedded JSON detail.
 func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
-	known := newSupportKnown([]string{":"})
-	in := "dial tcp [x]:7880: connect: connection refused"
-	if got := supportScrub(in, known); got != in {
-		t.Errorf("supportScrub(%q) = %q", in, got)
+	for _, name := range []string{":", ",", `"`} {
+		known := newSupportKnown([]string{name})
+		for _, c := range []struct{ in, want string }{
+			{"dial tcp [x]:7880: connect: connection refused", "dial tcp [x]:7880: connect: connection refused"},
+			{`kick {"participant_ids":[1],"error":"ice failed"}`, `kick {"participant_ids":"[x]","error":"ice failed"}`},
+		} {
+			if got := supportScrub(c.in, known); got != c.want {
+				t.Errorf("name %q: supportScrub(%q)\n got %q\nwant %q", name, c.in, got, c.want)
+			}
+		}
 	}
 }
 
