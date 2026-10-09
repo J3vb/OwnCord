@@ -2279,7 +2279,7 @@ describe("SidebarArea", () => {
         { channelId: 2, newPosition: 0, previousPosition: 1 },
       ];
 
-      it("restores the previous positions of the whole batch when one write fails", async () => {
+      it("restores only the entry whose own write failed", async () => {
         const opts = defaultOpts();
         const toast = { show: vi.fn() };
         (opts.getToast as MockedFn).mockReturnValue(toast);
@@ -2294,7 +2294,9 @@ describe("SidebarArea", () => {
         callArgs.onReorderChannel(swap);
         await flush();
 
-        expect(positionOf(1)).toBe(0);
+        // Channel 1's PATCH was accepted, so it stays at its new position;
+        // channel 2's was rejected, so it goes back.
+        expect(positionOf(1)).toBe(1);
         expect(positionOf(2)).toBe(1);
         expect(toast.show).toHaveBeenCalledWith("Failed to save channel order", "error");
 
@@ -2320,7 +2322,7 @@ describe("SidebarArea", () => {
         cleanup(result);
       });
 
-      it("does not restore a channel whose position a broadcast changed meanwhile", async () => {
+      it("leaves a confirmed entry alone when its broadcast lands before the batch settles", async () => {
         const opts = defaultOpts();
         (opts.api.adminUpdateChannel as MockedFn)
           .mockResolvedValueOnce(undefined)
@@ -2331,11 +2333,12 @@ describe("SidebarArea", () => {
 
         const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
         callArgs.onReorderChannel(swap);
-        // A channel_update broadcast moves channel 1 before the writes settle.
-        seedOrder({ 1: 7 });
+        // The server broadcasts channel_update before it answers the PATCH, so
+        // channel 1's confirmed position can arrive before the batch settles.
+        seedOrder({ 1: 1 });
         await flush();
 
-        expect(positionOf(1)).toBe(7);
+        expect(positionOf(1)).toBe(1);
         expect(positionOf(2)).toBe(1);
 
         cleanup(result);

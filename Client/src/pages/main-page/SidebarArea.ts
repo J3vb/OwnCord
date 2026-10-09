@@ -459,22 +459,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above. On any failure, roll the whole batch back so the sidebar
-        // does not keep an order the server never accepted.
+        // above. Each rejected PATCH is rolled back to its own previous
+        // position, so the store matches the server (accepted entries sit at
+        // their new positions there, rejected ones at their old ones) and
+        // never races the channel_update broadcast of an accepted entry.
         void Promise.allSettled(
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
           if (results.some((r) => r.status === "rejected")) {
-            // Restore every entry (not only the failed one) so the order stays
-            // internally consistent, but skip a channel whose position no
-            // longer equals what this batch set: a channel_update broadcast
-            // for a successful PATCH has already moved it, and restoring
-            // would fight the server's value.
-            for (const r of reorders) {
-              if (channelsStore.getState().channels.get(r.channelId)?.position === r.newPosition) {
-                updateChannelPosition(r.channelId, r.previousPosition);
+            results.forEach((result, i) => {
+              const entry = reorders[i];
+              if (result.status === "rejected" && entry !== undefined) {
+                updateChannelPosition(entry.channelId, entry.previousPosition);
               }
-            }
+            });
             getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });
