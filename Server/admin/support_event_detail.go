@@ -2,10 +2,14 @@ package admin
 
 import (
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // events.json detail: a record's attributes, so a coded failure carries its
@@ -21,10 +25,12 @@ import (
 //     key=value pairs (LiveKit's own log fields) are redacted by the same key
 //     rule.
 //
-// A username or hostname written as a bare word in prose, with no key or
-// dotted form to recognise, cannot be told apart from other text and is not
-// caught. The free-form message itself is still never kept: only its fixed
-// event code.
+// Values the server already knows to be identifying (registered usernames and
+// display names, the server name, the hosts of configured addresses) are also
+// redacted wherever they appear in text. An unregistered bare word in free text
+// (a name that is not an account, a hostname without a dot or port) cannot be
+// told apart from other text and is not caught. The free-form message itself is
+// still never kept: only its fixed event code.
 
 const (
 	supportDetailMaxKeys  = 8
@@ -76,17 +82,78 @@ var (
 	supportPathPattern = regexp.MustCompile(`(^|[\s"'=(\[])((?:[A-Za-z]:)?(?:[\\/][^\s\\/:"'<>,;()\[\]{}]+){2,}[\\/]?)`)
 	supportIPv6Pattern = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?`)
 	supportIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	// A run long enough to be a credential, session id, UUID or JWT. It must
-	// mix letters and digits, so long snake_case words survive.
+	// A run long enough to be a credential, session id, UUID or JWT.
 	supportTokenPattern = regexp.MustCompile(`[A-Za-z0-9_\-+/=.]{20,}`)
-	supportHostPattern  = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})\b`)
+	// Everything after a home directory root up to a quote or the end, so a
+	// space in a name cannot leave a fragment.
+	supportHomePattern = regexp.MustCompile(`(?i)(?:/home/|/Users/|[A-Za-z]:\\Users\\)[^"'\r\n]*`)
+	// "nas:7880": a single-label host with a port. A leading "." or "/" is
+	// excluded so "participant.go:12" stays a source reference.
+	supportHostPortPattern = regexp.MustCompile(`(^|[^\w./-])([A-Za-z][\w-]*):(\d{2,5})\b`)
+	supportLocalhost       = regexp.MustCompile(`(?i)\blocalhost\b`)
+	supportHostPattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})\b`)
 	// Dotted names ending in these are source or data files, not hosts.
-	supportFileExtensions = []string{"go", "rs", "ts", "js", "mjs", "json", "yaml", "yml", "toml", "txt", "log", "sql", "db", "md", "html", "css", "exe", "dll", "so", "sock", "pem", "crt", "zip"}
+	supportFileExtensions = []string{"go", "ts", "js", "mjs", "json", "yaml", "yml", "toml", "txt", "log", "sql", "db", "html", "css", "exe", "dll", "sock", "pem", "crt"}
 )
 
-func supportScrub(s string) string {
+// supportKnownValues lists the identifying values the server holds: the given
+// registered names plus the name and addresses in its configuration.
+func supportKnownValues(cfg *config.Config, names []string) []string {
+	out := slices.Clone(names)
+	if cfg == nil {
+		return out
+	}
+	out = append(out, cfg.Server.Name, cfg.Voice.NodeIP, cfg.TLS.Domain)
+	for _, addr := range append([]string{cfg.Voice.LiveKitURL}, cfg.Server.AllowedOrigins...) {
+		if u, err := url.Parse(addr); err == nil {
+			out = append(out, u.Hostname())
+		}
+	}
+	return out
+}
+
+// supportKnownPattern matches any value, case-insensitively and as a whole
+// word. Values under three characters are skipped: they would mangle ordinary
+// words. It returns nil when nothing remains.
+func supportKnownPattern(values []string) *regexp.Regexp {
+	seen := map[string]bool{}
+	var parts []string
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if len([]rune(v)) < 3 || seen[strings.ToLower(v)] {
+			continue
+		}
+		seen[strings.ToLower(v)] = true
+		part := regexp.QuoteMeta(v)
+		if r, _ := utf8.DecodeRuneInString(v); isWordRune(r) {
+			part = `\b` + part
+		}
+		if r, _ := utf8.DecodeLastRuneInString(v); isWordRune(r) {
+			part += `\b`
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	slices.SortFunc(parts, func(a, b string) int { return len(b) - len(a) })
+	re, err := regexp.Compile(`(?i)` + strings.Join(parts, "|"))
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
+func isWordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func supportScrub(s string, known *regexp.Regexp) string {
 	s = supportURLPattern.ReplaceAllString(s, "[url]")
 	s = supportEmailPattern.ReplaceAllString(s, "[email]")
+	if known != nil {
+		s = known.ReplaceAllString(s, "[name]")
+	}
 	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportJSONKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
@@ -101,6 +168,7 @@ func supportScrub(s string) string {
 		}
 		return sub[1] + "=[redacted]"
 	})
+	s = supportHomePattern.ReplaceAllString(s, "[path]")
 	s = supportPathPattern.ReplaceAllString(s, "${1}[path]")
 	s = supportIPv6Pattern.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.Trim(m, ":") == "" {
@@ -109,12 +177,9 @@ func supportScrub(s string) string {
 		return "[ip]"
 	})
 	s = supportIPv4Pattern.ReplaceAllString(s, "[ip]")
-	s = supportTokenPattern.ReplaceAllStringFunc(s, func(m string) string {
-		if strings.ContainsAny(m, "0123456789") && strings.IndexFunc(m, func(r rune) bool { return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' }) >= 0 {
-			return "[token]"
-		}
-		return m
-	})
+	s = supportTokenPattern.ReplaceAllString(s, "[token]")
+	s = supportHostPortPattern.ReplaceAllString(s, "${1}[host]:${3}")
+	s = supportLocalhost.ReplaceAllString(s, "[host]")
 	return supportHostPattern.ReplaceAllStringFunc(s, func(m string) string {
 		if slices.Contains(supportFileExtensions, strings.ToLower(m[strings.LastIndexByte(m, '.')+1:])) {
 			return m
@@ -125,7 +190,7 @@ func supportScrub(s string) string {
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil
 // when none survive.
-func supportDetail(attrs string) map[string]any {
+func supportDetail(attrs string, known *regexp.Regexp) map[string]any {
 	var raw map[string]any
 	if attrs == "" || json.Unmarshal([]byte(attrs), &raw) != nil {
 		return nil
@@ -146,7 +211,7 @@ func supportDetail(attrs string) map[string]any {
 		case bool, float64:
 			out[key] = v
 		case string:
-			out[key] = supportTruncate(supportScrub(v))
+			out[key] = supportTruncate(supportScrub(v, known))
 		}
 	}
 	if len(out) == 0 {
@@ -168,10 +233,10 @@ func supportTruncate(s string) string {
 
 // supportAttachDetail fills Detail on events, newest first, until
 // supportDetailBudget is spent; older events past it keep only their code.
-func supportAttachDetail(events []supportEvent, attrs []string) {
+func supportAttachDetail(events []supportEvent, attrs []string, known *regexp.Regexp) {
 	used := 0
 	for i := len(events) - 1; i >= 0; i-- {
-		detail := supportDetail(attrs[i])
+		detail := supportDetail(attrs[i], known)
 		if detail == nil {
 			continue
 		}

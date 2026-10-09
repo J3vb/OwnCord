@@ -222,6 +222,10 @@ func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
 	if err != nil {
 		return supportSnapshot{}, err
 	}
+	names, err := s.service.KnownNames(ctx)
+	if err != nil {
+		return supportSnapshot{}, err
+	}
 	created := s.now().UTC()
 	data := []struct {
 		name    string
@@ -232,7 +236,7 @@ func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
 		{"configuration.json", []int{}, supportConfig(s.config)},
 		{"database.json", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, database},
 		{"health.json", []int{}, supportHealth(s.hub, created)},
-		{"events.json", []int{22}, supportEvents(s.logs)},
+		{"events.json", []int{22}, supportEvents(s.logs, supportKnownValues(s.config, names)...)},
 	}
 	var buffer bytes.Buffer
 	zw := zip.NewWriter(&buffer)

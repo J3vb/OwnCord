@@ -90,7 +90,7 @@ const supportEventsMax = 200
 // are kept, and any remaining slots are filled with the most recent
 // lower-level records, so a routine INFO burst can never evict a failure. The
 // result is returned in chronological order.
-func supportEvents(rb *RingBuffer) []supportEvent {
+func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 	if rb == nil {
 		return []supportEvent{}
 	}
@@ -137,7 +137,7 @@ func supportEvents(rb *RingBuffer) []supportEvent {
 	for j, i := range keep {
 		out[j], attrs[j] = valid[i].event, valid[i].attrs
 	}
-	supportAttachDetail(out, attrs)
+	supportAttachDetail(out, attrs, supportKnownPattern(known))
 	return out
 }
 
@@ -174,7 +174,7 @@ func supportRedactions() []supportRedaction {
 	return []supportRedaction{
 		{"configuration.json", "structural allowlist", "all credentials, tokens, TOTP/environment values, keys, names, paths, addresses, URLs, contacts, plugin allowlists and live database settings omitted; unrecognized enum values replaced with unspecified"},
 		{"database.json", "counts and compiled names only", "all row contents, SQL definitions/defaults, custom schema names, unknown migration names, plugin storage and search index excluded"},
-		{"events.json", "fixed event codes plus non-identifying attribute detail; up to 200 records, Warn/Error kept in preference to lower levels", "free-form messages, source paths, nested attributes and every attribute keyed as an identifier, user, name, address, host, path, URL, token, key or other credential omitted; URLs, emails, paths, IP addresses, hostnames and token-like strings inside kept values replaced by placeholders; invalid timestamps excluded"},
+		{"events.json", "fixed event codes plus non-identifying attribute detail; up to 200 records, Warn/Error kept in preference to lower levels", "free-form messages, source paths, nested attributes and every attribute keyed as an identifier, user, name, address, host, path, URL, token, key or other credential omitted; URLs, emails, paths, IP addresses, hostnames, token-like strings and the server's registered usernames, display names, server name and configured hosts inside kept values replaced by placeholders; invalid timestamps excluded"},
 		{"health.json", "aggregate numeric metrics only", "no per-user, session, channel or host labels"},
 	}
 }

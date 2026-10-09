@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 func TestSupportEvents_KeepsErrorReasonWithoutIdentifiers(t *testing.T) {
@@ -54,16 +56,22 @@ func TestSupportScrub(t *testing.T) {
 		{"lookup turn.example.com: no such host", "lookup [host]: no such host"},
 		{"Post \"https://lk.example.org/twirp/livekit.RoomService/RemoveParticipant\": EOF", "Post \"[url]\": EOF"},
 		{"mail to alice@example.com bounced", "mail to [email] bounced"},
-		{"open /home/alice/owncord/data/chat.db: permission denied", "open [path]: permission denied"},
-		{`open C:\Users\alice\AppData\owncord.db: access is denied`, "open [path]: access is denied"},
+		{"open /home/alice/owncord/data/chat.db: permission denied", "open [path]"},
+		{`open C:\Users\alice\AppData\owncord.db: access is denied`, "open [path]"},
 		{"invalid token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2lnbmF0dXJl", "invalid token [token]"},
 		{"rtc/participant.go:123 track published", "rtc/participant.go:123 track published"},
 		{`could not restart {"room": "channel-3", "participant": "alice", "pID": "PA_x", "error": "ice failed"}`, `could not restart {"room": "[redacted]", "participant": "[redacted]", "pID": "[redacted]", "error": "ice failed"}`},
 		{"join refused user=alice reason=full", "join refused user=[redacted] reason=full"},
+		{"dial tcp nas:7880: connect: connection refused", "dial tcp [host]:7880: connect: connection refused"},
+		{"dial tcp localhost:7880: i/o timeout", "dial tcp [host]:7880: i/o timeout"},
+		{"bad secret abcdefghijklmnopqrstuvwx rejected", "bad secret [token] rejected"},
+		{"open /home/alice smith/x", "open [path]"},
+		{"lookup chat.example.rs: no such host", "lookup [host]: no such host"},
+		{"lookup chat.example.md: no such host", "lookup [host]: no such host"},
 		{"server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z", "server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z"},
 	}
 	for _, c := range cases {
-		if got := supportScrub(c.in); got != c.want {
+		if got := supportScrub(c.in, nil); got != c.want {
 			t.Errorf("supportScrub(%q)\n got %q\nwant %q", c.in, got, c.want)
 		}
 	}
@@ -125,5 +133,39 @@ func TestSupportEvents_DetailStaysWithinItemLimit(t *testing.T) {
 	}
 	if events[len(events)-1].Detail == nil {
 		t.Fatal("newest event lost its detail")
+	}
+}
+
+func TestSupportScrub_KnownValues(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.Name = "Bunker Chat"
+	cfg.Voice.LiveKitURL = "ws://lkbox:7880"
+	known := supportKnownPattern(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab"}))
+
+	cases := []struct{ in, want string }{
+		{"user alice not found", "user [name] not found"},
+		{"user ALICE not found", "user [name] not found"},
+		{"user Alice Smith not found", "user [name] not found"},
+		{"alicetown is fine", "alicetown is fine"},
+		{"ab is too short to match", "ab is too short to match"},
+		{"welcome to bunker chat", "welcome to [name]"},
+		{"dial lkbox failed", "dial [name] failed"},
+	}
+	for _, c := range cases {
+		if got := supportScrub(c.in, known); got != c.want {
+			t.Errorf("supportScrub(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSupportEvents_RedactsKnownNames(t *testing.T) {
+	rb := NewRingBuffer(10)
+	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "RemoveParticipant failed (may already be gone)",
+		Attrs: `{"err":"user alice not found"}`})
+
+	got, _ := supportEvents(rb, "alice")[0].Detail["err"].(string)
+
+	if got != "user [name] not found" {
+		t.Fatalf("err = %q", got)
 	}
 }

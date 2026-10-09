@@ -83,3 +83,25 @@ func (d *DB) Diagnostics(ctx context.Context) (*DiagnosticSnapshot, error) {
 	out.WriterWaitCount, out.WriterWaitSeconds = stats.WaitCount, stats.WaitDuration.Seconds()
 	return out, nil
 }
+
+// DiagnosticNames returns the registered usernames and display names and the
+// server name, so the support bundle can redact them from event text.
+func (d *DB) DiagnosticNames(ctx context.Context) ([]string, error) {
+	rows, err := d.reader.QueryContext(ctx, `SELECT username FROM users
+		UNION SELECT display_name FROM users WHERE display_name IS NOT NULL
+		UNION SELECT value FROM settings WHERE key = 'server_name'
+		LIMIT 10000`)
+	if err != nil {
+		return nil, fmt.Errorf("diagnostics names: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("diagnostics names scan: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
