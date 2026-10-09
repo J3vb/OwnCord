@@ -5,6 +5,7 @@ import {
   autoConfirmEnablers,
   autoConfirmIsDefault,
   gstreamerBuildDepsMissing,
+  unboundedPlaywrightInstalls,
   signingKeyHolders,
 } from "./check-workflow-guards.mjs";
 
@@ -148,5 +149,24 @@ test("a Tauri build install without the GStreamer dev packages is caught", () =>
       { name: "driver.yml", src: install("webkit2gtk-driver", "xvfb") },
     ]),
     ["bare.yml", "half.yml"],
+  );
+});
+
+// `playwright install --with-deps` runs apt with no bound; a dead runner mirror
+// then holds the step until the job times out. The shared script bounds apt.
+test("a direct `playwright install --with-deps` step is caught", () => {
+  const step = (cmd) => `      - name: Install Playwright browser\n        run: ${cmd}`;
+  assert.deepEqual(
+    unboundedPlaywrightInstalls([
+      { name: "bad.yml", src: `steps:\n${step("npx playwright install --with-deps chromium")}` },
+      { name: "short.yml", src: "      - run: npx playwright install --with-deps chromium" },
+      { name: "shared.yml", src: step("bash ../scripts/ci/playwright-install.sh") },
+      { name: "browser-only.yml", src: step("npx playwright install chromium") },
+      { name: "comment.yml", src: "      # was: npx playwright install --with-deps chromium" },
+    ]),
+    [
+      { name: "bad.yml", line: 3 },
+      { name: "short.yml", line: 1 },
+    ],
   );
 });
