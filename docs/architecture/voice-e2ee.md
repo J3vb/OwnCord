@@ -233,14 +233,15 @@ alone).
 device switch during a slow join proceeds, and a connect that a newer one
 superseded closes its own room and reports it.
 
-**Still out, by owner decision (2026-09-22).** Input volume and the
-sensitivity (VAD) gate: the phase-1 device-module track was a plain libwebrtc
-`LocalAudioSource`, which never hands capture frames to a sink, so neither
-could be applied there. The audio-parity capture path (below) now has such a
-stage, but input volume and the gate were not in its scope: Linux relies on the
-engine's automatic gain control and Opus DTX, and the settings tab hides the
-Input Volume and Input Sensitivity controls there with a note pointing at the
-system mixer; the processing toggles, Enhanced Noise Suppression included,
+**Still out, by owner decision (2026-09-22).** Input volume: the phase-1
+device-module track was a plain libwebrtc `LocalAudioSource`, which never
+hands capture frames to a sink, so it could not be applied there. The
+audio-parity capture path (below) now has such a stage, but input volume was
+not in its scope: Linux relies on the engine's automatic gain control, and the
+settings tab hides the Input Volume control there with a note pointing at the
+system mixer. The sensitivity gate has since landed on that stage (below), so
+the Input Sensitivity slider shows on Linux too, without a live level in its
+bar; the processing toggles, Enhanced Noise Suppression included,
 apply at the next join. Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
@@ -749,7 +750,13 @@ publication; unmute reopens it on the device it last resolved, without
 enumerating devices. Push-to-talk never closes it: with the key up
 (`native_voice_set_ptt_gated`) each processed frame is zeroed after the APM
 and RNNoise ran, so the stream and their state stay up and the indicator
-stays lit while PTT is armed. The capture shares the
+stays lit while PTT is armed. The input-sensitivity gate
+(`native_voice_set_voice_gate`, `VoiceGate` in `capture.rs`) zeroes frames the
+same way: it is the web detector (`vad-worklet.js`) on the same scale, the RMS
+of each processed 10 ms frame against `vadThreshold`, with its ~32 ms attack,
+~320 ms hold, ~500 ms start-up grace and a 50 ms lookahead, and its
+`voiceGate` events drive the local speaking ring as the web detector's
+verdicts do. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

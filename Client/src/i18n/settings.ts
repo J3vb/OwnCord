@@ -368,5 +368,5 @@ export const settingsText = defineCatalog("settings", {
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
-    "On Linux, audio runs in the app's native engine. Your microphone level and voice sensitivity are handled by the engine's automatic gain control and silence detection, so the input volume and input sensitivity controls are not available here. Use your system mixer to adjust your microphone level.",
+    "On Linux, audio runs in the app's native engine. Your microphone level is handled by the engine's automatic gain control, so the input volume control is not available here and the level bar stays empty. Use your system mixer to adjust your microphone level.",
 });
