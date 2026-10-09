@@ -1460,6 +1460,27 @@ describe("media.ts", () => {
       expect(extractUrls("|||| https://example.com/x")).toEqual(["https://example.com/x"]);
     });
 
+    it("keeps a URL inside a spoiler whose body holds an escaped pipe", () => {
+      expect(extractUrls("||secret \\|| https://example.com/a.png ||")).toEqual([]);
+      expect(extractUrls("||a\\|b https://example.com/x||")).toEqual([]);
+    });
+
+    it("counts an escaped pipe right after the opener as spoiler content", () => {
+      expect(extractUrls("||\\|a https://example.com/x||")).toEqual([]);
+    });
+
+    it("lets an escaped backslash end the spoiler normally", () => {
+      expect(extractUrls("||a\\\\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an escaped pipe outside a spoiler as hiding a URL", () => {
+      expect(extractUrls("a \\| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not close a spoiler on an escaped pipe followed by a lone pipe", () => {
+      expect(extractUrls("||oops \\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
     it("does not let an unclosed spoiler hide a later URL", () => {
       expect(extractUrls("||oops https://example.com/x")).toEqual(["https://example.com/x"]);
     });
