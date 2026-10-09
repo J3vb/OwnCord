@@ -96,6 +96,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setPttGated", args]);
         return Promise.resolve();
       },
+      setVoiceGate: (...args: unknown[]) => {
+        host.calls.push(["setVoiceGate", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
@@ -389,6 +393,50 @@ describe("NativeRoom room surface", () => {
         ["setPttGated", [1, false]],
         ["setMicrophone", [1, true]],
       ]);
+    });
+  });
+
+  describe("input-sensitivity gate", () => {
+    // The web path's detector runs in the mic processor, which the native
+    // room has none of: the session's capture gates on the same threshold.
+    it("sends the threshold to the session, ahead of the capture on an enable", async () => {
+      const room = createNativeRoom(audio);
+      room.setVoiceGate(0.05, () => {});
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, false]],
+        ["setVoiceGate", [1, 0.05]],
+        ["setMicrophone", [1, true]],
+      ]);
+      host.calls.length = 0;
+
+      room.setVoiceGate(0.02, () => {});
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.02]]]);
+    });
+
+    it("reports the session's verdicts as the local speaking verdict", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate(0.05, (speaking) => verdicts.push(speaking));
+      // The gate starts open, as the web detector does.
+      expect(verdicts).toEqual([true]);
+
+      emit({ session: 1, event: { type: "voiceGate", open: false } });
+      emit({ session: 1, event: { type: "voiceGate", open: true } });
+      expect(verdicts).toEqual([true, false, true]);
+    });
+
+    it("a zero threshold runs no gate: no verdict, LiveKit decides", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate(0, (speaking) => verdicts.push(speaking));
+      emit({ session: 1, event: { type: "voiceGate", open: true } });
+      expect(verdicts).toEqual([null]);
     });
   });
 

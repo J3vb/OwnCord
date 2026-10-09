@@ -209,8 +209,8 @@ export class NativeRoom {
     trackPublications: new Map<string, NativeLocalPublication>(),
     getTrackPublication: (source: string): NativeLocalPublication | undefined =>
       this.localParticipant.trackPublications.get(source),
-    /** An enable sends the push-to-talk gate first, so the capture opens
-     *  behind it: with the key up it sends silence, never the room. A
+    /** An enable sends the push-to-talk and sensitivity gates first, so the
+     *  capture opens behind them: with the key up it sends silence, never the room. A
      *  disable (mute, deafen) stops the capture whatever the gate. */
     setMicrophoneEnabled: async (
       enabled: boolean,
@@ -219,7 +219,12 @@ export class NativeRoom {
     ): Promise<void> => {
       // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
       if (this.sessionId === null) throw new Error("native room is not connected");
-      if (enabled) await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
+      if (enabled) {
+        await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
+        // A new session starts with no sensitivity gate.
+        if (this.voiceThreshold > 0)
+          await desktop.nativeVoice.setVoiceGate(this.sessionId, this.voiceThreshold);
+      }
       // A device-switch re-enable passes no options: keep the last bitrate
       // so a first publish after a failed one is not left at the default.
       const bitrate = publishOptions?.audioPreset?.maxBitrate ?? this.micBitrate;
@@ -267,6 +272,10 @@ export class NativeRoom {
   private micBitrate: number | undefined;
   /** Push-to-talk's key is up: the session's open capture sends silence. */
   private pttGated = false;
+  /** The input-sensitivity gate's threshold (0: none) and who hears its
+   *  verdicts. */
+  private voiceThreshold = 0;
+  private onVoiceGate: (speaking: boolean | null) => void = () => {};
   /** The session's frame-socket base URL (token included); never logged. */
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
@@ -336,6 +345,20 @@ export class NativeRoom {
     desktop.nativeVoice
       .setPttGated(this.sessionId, gated)
       .catch((err) => log.warn("Push-to-talk could not switch the native gate", err));
+  }
+  /** The input-sensitivity gate for the native room, which has no web mic
+   *  processor to run the detector (AudioPipeline.startVadPolling): the
+   *  session's capture gates on `threshold`, the web path's scale, and its
+   *  verdicts go to `onSpeaking` — open at the start, as the web detector
+   *  starts, and null when 0 runs no gate. */
+  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void {
+    this.voiceThreshold = threshold;
+    this.onVoiceGate = onSpeaking;
+    onSpeaking(threshold > 0 ? true : null);
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setVoiceGate(this.sessionId, threshold)
+      .catch((err) => log.warn("Voice sensitivity could not reach the native gate", err));
   }
   /** Native playout needs no autoplay gesture. */
   startAudio(): Promise<void> {
@@ -791,6 +814,9 @@ export class NativeRoom {
           canPublishSources: [],
         };
         this.emit(RoomEvent.ParticipantPermissionsChanged, undefined, this.localParticipant);
+        break;
+      case "voiceGate":
+        if (this.voiceThreshold > 0) this.onVoiceGate(event.open);
         break;
       case "activeSpeakers":
         this.emit(

@@ -9,7 +9,8 @@
 // sensitivity, push-to-talk) and re-applies them to whichever processor is
 // live, runs the VAD worklet on the processor's tap, and mirrors the
 // Enhanced Noise Suppression preference into it. The Linux native room has
-// no web mic track and so no processor: push-to-talk goes to its own gate.
+// no web mic track and so no processor: push-to-talk and the sensitivity
+// threshold go to its own gates.
 
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/preferences";
@@ -229,6 +230,12 @@ interface PttGatedRoom {
   setPttGated(gated: boolean): void;
 }
 
+/** A room that runs the sensitivity gate on its own capture (NativeRoom),
+ *  reporting its verdicts as the detector's `onGate` would. */
+interface VoiceGatedRoom {
+  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void;
+}
+
 export class AudioPipeline {
   private room: Room | null = null;
   private processor: MicProcessor | null = null;
@@ -254,6 +261,16 @@ export class AudioPipeline {
 
   setRoom(room: Room | null): void {
     this.room = room;
+    this.applyRoomVoiceGate();
+  }
+
+  /** Hand the saved sensitivity to a room that gates its own capture. */
+  private applyRoomVoiceGate(): void {
+    const sensitivity = loadPref<number>("voiceSensitivity", 50);
+    (this.room as Partial<VoiceGatedRoom> | null)?.setVoiceGate?.(
+      vadThreshold(sensitivity),
+      (speaking) => this.onGateSpeaking?.(speaking),
+    );
   }
 
   /** Whether a mic processor is live. */
@@ -432,6 +449,7 @@ export class AudioPipeline {
     this.voiceSensitivity = clamped;
     savePref("voiceSensitivity", clamped);
     this.startVadPolling();
+    this.applyRoomVoiceGate();
     log.debug("Voice sensitivity updated", { sensitivity: clamped });
   }
 

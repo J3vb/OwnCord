@@ -1632,13 +1632,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return select!;
   }
 
-  it("hides the input volume and sensitivity controls and explains why", async () => {
+  it("hides the input volume control and explains why", async () => {
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
     expect(headings).not.toContain("Input Volume");
-    expect(headings).not.toContain("Input Sensitivity");
     // The engine's playout mixer applies output volume.
     expect(headings).toEqual(
       expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
@@ -1655,13 +1654,29 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     );
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
     expect(note?.textContent).toContain("system mixer");
-    expect(tab.element.querySelector(".mic-meter-wrap")).toBeNull();
+    expect(note?.textContent).not.toMatch(/sensitivity/i);
     // The native engine acquires no audio through the webview. The camera
     // preview may still call getUserMedia (video only) since voice #22 starts
     // it on the default device; no audio request may occur.
     for (const call of getUserMedia.mock.calls) {
       expect((call[0] as MediaStreamConstraints).audio).toBe(false);
     }
+  });
+
+  // The engine's capture runs the sensitivity gate on the web path's scale;
+  // there is no webview microphone to meter, so the bar shows no level.
+  it("shows the input sensitivity slider and applies it to the call", async () => {
+    mockSetVoiceSensitivity.mockClear();
+    const tab = await mount();
+    const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
+      (h) => h.textContent,
+    );
+    expect(headings).toContain("Input Sensitivity");
+    const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
+    expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("45");
+    expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
   });
 
   it("tells the user the processing toggles apply on the next join", async () => {
