@@ -45,12 +45,23 @@ describe("tauri.conf.json — CSP", () => {
     expect(directive("connect-src").sort()).toEqual(
       [
         "'self'",
+        "ipc:",
         "http://ipc.localhost",
         "http://localhost:*",
         "ws://localhost:*",
         "http://127.0.0.1:*",
         "ws://127.0.0.1:*",
       ].sort(),
+    );
+  });
+
+  // Windows reaches IPC at http://ipc.localhost; Linux and macOS at ipc://localhost.
+  // Without `ipc:` the Linux webview blocks the custom protocol and Tauri falls
+  // back to postMessage, which hands a raw-bytes command (external_image) back as a
+  // number[] instead of an ArrayBuffer — every broker image then fails to decode.
+  it("connect-src lists both IPC schemes, so Linux keeps the binary-safe custom protocol", () => {
+    expect(directive("connect-src")).toEqual(
+      expect.arrayContaining(["ipc:", "http://ipc.localhost"]),
     );
   });
 });
