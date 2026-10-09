@@ -55,6 +55,8 @@ and only when it changes something a contributor or fork holder must do
 
 - **Linux camera honours the 720p default**: the native camera now captures at the selected quality's resolution, so the 720p default no longer encodes a 1080p source on Linux. Choosing 1080p still captures 1080p.
 - **Screen-share audio sounds like music**: audio shared with a screen is now sent in stereo at music quality, with echo cancellation, noise suppression and auto-gain off and silence suppression disabled, so game and music audio no longer pumps or gets voice-processed.
+- **First-contact calls say why they cannot ring**: calling someone who has not accepted your message request now tells you straight away that calls work after they accept, instead of ringing for 30 seconds unheard. The ring is still never delivered to them.
+- **Missed-call notice when the caller hangs up early**: if the caller gives up or drops before the ring times out, the person being called now gets the same "Missed call" notice as for a timeout.
 - **Camera defaults to 720p**: a new camera now sends 720p instead of 1080p, with half the CPU cost. Choosing 1080p in Voice settings still works and now also sends a 720p layer, so viewers on a slow link get a sharp 720p picture rather than a blurry 360p one. A quality you already chose is kept.
 
 ### Fixed

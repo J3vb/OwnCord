@@ -68,6 +68,9 @@ export type WsErrorCode =
   // A write refused by an active moderator timeout: a send or edit, a
   // reaction, a voice join, a call ring, or a custom status.
   | "TIMED_OUT"
+  // A 1:1 call ring to someone who has not accepted the caller's message
+  // request: refused at once, the ring is never delivered (D-03).
+  | "CALL_REQUIRES_ACCEPTANCE"
   | "CONFLICT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
