@@ -777,11 +777,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       host: string;
       id?: string;
       username?: string;
+      synthetic?: boolean;
     }[] {
       const saved = profileManager.getAll();
       if (saved.length > 0) return saved;
       // Fallback: show a default local server entry
-      return [{ name: connectText("profiles.defaultName"), host: "localhost:8443" }];
+      return [
+        { name: connectText("profiles.defaultName"), host: "localhost:8443", synthetic: true },
+      ];
     }
 
     // Persist a profile mutation, surfacing a failure instead of letting it
