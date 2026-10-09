@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+- **Messages & files**: Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
+
 ## v2.2.0-beta.2
 
 **OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
