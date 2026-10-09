@@ -53,6 +53,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
 
+### Changed
+
+**Messages & files**
+
+- Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
+
 ## v2.2.0-beta.2
 
 **OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
@@ -130,7 +136,9 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - First-run setup waits its turn for password checks like sign-in does and says "try again later" when the server is busy, and the owner's setup login no longer shows as an unreviewed new login.
 - Unblocking someone you had not blocked no longer clears an ignored Message Request, so their next message does not raise it again.
 - Plugin HTTP responses are checked more strictly against their declared content type.
+- Dragging files or images from your file manager onto OwnCord did nothing. They now attach to the message you are writing (desktop app and browser).
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+- **GIFs and linked images load on Linux again**: the desktop client's security policy now allows the app's own internal channel on Linux, so image bytes reach the picker and message embeds intact.
 
 **Support bundles**
 
