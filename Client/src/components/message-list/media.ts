@@ -34,6 +34,7 @@ import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
   MASKED_LINK_REGEX,
+  SPOILER_REGEX,
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
@@ -450,11 +451,13 @@ export function renderInlineImage(url: string): HTMLDivElement {
 /** Extract all URLs from a message content string. */
 export function extractUrls(content: string): string[] {
   // Skip URLs inside code blocks, and inside masked links: `[text](url)` is a
-  // deliberate act of hiding the address, so it gets no embed either.
+  // deliberate act of hiding the address, so it gets no embed either. The
+  // same goes for `||spoilers||`: a hidden address must not be previewed.
   const withoutCodeBlocks = content
     .replace(CODE_BLOCK_REGEX, "")
     .replace(INLINE_CODE_REGEX, "")
-    .replace(MASKED_LINK_REGEX, "");
+    .replace(MASKED_LINK_REGEX, "")
+    .replace(SPOILER_REGEX, "");
   const matches = withoutCodeBlocks.match(URL_REGEX);
   // Strip the same trailing sentence punctuation the linkifier strips (see
   // stripUrlTrailingPunctuation), so the embed pipeline and the rendered

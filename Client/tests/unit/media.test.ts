@@ -1442,6 +1442,41 @@ describe("media.ts", () => {
       expect(urls).toEqual([]);
     });
 
+    it("skips a URL that is wholly inside a spoiler", () => {
+      expect(extractUrls("||https://example.com/a.png||")).toEqual([]);
+    });
+
+    it("skips a spoilered URL but keeps one outside it", () => {
+      expect(extractUrls("look ||https://example.com/a.png|| and https://example.com/b")).toEqual([
+        "https://example.com/b",
+      ]);
+    });
+
+    it("skips a URL inside a spoiler that also holds prose", () => {
+      expect(extractUrls("||see https://example.com/a.png now||")).toEqual([]);
+    });
+
+    it("skips a URL inside a spoiler that spans lines", () => {
+      expect(extractUrls("||first\nhttps://example.com/a.png||")).toEqual([]);
+    });
+
+    it("leaves other URLs alone when a spoiler holds no URL", () => {
+      expect(extractUrls("||secret|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat a single pipe as a spoiler", () => {
+      expect(extractUrls("a | https://example.com/x")).toEqual(["https://example.com/x"]);
+      expect(extractUrls("a | b | https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an empty || || pair as a spoiler", () => {
+      expect(extractUrls("|||| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not let an unclosed spoiler hide a later URL", () => {
+      expect(extractUrls("||oops https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
     it("extracts URLs outside code blocks but not inside", () => {
       const urls = extractUrls("https://visible.com ```https://hidden.com```");
       expect(urls).toEqual(["https://visible.com"]);
