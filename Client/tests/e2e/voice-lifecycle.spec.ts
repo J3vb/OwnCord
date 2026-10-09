@@ -86,6 +86,13 @@ test.describe("Voice widget", () => {
 
     await joinVoiceChannelByName(page);
     await expect(widget).toHaveClass(/visible/);
+    // This mock never opens a real room; mark the session connected through
+    // the status seam (camera and share stay disabled while connecting).
+    await page.evaluate(() =>
+      (
+        window as unknown as { __owncord: { setVoiceStatus(s: string): void } }
+      ).__owncord.setVoiceStatus("connected"),
+    );
 
     // All five controls are visible and enabled once connected.
     for (const label of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
