@@ -19,7 +19,8 @@ import (
 //     value. Only string, number and boolean values survive; groups and lists
 //     (resolved LogValuers such as db.User) are dropped.
 //   - Every surviving string is scrubbed (supportScrub): URLs, emails, paths,
-//     IP addresses, token-like runs and hostnames are replaced by a fixed
+//     IP addresses, token-like runs, credentials after an auth scheme or a
+//     password/token label, and hostnames are replaced by a fixed
 //     placeholder, and identifying keys embedded in the text as JSON or
 //     key=value pairs (LiveKit's own log fields) are redacted by the same key
 //     rule.
@@ -111,62 +112,84 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 	return out
 }
 
-// supportKnown holds the identifying values to redact. Single-word values go
-// in a lowercase set checked per word token, so any number of names costs
-// O(words); values with spaces or punctuation are few and matched as
-// case-insensitive substrings.
-type supportKnown struct {
-	words   map[string]bool
-	phrases []*regexp.Regexp
-}
+// supportKnown holds the identifying values to redact, each split into
+// lowercase word tokens and indexed by its first token, so any number of names
+// costs O(words) per value. Matching is by whole words, so a name of any
+// length is redacted without mangling the words that contain it.
+type supportKnown map[string][][]string
 
 var supportWordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 
-// newSupportKnown skips values under three characters: they would mangle
-// ordinary words. It returns nil when nothing remains.
-func newSupportKnown(values []string) *supportKnown {
-	k := &supportKnown{words: map[string]bool{}}
-	seen := map[string]bool{}
+// newSupportKnown returns nil when no value has a word in it.
+func newSupportKnown(values []string) supportKnown {
+	k := supportKnown{}
 	for _, v := range values {
-		v = strings.TrimSpace(v)
-		lower := strings.ToLower(v)
-		if utf8.RuneCountInString(v) < 3 || seen[lower] {
-			continue
-		}
-		seen[lower] = true
-		if supportWordPattern.FindString(v) == v {
-			k.words[lower] = true
-		} else {
-			k.phrases = append(k.phrases, regexp.MustCompile(`(?i)`+regexp.QuoteMeta(v)))
+		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
+		if len(words) > 0 {
+			k[words[0]] = append(k[words[0]], words)
 		}
 	}
-	if len(k.words) == 0 && len(k.phrases) == 0 {
+	if len(k) == 0 {
 		return nil
 	}
 	return k
 }
 
-func (k *supportKnown) scrub(s string) string {
-	for _, re := range k.phrases {
-		s = re.ReplaceAllString(s, "[name]")
-	}
-	if len(k.words) == 0 {
+func (k supportKnown) scrub(s string) string {
+	if len(k) == 0 {
 		return s
 	}
-	return supportWordPattern.ReplaceAllStringFunc(s, func(w string) string {
-		if k.words[strings.ToLower(w)] {
-			return "[name]"
+	spans := supportWordPattern.FindAllStringIndex(s, -1)
+	words := make([]string, len(spans))
+	for i, sp := range spans {
+		words[i] = strings.ToLower(s[sp[0]:sp[1]])
+	}
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(words); i++ {
+		n := 0
+		for _, name := range k[words[i]] {
+			if len(name) > n && i+len(name) <= len(words) && slices.Equal(name, words[i:i+len(name)]) {
+				n = len(name)
+			}
 		}
-		return w
-	})
+		if n == 0 {
+			continue
+		}
+		b.WriteString(s[last:spans[i][0]])
+		b.WriteString("[name]")
+		last = spans[i+n-1][1]
+		i += n - 1
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
-func supportScrub(s string, known *supportKnown) string {
+// A credential following its scheme or label: "Bearer x", "password: x",
+// "token Xy9q". After a bare label (no ":" or "="), only a word that looks
+// like a token (a digit, an upper-case letter or a symbol) is taken, so
+// "token expired" stays readable.
+var (
+	supportCredentialPattern = regexp.MustCompile(`(?i)\b(authorization|password|passwd|pwd|secret|token|api[_-]?key|credentials?)(\s*[:=]\s*|\s+)((?:(?:bearer|basic|digest)\s+)?(?:"[^"]*"|[^\s,;]+))`)
+	supportSchemePattern     = regexp.MustCompile(`(?i)\b(bearer|basic|digest)\s+([^\s,;\[]\S*)`)
+)
+
+func supportScrubCredentials(s string) string {
+	s = supportCredentialPattern.ReplaceAllStringFunc(s, func(m string) string {
+		sub := supportCredentialPattern.FindStringSubmatch(m)
+		value := sub[3]
+		if strings.HasPrefix(value, "[") || strings.TrimSpace(sub[2]) == "" && strings.IndexFunc(value, func(r rune) bool { return r < 'a' || r > 'z' }) < 0 {
+			return m
+		}
+		return sub[1] + sub[2] + "[redacted]"
+	})
+	return supportSchemePattern.ReplaceAllString(s, "${1} [redacted]")
+}
+
+func supportScrub(s string, known supportKnown) string {
 	s = supportURLPattern.ReplaceAllString(s, "[url]")
 	s = supportEmailPattern.ReplaceAllString(s, "[email]")
-	if known != nil {
-		s = known.scrub(s)
-	}
+	s = known.scrub(s)
 	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportJSONKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
@@ -191,6 +214,7 @@ func supportScrub(s string, known *supportKnown) string {
 	})
 	s = supportIPv4Pattern.ReplaceAllString(s, "[ip]")
 	s = supportTokenPattern.ReplaceAllString(s, "[token]")
+	s = supportScrubCredentials(s)
 	s = supportHostPortPattern.ReplaceAllString(s, "${1}[host]:${3}")
 	s = supportLocalhost.ReplaceAllString(s, "[host]")
 	return supportHostPattern.ReplaceAllStringFunc(s, func(m string) string {
@@ -203,7 +227,7 @@ func supportScrub(s string, known *supportKnown) string {
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil
 // when none survive.
-func supportDetail(attrs string, known *supportKnown) map[string]any {
+func supportDetail(attrs string, known supportKnown) map[string]any {
 	var raw map[string]any
 	if attrs == "" || json.Unmarshal([]byte(attrs), &raw) != nil {
 		return nil
@@ -246,7 +270,7 @@ func supportTruncate(s string) string {
 
 // supportAttachDetail fills Detail on events, newest first, until
 // supportDetailBudget is spent; older events past it keep only their code.
-func supportAttachDetail(events []supportEvent, attrs []string, known *supportKnown) {
+func supportAttachDetail(events []supportEvent, attrs []string, known supportKnown) {
 	used := 0
 	for i := len(events) - 1; i >= 0; i-- {
 		detail := supportDetail(attrs[i], known)

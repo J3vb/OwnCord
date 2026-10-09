@@ -69,6 +69,11 @@ func TestSupportScrub(t *testing.T) {
 		{"open /home/alice smith/x", "open [path]"},
 		{"lookup chat.example.rs: no such host", "lookup [host]: no such host"},
 		{"lookup chat.example.md: no such host", "lookup [host]: no such host"},
+		{"auth failed: Bearer private-token", "auth failed: Bearer [redacted]"},
+		{"Authorization: Basic dXNlcjpwYXNz", "Authorization: [redacted]"},
+		{"password: hunter2 rejected", "password: [redacted] rejected"},
+		{"bad token Xy9q rejected", "bad token [redacted] rejected"},
+		{"token expired", "token expired"},
 		{"server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z", "server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z"},
 	}
 	for _, c := range cases {
@@ -148,7 +153,10 @@ func TestSupportScrub_KnownValues(t *testing.T) {
 		{"user ALICE not found", "user [name] not found"},
 		{"user Alice Smith not found", "user [name] not found"},
 		{"alicetown is fine", "alicetown is fine"},
-		{"ab is too short to match", "ab is too short to match"},
+		{"ab left the call", "[name] left the call"},
+		{"cab is not ab", "cab is not [name]"},
+		{"Alice  smith joined", "[name] joined"},
+		{"malice smithy", "malice smithy"},
 		{"welcome to bunker chat", "welcome to [name]"},
 		{"dial lkbox failed", "dial [name] failed"},
 	}
