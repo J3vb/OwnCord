@@ -42,3 +42,38 @@ test:
 # still enter the CI failure path; retry those in their workflows.
 ci:
   rerun_transient: 1
+
+# Checklists the reviewer applies to changed files under each path. They target
+# the finding classes that kept surviving review; AGENTS.md has the full rules.
+# Like test.instructions, path_instructions is read only from origin/main, so it
+# takes effect once this file reaches main with the next release.
+review:
+  path_instructions:
+    - path: "Server/**"
+      instructions: |
+        Concurrency and ordering:
+        - A check followed by an act on the same state (participant check then
+          reopen, exists then insert) must be atomic: one transaction, one
+          conditional statement, or one held lock. Flag any gap between them.
+        - Concurrent callers of the same mutation (two reopens, two joins) must
+          be serialized or idempotent; ask what the second caller sees.
+        - Events that belong together (reopen then ring, leave then incoming)
+          must go through one queue or one ordered send. Flag related events
+          delivered on different queues or goroutines, since they can reorder.
+        - Name the lock or transaction that protects each new shared field.
+    - path: "Client/src/**"
+      instructions: |
+        UI state and layout:
+        - After removing or replacing a focused control, focus must move to a
+          sensible element, not fall to <body>.
+        - When a view moves (pop-out, re-parent, rebuild), carry the hidden,
+          muted and stopped state of its tracks and controls across.
+        - Labels, timers and ids reused before their window or timeout closes
+          must be cancelled or made unique; flag stale callbacks firing on the
+          new owner.
+        - New or extracted client code belongs under src/features/ with relative
+          imports, messages.store mutators come from the @stores/messages.store
+          facade (never its reducer modules), and WebSocket
+          events reach stores only via src/lib/dispatcher.ts (see AGENTS.md).
+        - When rebasing or merging, keep values the base already has; do not
+          overwrite them with the stale branch copy.
