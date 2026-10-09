@@ -1115,6 +1115,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       { signal },
     );
 
+    // Files dragged in from the OS: accepted anywhere in the window, like
+    // Discord. dragover is cancelled by the app-wide fileDropGuard.
+    if (options.onUploadFile !== undefined) {
+      document.addEventListener(
+        "drop",
+        (e: DragEvent) => {
+          const dt = e.dataTransfer;
+          if (dt === null || !dt.types.includes("Files")) return;
+          e.preventDefault();
+          for (const file of dt.files) void handlePasteFile(file);
+        },
+        { signal },
+      );
+    }
+
     // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
     // decide the popup's fate — without this, completing a mention/emoji
     // after moving the caret away with the keyboard splices at a stale offset.

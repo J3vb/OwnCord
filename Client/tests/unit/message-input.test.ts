@@ -2038,6 +2038,60 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── Drag-and-drop file handling ──
+
+  // jsdom has no DragEvent/DataTransfer: build a plain Event carrying the two
+  // fields the handler reads.
+  function fileDrop(files: File[], types: string[] = ["Files"]): Event {
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "dataTransfer", { value: { types, files } });
+    return ev;
+  }
+
+  it("dropping files anywhere on the page uploads each of them", async () => {
+    const onUploadFile = vi.fn(async (file: File) => ({
+      id: file.name,
+      url: "http://x",
+      filename: file.name,
+    }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+
+    const a = new File(["a"], "a.png", { type: "image/png" });
+    const b = new File(["b"], "b.txt", { type: "text/plain" });
+    const drop = fileDrop([a, b]);
+    document.body.dispatchEvent(drop);
+
+    expect(drop.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+    expect(onUploadFile.mock.calls.map(([f]) => f)).toEqual([a, b]);
+    comp.destroy?.();
+  });
+
+  it("ignores a drop that carries no files (a dragged text selection)", () => {
+    const onUploadFile = vi.fn();
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+
+    const drop = fileDrop([], ["text/plain"]);
+    document.body.dispatchEvent(drop);
+
+    expect(drop.defaultPrevented).toBe(false);
+    expect(onUploadFile).not.toHaveBeenCalled();
+    comp.destroy?.();
+  });
+
+  it("stops listening for drops once the composer is destroyed", () => {
+    const onUploadFile = vi.fn();
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+    comp.destroy?.();
+
+    document.body.dispatchEvent(fileDrop([new File(["a"], "a.png", { type: "image/png" })]));
+
+    expect(onUploadFile).not.toHaveBeenCalled();
+  });
+
   // ── Files with an empty MIME type are uploaded; the server sniffs them (D1 a) ──
 
   it("files with empty MIME type are uploaded", async () => {

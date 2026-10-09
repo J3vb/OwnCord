@@ -21,6 +21,7 @@
         "decorations": true,
         "resizable": true,
         "center": true,
+        "dragDropEnabled": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --auto-accept-camera-and-microphone-capture"
       }
     ],

@@ -10,6 +10,8 @@ import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { setOwnedTimeout } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { installFileDropGuard } from "@lib/fileDropGuard";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import {
@@ -117,6 +119,9 @@ document.addEventListener("keydown", (e) => {
     void desktop.devTools.open();
   }
 });
+
+// A file dropped where no composer listens must not navigate the webview.
+installFileDropGuard(new Disposable().signal);
 
 // Open external links (target="_blank") in the user's default browser.
 document.addEventListener("click", (e) => {

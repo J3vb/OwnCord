@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+- Unblocking someone you had not blocked cleared an ignored Message Request, so their next message raised it again — unblock is now a no-op unless a block was removed.
+- Plugin HTTP responses are checked more strictly against their declared content type.
+- Dragging files or images from your file manager onto OwnCord did nothing. They now attach to the message you are writing (desktop app and browser).
+
 ## v2.2.0-beta.2
 
 **OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
