@@ -1146,9 +1146,16 @@ jobs:
         working-directory: Client/
         run: npm ci
 
+      - name: Cache Playwright browser
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+
       - name: Install Playwright browser
+        timeout-minutes: 8
         working-directory: Client/
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/ci/playwright-install.sh
 
       # The pinned livekit-server archive (~60 MB) is the slow, flaky part of
       # this job. install-livekit.mjs still verifies the pinned sha256 on every
@@ -1206,8 +1213,15 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Cache Playwright browser
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: bash ../scripts/ci/playwright-install.sh
 
       # Fast feedback by default. `client-e2e-parity` runs the complete
       # 694-test suite against the built bundle, and until this split this job
@@ -1274,8 +1288,15 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Cache Playwright browser
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: bash ../scripts/ci/playwright-install.sh
 
       - name: Run admin-panel journey
         run: npm run test:e2e:admin
@@ -1320,8 +1341,15 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Cache Playwright browser
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: bash ../scripts/ci/playwright-install.sh
 
       - name: Run production e2e specs
         run: npm run test:e2e:prod
@@ -1509,7 +1537,14 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Cache Playwright browser
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+      - name: Install Playwright browser
+        timeout-minutes: 8
+        run: bash ../scripts/ci/playwright-install.sh
       - name: Cache livekit-server archive
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
