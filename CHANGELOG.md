@@ -89,7 +89,8 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 
 - Robot-sounding or choppy voice: the input-sensitivity gate no longer chops quiet microphones.
 - The "Secured" badge degrades on repeated decrypt failures even in short bursts; its grace window restarts only after a new key is installed.
-- Starting a microphone now makes a single capture request and reads the result back from the live track.
+- Rejoining voice no longer switches on the browser's voice isolation, which Settings never showed and could make a voice sound robotic; your saved microphone processing settings are applied every time.
+- With the microphone set to Default, unplugging and replugging it moves the call back to the system default instead of staying on the device it fell back to.
 - The speaking ring lights up at normal speaking volume.
 - Screen share degrades instead of freezing on a weak link.
 - A stalled voice connection that fails to resume now escalates to a full reconnect.
