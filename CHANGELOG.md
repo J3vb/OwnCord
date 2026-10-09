@@ -81,7 +81,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- A voice join that kept failing could be retried several times a second, churning join/leave on the server — after a failed join the next one now waits 2 s, doubling up to 30 s, and says so.
+- After a failed voice join the next one now waits 2 s, doubling up to 30 s, and says so, so a failing join can no longer be retried several times a second. This contains a join/leave loop reported on a server (stuck at "securing", then leaving); its trigger is not yet identified and needs a client support bundle.
 
 **Linux desktop**
 

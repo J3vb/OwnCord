@@ -23,6 +23,8 @@ import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@li
 import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
+import { voiceText } from "../i18n/voice";
+import { joinRetryInMs } from "../features/voice/joinBackoff";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
@@ -577,6 +579,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // reconnected.
     if (uiStore.getState().connectionStatus !== "connected") {
       showToast(account("voice.canAnswerWhileReconnecting"), "error");
+      return;
+    }
+    const waitMs = joinRetryInMs();
+    if (waitMs > 0) {
+      showToast(voiceText("join.backoff", { seconds: Math.ceil(waitMs / 1000) }), "error");
       return;
     }
     const ring = ringCtrl?.current() ?? null;
