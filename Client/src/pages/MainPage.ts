@@ -796,12 +796,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
-    // the sidebar's first control: the first of them that takes focus.
+    // the sidebar's first visible control: the first of them that takes focus.
+    // A permission-gated header button (Invite, Audit Log) is hidden inline, so
+    // the first button in the DOM can be one that can never take focus.
     const focusReachable = (): HTMLElement | null => {
       const candidates = [
         chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
         chatAreaResult.sidebarToggle,
-        sidebar.sidebarWrapper.querySelector<HTMLElement>("button"),
+        ...Array.from(sidebar.sidebarWrapper.querySelectorAll<HTMLElement>("button")).filter(
+          (b) => b.style.display !== "none" && b.style.visibility !== "hidden",
+        ),
       ];
       for (const el of candidates) {
         el?.focus();
