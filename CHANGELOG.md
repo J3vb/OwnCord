@@ -109,6 +109,7 @@ and only when it changes something a contributor or fork holder must do
 
 - **Permission checks**: asking whether a member holds an empty permission set now always answers no, administrators included, matching the other permission helpers.
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
+- **Server support bundle detail**: `events.json` kept only an event name per record, so a bundle showed that something failed (for example a LiveKit participant removal) but never why. Each record now also carries its error reason and other detail, with ids, usernames, names, addresses, hostnames, paths and tokens removed.
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
 - **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
