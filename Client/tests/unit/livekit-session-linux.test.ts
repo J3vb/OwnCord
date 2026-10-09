@@ -308,7 +308,13 @@ describe("LiveKitSession on the Linux native backend", () => {
   it("installs the room key natively before connecting, then publishes the mic", async () => {
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     // The push-to-talk gate is set before the capture opens behind it.
-    expect(names()).toEqual(["setRoomKey", "connect", "setPttGated", "setVoiceGate", "setMicrophone"]);
+    expect(names()).toEqual([
+      "setRoomKey",
+      "connect",
+      "setPttGated",
+      "setVoiceGate",
+      "setMicrophone",
+    ]);
     expect(host.commands[0]).toEqual(["setRoomKey", ["mock-room-key-base64"]]);
     expect(host.commands[1]).toEqual([
       "connect",
