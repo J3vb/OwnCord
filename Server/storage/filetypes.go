@@ -46,14 +46,14 @@ type FileTypePolicy struct {
 // ignored.
 func (p FileTypePolicy) Check(filename string) error {
 	name := strings.ToLower(strings.TrimRight(filename, ". "))
-	dot := strings.LastIndexByte(name, '.')
-	if dot < 0 {
+	_, rawExt, found := strings.CutLast(name, ".")
+	if !found {
 		if len(p.Allowed) == 0 {
 			return nil
 		}
 		return errors.New("blocked file type: no file extension")
 	}
-	ext := strings.TrimSpace(name[dot+1:])
+	ext := strings.TrimSpace(rawExt)
 	if slices.Contains(p.Blocked, ext) || len(p.Allowed) > 0 && !slices.Contains(p.Allowed, ext) {
 		return fmt.Errorf("blocked file type: .%s", ext)
 	}

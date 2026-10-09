@@ -45,7 +45,7 @@ linters:
     # Complexity budgets set to a TARGET, not to whatever passes today. An
     # exclusion list goes stale and quietly becomes permanent, whereas a
     # failing check is a backlog you can see. The tree is currently clean at
-    # every threshold below (golangci-lint v2.13.2 reports 0 issues over
+    # every threshold below (golangci-lint v2.14.0 reports 0 issues over
     # Server/), so a new failure is a regression to fix, not accepted backlog.
     #
     # These are not the tool defaults (60/40, 10, 4). The defaults descend from
