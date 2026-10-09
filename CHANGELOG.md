@@ -62,7 +62,6 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
-- **Linux camera and screen share**: turning a camera or screen share on while the voice connection is rebuilding no longer drops it; the republished stream is kept instead of being unpublished as a stray.
 - **Calls queued during a connection drop**: a call ring that was waiting to be sent when the connection dropped is no longer sent afterwards, so "Calling…" no longer shows for 30 seconds with nobody notified. Pressing Call again within a few seconds now waits a little longer so the server does not refuse the second ring, and a ring the server does refuse ends "Calling…".
 - **DM call state**: a group ring now stops when the last person leaves, even after the caller hung up first; the camera and screen-share buttons wait until the call has connected instead of failing with "Join a voice channel first"; after the other person hangs up you see "<name> left the call" with Ring again; and a group call whose online members all declined no longer waits out the 30 s timer for offline members.
 - **Linux input sensitivity**: on the Linux desktop app the Input Sensitivity slider is back in Voice settings and now works as on Windows: speech above the threshold is sent and lights your speaking ring promptly, quieter sound is neither sent nor shown. The level bar beside it stays empty on Linux for now.

@@ -318,9 +318,7 @@ capture and releases the pipeline and the device. The backend unpublishes the
 camera's live publication, which follows the SDK's republish (a new sid) after
 a full reconnect; a republish that continues no live camera (camera off, or a
 newer camera published, while the SDK was between its unpublish and republish)
-is unpublished rather than left published with no frames. A republish that
-lands while the camera's own first publish is still in flight is adopted, but
-not the delayed republish of the publication that camera replaced. A device unplugged
+is unpublished rather than left published with no frames. A device unplugged
 mid-capture ends the stream; the backend sends `cameraCaptureEnded` and the
 track raises `ended`, which the shared code already handles by turning the
 camera off. The settings tab's own camera preview has no room: it starts a
