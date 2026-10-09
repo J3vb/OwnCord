@@ -246,6 +246,10 @@ function buildMentionNode(raw: string, token: string, info?: MentionInfo): HTMLS
   const isSelf = authStore.getState().user?.id === userId;
   const span = createElement("span", {
     class: isSelf ? "mention mention-self" : "mention",
+    // Clicking or activating the chip opens that user's profile (delegated in
+    // MessageList), so it is a button for the keyboard and assistive tech.
+    role: "button",
+    tabindex: "0",
     "data-user-id": String(userId),
   });
   setText(span, raw);
