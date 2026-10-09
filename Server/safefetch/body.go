@@ -206,7 +206,13 @@ func skipLeadingComments(body []byte) (rest []byte, ok bool) {
 		if !found {
 			return rest, ok
 		}
-		if _, rest, found = bytes.Cut(after, []byte("-->")); !found {
+		var text []byte
+		if text, rest, found = bytes.Cut(after, []byte("-->")); !found {
+			return nil, false
+		}
+		// Only a well-formed XML comment, which an HTML parser closes at the same place.
+		if bytes.HasPrefix(text, []byte(">")) || bytes.HasPrefix(text, []byte("->")) ||
+			bytes.Contains(text, []byte("--")) || bytes.HasSuffix(text, []byte("-")) {
 			return nil, false
 		}
 		ok = true

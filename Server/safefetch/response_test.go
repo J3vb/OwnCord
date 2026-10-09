@@ -1023,6 +1023,10 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"plain declared, html body", "text/plain", []byte("<!DOCTYPE html><html></html>"), false},
 		{"svg declared, html after a comment", "image/svg+xml", []byte("<!-- c --><html></html>"), false},
 		{"svg declared, unterminated comment", "image/svg+xml", []byte("<!-- c <html></html>"), false},
+		{"plain declared, empty-comment opener before html", "text/plain", []byte("<!--><h1>x</h1><!-- -->"), false},
+		{"svg declared, empty-comment opener before html", "image/svg+xml", []byte("<!--><h1>x</h1><!-- -->"), false},
+		{"svg declared, bang-terminated comment before html", "image/svg+xml", []byte("<!-- a --!><h1>x</h1><!-- -->"), false},
+		{"plain declared, bang-terminated comment before html", "text/plain", []byte("<!-- a --!><h1>x</h1><!-- -->"), false},
 		{"xhtml declared, html body", "application/xhtml+xml", []byte("<html xmlns=\"http://www.w3.org/1999/xhtml\"></html>"), true},
 		{"xhtml declared, comment-first html body", "application/xhtml+xml", []byte("<!-- generated --><html xmlns=\"http://www.w3.org/1999/xhtml\"></html>"), true},
 	}
