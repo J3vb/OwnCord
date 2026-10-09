@@ -120,8 +120,8 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Link and image previews have a fetch deadline and a length limit on image URLs.
 - Uploads with padded or malformed trailing data now return 413 or 400 and leave no file behind.
 - A failed avatar change no longer leaves a stray file or uses up your storage quota.
-- When a timeout is replaced by a newer one, the earlier voice mute is released instead of lingering.
-- First-run setup counts password hashing against the shared sign-in limit, and its first session is marked as seen.
+- Replacing a timeout as someone who cannot moderate voice now releases the voice mute the old timeout held, instead of leaving it on.
+- First-run setup waits its turn for password checks like sign-in does and says "try again later" when the server is busy, and the owner's setup login no longer shows as an unreviewed new login.
 - Unblocking someone you had not blocked no longer clears an ignored Message Request, so their next message does not raise it again.
 - Plugin HTTP responses are checked more strictly against their declared content type.
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
@@ -129,7 +129,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 **Support bundles**
 
 - Support bundles keep the redacted detail of error events, and their wording and log writes are cleaner.
-- Support bundles hide more names: ones made only of punctuation, whole JSON lists and objects, and servers with thousands of similar names no longer slow the preview.
+- Support bundles also hide names made only of punctuation and whole JSON lists or objects under identifying fields, and the preview no longer slows down on servers with thousands of similar names.
 
 ### Known issues
 
