@@ -288,6 +288,15 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 
 // A one-character separator name identifies no one, so it is never masked and
 // cannot damage prose or embedded JSON detail.
+func TestSupportScrub_SingleSymbolNameStillMasked(t *testing.T) {
+	for _, name := range []string{"😀", "★"} {
+		known := newSupportKnown([]string{name})
+		if got, want := supportScrub("call from "+name+" dropped", known), "call from [x] dropped"; got != want {
+			t.Errorf("name %q: got %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
 	for _, name := range []string{":", ",", `"`} {
 		known := newSupportKnown([]string{name})

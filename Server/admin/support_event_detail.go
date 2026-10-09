@@ -114,7 +114,7 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 
 // supportKnown holds the identifying values to redact in two tries: names
 // split into lowercase word tokens, and names with no letters or digits ("!!",
-// "[]", an emoji) by their bytes. A match walks one trie path, so any number
+// "[]", an emoji; not a lone separator) by their bytes. A match walks one trie path, so any number
 // of names, however many share a first word, costs O(name length) per
 // position. Matching is by whole words, so a name of any length is redacted
 // without mangling the words that contain it. It catches a name that is also a
@@ -146,12 +146,19 @@ var (
 	supportAlnumPattern = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
 
+// supportSingleSeparator reports a value that is one separator rune, which
+// identifies no one and would only damage the text around every occurrence.
+func supportSingleSeparator(v string) bool {
+	r, size := utf8.DecodeRuneInString(v)
+	return size == len(v) && supportStructural(r)
+}
+
 // newSupportKnown returns nil when no value is left.
 func newSupportKnown(values []string) *supportKnown {
 	k := &supportKnown{}
 	for _, v := range values {
 		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
-		if v = strings.TrimSpace(v); len(words) == 0 && utf8.RuneCountInString(v) > 1 {
+		if v = strings.TrimSpace(v); len(words) == 0 && !supportSingleSeparator(v) && v != "" {
 			bytes := make([]string, len(v))
 			for i := 0; i < len(v); i++ {
 				bytes[i] = v[i : i+1]
@@ -202,8 +209,8 @@ func (k *supportKnown) scrub(s string) string {
 
 // scrubLiterals masks the names with no letters or digits. One is masked only
 // between structural separators or the ends of s, so it never splits a
-// compound: a name "!!" cannot unjoin a host or path. A name of two or
-// more separators ("[]", "::") is masked anywhere, before supportAllowlist
+// compound: a name "!!" or an emoji cannot unjoin a host or path. A single
+// separator is never a literal; a name of two or more separators ("[]", "::") is masked anywhere, before supportAllowlist
 // splits it into kept separators.
 func (k *supportKnown) scrubLiterals(s string) string {
 	bounded := func(i int) bool {
@@ -220,7 +227,7 @@ func (k *supportKnown) scrubLiterals(s string) string {
 			if t = t.next[s[j:j+1]]; t == nil {
 				break
 			}
-			if t.end && ((leftOK && bounded(j+1)) || (j > i && strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0)) {
+			if t.end && ((leftOK && bounded(j+1)) || (strings.IndexFunc(s[i:j+1], func(r rune) bool { return !supportStructural(r) }) < 0)) {
 				n = j + 1 - i
 			}
 		}
