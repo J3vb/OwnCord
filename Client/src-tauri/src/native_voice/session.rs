@@ -510,7 +510,7 @@ struct VideoPublication {
     pending: bool,
     /// While pending: the sid of the publication this one replaced. Its own
     /// delayed republish can still arrive and must not be adopted.
-    stale: Option<TrackSid>,
+    stale: Vec<TrackSid>,
 }
 
 impl VideoPublication {
@@ -520,12 +520,12 @@ impl VideoPublication {
             issued: sid.to_string(),
             live: sid,
             pending: false,
-            stale: None,
+            stale: Vec::new(),
         }
     }
 
     /// Marks a publish in flight; [`Self::settle`] completes it.
-    fn pending(stale: Option<TrackSid>) -> Self {
+    fn pending(stale: Vec<TrackSid>) -> Self {
         Self {
             issued: String::new(),
             live: Self::placeholder(),
@@ -546,7 +546,6 @@ impl VideoPublication {
             self.live = sid;
         }
         self.pending = false;
-        self.stale = None;
     }
 
     fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
@@ -597,8 +596,8 @@ pub struct NativeSession {
     screen_publication: VideoSlot,
     /// The sid each slot last unpublished, for the next publish to refuse
     /// that publication's delayed republish even across a disable/re-enable.
-    camera_stale: Option<TrackSid>,
-    screen_stale: Option<TrackSid>,
+    camera_stale: Vec<TrackSid>,
+    screen_stale: Vec<TrackSid>,
     next_capture: u64,
     next_camera: u64,
     on_event: EventSink,
@@ -668,8 +667,8 @@ impl NativeSession {
             camera_capture: None,
             screen: None,
             screen_publication,
-            camera_stale: None,
-            screen_stale: None,
+            camera_stale: Vec::new(),
+            screen_stale: Vec::new(),
             next_capture: 0,
             next_camera: 0,
             on_event,
@@ -865,7 +864,7 @@ impl NativeSession {
             return Err(format!("camera capture {capture} is not running"));
         }
         self.release_camera_publication().await;
-        let stale = self.camera_stale.take();
+        let stale = std::mem::take(&mut self.camera_stale);
         *self.camera.lock().unwrap() = Some(VideoPublication::pending(stale));
         let source = NativeVideoSource::new(
             VideoResolution {
@@ -882,7 +881,13 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| {
-                self.camera_stale = self.camera.lock().unwrap().take().and_then(|c| c.stale);
+                self.camera_stale = self
+                    .camera
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .map(|c| c.stale)
+                    .unwrap_or_default();
                 e.to_string()
             })?;
         let sid = publication.sid();
@@ -987,7 +992,7 @@ impl NativeSession {
             return Err(format!("screen capture {capture} is not running"));
         }
         self.unpublish_screen().await;
-        let stale = self.screen_stale.take();
+        let stale = std::mem::take(&mut self.screen_stale);
         *self.screen_publication.lock().unwrap() = Some(VideoPublication::pending(stale));
         let source = NativeVideoSource::new(
             VideoResolution {
@@ -1011,7 +1016,8 @@ impl NativeSession {
                     .lock()
                     .unwrap()
                     .take()
-                    .and_then(|p| p.stale);
+                    .map(|p| p.stale)
+                    .unwrap_or_default();
                 e.to_string()
             })?;
         let sid = publication.sid();
@@ -1244,9 +1250,13 @@ impl MicWithdrawn {
 }
 
 /// Empties `slot` for an unpublish, remembering the sid it held in `stale`.
-fn take_publication(slot: &VideoSlot, stale: &mut Option<TrackSid>) -> Option<VideoPublication> {
-    let publication = slot.lock().unwrap().take()?;
-    *stale = Some(publication.live.clone());
+fn take_publication(slot: &VideoSlot, stale: &mut Vec<TrackSid>) -> Option<VideoPublication> {
+    let mut publication = slot.lock().unwrap().take()?;
+    stale.append(&mut publication.stale);
+    stale.push(publication.live.clone());
+    // ponytail: keep the newest 8 superseded sids; a delayed republish older
+    // than 8 replacements is orphaned only if it is also not adopted.
+    stale.drain(..stale.len().saturating_sub(8));
     Some(publication)
 }
 
@@ -1267,10 +1277,10 @@ fn apply_republish(
         return None;
     }
     match slot.as_mut() {
-        Some(c) if c.pending && c.stale.as_ref() == Some(previous_sid) => {
-            // The replaced publication's delayed republish: nobody can drive
+        Some(c) if c.pending && c.stale.contains(previous_sid) => {
+            // A superseded publication's delayed republish: nobody can drive
             // it, and its next republish must be told apart the same way.
-            c.stale = Some(sid.clone());
+            c.stale.push(sid.clone());
             Some(sid.clone())
         }
         Some(c) if c.pending || c.live == *previous_sid => {
@@ -1563,7 +1573,7 @@ mod tests {
     #[test]
     fn a_camera_republished_while_its_first_publish_is_pending_is_adopted() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut slot = Some(VideoPublication::pending(None));
+        let mut slot = Some(VideoPublication::pending(Vec::new()));
         assert_eq!(
             apply_republish(&mut slot, TrackSource::Camera, &sid("TR_a"), &sid("TR_b")),
             None,
@@ -1581,7 +1591,7 @@ mod tests {
     #[test]
     fn a_pending_camera_ignores_the_replaced_publications_republish() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut slot = Some(VideoPublication::pending(Some(sid("TR_old"))));
+        let mut slot = Some(VideoPublication::pending(vec![sid("TR_old")]));
         // The replaced camera's delayed republish is orphaned, and so is the
         // next one in its chain.
         assert_eq!(
@@ -1622,10 +1632,10 @@ mod tests {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
         let slot = VideoSlot::default();
         *slot.lock().unwrap() = Some(VideoPublication::new(sid("TR_old")));
-        let mut stale = None;
+        let mut stale = Vec::new();
         // Disable, then re-enable before the SDK's republish event arrives.
         assert!(take_publication(&slot, &mut stale).is_some());
-        *slot.lock().unwrap() = Some(VideoPublication::pending(stale.take()));
+        *slot.lock().unwrap() = Some(VideoPublication::pending(stale));
         assert_eq!(
             apply_republish(
                 &mut slot.lock().unwrap(),
@@ -1639,9 +1649,34 @@ mod tests {
     }
 
     #[test]
+    fn a_camera_replaced_twice_keeps_every_superseded_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let slot = VideoSlot::default();
+        let mut stale = Vec::new();
+        // A is replaced by B, B settles, then B is replaced by pending C.
+        *slot.lock().unwrap() = Some(VideoPublication::new(sid("TR_a")));
+        take_publication(&slot, &mut stale);
+        let mut b = VideoPublication::pending(std::mem::take(&mut stale));
+        b.settle(sid("TR_b"));
+        *slot.lock().unwrap() = Some(b);
+        take_publication(&slot, &mut stale);
+        *slot.lock().unwrap() = Some(VideoPublication::pending(stale));
+        assert_eq!(
+            apply_republish(
+                &mut slot.lock().unwrap(),
+                TrackSource::Camera,
+                &sid("TR_a"),
+                &sid("TR_a2")
+            ),
+            Some(sid("TR_a2")),
+            "A's late republish must not be adopted by C"
+        );
+    }
+
+    #[test]
     fn a_pending_camera_without_a_republish_settles_on_its_sid() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
-        let mut camera = VideoPublication::pending(None);
+        let mut camera = VideoPublication::pending(Vec::new());
         camera.settle(sid("TR_a"));
         assert_eq!(camera.live, sid("TR_a"));
         assert!(!camera.pending);
