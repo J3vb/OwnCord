@@ -119,11 +119,19 @@ export async function installArtifact(dir: string, installation?: string) {
   return { installation: target, binary: appimage };
 }
 
+/**
+ * The policy's arguments: the debugging port and a fake capture device, and
+ * nothing the app ships. WebView2 appends policy arguments to the installed
+ * binary's own, and the update smoke launches the PREVIOUS release under this
+ * policy too, so a shipped flag copied from this build can clash with the
+ * baseline's: Chromium CHECK-crashes on --use-fake-ui-for-media-stream (up to
+ * v2.2.0-beta.1) beside --auto-accept-camera-and-microphone-capture, and
+ * WebView2 reports that as 0x8000FFFF before the window exists.
+ */
+export const WINDOWS_CDP_ARGUMENTS =
+  "--remote-debugging-port=9222 --use-fake-device-for-media-stream";
+
 async function allowWindowsCdp() {
-  // Keep the shipped arguments (media auto-grant) whether WebView2 appends
-  // or replaces; add the debugging port and a fake capture device.
-  const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
-  const args = `${config.app.windows[0].additionalBrowserArgs} --remote-debugging-port=9222 --use-fake-device-for-media-stream`;
   await exec("reg", [
     "add",
     "HKLM\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments",
@@ -132,7 +140,7 @@ async function allowWindowsCdp() {
     "/t",
     "REG_SZ",
     "/d",
-    args,
+    WINDOWS_CDP_ARGUMENTS,
     "/f",
   ]);
 }
