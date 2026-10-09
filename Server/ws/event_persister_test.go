@@ -125,52 +125,6 @@ func (s *slowEventStore) PersistEvents(ctx context.Context, events []db.Persiste
 	return s.EventStore.PersistEvents(ctx, events)
 }
 
-// TestEventPersisterStopWaitsForGoroutineExit pins the fixed contract: Stop
-// must not return until the run goroutine has finished its in-flight flush,
-// even when the Stop context expires first. The store flush (200ms) far
-// outlasts the Stop ctx (20ms); the old select{done|ctx.Done} would have
-// returned at ~20ms with nothing persisted, letting main.go's LIFO
-// database.Close() run underneath a still-flushing goroutine. The fix must
-// return only after the flush completes, with every event persisted.
-//
-// FLAKY, superseded by TestEventPersisterStopBlocksThroughFlushAfterCtxDone
-// below: the 20ms timer races the run goroutine's start. If run() reaches its
-// stop drain only after the timer has fired (slow runner, -race, first-time
-// telemetry.NewAppMetrics()), <-p.queue and <-p.stopCtxDone are both ready and
-// select picks one at random; taking stopCtxDone flushes an empty batch and
-// returns, so Stop comes back in ~40ms with persisted=0 (CI: "Stop returned
-// after 41.8149ms" / "persisted=0, want 5"). That is the test racing the
-// scheduler, not the production contract.
-func TestEventPersisterStopWaitsForGoroutineExit(t *testing.T) {
-	mem := openPersisterTestDB(t)
-	store := &slowEventStore{EventStore: mem, delay: 200 * time.Millisecond}
-	// Neither the batch (1024) nor the ticker (1h) can flush before Stop is
-	// called; only Stop's drain flushes, so the in-flight flush is
-	// deterministic.
-	p := NewEventPersister(store, 64, 1024, time.Hour)
-	p.Start(context.Background())
-	for i := range 5 {
-		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	p.Stop(ctx)
-	elapsed := time.Since(start)
-
-	if elapsed < 150*time.Millisecond {
-		t.Errorf("Stop returned after %v, want it to block for the ~200ms flush "+
-			"(it must not abandon the goroutine when ctx expires — main.go closes "+
-			"the DB right after Stop returns)", elapsed)
-	}
-	persisted, _, _, _ := p.Stats()
-	if persisted != 5 {
-		t.Errorf("persisted=%d, want 5 (Stop must wait for the in-flight flush to finish)", persisted)
-	}
-}
-
 // TestEventPersisterStopBlocksThroughFlushAfterCtxDone pins the contract that
 // Stop never abandons an in-flight flush: main.go closes the database right
 // after Stop returns, so Stop must outlast a flush even when its context is
