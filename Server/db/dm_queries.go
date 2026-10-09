@@ -459,6 +459,20 @@ func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) 
 	return rows > 0, nil
 }
 
+// OpenDMIfParticipant is OpenDM that writes nothing unless userID is a current
+// participant of channelID, checked in the same statement. The bool reports a
+// genuine (re)open, as for OpenDM.
+func (d *DB) OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error) {
+	rows, err := d.q.OpenDMIfParticipant(ctx, dbgen.OpenDMIfParticipantParams{
+		UserID:    userID,
+		ChannelID: channelID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("OpenDMIfParticipant: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // CloseDM removes a DM channel from a user's open list.
 func (d *DB) CloseDM(ctx context.Context, userID, channelID int64) error {
 	if err := d.q.CloseDM(ctx, dbgen.CloseDMParams{

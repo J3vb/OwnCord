@@ -405,3 +405,87 @@ func TestRingTargets_GroupLookupErrorFailsClosedToNoTargets(t *testing.T) {
 		t.Errorf("targets = %v, want none", targets)
 	}
 }
+
+// failingParticipantsStore fails the participant read DMSummaryFor needs.
+type failingParticipantsStore struct {
+	*db.DB
+}
+
+func (s *failingParticipantsStore) GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error) {
+	return nil, errors.New("simulated GetDMParticipants failure")
+}
+
+// Codex on #2197: a reopen whose dm_channel_open payload cannot be built must
+// not be persisted — the next ring would see the DM as open and never announce
+// it, leaving the callee ringing into a channel their client does not have.
+func TestOpenForRing_SummaryFailureLeavesDMClosed(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	if err := database.CloseDM(ctx, 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	svc := NewDMService(&failingParticipantsStore{DB: database}, NewPermissionService(database, permissions.NewChecker(database)))
+
+	if got := svc.OpenForRing(ctx, 50, []int64{2}); len(got) != 0 {
+		t.Fatalf("OpenForRing = %v, want nothing when the summary cannot be built", got)
+	}
+	open, err := database.GetUserDMChannels(ctx, 2)
+	if err != nil {
+		t.Fatalf("GetUserDMChannels: %v", err)
+	}
+	if len(open) != 0 {
+		t.Errorf("the DM was reopened without a notification: %v", open)
+	}
+
+	good := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	got := good.OpenForRing(ctx, 50, []int64{2})
+	if len(got) != 1 || got[0].UserID != 2 || got[0].Summary.ChannelID != 50 {
+		t.Errorf("OpenForRing = %+v, want one reopen for user 2 carrying channel 50", got)
+	}
+}
+
+// Codex on #2197: the dm_channel_open a ring sends is the callee's only
+// sidebar row for the channel (no chat frame follows), so it must carry the
+// history metadata, not the zero values DMSummaryFor builds.
+func TestOpenForRing_SummaryCarriesHistoryMetadata(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	ids := seedPurgeMessages(t, database, 50, 2)
+	if err := database.CloseDM(ctx, 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+
+	got := svc.OpenForRing(ctx, 50, []int64{2})
+	if len(got) != 1 {
+		t.Fatalf("OpenForRing = %+v, want one reopen", got)
+	}
+	s := got[0].Summary
+	if s.LastMessageID == nil || *s.LastMessageID != ids[1] || s.LastMessage != "spam" || s.UnreadCount != 2 {
+		t.Errorf("summary = %+v, want last message %d \"spam\" and 2 unread", s, ids[1])
+	}
+}
+
+// Codex on #2197: the reopen must be conditional on current participation in
+// the same statement, or a member who leaves between the check and the write
+// gets the DM back in their open list.
+func TestOpenDMIfParticipant_RefusesNonParticipant(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+
+	opened, err := database.OpenDMIfParticipant(ctx, 3, 50)
+	if err != nil || opened {
+		t.Fatalf("OpenDMIfParticipant(non-participant) = %v, %v; want false, nil", opened, err)
+	}
+	if open, _ := database.GetUserDMChannels(ctx, 3); len(open) != 0 {
+		t.Errorf("a non-participant got the DM in their open list: %v", open)
+	}
+
+	if err := database.CloseDM(ctx, 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	if opened, err := database.OpenDMIfParticipant(ctx, 2, 50); err != nil || !opened {
+		t.Errorf("OpenDMIfParticipant(participant, closed) = %v, %v; want true, nil", opened, err)
+	}
+}
