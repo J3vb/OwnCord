@@ -49,7 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ## v2.2.0-beta.2
 
-**OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and brings screen sharing and the camera to Linux's native voice stack.
+**OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
 
 It is still a **beta and a hobby project** — don't use it for anything sensitive. Update the server and the desktop app together.
 
@@ -87,7 +87,8 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 
 **Voice**
 
-- Robot-sounding or choppy voice: the decrypt grace window now restarts only after a new key is installed, and the input-sensitivity gate no longer chops quiet microphones.
+- Robot-sounding or choppy voice: the input-sensitivity gate no longer chops quiet microphones.
+- The "Secured" badge degrades on repeated decrypt failures even in short bursts; its grace window restarts only after a new key is installed.
 - Starting a microphone now makes a single capture request and reads the result back from the live track.
 - The speaking ring lights up at normal speaking volume.
 - Screen share degrades instead of freezing on a weak link.
@@ -111,7 +112,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - Typing a server address probes the server correctly, and a stale refusal error clears when you leave.
 - Logout is time-limited, Cancel locks during recovery, and Settings stays open while a recovery key is requested.
 - Opening a DM accepts a pending request; blocking someone revokes trust and unblocking clears old requests.
-- The retention page lists only channels you can manage; a moderator's own list is capped at 200 rows.
+- A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. A moderator's own list is capped at 200 rows.
 - Link and image previews have a fetch deadline and a length limit on image URLs.
 - Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
 
