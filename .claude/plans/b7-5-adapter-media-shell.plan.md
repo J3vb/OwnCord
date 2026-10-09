@@ -86,7 +86,7 @@ that task and record it**; do not improvise around it.
 | 4   | 27 files under `Client/src/platform/`: 18 contracts (17 + `index.ts`) and 9 desktop files (8 + `index.ts`)                   | `find Client/src/platform -type f \| wc -l` → 27; split across `contracts/` and `desktop/`                                                                                       | yes      |
 | 5   | `Platform` has 18 readonly members; `desktop` registers 8 of them as `Partial<Platform>`                                     | `grep -c "^  readonly" Client/src/platform/contracts/index.ts` → 18; `desktop/index.ts:14-23`                                                                                    | yes      |
 | 6   | 12 `*.suite.ts`, 8 `*.legacy.test.ts`, 8 `*.desktop.test.ts` under `Client/tests/unit/platform/`                             | `ls Client/tests/unit/platform/*.suite.ts \| wc -l` → 12; same for the other two globs → 8 each                                                                                  | yes      |
-| 7   | The four B7-5 suites exist and pass; the platform suite is green at baseline                                                 | `npx vitest run tests/unit/platform` → 18 files, 146 passed \| 96 expected fail                                                                                                  | yes      |
+| 7   | The four B7-5 suites exist and pass; the platform suite is green at baseline                                                 | `npx vitest run tests/unit/platform` → 32 files, passes with 8 expected fail                                                                                                     | yes      |
 | 8   | `platform-contracts-counts.test.ts:57-59` hard-codes 19 / 28 / 33 and the doc table must match                               | read the file; `docs/architecture/platform-contracts.md:54-56`                                                                                                                   | yes      |
 | 9   | No contract exposes `relaunch`, and none exposes the tray `status-change` event                                              | `grep -rn "relaunch\|status-change" Client/src/platform/contracts/*.ts` → only `updater.ts`'s `subscribeToInstall` comment                                                       | yes      |
 | 10  | `Client/CLAUDE.md:19-24` still says "No call site has moved yet"; it was last touched by B7-3 and B7-4 did not update it     | `git log --oneline -1 -- Client/CLAUDE.md` → `89c9741e` (B7-3); `git show --stat 3634cb0d \| grep CLAUDE` → nothing                                                              | yes      |
@@ -179,7 +179,7 @@ means a compaction loses at most one.
   `3634cb0d` or later; run the recount commands from rows 1–6 and 8 above and
   record their output.
 - **Validate:** `npm --prefix Client test -- tests/unit/platform` green before
-  you change anything: 18 files, 146 passed | 96 expected fail. Record the test
+  you change anything: record the test count and passing/expected-fail output. Record the test
   count — it must never drop. Also record the full `npm --prefix Client test`
   count (5672 passed | 96 expected fail at `3634cb0d`).
 
