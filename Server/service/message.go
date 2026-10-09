@@ -36,6 +36,10 @@ var (
 	// join voice, start a new DM, create or rename a group DM, ring a DM
 	// call, pin in a DM, or set a custom status.
 	ErrTimedOut = errors.New("timed out")
+	// ErrCallNeedsAcceptance refuses a 1:1 call_ring whose recipient has not
+	// accepted the caller (pending, ignored or deleted request alike: one
+	// answer for every untrusted state). The ring is never delivered.
+	ErrCallNeedsAcceptance = errors.New("calls work after the other person accepts your message request")
 )
 
 // SendMessageParams contains validated input for sending a message.

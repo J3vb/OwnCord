@@ -371,11 +371,11 @@ func TestCallRing_BlockedOneToOneForbidden(t *testing.T) {
 	}
 }
 
-// TestCallRing_UntrustedRecipientDoesNotRing is B5-6's Codex P1-2 fix:
-// call_ring/call_incoming is a DM interaction like chat, typing and
-// reactions — unlike the blocked case above, the ring itself succeeds
-// (decision 5's "the sender's side is byte-identical" posture), but an
-// untrusted recipient of a pending request must not be rung.
+// TestCallRing_UntrustedRecipientDoesNotRing is B5-6's Codex P1-2 fix plus
+// DM call review D-03: call_ring/call_incoming is a DM interaction like chat,
+// typing and reactions, so an untrusted recipient of a pending request is
+// never rung. The caller is told at once, with one code that names no
+// recipient state, instead of waiting out a 30 s ring nobody can hear.
 func TestCallRing_UntrustedRecipientDoesNotRing(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "ring-untrusted-alice")
@@ -393,11 +393,37 @@ func TestCallRing_UntrustedRecipientDoesNotRing(t *testing.T) {
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 
-	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "" {
-		t.Errorf("alice's own ring must succeed, got error code %q", code)
+	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "CALL_REQUIRES_ACCEPTANCE" {
+		t.Errorf("expected CALL_REQUIRES_ACCEPTANCE ringing an untrusted recipient, got %q", code)
 	}
 	if got := dmFindMsgType(dmDrainAll(sendBob), "call_incoming"); got != nil {
 		t.Error("an untrusted recipient of a pending request received call_incoming")
+	}
+}
+
+// A decline is not a ring: the refusal D-03 adds to call_ring must not leak
+// into call_decline, which stays a silent no-target success.
+func TestCallDecline_UntrustedRecipientStaysSilent(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "decl-untrusted-alice")
+	bob := seedMemberUser(t, database, "decl-untrusted-bob")
+	chID := untrustedDMChannel(t, database, alice.ID, bob.ID)
+
+	sendAlice := make(chan []byte, 64)
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_decline", chID))
+
+	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "" {
+		t.Errorf("call_decline must stay a success, got error code %q", code)
+	}
+	if got := dmFindMsgType(dmDrainAll(sendBob), "call_declined"); got != nil {
+		t.Error("an untrusted recipient received call_declined")
 	}
 }
 

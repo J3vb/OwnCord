@@ -560,7 +560,13 @@ func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ri
 			continue
 		}
 		if !isGroup {
-			if trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID); tErr != nil || !trusted {
+			trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID)
+			if tErr == nil && !trusted && ring {
+				// D-03: tell the ringer at once rather than letting them
+				// wait out a ring nobody will hear. A decline stays silent.
+				return nil, ErrCallNeedsAcceptance
+			}
+			if tErr != nil || !trusted {
 				continue
 			}
 		}

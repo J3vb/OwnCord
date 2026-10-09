@@ -8,7 +8,7 @@
  *      (none) --call_incoming--> ringing --accept---> (none)  [+ join voice]
  *                                       --decline--> (none)  [+ call_decline]
  *                                       --timeout--> (none)   after 30s [+ missed]
- *                                       --ringer left-> (none)
+ *                                       --ringer left-> (none)  [+ missed]
  *
  * It is kept apart from the banner that draws it because the interesting part
  * is the transitions, and a statechart with no DOM in it is a statechart that
@@ -41,8 +41,8 @@ export interface RingControllerOptions {
   /** A new ring began: not a redial of the ring already on screen. The OS
    *  notification and the attention request hang off this, once per ring. */
   readonly onRingStart?: (state: RingState) => void;
-  /** The ring ran out with nobody answering (DP-24). Only the timeout: an
-   *  accept, a decline, the ringer leaving or a newer call is not a miss. */
+  /** The ring ended with nobody answering (DP-24): the timeout, or the ringer
+   *  hanging up first (D-07). An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -59,7 +59,8 @@ export interface RingController {
   /**
    * A call_declined arrived, or the ringer left the DM's voice channel — both
    * mean "stop ringing for this channel". Ignored when the current ring is for
-   * a different channel, so a stale signal cannot silence a live call.
+   * a different channel, so a stale signal cannot silence a live call. Only
+   * `reason: "ringer-left"` reports a missed call.
    */
   readonly cancel: (channelId: number, reason?: RingEndReason) => void;
   /** The ring in flight, or null. */
@@ -122,9 +123,11 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     opts.onDecline(active.channelId);
   }
 
-  function cancel(channelId: number): void {
+  function cancel(channelId: number, reason?: RingEndReason): void {
     if (state === null || state.channelId !== channelId) return;
+    const missed = reason === "ringer-left" ? state : null;
     stopRinging();
+    if (missed !== null) opts.onMissed?.(missed);
   }
 
   return {
