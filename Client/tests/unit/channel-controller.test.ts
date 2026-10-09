@@ -2253,6 +2253,72 @@ describe("createChannelController", () => {
       }
     });
 
+    it("follows an admin lowering slow mode while the user was away", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        switchTo(ctrl, 43);
+        updateChannel({ id: 42, slow_mode: 5 });
+        channelsStore.flush();
+        vi.advanceTimersByTime(6000);
+        mockSetSendGate.mockClear();
+        switchTo(ctrl, 42);
+
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("follows an admin raising slow mode while the user was away", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        switchTo(ctrl, 43);
+        updateChannel({ id: 42, slow_mode: 60 });
+        channelsStore.flush();
+        vi.advanceTimersByTime(6000);
+        switchTo(ctrl, 42);
+
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 54s");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops the cooldown when slow mode is switched off while the user was away", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        switchTo(ctrl, 43);
+        updateChannel({ id: 42, slow_mode: 0 });
+        channelsStore.flush();
+        mockSetSendGate.mockClear();
+        switchTo(ctrl, 42);
+
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("does not re-arm once the cooldown has expired", () => {
       vi.useFakeTimers();
       try {
