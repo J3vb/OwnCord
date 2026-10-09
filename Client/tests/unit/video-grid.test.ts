@@ -1860,7 +1860,9 @@ describe("VideoGrid", () => {
       control(SCREEN, "pip").click();
 
       expect(open).toHaveBeenCalledTimes(1);
-      expect(open.mock.calls[0]![0]).toBe(`about:blank#owncord-popout-${SCREEN}`);
+      const label = String(open.mock.calls[0]![1]);
+      expect(label).toMatch(/^owncord-popout-\d+$/);
+      expect(open.mock.calls[0]![0]).toBe(`about:blank#${label}`);
       expect(popup.doc.body.contains(video)).toBe(true);
       expect(video.srcObject).toBe(stream);
       expect(popup.doc.title).toBe("Otto (Screen) — OwnCord");
@@ -1912,12 +1914,29 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).contains(video)).toBe(true);
     });
 
+    it("pops the same tile out again right after Bring back, under a new window label", () => {
+      // The old window may still be registered while it closes: reusing its
+      // label would make the desktop refuse the new one.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      control(SCREEN, "pop-in").click();
+      popup = fakePopup();
+      open.mockReturnValue(popup.win as unknown as Window);
+      control(SCREEN, "pip").click();
+
+      expect(open).toHaveBeenCalledTimes(2);
+      const [first, second] = open.mock.calls.map((c) => String(c[0]));
+      expect(first).toMatch(/^about:blank#owncord-popout-\d+$/);
+      expect(second).toMatch(/^about:blank#owncord-popout-\d+$/);
+      expect(second).not.toBe(first);
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
       control(SCREEN, "pip").click();
-      const label = `owncord-popout-${SCREEN}`;
+      const label = String(open.mock.calls[0]![1]);
       const fs = popup.doc.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!;
       expect(fs.getAttribute("aria-label")).toBe("Full screen");
 
@@ -1949,7 +1968,7 @@ describe("VideoGrid", () => {
       grid.setCallbacks({ setWindowFullscreen });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
       control(SCREEN, "pip").click();
-      const label = `owncord-popout-${SCREEN}`;
+      const label = String(open.mock.calls[0]![1]);
 
       popup.doc.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!.click();
       expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, label);

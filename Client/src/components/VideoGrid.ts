@@ -928,7 +928,6 @@ export function createVideoGrid(): VideoGridComponent {
     if (isFullscreen(tileId)) leaveFullscreen();
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
     const popout = openPopout({
-      id: tileId,
       title: voiceText("tile.popoutTitle", { name: username }),
       video: entry.video,
       onClosed: () => bringBack(entry),

@@ -26,8 +26,6 @@ import { voiceText } from "../../i18n/voice";
 const CLOSED_POLL_MS = 300;
 
 export interface PopoutOptions {
-  /** The tile id; it names the window. */
-  readonly id: number;
   readonly title: string;
   readonly video: HTMLVideoElement;
   /** The window is gone, closed by the user or by close(): the video is the
@@ -42,6 +40,10 @@ export interface Popout {
   close(): void;
 }
 
+/** Numbers each window: a label is never reused, since a closing window can
+ *  stay registered with the desktop for a moment after close(). */
+let openings = 0;
+
 /** F without a modifier: the tiles' full-screen key. */
 function isFullscreenKey(e: KeyboardEvent): boolean {
   return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -50,7 +52,7 @@ function isFullscreenKey(e: KeyboardEvent): boolean {
 /** Open the pop-out window and move the video into it, or null when no
  *  window could open. */
 export function openPopout(opts: PopoutOptions): Popout | null {
-  const label = `owncord-popout-${opts.id}`;
+  const label = `owncord-popout-${++openings}`;
   const win = window.open(`about:blank#${label}`, label, "popup,width=960,height=540");
   if (win === null) return null;
 
