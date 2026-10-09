@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -112,47 +111,61 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 	return out
 }
 
-// supportKnownPattern matches any value, case-insensitively and as a whole
-// word. Values under three characters are skipped: they would mangle ordinary
-// words. It returns nil when nothing remains.
-func supportKnownPattern(values []string) *regexp.Regexp {
+// supportKnown holds the identifying values to redact. Single-word values go
+// in a lowercase set checked per word token, so any number of names costs
+// O(words); values with spaces or punctuation are few and matched as
+// case-insensitive substrings.
+type supportKnown struct {
+	words   map[string]bool
+	phrases []*regexp.Regexp
+}
+
+var supportWordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
+
+// newSupportKnown skips values under three characters: they would mangle
+// ordinary words. It returns nil when nothing remains.
+func newSupportKnown(values []string) *supportKnown {
+	k := &supportKnown{words: map[string]bool{}}
 	seen := map[string]bool{}
-	var parts []string
 	for _, v := range values {
 		v = strings.TrimSpace(v)
-		if len([]rune(v)) < 3 || seen[strings.ToLower(v)] {
+		lower := strings.ToLower(v)
+		if utf8.RuneCountInString(v) < 3 || seen[lower] {
 			continue
 		}
-		seen[strings.ToLower(v)] = true
-		part := regexp.QuoteMeta(v)
-		if r, _ := utf8.DecodeRuneInString(v); isWordRune(r) {
-			part = `\b` + part
+		seen[lower] = true
+		if supportWordPattern.FindString(v) == v {
+			k.words[lower] = true
+		} else {
+			k.phrases = append(k.phrases, regexp.MustCompile(`(?i)`+regexp.QuoteMeta(v)))
 		}
-		if r, _ := utf8.DecodeLastRuneInString(v); isWordRune(r) {
-			part += `\b`
-		}
-		parts = append(parts, part)
 	}
-	if len(parts) == 0 {
+	if len(k.words) == 0 && len(k.phrases) == 0 {
 		return nil
 	}
-	slices.SortFunc(parts, func(a, b string) int { return len(b) - len(a) })
-	re, err := regexp.Compile(`(?i)` + strings.Join(parts, "|"))
-	if err != nil {
-		return nil
+	return k
+}
+
+func (k *supportKnown) scrub(s string) string {
+	for _, re := range k.phrases {
+		s = re.ReplaceAllString(s, "[name]")
 	}
-	return re
+	if len(k.words) == 0 {
+		return s
+	}
+	return supportWordPattern.ReplaceAllStringFunc(s, func(w string) string {
+		if k.words[strings.ToLower(w)] {
+			return "[name]"
+		}
+		return w
+	})
 }
 
-func isWordRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
-}
-
-func supportScrub(s string, known *regexp.Regexp) string {
+func supportScrub(s string, known *supportKnown) string {
 	s = supportURLPattern.ReplaceAllString(s, "[url]")
 	s = supportEmailPattern.ReplaceAllString(s, "[email]")
 	if known != nil {
-		s = known.ReplaceAllString(s, "[name]")
+		s = known.scrub(s)
 	}
 	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportJSONKVPattern.FindStringSubmatch(m)
@@ -190,7 +203,7 @@ func supportScrub(s string, known *regexp.Regexp) string {
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil
 // when none survive.
-func supportDetail(attrs string, known *regexp.Regexp) map[string]any {
+func supportDetail(attrs string, known *supportKnown) map[string]any {
 	var raw map[string]any
 	if attrs == "" || json.Unmarshal([]byte(attrs), &raw) != nil {
 		return nil
@@ -233,7 +246,7 @@ func supportTruncate(s string) string {
 
 // supportAttachDetail fills Detail on events, newest first, until
 // supportDetailBudget is spent; older events past it keep only their code.
-func supportAttachDetail(events []supportEvent, attrs []string, known *regexp.Regexp) {
+func supportAttachDetail(events []supportEvent, attrs []string, known *supportKnown) {
 	used := 0
 	for i := len(events) - 1; i >= 0; i-- {
 		detail := supportDetail(attrs[i], known)

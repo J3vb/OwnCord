@@ -89,8 +89,7 @@ func (d *DB) Diagnostics(ctx context.Context) (*DiagnosticSnapshot, error) {
 func (d *DB) DiagnosticNames(ctx context.Context) ([]string, error) {
 	rows, err := d.reader.QueryContext(ctx, `SELECT username FROM users
 		UNION SELECT display_name FROM users WHERE display_name IS NOT NULL
-		UNION SELECT value FROM settings WHERE key = 'server_name'
-		LIMIT 10000`)
+		UNION SELECT value FROM settings WHERE key = 'server_name'`)
 	if err != nil {
 		return nil, fmt.Errorf("diagnostics names: %w", err)
 	}

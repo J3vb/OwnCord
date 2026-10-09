@@ -137,7 +137,7 @@ func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 	for j, i := range keep {
 		out[j], attrs[j] = valid[i].event, valid[i].attrs
 	}
-	supportAttachDetail(out, attrs, supportKnownPattern(known))
+	supportAttachDetail(out, attrs, newSupportKnown(known))
 	return out
 }
 

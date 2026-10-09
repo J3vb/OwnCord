@@ -8,6 +8,7 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -140,7 +141,7 @@ func TestSupportScrub_KnownValues(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.Name = "Bunker Chat"
 	cfg.Voice.LiveKitURL = "ws://lkbox:7880"
-	known := supportKnownPattern(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab"}))
+	known := newSupportKnown(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab"}))
 
 	cases := []struct{ in, want string }{
 		{"user alice not found", "user [name] not found"},
@@ -164,6 +165,22 @@ func TestSupportEvents_RedactsKnownNames(t *testing.T) {
 		Attrs: `{"err":"user alice not found"}`})
 
 	got, _ := supportEvents(rb, "alice")[0].Detail["err"].(string)
+
+	if got != "user [name] not found" {
+		t.Fatalf("err = %q", got)
+	}
+}
+
+func TestSupportEvents_RedactsNamePastTenThousand(t *testing.T) {
+	names := make([]string, 0, 10100)
+	for i := range 10100 {
+		names = append(names, fmt.Sprintf("user%05d", i))
+	}
+	rb := NewRingBuffer(10)
+	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "RemoveParticipant failed (may already be gone)",
+		Attrs: `{"err":"user user10099 not found"}`})
+
+	got, _ := supportEvents(rb, names...)[0].Detail["err"].(string)
 
 	if got != "user [name] not found" {
 		t.Fatalf("err = %q", got)
