@@ -1,6 +1,6 @@
 //! Stream pop-out windows (Discord-style). The client opens one with
 //! `window.open("about:blank#owncord-popout-<n>")` and moves the tile's own
-//! `<video>` into it (`src/components/video-grid/popout.ts`), so the window
+//! `<video>` into it (`src/features/voice/popout.ts`), so the window
 //! must share the main webview's process: `window_features` carries the
 //! opener's WebView2 environment / WebKitGTK related view.
 //!

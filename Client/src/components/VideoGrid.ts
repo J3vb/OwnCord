@@ -21,7 +21,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
-import { openPopout, type Popout } from "./video-grid/popout";
+import { openPopout, type Popout } from "../features/voice/popout";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;

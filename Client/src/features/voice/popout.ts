@@ -16,9 +16,9 @@
  * the opener's CSP (HTML policy-container inheritance), so it runs under the
  * app's policy; tests/e2e/stream-popout.spec.ts checks that.
  */
-import { createElement } from "@lib/dom";
-import { Disposable } from "@lib/disposable";
-import { createIcon } from "@lib/icons";
+import { createElement } from "../../lib/dom";
+import { Disposable } from "../../lib/disposable";
+import { createIcon } from "../../lib/icons";
 import { voiceText } from "../../i18n/voice";
 
 /** How often to check whether the window was closed (the system's close
