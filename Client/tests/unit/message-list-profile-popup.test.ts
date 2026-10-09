@@ -145,6 +145,48 @@ describe("MessageList profile popup", () => {
     expect(openedFor()).toBe(9);
   });
 
+  it("keeps a mention inside a masked link from also opening the link", async () => {
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([
+        [1, [makeMessage({ id: 2, content: "[@nine](https://example.com/x)", mentions: [9] })]],
+      ]),
+    }));
+    list.destroy?.();
+    container.replaceChildren();
+    list = createMessageList({
+      channelId: 1,
+      channelName: "general",
+      currentUserId: 1,
+      onScrollTop: vi.fn(),
+      onReplyClick: vi.fn(),
+      onEditClick: vi.fn(),
+      onDeleteClick: vi.fn(),
+      onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
+    });
+    list.mount(container);
+
+    const chip = container.querySelector<HTMLElement>(
+      'a[target="_blank"] .mention[data-user-id="9"]',
+    );
+    expect(chip).not.toBeNull();
+
+    // main.ts opens external links from a bubbling document listener; it must
+    // never see a click that was a profile open.
+    const reachedDocument = vi.fn();
+    const ac = new AbortController();
+    document.addEventListener("click", reachedDocument, { signal: ac.signal });
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    chip?.dispatchEvent(click);
+    ac.abort();
+
+    await settle();
+    expect(openedFor()).toBe(9);
+    expect(click.defaultPrevented).toBe(true);
+    expect(reachedDocument).not.toHaveBeenCalled();
+  });
+
   it("ignores @everyone chips, which name no user", async () => {
     // Rendered only when the server honoured it; either way it must never open a profile.
     container.querySelector<HTMLElement>(".mention-everyone")?.click();

@@ -1340,7 +1340,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // (rows are rebuilt by virtual scrolling). Owned by disposable.signal.
     contentContainer.addEventListener(
       "click",
-      (e) => openProfileFrom(e.target, e.clientX, e.clientY),
+      (e) => {
+        const control = profileControlOf(e.target);
+        if (control === null) return;
+        // A mention can be the label of a masked link ([@name](https://...)),
+        // which would otherwise also navigate: the anchor's default action, and
+        // main.ts's bubbling document listener that hands target=_blank links
+        // to the system browser. Handle the click here and stop it, but only
+        // inside an anchor so other document-level dismissals still see it.
+        e.preventDefault();
+        if (control.closest("a") !== null) e.stopPropagation();
+        openProfileFrom(control, e.clientX, e.clientY);
+      },
       { signal: disposable.signal },
     );
     contentContainer.addEventListener(
