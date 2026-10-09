@@ -181,7 +181,7 @@ func supportScrubPaths(s string) string {
 	for _, m := range supportPathPattern.FindAllStringSubmatchIndex(s, -1) {
 		start, end := m[4], m[5]
 		path := s[start:end]
-		relative := !strings.ContainsAny(path[:1], `/\`) && !(len(path) > 1 && path[1] == ':')
+		relative := !strings.ContainsAny(path[:1], `/\`) && (len(path) <= 1 || path[1] != ':')
 		if slices.Contains(supportSlashWords, strings.ToLower(path)) ||
 			relative && end+1 < len(s) && s[end] == ':' && s[end+1] >= '0' && s[end+1] <= '9' {
 			continue
