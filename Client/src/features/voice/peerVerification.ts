@@ -10,7 +10,6 @@ import type { MountableComponent } from "../../lib/safe-render";
 import type { PeerVerification } from "../../stores/voice.store";
 import { rePinPeerIdentity } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
-import { createIdentityMismatchModal } from "../../components/IdentityMismatchModal";
 import { createLogger } from "../../lib/logger";
 import { membersStore } from "../../stores/members.store";
 import { importIdentityPublicKey, computeKeyFingerprint } from "../../lib/e2eeCrypto";
@@ -119,6 +118,9 @@ export async function openIdentityMismatchModal(
   // silent no-op.
   if (lifetimeSignal.aborted) return;
   closeIdentityModal();
+  // Lazy: a feature must not statically import the UI layer (ARCH-06).
+  const { createIdentityMismatchModal } = await import("../../components/IdentityMismatchModal");
+  if (lifetimeSignal.aborted) return;
   const modal = createIdentityMismatchModal({
     username,
     fingerprint,
