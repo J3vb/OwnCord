@@ -150,4 +150,13 @@ describe("star on GIFs in messages", () => {
     await flush();
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining("limit"), "error");
   });
+
+  it("toasts when toggling while the favorites load has failed", async () => {
+    const a = api();
+    a.gifFavorites = vi.fn().mockRejectedValue(new ApiClientError(500, "INTERNAL_ERROR", "boom"));
+    bindGifFavoritesApi(a);
+    await flush();
+    expect(await toggleGifFavorite({ url: URL_, preview_url: URL_, title: "" })).toBe(false);
+    expect(showToast).toHaveBeenCalledWith(expect.any(String), "error");
+  });
 });

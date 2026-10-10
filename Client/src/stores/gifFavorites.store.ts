@@ -83,7 +83,10 @@ export function bindGifFavoritesApi(api: GifFavoritesApi): void {
 /** Add or remove a favorite. Resolves false (state rolled back) on failure. */
 export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   const api = boundApi;
-  if (api === null) return false;
+  if (api === null) {
+    showToast(gifFavoritesText("favoriteFailed"), "error");
+    return false;
+  }
   if (pending.has(fav.url)) return true;
   const gen = generation;
   pending.add(fav.url);
