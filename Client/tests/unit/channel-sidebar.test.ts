@@ -834,9 +834,7 @@ describe("ChannelSidebar", () => {
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
     sidebar.mount(container);
 
-    const btn = container.querySelector(
-      "[data-testid='create-channel-empty']",
-    );
+    const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
     expect(onCreateChannel).toHaveBeenCalledWith("");
