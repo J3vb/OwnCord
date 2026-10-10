@@ -12,6 +12,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
 
 import { renderInlineImage } from "../../src/components/message-list/media";
 import { bindGifFavoritesApi, isGifFavorite, resetGifFavorites } from "@stores/gifFavorites.store";
+import { ApiClientError } from "@lib/api";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 
 const URL_ = "https://media.klipy.com/full/cat.gif";
@@ -36,6 +37,18 @@ describe("star on GIFs in messages", () => {
 
   it("has no star when favorites are unavailable", () => {
     expect(renderInlineImage(URL_).querySelector(".msg-gif-fav")).toBeNull();
+  });
+
+  it("has no star while a rebind is pending after an older server answered 404", async () => {
+    const old = api();
+    old.gifFavorites = vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "nope"));
+    bindGifFavoritesApi(old);
+    await flush();
+    const pending = api();
+    pending.gifFavorites = vi.fn(() => new Promise(() => {}));
+    bindGifFavoritesApi(pending);
+    const star = renderInlineImage(URL_).querySelector<HTMLButtonElement>(".msg-gif-fav");
+    expect(star === null || star.hidden).toBe(true);
   });
 
   it("has no star on a non-Klipy image", async () => {

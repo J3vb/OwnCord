@@ -37,7 +37,7 @@ export function resetGifFavorites(): void {
 
 /** True once an API is bound, i.e. this server session can save favorites. */
 export function gifFavoritesAvailable(): boolean {
-  return boundApi !== null;
+  return boundApi !== null && !gifFavoritesStore.getState().unsupported;
 }
 
 export function isGifFavorite(url: string): boolean {

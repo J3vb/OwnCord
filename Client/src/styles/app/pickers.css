@@ -355,3 +355,7 @@
 .gp-no-favorites .gp-star {
   display: none;
 }
+
+.msg-gif-fav[hidden] {
+  display: none;
+}

@@ -328,6 +328,7 @@ function renderFavoriteStar(url: string): HTMLButtonElement {
     star.setAttribute("aria-pressed", String(on));
     star.setAttribute("aria-label", messagingText(on ? "gif.unfavorite" : "gif.favorite"));
     star.classList.toggle("on", on);
+    star.hidden = !gifFavoritesAvailable();
     star.textContent = on ? "\u2605" : "\u2606";
   };
   sync();
