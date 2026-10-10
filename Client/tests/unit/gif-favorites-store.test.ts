@@ -6,6 +6,7 @@ import {
   toggleGifFavorite,
   resetGifFavorites,
 } from "@stores/gifFavorites.store";
+import { ApiClientError } from "@lib/api";
 import type { GifFavorite } from "@lib/types";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 
@@ -70,6 +71,19 @@ describe("gifFavorites store", () => {
     await flush();
     await toggleGifFavorite({ url: fav("a").url, preview_url: fav("a").url, title: "" });
     expect(gifFavoritesStore.getState().favorites).toEqual([fav("a")]);
+  });
+
+  it("marks favorites unsupported on a 404 and recovers on the next successful bind", async () => {
+    const old = makeApi();
+    old.gifFavorites = vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "nope"));
+    bindGifFavoritesApi(old);
+    await flush();
+    expect(gifFavoritesStore.getState().unsupported).toBe(true);
+    expect(await toggleGifFavorite(fav("a"))).toBe(false);
+    bindGifFavoritesApi(makeApi([fav("a")]));
+    await flush();
+    expect(gifFavoritesStore.getState().unsupported).toBe(false);
+    expect(isGifFavorite(fav("a").url)).toBe(true);
   });
 
   it("rolls back and reports failure when the server refuses", async () => {

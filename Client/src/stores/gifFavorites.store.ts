@@ -7,15 +7,21 @@
  * and the GIF picker share one list without threading the client through.
  */
 
+import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 import type { GifFavorite } from "@lib/types";
 
 export interface GifFavoritesState {
   readonly favorites: readonly GifFavorite[];
+  /** The server answered 404: it predates favorites. Cleared by the next successful load. */
+  readonly unsupported: boolean;
 }
 
-export const gifFavoritesStore = createStore<GifFavoritesState>({ favorites: [] });
+export const gifFavoritesStore = createStore<GifFavoritesState>({
+  favorites: [],
+  unsupported: false,
+});
 
 let boundApi: GifFavoritesApi | null = null;
 // Bumped on reset so a slow request from a previous session cannot touch the next one.
@@ -26,7 +32,7 @@ export function resetGifFavorites(): void {
   boundApi = null;
   generation++;
   pending.clear();
-  gifFavoritesStore.setState(() => ({ favorites: [] }));
+  gifFavoritesStore.setState(() => ({ favorites: [], unsupported: false }));
 }
 
 /** True once an API is bound, i.e. this server session can save favorites. */
@@ -43,13 +49,14 @@ export function bindGifFavoritesApi(api: GifFavoritesApi): void {
   if (boundApi === api) return;
   boundApi = api;
   const gen = generation;
-  gifFavoritesStore.setState(() => ({ favorites: [] }));
+  gifFavoritesStore.setState((prev) => ({ favorites: [], unsupported: prev.unsupported }));
   void api
     .gifFavorites()
     .then((res) => {
       if (gen !== generation) return;
       // Keep anything toggled on while the load was in flight.
       gifFavoritesStore.setState((prev) => ({
+        unsupported: false,
         favorites: [
           ...prev.favorites,
           ...res.favorites.filter((f) => !prev.favorites.some((p) => p.url === f.url)),
@@ -57,8 +64,12 @@ export function bindGifFavoritesApi(api: GifFavoritesApi): void {
       }));
     })
     // Unbind on failure so the next bind retries the load.
-    .catch(() => {
-      if (gen === generation) boundApi = null;
+    .catch((err: unknown) => {
+      if (gen !== generation) return;
+      boundApi = null;
+      if (err instanceof ApiClientError && err.status === 404) {
+        gifFavoritesStore.setState((prev) => ({ ...prev, unsupported: true }));
+      }
     });
 }
 
@@ -75,10 +86,10 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   const apply = (on: boolean): void =>
     gifFavoritesStore.setState((prev) => {
       const rest = prev.favorites.filter((f) => f.url !== fav.url);
-      if (!on) return { favorites: rest };
+      if (!on) return { ...prev, favorites: rest };
       const at = was ? Math.min(index, rest.length) : 0;
       const entry = was ? stored : fav;
-      return { favorites: [...rest.slice(0, at), entry, ...rest.slice(at)] };
+      return { ...prev, favorites: [...rest.slice(0, at), entry, ...rest.slice(at)] };
     });
   apply(!was);
   try {

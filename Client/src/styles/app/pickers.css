@@ -350,3 +350,8 @@
   color: var(--text-faint);
   font-size: var(--font-size-sm);
 }
+
+.gp-no-favorites .gp-tabs,
+.gp-no-favorites .gp-star {
+  display: none;
+}

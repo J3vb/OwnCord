@@ -168,7 +168,7 @@ export function createGifPicker(options: GifPickerOptions): {
         return;
       }
       const cell = e.target instanceof Element ? e.target.closest<HTMLElement>(".gp-item") : null;
-      if (cell === null) return;
+      if (cell === null || gifFavoritesStore.getState().unsupported) return;
       e.preventDefault();
       void toggleCell(cell);
     },
@@ -233,7 +233,14 @@ export function createGifPicker(options: GifPickerOptions): {
   tabBrowse.addEventListener("click", () => selectTab(false), { signal });
   tabFavorites.addEventListener("click", () => selectTab(true), { signal });
   // Keep stars (and the Favorites list) in step with the shared store.
+  const syncSupport = (): void => {
+    const unsupported = gifFavoritesStore.getState().unsupported;
+    root.classList.toggle("gp-no-favorites", unsupported);
+    if (unsupported && showingFavorites) selectTab(false);
+  };
+  syncSupport();
   const unsubscribe = gifFavoritesStore.subscribe(() => {
+    syncSupport();
     if (showingFavorites) renderFavoritesKeepingFocus();
     else syncStars();
   });
