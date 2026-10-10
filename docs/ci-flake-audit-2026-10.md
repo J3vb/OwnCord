@@ -307,8 +307,12 @@ skipped`
   `created 7, refused 1; want all 8 admitted (96 MiB landed leaves 54 MiB,
 above the 50 MiB floor)`
   ([run 35309733588](https://github.com/J3vb/OwnCord/actions/runs/35309733588/job/105489087612)).
-  The expected count assumes the runner's free disk; recommendation: compute
-  the admissible count from the measured free space at test start.
+  Already fixed: the test does not depend on the runner's free disk (its probe
+  derives free space from a fixed base). The cause was a transient window in
+  which a racer judged between another's store write and its landing is refused
+  because the landed bytes are counted twice, which is the safe side; the
+  exact-count assertion was relaxed to "at least one created, and created plus
+  refused equals eight" (#1612), and the test comment documents the window.
 - **`TestHandleRestoreBackup_AbortsWithoutSafetyBackup` (Windows, deadlock
   leg).** Flaked on 2026-09-12; its 4 s pre-restore window was widened to a
   120 s set of blockers on `dev` since (the comment in
