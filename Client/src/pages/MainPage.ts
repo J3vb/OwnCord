@@ -1278,16 +1278,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       }),
     );
-    // A first-contact 1:1 ring is refused at once and never delivered (D-03),
-    // as is one the server rate-limits: end the caller's "Calling…" now. The
-    // dispatcher shows the server's explanation as the toast; the caller stays
-    // in the room.
+    // The server answers a ring it refuses with an error frame carrying the
+    // ring's envelope id, whatever the code (CALL_REQUIRES_ACCEPTANCE,
+    // RATE_LIMITED, FORBIDDEN, TIMED_OUT, NOT_FOUND, VOICE_ERROR, INTERNAL):
+    // nobody was rung, so end the caller's "Calling…" and ringback now. The
+    // correlation id is the guard, not the code. The dispatcher shows the
+    // server's explanation as the toast; the caller stays in the room.
     unsubscribers.push(
-      ws.on("error", (payload, id) => {
-        // RATE_LIMITED: the server dropped this ring too, nobody was notified.
-        const refused =
-          payload.code === "CALL_REQUIRES_ACCEPTANCE" || payload.code === "RATE_LIMITED";
-        if (refused && id === lastRingId) outgoingCall?.clear();
+      ws.on("error", (_payload, id) => {
+        if (id === lastRingId) outgoingCall?.clear();
       }),
     );
     unsubscribers.push(() => {
