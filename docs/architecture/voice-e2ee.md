@@ -357,6 +357,15 @@ E2EE for the soak window and asserts both decode and the process closes
 cleanly — the regression guard for the silent camera-plus-screen crash
 (#2095), and where a crash-log line would surface as evidence.
 
+The camera-cycle case waits for each camera to be acknowledged by its
+subscriber (the browser sends a `camera-subscribed` data message carrying the
+sid once the track is attached, 5 s at most) before the camera is unpublished,
+and the spec asserts the browser peer saw 0 reconnects: the SFU answers an
+unpublish that collides with a subscriber's own negotiation with a full
+reconnect, which showed up as 0 decoded frames. The server's own
+`LocalTrackSubscribed` event is too early a signal, since it precedes the
+subscriber's offer.
+
 **CPU at 720p (measured 2026-09-22, before native capture).** Harness: a
 release build of the interop example as the app's native session
 (`--video 1280x720 --external-camera`, since removed), a second native peer
