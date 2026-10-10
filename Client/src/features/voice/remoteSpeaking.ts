@@ -14,8 +14,14 @@ import { parseUserId } from "./sessionState";
 
 /** How often the received levels are read. */
 const LEVEL_POLL_MS = 50;
-/** Received level that counts as speech: -45 dBov, the SFU's own active_level. */
-const SPEECH_RMS = 10 ** (-45 / 20);
+/** Received level that counts as speech: -33 dBov. totalAudioEnergy is peak-derived
+ *  (libwebrtc audio_level), running about 12 dB above the RMS the SFU compares
+ *  against its -45 dBov active_level, so the threshold is raised to match. */
+const SPEECH_RMS = 10 ** (-33 / 20);
+/** A user lights when at least this many of their last POLL_WINDOW polls were
+ *  loud, so a single keystroke transient does not flash the ring. */
+const LOUD_POLLS = 2;
+const POLL_WINDOW = 3;
 /** How long a ring stays lit after the last loud poll, so it does not flicker
  *  between words. Short, because WebRTC's level already decays over ~300 ms. */
 export const SPEAKING_HOLD_MS = 100;
@@ -33,6 +39,8 @@ export class RemoteSpeaking {
   private counters = new Map<string, Counters>();
   /** Date.now() of each user's last poll above speech level. */
   private loudAt = new Map<number, number>();
+  /** Each user's last POLL_WINDOW polls, true where the level was speech. */
+  private recent = new Map<number, boolean[]>();
   private speakers: ReadonlySet<number> = new Set();
 
   constructor(private readonly onChange: (userIds: ReadonlySet<number>) => void) {}
@@ -44,6 +52,7 @@ export class RemoteSpeaking {
     this.timer = null;
     this.counters.clear();
     this.loudAt.clear();
+    this.recent.clear();
     this.report(new Set());
     // The native room has no browser peer connection to read.
     if (room === null || isLinuxDesktop()) return;
@@ -79,9 +88,13 @@ export class RemoteSpeaking {
         counters.set(track, { energy, duration });
         if (userId === undefined || userId <= 0 || last === undefined) return;
         const elapsed = duration - last.duration;
-        if (elapsed > 0 && Math.sqrt((energy - last.energy) / elapsed) >= SPEECH_RMS) {
-          this.loudAt.set(userId, now);
-        }
+        if (elapsed <= 0) return;
+        const polls = [
+          ...(this.recent.get(userId) ?? []),
+          Math.sqrt((energy - last.energy) / elapsed) >= SPEECH_RMS,
+        ].slice(-POLL_WINDOW);
+        this.recent.set(userId, polls);
+        if (polls.filter(Boolean).length >= LOUD_POLLS) this.loudAt.set(userId, now);
       });
       this.counters = counters;
       const speaking = new Set<number>();

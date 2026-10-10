@@ -65,13 +65,29 @@ describe("RemoteSpeaking", () => {
     vi.useRealTimers();
   });
 
-  it("lights a remote ring on the first poll its received audio carries speech", async () => {
+  it("lights a remote ring once speech persists across two polls", async () => {
     const { room, receive } = fakeRoom();
     detector.setRoom(room);
     await detector.poll(); // baseline
     receive(0.1);
     await detector.poll();
+    expect(changes).toEqual([]);
+    receive(0.1);
+    await detector.poll();
     expect(changes).toEqual([[2]]);
+  });
+
+  it("does not light the ring for a single transient like a keystroke", async () => {
+    const { room, receive } = fakeRoom();
+    detector.setRoom(room);
+    await detector.poll();
+    receive(0.1);
+    await detector.poll();
+    for (let i = 0; i < 3; i++) {
+      receive(0);
+      await detector.poll();
+    }
+    expect(changes).toEqual([]);
   });
 
   it("ignores received audio below speech level", async () => {
@@ -86,6 +102,8 @@ describe("RemoteSpeaking", () => {
   it("holds the ring through a short pause, then drops it", async () => {
     const { room, receive } = fakeRoom();
     detector.setRoom(room);
+    await detector.poll();
+    receive(0.1);
     await detector.poll();
     receive(0.1);
     await detector.poll();
@@ -117,6 +135,8 @@ describe("RemoteSpeaking", () => {
     await detector.poll();
     receive(0.1);
     await detector.poll();
+    receive(0.1);
+    await detector.poll();
     detector.setRoom(null);
     expect(changes).toEqual([[2], []]);
   });
@@ -132,7 +152,9 @@ describe("RemoteSpeaking", () => {
     engine.pcManager = pcManager;
     await vi.advanceTimersByTimeAsync(100);
     receive(0.1);
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(50);
+    receive(0.1);
+    await vi.advanceTimersByTimeAsync(50);
     expect(changes).toEqual([[2]]);
   });
 
