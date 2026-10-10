@@ -271,6 +271,7 @@ export class LiveKitSession {
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
     leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),
+    sweepPublications: (room) => this.sweepPublications(room),
     handleVoiceTokenRefresh: (token) => this.handleVoiceTokenRefresh(token),
     connectAndSetup: (t, u, c, d, k) => this.connectAndSetup(t, u, c, d, k),
   });
@@ -486,6 +487,7 @@ export class LiveKitSession {
         this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
+      sweepPublications: (room) => this.sweepPublications(room),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
       disconnectSupersededLocalRoom: (room) => this._join.disconnectSupersededLocalRoom(room),
@@ -755,6 +757,11 @@ export class LiveKitSession {
   /** Retry microphone permission after being in listen-only mode. */
   async retryMicPermission(): Promise<void> {
     return this._media.retryMicPermission();
+  }
+
+  private sweepPublications(room: Room): void {
+    this._eventHandlers.handleConnected(room);
+    this._remoteTracks.dropUnpublishedWatches();
   }
 
   leaveVoice(sendWs = true, keepWatched = false): void {

@@ -134,6 +134,14 @@ export class RemoteTracks {
     for (const source of sources) this.publication(userId, source)?.setSubscribed(on);
   }
 
+  /** Forget watches whose stream the room does not publish. */
+  dropUnpublishedWatches(): void {
+    for (const key of this.watched) {
+      const [userId, type] = key.split(":") as [string, "camera" | "screenshare"];
+      if (this.publication(Number(userId), type) === undefined) this.watched.delete(key);
+    }
+  }
+
   /** A user's publication of a source, or of the camera or screen share. */
   private publication(userId: number, source: "camera" | "screenshare" | "screen_share_audio") {
     const name = source === "screenshare" ? "screen_share" : source;

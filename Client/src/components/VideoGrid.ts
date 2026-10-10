@@ -1301,10 +1301,8 @@ export function createVideoGrid(): VideoGridComponent {
     }
     applyNames(entry, username, config?.name ?? username);
     cells.set(userId, entry);
-    const asked = pendingWatch.delete(userId);
+    pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
-    // Not watched yet: Watch stream, unless the voice roster already asked.
-    else if (asked) callbacks.setStreamWatched?.(userId, true);
     else setStopped(userId, true, false);
     root.appendChild(cell);
     applySpeaking();

@@ -58,6 +58,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     leaveVoice: vi.fn(() => {
       state = { type: "idle" };
     }),
+    sweepPublications: vi.fn(),
     handleVoiceTokenRefresh: vi.fn(),
     connectAndSetup: vi.fn(async () => true as const),
   };
@@ -121,6 +122,7 @@ describe("connectAndSetup", () => {
     expect(host.nextJoinGeneration).toHaveBeenCalledOnce();
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.leaveVoice).not.toHaveBeenCalled();
+    expect(host.sweepPublications).not.toHaveBeenCalled();
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
   });
 

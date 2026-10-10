@@ -1485,11 +1485,12 @@ describe("VideoGrid", () => {
       expect(setStreamWatched).not.toHaveBeenCalled();
     });
 
-    it("watch() from the voice roster before the tile exists watches it once it is offered", () => {
+    it("a roster watch that never got a stream does not unlock a later offered tile", () => {
       grid.watch(SCREEN);
-      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, true);
+      setStreamWatched.mockClear();
       grid.addStream(SCREEN, "Otto (Screen)", null, screen);
-      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(true);
+      expect(setStreamWatched).not.toHaveBeenCalled();
     });
 
     it("a used roster watch does not start a later stream of the same tile", () => {

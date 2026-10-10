@@ -53,6 +53,8 @@ export interface JoinHost {
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
   leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
+  /** Offer the adopted room's already-published streams (Watch stream tiles). */
+  sweepPublications(room: Room): void;
   handleVoiceTokenRefresh(token: string): void;
   /** The session's own connectAndSetup, so the drain loop re-enters through it. */
   connectAndSetup(
@@ -405,6 +407,7 @@ export class JoinOrchestration {
         });
         // Room connected and E2EE key ready — the call is now secured.
         setJoinedVoiceStatus(localRoom);
+        this.host.sweepPublications(localRoom);
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.

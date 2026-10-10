@@ -206,6 +206,13 @@ describe("RemoteTracks", () => {
       expect(tracks.isWatched(7, "camera")).toBe(true);
     });
 
+    it("dropUnpublishedWatches forgets a watch the room has no publication for", () => {
+      const tracks = new RemoteTracks(() => null);
+      tracks.watch(7, "screenshare", true);
+      tracks.dropUnpublishedWatches();
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+    });
+
     it("clearWatched forgets every watch", () => {
       const tracks = new RemoteTracks(() => null);
       tracks.watch(7, "screenshare", true);

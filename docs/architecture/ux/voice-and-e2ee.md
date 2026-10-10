@@ -135,7 +135,8 @@ opt-in, Discord-style: a remote camera or screen share arrives as a tile behind
 a **Watch stream** card, and nothing of it (screen-share audio included) is
 subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
 out; Stop watching unsubscribes it and returns the card. A watch survives a
-reconnect or rejoin, and ends when you leave voice. The room connects with
+channel switch and the app's own reconnect or rejoin, but not livekit-client's
+full reconnect, and ends when you leave voice. The room connects with
 `autoSubscribe: false`: `handleTrackPublished` (`lib/roomEventHandlers.ts`)
 subscribes each voice unless deafened, and `RemoteTracks.watch` the streams.
 On Linux the native backend still auto-subscribes, so it unsubscribes an
