@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
+import { isAllowedGifUrl } from "@lib/gifProvider";
 import { loadPref } from "@lib/preferences";
 import {
   gifFavoritesAvailable,
@@ -375,7 +376,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.appendChild(watermark);
   }
 
-  if (isKlipyUrl(url) && gifFavoritesAvailable()) wrap.appendChild(renderFavoriteStar(url));
+  if (isAllowedGifUrl(url) && gifFavoritesAvailable()) wrap.appendChild(renderFavoriteStar(url));
 
   // The failure line and its bounded retry sit beside the image; the image is
   // hidden, not discarded, so retry can reuse it and tests keep one element.

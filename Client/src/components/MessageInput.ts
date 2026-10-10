@@ -34,7 +34,7 @@ export interface MessageInputOptions {
    * entirely — the button is rendered disabled rather than offering a picker
    * that cannot load.
    */
-  readonly gifApi?: GifApi & Partial<GifFavoritesApi>;
+  readonly gifApi?: GifApi & GifFavoritesApi;
   readonly onSend: (
     content: string,
     replyTo: number | null,

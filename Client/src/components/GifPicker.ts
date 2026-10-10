@@ -9,7 +9,6 @@ import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
 import {
-  bindGifFavoritesApi,
   gifFavoritesStore,
   isGifFavorite,
   toggleGifFavorite,
@@ -35,7 +34,7 @@ import { messagingText } from "../i18n/messaging";
 
 export interface GifPickerOptions {
   /** GIF endpoints on the user's own server. */
-  readonly api: GifApi & Partial<GifFavoritesApi>;
+  readonly api: GifApi & GifFavoritesApi;
   readonly onSelect: (gifUrl: string) => void;
   readonly onClose: () => void;
   /**
@@ -91,12 +90,7 @@ export function createGifPicker(options: GifPickerOptions): {
   setText(attribution, messagingText("gif.attribution"));
   header.appendChild(attribution);
 
-  // Search/trending vs the user's saved GIFs. Only offered when the API can
-  // save favorites (the composer passes the full client).
-  const favoritesEnabled =
-    options.api.gifFavorites !== undefined &&
-    options.api.addGifFavorite !== undefined &&
-    options.api.removeGifFavorite !== undefined;
+  // Search/trending vs the user's saved GIFs.
   let showingFavorites = false;
   const tabBrowse = createElement("button", {
     type: "button",
@@ -112,16 +106,13 @@ export function createGifPicker(options: GifPickerOptions): {
     "aria-selected": "false",
   });
   setText(tabFavorites, messagingText("gif.tabFavorites"));
-  if (favoritesEnabled) {
-    bindGifFavoritesApi(options.api as GifApi & GifFavoritesApi);
-    const tabs = createElement("div", {
-      class: "gp-tabs",
-      role: "tablist",
-      "aria-label": messagingText("gif.tabsLabel"),
-    });
-    tabs.append(tabBrowse, tabFavorites);
-    header.appendChild(tabs);
-  }
+  const tabs = createElement("div", {
+    class: "gp-tabs",
+    role: "tablist",
+    "aria-label": messagingText("gif.tabsLabel"),
+  });
+  tabs.append(tabBrowse, tabFavorites);
+  header.appendChild(tabs);
 
   root.appendChild(header);
 
@@ -177,7 +168,7 @@ export function createGifPicker(options: GifPickerOptions): {
   gridArea.addEventListener(
     "keydown",
     (e) => {
-      if (!favoritesEnabled || e.key.toLowerCase() !== "f" || e.ctrlKey || e.metaKey || e.altKey) {
+      if (e.key.toLowerCase() !== "f" || e.ctrlKey || e.metaKey || e.altKey) {
         return;
       }
       const cell = e.target instanceof Element ? e.target.closest<HTMLElement>(".gp-item") : null;
@@ -209,6 +200,20 @@ export function createGifPicker(options: GifPickerOptions): {
     );
   }
 
+  function renderFavoritesKeepingFocus(): void {
+    const active = document.activeElement;
+    const cell = active instanceof Element ? active.closest<HTMLElement>(".gp-item") : null;
+    if (cell === null || !gridArea.contains(cell)) {
+      renderFavorites();
+      return;
+    }
+    const cells = [...gridArea.querySelectorAll<HTMLElement>(".gp-item")];
+    const index = cells.indexOf(cell);
+    renderFavorites();
+    const next = gridArea.querySelectorAll<HTMLElement>(".gp-item");
+    (next[Math.min(index, next.length - 1)] ?? tabFavorites).focus();
+  }
+
   function selectTab(favorites: boolean): void {
     if (showingFavorites === favorites) return;
     showingFavorites = favorites;
@@ -221,20 +226,22 @@ export function createGifPicker(options: GifPickerOptions): {
     }
     searchInput.hidden = favorites;
     ++currentRequestId; // drop any in-flight search render
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
     if (favorites) renderFavorites();
     else void loadGifs(searchInput.value.trim());
   }
 
-  if (favoritesEnabled) {
-    tabBrowse.addEventListener("click", () => selectTab(false), { signal });
-    tabFavorites.addEventListener("click", () => selectTab(true), { signal });
-    // Keep stars (and the Favorites list) in step with the shared store.
-    const unsubscribe = gifFavoritesStore.subscribe(() => {
-      if (showingFavorites) renderFavorites();
-      else syncStars();
-    });
-    signal.addEventListener("abort", unsubscribe, { once: true });
-  }
+  tabBrowse.addEventListener("click", () => selectTab(false), { signal });
+  tabFavorites.addEventListener("click", () => selectTab(true), { signal });
+  // Keep stars (and the Favorites list) in step with the shared store.
+  const unsubscribe = gifFavoritesStore.subscribe(() => {
+    if (showingFavorites) renderFavoritesKeepingFocus();
+    else syncStars();
+  });
+  signal.addEventListener("abort", unsubscribe, { once: true });
 
   // Loading indicator
   const loadingEl = createElement("div", { class: "gp-loading", role: "status" });
@@ -275,7 +282,7 @@ export function createGifPicker(options: GifPickerOptions): {
         "data-full-url": gif.fullUrl,
         "data-preview-url": gif.url,
         "data-title": gif.title,
-        ...(favoritesEnabled ? { "aria-keyshortcuts": "F" } : {}),
+        "aria-keyshortcuts": "F",
       });
       // Klipy's CDN is still an external host: the thumbnail arrives through
       // the external-content broker, not as a URL the webview loads itself.
@@ -290,15 +297,13 @@ export function createGifPicker(options: GifPickerOptions): {
         if (src !== null) img.src = src;
       });
       item.appendChild(img);
-      if (favoritesEnabled) {
-        const star = createElement("button", {
-          type: "button",
-          class: "gp-star",
-          tabindex: "-1",
-        });
-        setStarState(star, isGifFavorite(gif.fullUrl));
-        item.appendChild(star);
-      }
+      const star = createElement("button", {
+        type: "button",
+        class: "gp-star",
+        tabindex: "-1",
+      });
+      setStarState(star, isGifFavorite(gif.fullUrl));
+      item.appendChild(star);
 
       grid.appendChild(item);
     }
@@ -340,6 +345,7 @@ export function createGifPicker(options: GifPickerOptions): {
   }
 
   async function loadGifs(query: string): Promise<void> {
+    if (showingFavorites) return;
     if (!externalAllowed(GIF_PICKER_ITEM)) {
       showConsent();
       return;

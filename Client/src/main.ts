@@ -34,6 +34,7 @@ import { setLastChannelHost } from "@lib/last-channel";
 import { markActiveChannelReadOnUnload } from "@lib/read-state";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
 import { resetSafetyStore } from "./features/safety/store";
+import { resetGifFavorites } from "@stores/gifFavorites.store";
 import {
   setTransientError,
   uiStore,
@@ -200,6 +201,7 @@ onAuthCleared(cleanupNotificationAudio);
 onAuthCleared(resetNotificationCoalescing);
 // A profile switch or sign-out must not carry one account's moderation notices into the next.
 onAuthCleared(resetSafetyStore);
+onAuthCleared(resetGifFavorites);
 onAuthCleared((reason) => {
   // Server switches retain their account-scoped drafts. Explicit logout and
   // invalid credentials discard pending sends.

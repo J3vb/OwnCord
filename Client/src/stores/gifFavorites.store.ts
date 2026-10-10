@@ -18,9 +18,14 @@ export interface GifFavoritesState {
 export const gifFavoritesStore = createStore<GifFavoritesState>({ favorites: [] });
 
 let boundApi: GifFavoritesApi | null = null;
+// Bumped on reset so a slow request from a previous session cannot touch the next one.
+let generation = 0;
+const pending = new Set<string>();
 
 export function resetGifFavorites(): void {
   boundApi = null;
+  generation++;
+  pending.clear();
   gifFavoritesStore.setState(() => ({ favorites: [] }));
 }
 
@@ -37,11 +42,12 @@ export function isGifFavorite(url: string): boolean {
 export function bindGifFavoritesApi(api: GifFavoritesApi): void {
   if (boundApi === api) return;
   boundApi = api;
+  const gen = generation;
   gifFavoritesStore.setState(() => ({ favorites: [] }));
   void api
     .gifFavorites()
     .then((res) => {
-      if (boundApi !== api) return;
+      if (gen !== generation) return;
       // Keep anything toggled on while the load was in flight.
       gifFavoritesStore.setState((prev) => ({
         favorites: [
@@ -50,14 +56,19 @@ export function bindGifFavoritesApi(api: GifFavoritesApi): void {
         ],
       }));
     })
-    // A failed load leaves an empty list; the stars still work.
-    .catch(() => {});
+    // Unbind on failure so the next bind retries the load.
+    .catch(() => {
+      if (gen === generation) boundApi = null;
+    });
 }
 
 /** Add or remove a favorite. Resolves false (state rolled back) on failure. */
 export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   const api = boundApi;
   if (api === null) return false;
+  if (pending.has(fav.url)) return true;
+  const gen = generation;
+  pending.add(fav.url);
   const was = isGifFavorite(fav.url);
   const apply = (on: boolean): void =>
     gifFavoritesStore.setState((prev) => ({
@@ -71,7 +82,9 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
     else await api.addGifFavorite(fav);
     return true;
   } catch {
-    if (boundApi === api) apply(was);
+    if (gen === generation) apply(was);
     return false;
+  } finally {
+    if (gen === generation) pending.delete(fav.url);
   }
 }
