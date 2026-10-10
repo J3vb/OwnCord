@@ -9,6 +9,7 @@
 
 import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
+import { onAuthCleared } from "./auth.store";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 import type { GifFavorite } from "@lib/types";
 
@@ -34,6 +35,10 @@ export function resetGifFavorites(): void {
   pending.clear();
   gifFavoritesStore.setState(() => ({ favorites: [], unsupported: false }));
 }
+
+// Registered at load, not from main.ts, so the store stays out of the startup
+// chunk; a store that never loaded holds nothing to reset.
+onAuthCleared(resetGifFavorites);
 
 /** True once an API is bound, i.e. this server session can save favorites. */
 export function gifFavoritesAvailable(): boolean {
