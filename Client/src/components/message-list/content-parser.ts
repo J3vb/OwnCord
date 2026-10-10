@@ -135,6 +135,14 @@ function buildMaskedLink(
     rel: "noopener noreferrer",
   });
   appendInline(link, node.children, info);
+  // A mention that labels a link is part of the link: a nested button would
+  // give Tab and screen readers two controls with one label, one opening the
+  // URL and one a profile.
+  for (const chip of link.querySelectorAll<HTMLElement>(".mention[data-user-id]")) {
+    chip.removeAttribute("role");
+    chip.removeAttribute("tabindex");
+    chip.removeAttribute("data-user-id");
+  }
   return link;
 }
 

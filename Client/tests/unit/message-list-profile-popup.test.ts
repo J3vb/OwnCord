@@ -145,7 +145,7 @@ describe("MessageList profile popup", () => {
     expect(openedFor()).toBe(9);
   });
 
-  it("keeps a mention inside a masked link from also opening the link", async () => {
+  it("renders a mention inside a masked link as part of the link, not as a second control", async () => {
     messagesStore.setState((prev) => ({
       ...prev,
       messagesByChannel: new Map([
@@ -167,24 +167,18 @@ describe("MessageList profile popup", () => {
     });
     list.mount(container);
 
-    const chip = container.querySelector<HTMLElement>(
-      'a[target="_blank"] .mention[data-user-id="9"]',
-    );
+    const chip = container.querySelector<HTMLElement>('a[target="_blank"] .mention');
     expect(chip).not.toBeNull();
+    // One control only: no nested button for Tab or a screen reader to find...
+    expect(chip?.hasAttribute("role")).toBe(false);
+    expect(chip?.hasAttribute("tabindex")).toBe(false);
+    expect(chip?.hasAttribute("data-user-id")).toBe(false);
 
-    // main.ts opens external links from a bubbling document listener; it must
-    // never see a click that was a profile open.
-    const reachedDocument = vi.fn();
-    const ac = new AbortController();
-    document.addEventListener("click", reachedDocument, { signal: ac.signal });
-    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
-    chip?.dispatchEvent(click);
-    ac.abort();
-
-    await settle();
-    expect(openedFor()).toBe(9);
-    expect(click.defaultPrevented).toBe(true);
-    expect(reachedDocument).not.toHaveBeenCalled();
+    // ...and a click on it is the link's click, never a profile open.
+    createPopupMock.mockClear();
+    chip?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(createPopupMock).not.toHaveBeenCalled();
   });
 
   it("ignores @everyone chips, which name no user", async () => {

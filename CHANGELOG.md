@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
 
+**Messages**
+
+- Clicking an author name, avatar or @mention in a message now opens that person's profile card.
+
 ### Changed
 
 **Messages & files**
