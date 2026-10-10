@@ -18,7 +18,7 @@ import (
 
 func buildGIFFavoritesRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
-	api.MountGIFRoutes(r, service.NewSessionService(database), auth.NewRateLimiter(), &config.Config{}, database)
+	api.MountGIFRoutes(r, service.NewSessionService(database), auth.NewRateLimiter(), &config.Config{}, service.NewGIFFavoriteService(database))
 	return r
 }
 

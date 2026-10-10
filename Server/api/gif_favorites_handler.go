@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 const (
@@ -43,13 +43,13 @@ func allowedGIFFavoriteURL(raw string) bool {
 	return h == "klipy.com" || strings.HasSuffix(h, ".klipy.com")
 }
 
-func handleListGIFFavorites(database *db.DB) http.HandlerFunc {
+func handleListGIFFavorites(favorites *service.GIFFavoriteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
-		favs, err := database.ListGIFFavorites(r.Context(), user.ID)
+		favs, err := favorites.List(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("list gif favorites", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not load favorites")
@@ -63,7 +63,7 @@ func handleListGIFFavorites(database *db.DB) http.HandlerFunc {
 	}
 }
 
-func handleAddGIFFavorite(database *db.DB) http.HandlerFunc {
+func handleAddGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -89,8 +89,8 @@ func handleAddGIFFavorite(database *db.DB) http.HandlerFunc {
 			}
 			in.Title = in.Title[:cut]
 		}
-		err := database.AddGIFFavorite(r.Context(), user.ID, db.GIFFavorite{URL: in.URL, PreviewURL: in.PreviewURL, Title: in.Title})
-		if errors.Is(err, db.ErrGIFFavoritesFull) {
+		err := favorites.Add(r.Context(), user.ID, service.GIFFavorite{URL: in.URL, PreviewURL: in.PreviewURL, Title: in.Title})
+		if errors.Is(err, service.ErrGIFFavoritesFull) {
 			writeErr(w, http.StatusConflict, "GIF_FAVORITES_FULL", "you have reached the favorite GIF limit")
 			return
 		}
@@ -103,13 +103,13 @@ func handleAddGIFFavorite(database *db.DB) http.HandlerFunc {
 	}
 }
 
-func handleRemoveGIFFavorite(database *db.DB) http.HandlerFunc {
+func handleRemoveGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
-		if err := database.RemoveGIFFavorite(r.Context(), user.ID, r.URL.Query().Get("url")); err != nil {
+		if err := favorites.Remove(r.Context(), user.ID, r.URL.Query().Get("url")); err != nil {
 			slog.Error("remove gif favorite", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not remove favorite")
 			return

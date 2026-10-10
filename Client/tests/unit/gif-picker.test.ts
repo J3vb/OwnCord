@@ -1179,7 +1179,9 @@ describe("GifPicker", () => {
     it("a load from before a reset never lands in the next session", async () => {
       let resolveLoad!: (v: { favorites: typeof favs }) => void;
       const api = favApi();
-      api.gifFavorites = vi.fn(() => new Promise((r) => (resolveLoad = r)));
+      api.gifFavorites = vi.fn(
+        () => new Promise<{ favorites: typeof favs }>((r) => (resolveLoad = r)),
+      );
       bindGifFavoritesApi(api);
       resetGifFavorites();
       resolveLoad({ favorites: favs });

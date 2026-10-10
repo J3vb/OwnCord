@@ -23,7 +23,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -104,7 +103,7 @@ type gifResponse struct {
 // a dedicated per-IP rate-limit bucket — the picker searches on every debounced
 // keystroke, so it must not share the empty-prefix bucket used by password and
 // TOTP endpoints.
-func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, database *db.DB) {
+func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, favorites *service.GIFFavoriteService) {
 	r.Route("/api/v1/gif", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))
 
@@ -118,9 +117,9 @@ func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *aut
 		// make no upstream call, so they get their own, looser bucket.
 		r.Group(func(r chi.Router) {
 			r.Use(RateLimitMiddleware(limiter, "giffav:", gifFavoritesRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
-			r.Get("/favorites", handleListGIFFavorites(database))
-			r.Put("/favorites", handleAddGIFFavorite(database))
-			r.Delete("/favorites", handleRemoveGIFFavorite(database))
+			r.Get("/favorites", handleListGIFFavorites(favorites))
+			r.Put("/favorites", handleAddGIFFavorite(favorites))
+			r.Delete("/favorites", handleRemoveGIFFavorite(favorites))
 		})
 	})
 }
