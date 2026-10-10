@@ -93,8 +93,14 @@ async function bringToForeground(app: NativeApp, page: Page): Promise<void> {
   await powershell(`${USER32}
 $h = (Get-Process -Id ${app.process.pid}).MainWindowHandle
 if ($h -eq [System.IntPtr]::Zero) { throw 'OwnCord has no main window' }
+# The runner's foreground lock can outlast one input tap, so tap and retry.
+$ok = $false
+foreach ($i in 1..5) {
 ${keyEvents(chords([VK.F24]))}
-if (-not [OwnCordE2E.User32]::SetForegroundWindow($h)) { throw 'SetForegroundWindow refused' }`);
+  if ([OwnCordE2E.User32]::SetForegroundWindow($h)) { $ok = $true; break }
+  Start-Sleep -Milliseconds 200
+}
+if (-not $ok) { throw 'SetForegroundWindow refused' }`);
   await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
 }
 
