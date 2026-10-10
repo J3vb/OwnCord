@@ -73,7 +73,16 @@ export default defineConfig({
     // through `npm run dev` would leave the npm process holding it open.
     // --config is explicit because a bare `vite` resolves the SHARED config,
     // which since the B7-6 split no longer carries the desktop settings.
-    command: "node node_modules/vite/bin/vite.js --config vite.config.desktop.ts",
+    //
+    // --no-turbo-fast-api-calls works around a V8 bug (Node 26, V8 14.6) in
+    // this dev-server transform path only: writing a large module body through
+    // node:http aborts the process with "Lazy deopt after a fast API call with
+    // return value is unsupported", and every later page.goto is refused. V8
+    // flags are rejected in NODE_OPTIONS, so it sits on the node command line.
+    // stdout is piped so a crash message written there reaches the CI log.
+    command:
+      "node --no-turbo-fast-api-calls node_modules/vite/bin/vite.js --config vite.config.desktop.ts",
+    stdout: "pipe",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
