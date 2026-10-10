@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -82,8 +83,11 @@ func handleAddGIFFavorite(database *db.DB) http.HandlerFunc {
 			return
 		}
 		if len(in.Title) > gifFavMaxTitleLen {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "title is too long")
-			return
+			cut := gifFavMaxTitleLen
+			for cut > 0 && !utf8.RuneStart(in.Title[cut]) {
+				cut--
+			}
+			in.Title = in.Title[:cut]
 		}
 		err := database.AddGIFFavorite(r.Context(), user.ID, db.GIFFavorite{URL: in.URL, PreviewURL: in.PreviewURL, Title: in.Title})
 		if errors.Is(err, db.ErrGIFFavoritesFull) {

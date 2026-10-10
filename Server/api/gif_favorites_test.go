@@ -94,6 +94,24 @@ func TestGIFFavorites_PreviewDefaultsToURL(t *testing.T) {
 	}
 }
 
+func TestGIFFavorites_LongTitleIsTruncatedOnRuneBoundary(t *testing.T) {
+	database := newMigratedAuthTestDB(t)
+	token := profileCreateToken(t, database, "favuser", 4)
+	router := buildGIFFavoritesRouter(database)
+	title := strings.Repeat("猫", 70)
+	body := fmt.Sprintf(`{"url":"https://media.klipy.com/a.gif","title":%q}`, title)
+	if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusNoContent {
+		t.Fatalf("add status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	got := gifFavList(t, router, token)
+	if len(got) != 1 {
+		t.Fatalf("list = %+v", got)
+	}
+	if want := strings.Repeat("猫", 66); got[0]["title"] != want {
+		t.Fatalf("title = %q, want %d runes", got[0]["title"], 66)
+	}
+}
+
 func TestGIFFavorites_RejectsDisallowedURLs(t *testing.T) {
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)

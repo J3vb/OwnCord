@@ -69,13 +69,15 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   if (pending.has(fav.url)) return true;
   const gen = generation;
   pending.add(fav.url);
-  const was = isGifFavorite(fav.url);
+  const index = gifFavoritesStore.getState().favorites.findIndex((f) => f.url === fav.url);
+  const was = index >= 0;
   const apply = (on: boolean): void =>
-    gifFavoritesStore.setState((prev) => ({
-      favorites: on
-        ? [fav, ...prev.favorites.filter((f) => f.url !== fav.url)]
-        : prev.favorites.filter((f) => f.url !== fav.url),
-    }));
+    gifFavoritesStore.setState((prev) => {
+      const rest = prev.favorites.filter((f) => f.url !== fav.url);
+      if (!on) return { favorites: rest };
+      const at = was ? Math.min(index, rest.length) : 0;
+      return { favorites: [...rest.slice(0, at), fav, ...rest.slice(at)] };
+    });
   apply(!was);
   try {
     if (was) await api.removeGifFavorite(fav.url);

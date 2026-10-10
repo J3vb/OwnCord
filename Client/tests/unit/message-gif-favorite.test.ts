@@ -73,9 +73,9 @@ describe("star on GIFs in messages", () => {
     bindGifFavoritesApi(api());
     await flush();
     const wrap = renderInlineImage(URL_);
-    const imgClick = vi.fn();
-    wrap.querySelector("img")!.addEventListener("click", imgClick);
+    const wrapClick = vi.fn();
+    wrap.addEventListener("click", wrapClick);
     wrap.querySelector<HTMLButtonElement>(".msg-gif-fav")!.click();
-    expect(imgClick).not.toHaveBeenCalled();
+    expect(wrapClick).not.toHaveBeenCalled();
   });
 });
