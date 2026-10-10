@@ -229,8 +229,12 @@ The picker inserts Tenor's `media_formats.gif` (`lib/gifProvider.ts:48-56`),
 rendered as `<img>` (`media.ts:330`, `attachments.ts:1023`), not the mp4/webm
 Tenor also serves. `pauseAllMedia` on every window blur
 (`media-visibility.ts:180-183`, `:279-291`) encodes a PNG per playing GIF on the
-main thread. Switching to video is a product and platform question (Linux video
-goes through the native path, and the Linux GIF work in PR #2230 is in flight).
+main thread. Switching to video is a product and platform question, but not a
+native-voice one: Linux native video belongs to LiveKit sessions only. Tenor
+mp4/webm would be message media, so it needs the broker (which today accepts
+raster-image signatures only, `external_content.rs:90-99`), renderers that create
+`<video>` elements and WebKit playback work; PR #2230 only lets the Linux IPC
+scheme carry broker-fetched images.
 
 ### C5 — off-screen fetches are never cancelled (follow-up)
 
@@ -261,8 +265,9 @@ titles and image heights in bounded LRUs; message parsing in a bounded LRU.
   Nothing is cached; the buffer is detached by the transfer. It runs from
   `AudioPipeline.attach` → `applyEnhancedPreference` (`lib/audioPipeline.ts:353`)
   inside `createTracks`, so with enhanced noise suppression on it sits on the
-  critical path of the first microphone publish on every join and every
-  connect retry.
+  critical path of the first microphone publish on every join. A failed
+  `room.connect` retry recreates only the Room; microphone restore, and so this
+  fetch, happens once after a connection succeeds.
 - **Fix.** Fetch the bytes once per process and hand each new worklet its own
   transferred copy; the worklet compiles as before. A compiled
   `WebAssembly.Module` cannot be handed over instead: in Chromium a module
@@ -297,12 +302,14 @@ section 9.
 ### D3 — per-join allocations and device enumeration (notes)
 
 A new `AudioContext` per `AudioPipeline.attach` (`lib/micProcessor.ts:87`) and a
-new E2EE `Worker` per `createRoom` (`roomLifecycle.ts:147-148`), including per
-connect retry. The Settings Voice tab enumerates devices twice per
+new E2EE `Worker` per `createRoom` (`roomLifecycle.ts:147-148`), which
+also runs per connect retry. The Settings Voice tab enumerates devices twice per
 `devicechange` (immediately and after 1 s, `VoiceAudioTab.ts:626-636`) and on
 Linux calls the full native `listDevices` IPC once per kind
-(`native/devices.ts:21-26`). None of these is on the join path's critical
-section after D1; noted for a later pass.
+(`native/devices.ts:21-26`). The `createRoom` worker setup and, when a microphone
+is published, the `AudioContext` creation stay on the join path's critical
+section even after D1 (see D1); the device enumeration does not. Noted for a
+later pass.
 
 ### D4 — documentation drift (noted)
 
@@ -387,7 +394,7 @@ One PR per finding, each with a test that fails on `dev` before the fix.
 | D2   | Parallelise the pre-connect voice steps? Overlap connect with the key wait? | Run `createRoom`, `resolveLiveKitUrl` and `setupKeyExchange` together now; keep `connect` after the key so no frame arrives before it is installed. |
 | B1   | How much history should a revisit restore?                                  | Cap revisit paging at two pages; a reader further back scrolls up as on a first visit.                                                              |
 | C3   | Reserve a fixed height for pending link-preview cards and video?            | Yes: a fixed min-height for a pending card, and the server-reported aspect ratio for video.                                                         |
-| C4   | Insert Tenor GIFs as mp4/webm instead of GIF?                               | Yes, after PR #2230 lands and Linux video is confirmed on the native path.                                                                          |
+| C4   | Insert Tenor GIFs as mp4/webm instead of GIF?                               | Yes, after PR #2230 lands and the broker, renderer and WebKit playback work for message video is scoped.                                            |
 | A4   | Virtualize the member list?                                                 | Yes, once a server above 1,000 members is a supported configuration.                                                                                |
 | E3   | Bound the content-consent `admitted` set?                                   | Bound at 2,000 entries; consent is re-evaluated, not revoked, when an entry falls out.                                                              |
 | A2   | Make the LiveKit facade a dynamic import everywhere?                        | Yes, as its own change with the voice widget's call sites made async; measure first-channel time before and after.                                  |
