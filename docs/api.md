@@ -2442,7 +2442,9 @@ authentication and the same `ModerationService` permission and rank checks as
 `/admin/api/users`, `/admin/api/users/{id}` and `/admin/api/users/{id}/sessions`
 (request and response shapes are identical), but live outside `/admin` so a
 reverse proxy that answers `/admin` with a web page does not break them, and
-they are not subject to `server.admin_allowed_cidrs`. A role the caller does not
+they are not subject to `server.admin_allowed_cidrs`. They accept only a
+session or API token issued by this server (any other token gets `401`), with
+the permission and rank checks. A role the caller does not
 outrank, or a role at or above the caller's own, is refused with `403`.
 
 ### POST /api/v1/moderation/queue/{id}/act
