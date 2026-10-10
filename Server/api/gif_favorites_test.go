@@ -64,7 +64,7 @@ func TestGIFFavorites_AddListRemove(t *testing.T) {
 	router := buildGIFFavoritesRouter(database)
 
 	for _, n := range []string{"a", "b"} {
-		body := fmt.Sprintf(`{"url":"https://media.klipy.com/%s.gif","preview_url":"https://media.klipy.com/%s_t.gif","title":"%s"}`, n, n, n)
+		body := fmt.Sprintf(`{"url":"https://media.klipy.com/%s.gif","preview_url":"https://media.klipy.com/%s_t.gif","title":%q}`, n, n, n)
 		if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusNoContent {
 			t.Fatalf("add %s = %d (%s)", n, rr.Code, rr.Body.String())
 		}
@@ -143,7 +143,7 @@ func TestGIFFavorites_CapReturnsConflict(t *testing.T) {
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
-	for i := 0; i < db.MaxGIFFavorites; i++ {
+	for i := range db.MaxGIFFavorites {
 		body := fmt.Sprintf(`{"url":"https://media.klipy.com/%d.gif"}`, i)
 		if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusNoContent {
 			t.Fatalf("add %d = %d", i, rr.Code)

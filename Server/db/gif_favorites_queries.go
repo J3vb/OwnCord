@@ -61,7 +61,7 @@ func (d *DB) ListGIFFavorites(ctx context.Context, userID int64) ([]GIFFavorite,
 	if err != nil {
 		return nil, fmt.Errorf("ListGIFFavorites: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []GIFFavorite{}
 	for rows.Next() {
 		var f GIFFavorite

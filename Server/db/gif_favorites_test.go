@@ -51,7 +51,7 @@ func TestGIFFavorites_AddIsIdempotentAndPerUser(t *testing.T) {
 	ctx := context.Background()
 	a, b := gifFavUser(t, d, "alice"), gifFavUser(t, d, "bob")
 	f := db.GIFFavorite{URL: "https://media.klipy.com/a.gif", PreviewURL: "https://media.klipy.com/a_t.gif"}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := d.AddGIFFavorite(ctx, a, f); err != nil {
 			t.Fatalf("add: %v", err)
 		}
@@ -74,7 +74,7 @@ func TestGIFFavorites_CapRefusesNewButAllowsExisting(t *testing.T) {
 	d := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := gifFavUser(t, d, "alice")
-	for i := 0; i < db.MaxGIFFavorites; i++ {
+	for i := range db.MaxGIFFavorites {
 		u := fmt.Sprintf("https://media.klipy.com/%d.gif", i)
 		if err := d.AddGIFFavorite(ctx, uid, db.GIFFavorite{URL: u, PreviewURL: u}); err != nil {
 			t.Fatalf("add %d: %v", i, err)
