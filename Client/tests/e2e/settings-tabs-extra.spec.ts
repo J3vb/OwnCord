@@ -455,7 +455,8 @@ test.describe("Settings — Advanced Tab", () => {
     await page.evaluate(
       () =>
         new Promise<void>((resolve, reject) => {
-          const req = indexedDB.open("owncord-image-cache", 1);
+          // Opens at whatever version the app uses, so a schema bump never refuses it.
+          const req = indexedDB.open("owncord-image-cache");
           req.onupgradeneeded = () => undefined;
           req.onsuccess = () => {
             req.result.close();
