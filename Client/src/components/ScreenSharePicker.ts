@@ -298,12 +298,19 @@ export function showScreenSharePicker(
         t("picker.fpsDefault", { fps: getEffectiveScreenShareFps(selectedQuality, 30) });
       const defaultFpsOption = createElement("option", { value: "30" }, defaultFpsLabel());
       fpsSelect.appendChild(defaultFpsOption);
+      // The portal's PipeWire stream is negotiated at 60 fps at most, and the
+      // native capturer cannot ask for more.
+      const maxFps = opts.portal ? 60 : Infinity;
       for (const fps of FPS_OPTIONS) {
-        fpsSelect.appendChild(
-          createElement("option", { value: String(fps) }, t("picker.fps", { fps })),
-        );
+        const option = createElement("option", { value: String(fps) }, t("picker.fps", { fps }));
+        if (fps > maxFps) {
+          option.disabled = true;
+          option.title = t("picker.fpsWaylandLimit");
+        }
+        fpsSelect.appendChild(option);
       }
       if (!FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
+      else if (selectedFps > maxFps) selectedFps = maxFps;
       fpsSelect.value = String(selectedFps);
       fpsSelect.addEventListener("change", () => {
         selectedFps = Number(fpsSelect.value);

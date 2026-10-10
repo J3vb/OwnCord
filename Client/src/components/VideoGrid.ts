@@ -3,7 +3,7 @@
  * Replaces the chat area when cameras are active.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";
@@ -61,6 +61,8 @@ export interface VideoGridCallbacks {
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
   readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
+  /** The frame rate your own screen share is sending, or null when unknown. */
+  readonly getLocalShareFps?: () => Promise<number | null>;
   /** What a remote tile shows now, so its stream sends only that. */
   readonly setStreamView?: (tileId: number, view: VideoView) => void;
   /** Opt-in watching: the viewer watches a remote stream, or stops. Nothing
@@ -1054,7 +1056,12 @@ export function createVideoGrid(): VideoGridComponent {
     if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
   }
 
-  function buildSelfCover(tileId: number, stream: MediaStream, hasAudio: boolean): HTMLDivElement {
+  function buildSelfCover(
+    tileId: number,
+    stream: MediaStream,
+    hasAudio: boolean,
+    signal: AbortSignal,
+  ): HTMLDivElement {
     const track = stream.getVideoTracks()[0];
     const settings = track?.getSettings?.() ?? {};
     const surface = (settings as { displaySurface?: string }).displaySurface;
@@ -1064,17 +1071,36 @@ export function createVideoGrid(): VideoGridComponent {
         : surface === "browser"
           ? voiceText("tile.sharingTab")
           : voiceText("tile.sharingScreen");
-    const parts: string[] = [];
-    if (settings.height !== undefined && settings.frameRate !== undefined) {
-      parts.push(
-        voiceText("tile.shareQuality", {
-          // Plain strings: the catalog would group 1080 as "1,080".
-          height: String(settings.height),
-          fps: String(Math.round(settings.frameRate)),
-        }),
-      );
-    }
-    parts.push(hasAudio ? voiceText("tile.withAudio") : voiceText("tile.noAudio"));
+    const detail = createElement("div", { class: "video-self-detail" });
+    // The rate actually sent, never the requested one: the capture can fall
+    // short of it (a 60 Hz monitor, a busy encoder).
+    const renderDetail = (fps: number | null): void => {
+      const parts: string[] = [];
+      if (settings.height !== undefined) {
+        // Plain strings: the catalog would group 1080 as "1,080".
+        const height = String(settings.height);
+        parts.push(
+          fps === null
+            ? voiceText("tile.qualityHeight", { height })
+            : voiceText("tile.shareQuality", { height, fps: String(Math.round(fps)) }),
+        );
+      }
+      parts.push(hasAudio ? voiceText("tile.withAudio") : voiceText("tile.noAudio"));
+      detail.textContent = parts.join(" · ");
+    };
+    renderDetail(null);
+    const pollFps = async (): Promise<void> => {
+      let fps: number | null = null;
+      try {
+        fps = (await callbacks.getLocalShareFps?.()) ?? null;
+      } catch (err) {
+        log.debug("Local share stats unavailable", { tileId, err });
+      }
+      if (signal.aborted) return;
+      renderDetail(fps);
+      setOwnedTimeout(signal, () => void pollFps(), STATS_POLL_MS);
+    };
+    setOwnedTimeout(signal, () => void pollFps(), STATS_POLL_MS);
 
     const cover = createElement("div", { class: "video-self-cover" });
     const actions = createElement("div", { class: "video-self-actions" });
@@ -1100,7 +1126,7 @@ export function createVideoGrid(): VideoGridComponent {
     appendChildren(
       cover,
       createElement("div", { class: "video-self-title" }, title),
-      createElement("div", { class: "video-self-detail" }, parts.join(" · ")),
+      detail,
       actions,
     );
     return cover;
@@ -1297,7 +1323,9 @@ export function createVideoGrid(): VideoGridComponent {
     // Your own screen share: say what is going out instead of showing a
     // hall of mirrors, with Stop sharing always at hand.
     if (config?.isSelf === true && config.isScreenshare && stream !== null) {
-      cell.appendChild(buildSelfCover(userId, stream, config.hasAudio === true));
+      cell.appendChild(
+        buildSelfCover(userId, stream, config.hasAudio === true, entry.listeners.signal),
+      );
     }
     applyNames(entry, username, config?.name ?? username);
     cells.set(userId, entry);

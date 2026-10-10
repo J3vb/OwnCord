@@ -891,6 +891,10 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
+  getLocalScreenshareFps(): Promise<number | null> {
+    return this._remoteTracks.getLocalScreenshareFps();
+  }
+
   /** Your screen share is publishing its audio too. */
   hasLocalScreenshareAudio(): boolean {
     return (
@@ -1007,6 +1011,7 @@ export const reapplyEnhancedNoiseSuppression =
   session.reapplyEnhancedNoiseSuppression.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
+export const getLocalScreenshareFps = session.getLocalScreenshareFps.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);

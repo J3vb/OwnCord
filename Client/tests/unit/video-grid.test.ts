@@ -1765,28 +1765,49 @@ describe("VideoGrid", () => {
       container.remove();
     });
 
-    it("writes the self-share quality as 1080p, not 1,080p", () => {
-      const track = {
-        id: "t",
-        kind: "video",
-        muted: false,
-        getSettings: () => ({ height: 1080, frameRate: 30 }),
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      };
-      const stream = {
-        getTracks: () => [track],
-        getVideoTracks: () => [track],
-        getAudioTracks: () => [],
-      } as unknown as MediaStream;
-      grid.addStream(1 + 1_000_000, "Your Screen", stream, {
-        isSelf: true,
-        audioUserId: 1,
-        isScreenshare: true,
-      });
-      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toContain(
-        "1080p · 30 fps",
-      );
+    it("shows the frame rate your screen share achieves, not the one it asked for", async () => {
+      vi.useFakeTimers();
+      try {
+        const track = {
+          id: "t",
+          kind: "video",
+          muted: false,
+          getSettings: () => ({ height: 1080, frameRate: 120 }),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        };
+        const stream = {
+          getTracks: () => [track],
+          getVideoTracks: () => [track],
+          getAudioTracks: () => [],
+        } as unknown as MediaStream;
+        const getLocalShareFps = vi.fn(async (): Promise<number | null> => null);
+        grid.setCallbacks({ getLocalShareFps });
+        grid.addStream(1 + 1_000_000, "Your Screen", stream, {
+          isSelf: true,
+          audioUserId: 1,
+          isScreenshare: true,
+        });
+        const detail = () => cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent;
+        // 1080p, not 1,080p; and never the requested 120 before a measurement.
+        expect(detail()).toBe("1080p · No audio");
+
+        getLocalShareFps.mockResolvedValue(58.4);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · 58 fps · No audio");
+
+        getLocalShareFps.mockResolvedValue(117);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · 117 fps · No audio");
+
+        // The poll goes with the tile.
+        grid.removeStream(1 + 1_000_000);
+        const calls = getLocalShareFps.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(getLocalShareFps).toHaveBeenCalledTimes(calls);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("leaves the video in its tile when no pop-out window opens", () => {

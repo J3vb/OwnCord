@@ -47,6 +47,7 @@ import {
   setOnError as setVoiceOnError,
   enableCamera,
   getRemoteVideoStats,
+  getLocalScreenshareFps,
   setRemoteVideoView,
   setRemoteVideoWatched,
 } from "@lib/livekitSession";
@@ -1427,6 +1428,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
+      getLocalShareFps: () => getLocalScreenshareFps(),
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)

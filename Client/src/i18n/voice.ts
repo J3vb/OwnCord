@@ -142,6 +142,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.frameRate": "Frame rate",
   "picker.fps": "{fps} fps",
   "picker.fpsDefault": "Default ({fps} fps)",
+  "picker.fpsWaylandLimit": "Wayland screen capture is limited to 60 fps",
   "picker.goLive": "Go Live",
   "picker.quality.low": "Low (720p)",
   "picker.quality.medium": "Medium (720p)",

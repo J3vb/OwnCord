@@ -94,6 +94,9 @@ and only when it changes something a contributor or fork holder must do
 - After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
 - A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 - A screen share watched in a pop-out window had no volume or mute controls (since v2.2.0-beta.2); the stream's volume and mute are now in the window.
+- A High-quality screen share at 120 fps reached only about 40-50 fps; it now goes out as one layer, as Source does, and can reach 120 where the screen and machine allow.
+- Your own screen share tile showed the frame rate you picked, not the one being sent; it now shows the rate actually going out.
+- On Linux Wayland, the screen-share picker offered 120 fps, but the capture stops at 60; 120 is now disabled there, with the reason.
 
 ### Changed
 

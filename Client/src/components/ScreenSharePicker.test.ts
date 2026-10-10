@@ -210,6 +210,39 @@ describe("showScreenSharePicker", () => {
     });
   });
 
+  it("disables 120 fps on Wayland, where the portal capture stops at 60", async () => {
+    const picking = showScreenSharePicker({
+      sources: [],
+      portal: true,
+      defaultQuality: "source",
+      defaultFps: 120,
+    });
+    const root = await mounted();
+    const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+    const option120 = [...fps.options].find((o) => o.value === "120")!;
+    expect(option120.disabled).toBe(true);
+    expect(option120.title).toBe("Wayland screen capture is limited to 60 fps");
+    // A saved 120 falls back to the highest rate the capture can deliver.
+    expect(fps.value).toBe("60");
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ quality: "source", fps: 60 });
+  });
+
+  it("offers 120 fps where the capture is not the portal", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "source",
+      defaultFps: 120,
+    });
+    const root = await mounted();
+    const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+    expect([...fps.options].find((o) => o.value === "120")!.disabled).toBe(false);
+    expect(fps.value).toBe("120");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
+  });
+
   it("says so when there is nothing to share", async () => {
     const picking = showScreenSharePicker({
       sources: [],
