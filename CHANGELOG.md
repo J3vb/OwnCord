@@ -47,8 +47,6 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
-
 ### Fixed
 
 **Messages & files**
@@ -60,12 +58,11 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
-
-### Changed
-
-**Messages & files**
-
 - Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
+
+**Linux desktop**
+
+- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
 
 ## v2.2.0-beta.2
 
