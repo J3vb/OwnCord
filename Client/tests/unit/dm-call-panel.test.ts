@@ -884,7 +884,7 @@ describe("DmCallPanel — video in the call", () => {
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
-  it("moves a blocked peer's shield onto their camera tile, where it still opens the re-trust prompt", () => {
+  it("moves a blocked peer's shield with their camera tile, and back when it goes", async () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();
     panel!.setVideoActive(true);
@@ -895,17 +895,18 @@ describe("DmCallPanel — video in the call", () => {
       sessionFingerprint: null,
     });
     voiceStore.flush();
-    expect(shield(root, OTTO)).not.toBeNull();
+    const onAvatar = shield(root, OTTO)!;
+    expect(onAvatar).not.toBeNull();
 
     const cell = document.createElement("div");
     cell.className = "video-cell";
     cell.dataset.userId = String(OTTO);
     cell.dataset.streamType = "camera";
     panel!.videoElement()!.appendChild(cell);
-    patchVoice({ localCamera: true });
-    voiceStore.flush();
+    await Promise.resolve();
 
     const badge = cell.querySelector<HTMLElement>(".dcp-verify")!;
+    expect(badge).toBe(onAvatar);
     expect(badge.tagName).toBe("BUTTON");
     badge.click();
     expect(openIdentityMismatchModal).toHaveBeenCalledWith(
@@ -914,6 +915,36 @@ describe("DmCallPanel — video in the call", () => {
       expect.any(AbortSignal),
       expect.any(Function),
     );
+
+    cell.remove();
+    await Promise.resolve();
+    expect(shield(root, OTTO)).toBe(badge);
+  });
+
+  it("leaves one shield on a camera tile across a panel rebuild", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    q(root, "dcp-collapse")!.click();
+    q(root, "dcp-collapse")?.click();
+    voiceStore.flush();
+    await Promise.resolve();
+
+    expect(cell.querySelectorAll(".dcp-verify")).toHaveLength(1);
   });
 
   it("keeps your own video once the call went unanswered, without the absent callee's tile", () => {

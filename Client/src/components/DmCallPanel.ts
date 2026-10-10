@@ -750,6 +750,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const focusId = hadFocus ? (active.dataset.testid ?? "") : "";
 
     for (const child of Array.from(body.childNodes)) if (child !== videoEl) child.remove();
+    for (const ref of avatars.values()) ref.verify?.remove();
     avatars = new Map();
     people = [];
     controls = { mute: null, deafen: null, camera: null, share: null };
@@ -838,13 +839,18 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       ref.verify = null;
       if (v !== null) ref.verify = buildShield(userId, v, dm);
     }
-    // A camera tile replaces the avatar tile in the grid, so the shield moves with the person.
+    placeShield(userId, ref);
+    if (hadFocus) focusFallback(userId)?.focus();
+  }
+
+  /** A camera tile replaces the avatar tile in the grid, so the shield moves with the person. */
+  function placeShield(userId: number, ref: AvatarRef): void {
+    if (ref.verify === null) return;
     const host =
       videoEl.querySelector<HTMLElement>(
         `.video-cell[data-user-id='${userId}'][data-stream-type='camera']`,
       ) ?? ref.wrap;
-    if (ref.verify !== null && ref.verify.parentElement !== host) host.appendChild(ref.verify);
-    if (hadFocus) focusFallback(userId)?.focus();
+    if (ref.verify.parentElement !== host) host.appendChild(ref.verify);
   }
 
   function buildShield(userId: number, v: PeerVerification, dm: DmChannel): HTMLElement {
@@ -1017,6 +1023,15 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   return {
     mount(container: Element): void {
       container.appendChild(root);
+      const tiles = new MutationObserver(() => {
+        for (const [userId, ref] of avatars) {
+          const hadFocus = ref.verify?.contains(document.activeElement) === true;
+          placeShield(userId, ref);
+          if (hadFocus) focusFallback(userId)?.focus();
+        }
+      });
+      tiles.observe(videoEl, { childList: true, subtree: true });
+      disposable.addCleanup(() => tiles.disconnect());
       unsubs.push(
         voiceStore.subscribe(() => update()),
         channelsStore.subscribeSelector(
