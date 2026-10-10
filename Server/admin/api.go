@@ -41,13 +41,44 @@ var setupLimiterHook func(*auth.RateLimiter)
 // is ADMINISTRATOR with the hierarchy re-checked in the service; recovery
 // credentials (B4-6) are owner-only.
 func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) {
-	r.Get("/users", handleListUsers(svc.Users))
-	r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
-	r.With(requirePerm(permissions.KickMembers)).
-		Delete("/users/{id}/sessions", handleForceLogout(mod))
+	mountMemberActionRoutes(r, "/users", svc, hub, permInvalidator, mod)
 	r.With(requirePerm(permissions.Administrator)).
 		Delete("/users/{id}", handleDeleteUser(mod, hub))
 	ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
+}
+
+// mountMemberActionRoutes registers the member-list actions the desktop client
+// uses: list, ban/unban and role change (PATCH) and force-logout. They are
+// mounted twice, under /admin/api/users for the panel and under
+// /api/v1/moderation/members (NewMemberAPI) for the client, so both run the
+// same handlers and the same ModerationService rank checks. The list sits at
+// base itself, the per-user routes under base/{id}.
+func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) {
+	list := base
+	if list == "" {
+		list = "/"
+	}
+	r.Get(list, handleListUsers(svc.Users))
+	r.Patch(base+"/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
+	r.With(requirePerm(permissions.KickMembers)).
+		Delete(base+"/{id}/sessions", handleForceLogout(mod))
+}
+
+// NewMemberAPI serves the member-list actions on the main /api/v1 surface
+// (mounted by api.NewRouter at /api/v1/moderation/members). A reverse proxy in
+// front of a server may answer /admin/... with a web page, which broke the
+// desktop client's member menu; this surface does not depend on that prefix.
+// Authentication is the admin perimeter's (a session or API token whose role
+// holds a moderation bit) and authorisation is the same per-action permission
+// and rank check, in ModerationService. Unlike /admin it is not subject to
+// server.admin_allowed_cidrs: these are routine moderator actions. They accept
+// only a session or API token issued by this server, and the permission and
+// rank checks, not the network, are what bound them.
+func NewMemberAPI(svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.Handler {
+	r := chi.NewRouter()
+	r.Use(adminAuthMiddleware(svc.Sessions))
+	mountMemberActionRoutes(r, "", svc, hub, permInvalidator, svc.Moderation)
+	return r
 }
 
 // OwnerOnlyRoute is one (method, pattern) pair ownerOnly registered, relative
