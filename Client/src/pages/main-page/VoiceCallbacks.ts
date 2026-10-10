@@ -8,7 +8,8 @@ import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
-import { joinBackoffText, noteJoinFailed } from "../../features/voice/joinBackoff";
+import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,

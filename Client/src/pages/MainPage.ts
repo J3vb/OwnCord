@@ -23,7 +23,7 @@ import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@li
 import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
-import { joinBackoffText } from "../features/voice/joinBackoff";
+import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";

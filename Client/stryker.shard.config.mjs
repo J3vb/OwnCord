@@ -18,6 +18,7 @@ export const shards = {
     "src/features/voice/sessionState.ts",
     "src/features/voice/joinOrchestration.ts",
     "src/features/voice/joinBackoff.ts",
+    "src/features/voice/joinBackoffText.ts",
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/remoteTracks.ts",

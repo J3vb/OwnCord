@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { joinBackoffText, joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
+import { joinBackoffText } from "./joinBackoffText";
 
 beforeEach(() => noteJoinSucceeded());
 

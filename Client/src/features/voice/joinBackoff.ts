@@ -1,5 +1,3 @@
-import { voiceText } from "../../i18n/voice";
-
 // Backoff between voice joins after a failed one. A join that keeps failing
 // before it reaches the SFU (key exchange gave up, connect or setup threw)
 // must never cycle voice_join/voice_leave several times a second, however
@@ -32,10 +30,7 @@ export function joinRetryInMs(now = Date.now()): number {
   return Math.max(0, retryAt - now);
 }
 
-/** Refusal toast text for a join inside the wait, null when it may start. */
-export function joinBackoffText(now = Date.now()): string | null {
-  const waitMs = joinRetryInMs(now);
-  if (waitMs === 0) return null;
-  const seconds = Math.ceil(waitMs / 1000);
-  return voiceText(switched ? "join.switchBackoff" : "join.backoff", { seconds });
+/** True when the current wait was armed by a channel switch, not a failed join. */
+export function joinBackoffFromSwitch(): boolean {
+  return switched;
 }
