@@ -104,8 +104,9 @@ describe("API session ownership", () => {
         json: () => Promise.reject(new SyntaxError("Invalid JSON")),
       });
       await expect(kind === "health" ? api.getHealth() : api.getMe()).rejects.toThrow(
-        "Invalid JSON",
+        kind === "health" ? "Invalid JSON" : "The server answered with a web page",
       );
+      if (kind !== "health") expectConsole("warn", /response is not JSON/);
       expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(false);
     },
   );
