@@ -14,6 +14,7 @@ import {
   setLocalDeafened,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
+import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import type { Payload } from "../connection/dispatchContext";
 import { expectConsole } from "../../../tests/helpers/console";
 
@@ -185,6 +186,22 @@ describe("handleVoiceJoinRollback", () => {
     handleVoiceJoinRollback();
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("backs off the next join after a refusal before any voice token", () => {
+    // CHANNEL_FULL / FORBIDDEN / VOICE_ERROR / RATE_LIMITED land here with no
+    // token issued; without arming the backoff every click re-sent voice_join.
+    noteJoinSucceeded();
+    joinVoiceChannel(4);
+    handleVoiceJoinRollback();
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+    noteJoinSucceeded();
+  });
+
+  it("does not back off an error that lands with no join outstanding", () => {
+    noteJoinSucceeded();
+    handleVoiceJoinRollback();
+    expect(joinRetryInMs()).toBe(0);
   });
 });
 

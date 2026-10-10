@@ -13,6 +13,7 @@ import type {
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
+import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 
 export interface VoiceUser {
@@ -198,7 +199,13 @@ export function resetVoiceStore(): void {
   }));
 }
 
-registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState(), reset: resetVoiceStore });
+registerVoiceLogoutTeardown({
+  snapshot: () => voiceStore.getState(),
+  reset: () => {
+    resetVoiceStore();
+    noteJoinSucceeded();
+  },
+});
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {

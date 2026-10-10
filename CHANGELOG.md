@@ -52,6 +52,8 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - The Invite button now shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
+- The Mark All as Read button was never visible: it sat in a sidebar header that is hidden. It now shows as an icon beside Invite in the server header whenever a channel or DM is unread.
+- A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
 
 **Voice**
 
@@ -60,10 +62,19 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
+- On Linux, GIF picker previews and linked images no longer show as broken images when the webview falls back to its slower internal message channel; the log now says when that happens.
 
 **Voice and video**
 
+- On Windows, a popped-out stream or camera no longer leaves an empty black window behind when the stream ends or you choose Bring back; the window now closes.
 - On Windows, Settings > Voice & Audio lists your microphones, speakers and cameras by name again instead of nameless entries, and a saved device that is still plugged in no longer shows as "(disconnected)".
+- DM calls had no identity shields; each person in the call now shows one, as in a server voice channel, and a red (blocked) shield opens the prompt to review their new key.
+- A DM call's timer showed each side its own time in the call; it now counts from when the other person joined, so both sides show the same length.
+- Calling a 1:1 contact who is offline showed "Calling…" for 30 seconds; it now says they are offline at once.
+- On Windows, the "is calling you" notification stayed in Action Center after the ring ended; it is now removed once the ring is answered, declined or over.
+- Clicking a voice channel again while it was still connecting or securing left it at once, so repeated clicks cycled join/leave on the server several times a second — a repeat click now leaves the join running (Disconnect still ends it).
+- After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
+- A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 
 ### Changed
 

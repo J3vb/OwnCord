@@ -45,9 +45,21 @@ export const notifier: Notifier = {
     });
   },
   // A call is the same command with no message id: the host then opens the
-  // DM (`owncord://channel/…` on Windows) instead of a message.
-  async showCall(title: string, body: string, target): Promise<void> {
-    await notifier.showMessage(title, body, { host: target.host, channelId: target.channelId });
+  // DM (`owncord://channel/…` on Windows) instead of a message. A ringing
+  // call's toast is tagged by its channel so `clearCall` can withdraw it.
+  async showCall(title: string, body: string, target, ringing = false): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("notify_message", {
+      title,
+      body,
+      host: target.host,
+      channelId: target.channelId,
+      ring: ringing,
+    });
+  },
+  async clearCall(channelId: number): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("clear_call_notification", { channelId });
   },
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;

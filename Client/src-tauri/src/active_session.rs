@@ -42,9 +42,22 @@ impl ActiveSession {
 
     /// Record the host a login was verified for. Set only from the relayed
     /// `auth_ok`; marks both the active session and a verified host.
+    #[cfg(test)]
     pub fn set(&self, host: &str) {
+        self.set_if(host, || true);
+    }
+
+    /// `set`, but only if `still_current` holds. The check runs under the same
+    /// lock `clear_active_unless` takes, so a connection claim that bumps the
+    /// generation first makes this refuse, and one that bumps it after clears
+    /// the host this just set: a superseded attempt can never leave its host
+    /// active.
+    pub fn set_if(&self, host: &str, still_current: impl FnOnce() -> bool) {
         let key = crate::tofu::cert_store_key(host);
         let mut state = self.lock();
+        if !still_current() {
+            return;
+        }
         state.verified_hosts.insert(key.clone());
         state.host = Some(key);
     }
@@ -53,6 +66,18 @@ impl ActiveSession {
     /// The verified hosts are deliberately kept.
     pub fn clear_active(&self) {
         self.lock().host = None;
+    }
+
+    /// Clear the active host unless it is `host` (compared the way the cert
+    /// store does). A reconnect to the same server keeps its session, so the
+    /// identity-pin commands do not fail-close voice E2EE while the socket is
+    /// redialled; switching to a different server still clears it.
+    pub fn clear_active_unless(&self, host: &str) {
+        let key = crate::tofu::cert_store_key(host);
+        let mut state = self.lock();
+        if state.host.as_deref() != Some(key.as_str()) {
+            state.host = None;
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
@@ -294,6 +319,45 @@ mod tests {
         assert!(session
             .ensure_identity_scope("7@other.example", false)
             .is_err());
+    }
+
+    #[test]
+    fn a_same_host_reconnect_keeps_the_session_and_a_switch_clears_it() {
+        let session = ActiveSession::new();
+        session.set("chat.example.com");
+        session.clear_active_unless("Chat.Example.com:443");
+        assert!(session.ensure("chat.example.com", false).is_ok());
+        session.clear_active_unless("other.example.com");
+        assert!(session.ensure("chat.example.com", false).is_err());
+        // The verified host outlives the clear, as with clear_active.
+        assert!(session.ensure("chat.example.com", true).is_ok());
+    }
+
+    #[test]
+    fn a_non_pre_session_guard_refuses_without_a_session_or_for_another_host() {
+        // get_identity_pin and store_identity_pin both call ensure(host, false).
+        let session = ActiveSession::new();
+        assert!(session.ensure("chat.example.com", false).is_err());
+        session.set("chat.example.com");
+        assert!(session.ensure("other.example.com", false).is_err());
+        assert!(session.ensure("Chat.Example.com:443", false).is_ok());
+    }
+
+    #[test]
+    fn set_if_checks_under_the_session_lock_and_refuses_a_superseded_attempt() {
+        let session = ActiveSession::new();
+        let mut held = false;
+        session.set_if("chat.example.com", || {
+            held = session.state.try_lock().is_err();
+            true
+        });
+        assert!(held, "the currency check must run under the session lock");
+        assert!(session.ensure("chat.example.com", false).is_ok());
+
+        session.clear_active_unless("other.example.com");
+        session.set_if("dead.example.com", || false);
+        assert!(session.ensure("dead.example.com", false).is_err());
+        assert!(session.ensure("dead.example.com", true).is_err());
     }
 
     #[test]

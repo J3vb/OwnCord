@@ -127,7 +127,9 @@ test.describe("B9-4 shared navigation", () => {
 
   test("the header actions are one named row of icon buttons, in Tab order", async ({ page }) => {
     const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
-    const actions = header.locator(".sidebar-header-actions > button");
+    // Mark All as Read is in the row too but hidden while nothing is unread (the
+    // mock server has no unread channel here), so only visible buttons count.
+    const actions = header.locator(".sidebar-header-actions > button:visible");
     await expect(actions).toHaveCount(3);
     const names = ["Invite", "Audit Log", "Moderation"];
     for (const [i, name] of names.entries()) {
@@ -214,5 +216,52 @@ test.describe("B9-4 shared navigation", () => {
     await signIn(page);
     await expectNoView(page);
     await expect(page.locator("[data-testid='settings-overlay']")).not.toHaveClass(/open/);
+  });
+});
+
+test.describe("Mark All as Read in the server header", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/api/v1/invites", status: 200, body: [] },
+        ],
+        simulateWsFlow: true,
+        // "general" is the open channel; "random" is the unread one, so opening
+        // the app does not mark it read.
+        readyOverrides: {
+          channels: [
+            { id: 1, name: "general", type: "text", position: 0, category: null },
+            { id: 2, name: "random", type: "text", position: 1, category: null, unread_count: 2 },
+          ],
+        },
+      }),
+    );
+    await page.goto("/");
+    await signIn(page);
+  });
+
+  test("shows while a channel is unread, and clears it from the keyboard", async ({ page }) => {
+    const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
+    const actions = header.locator(".sidebar-header-actions > button:visible");
+    const markAll = page.locator("[data-testid='mark-all-read']");
+    const badge = page.locator("[data-channel-id='2'] .unread-badge");
+
+    await expect(badge).toHaveText("2");
+    await expect(actions).toHaveCount(4);
+    await expect(actions.nth(0)).toHaveAttribute("data-testid", "mark-all-read");
+    await expect(markAll).toHaveAccessibleName("Mark All as Read");
+    await expect(markAll).toHaveText("");
+    expect(await findUnnamedControls(header)).toEqual([]);
+
+    expect(await keyboardReachable(page, markAll)).toBe(true);
+    await page.keyboard.press("Enter");
+
+    await expect(badge).toHaveCount(0);
+    await expect(markAll).toBeHidden();
+    await expect(actions).toHaveCount(3);
   });
 });
