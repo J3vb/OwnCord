@@ -81,6 +81,7 @@ current status.
 | Audit                                                                                      | Scope                                                                                      |
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | [ci-flake-audit-2026-10.md](ci-flake-audit-2026-10.md)                                     | CI flake audit: checks ranked by red-then-green reruns over 60 days, root causes, fix PRs. |
+| [linux-platform-audit-2026-10.md](linux-platform-audit-2026-10.md)                         | Linux desktop client vs Windows: IPC byte paths, WebKitGTK differences, what to fix.       |
 | [audit-2026-09-23-windows-update-relaunch.md](audit-2026-09-23-windows-update-relaunch.md) | Windows client update: why the successor can start late (not conclusive).                  |
 | [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md)             | Repository layout and contributor experience (`RL-01`…`RL-22`).                            |
 | [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md)             | Full repository health.                                                                    |
