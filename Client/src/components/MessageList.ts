@@ -544,8 +544,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
-    // The caller decides whether to re-window now; the scroll event does on the next frame.
-    root.scrollTop = Math.max(0, offsetBefore(idx) - UNREAD_BAR_CLEARANCE);
+    // The rows between here and the divider are estimates until rendered, so
+    // settle against their measured heights, as a jump does.
+    for (let pass = 0; pass < 3; pass++) {
+      if (!placeIndex(idx, -UNREAD_BAR_CLEARANCE)) break;
+    }
     updateScrollToBottomBtn();
     return true;
   }
@@ -763,6 +766,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // per dropped call, so the image-height oscillation it stops cannot restart.
   let renderWindowSuppressed = false;
 
+  /** Where `el`'s top edge sits in the scroller, in px below the top of the
+   *  view; the one measure of position the heights model cannot drift from. */
+  function edgeOf(el: Element): number {
+    return root === null ? 0 : el.getBoundingClientRect().top - root.getBoundingClientRect().top;
+  }
+
+  /** Scroll so `el`'s top edge is back at `edge` after rows above it were
+   *  built, released or re-measured: a row that entered above the view
+   *  measures differently from the estimate its spacer share was cut by, and
+   *  a divider's collapsed margin never matches the summed one. */
+  function holdRow(el: Element, edge: number): void {
+    if (root === null) return;
+    const delta = edgeOf(el) - edge;
+    if (Math.abs(delta) >= 1) root.scrollTop += delta;
+  }
+
   /** Slide the rendered window to [start, end), which overlaps it: release the
    *  rows that left, render only the rows that entered, keep the rest. */
   function shiftWindow(start: number, end: number): void {
@@ -770,6 +789,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Record the rows' heights before any of them leave.
     measureRendered();
     const rows = [...contentContainer.children] as HTMLElement[];
+    // Rows entering above the view keep the first row that stays in place on
+    // screen; rows leaving above it are measured, so their spacer share is exact.
+    const kept = start < renderedStart ? rows[0] : undefined;
+    const keptEdge = kept === undefined ? 0 : edgeOf(kept);
+    // Only a row the reader could see is worth holding: a jump to the top
+    // shows the rows above it instead, laid out as they really are.
+    const hold = kept !== undefined && keptEdge < (root?.clientHeight ?? 0) && root!.scrollTop > 0;
     for (let i = 0; i < rows.length; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < start || globalIdx >= end) releaseRow(rows[i]!);
@@ -788,6 +814,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderedEnd = end;
     measureRendered();
     updateSpacers();
+    if (hold && kept.isConnected) holdRow(kept, keptEdge);
   }
 
   function renderWindow(): void {
@@ -824,8 +851,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const firstVisible = offsetToIndex(scrollTop);
     const lastVisible = offsetToIndex(scrollTop + clientHeight);
 
-    const start = Math.max(0, firstVisible - OVERSCAN);
+    let start = Math.max(0, firstVisible - OVERSCAN);
     const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
+    // A divider is drawn with the row under it: that row's top margin depends
+    // on the divider being there, so a window starting between them would
+    // measure the row differently from how it is laid out once both show.
+    while (start > 0 && virtualItems[start - 1]!.kind !== "message") start--;
 
     // Rebuild the DOM when explicitly requested by renderAll (which sets
     // renderedStart to -1) or when the target range has left the rendered
@@ -1148,11 +1179,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // survives the prepend, since the id is stable while the index shifts.
       let anchorMessageId: number | null = null;
       let anchorOffsetInItem = 0;
+      let anchorEdge: number | null = null;
       if (!wasAtBottom && root !== null) {
         const anchorIdx = topMessageIndex();
         if (anchorIdx !== -1) {
           anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
           anchorOffsetInItem = root.scrollTop - offsetBefore(anchorIdx);
+          const el = contentContainer?.children[anchorIdx - renderedStart];
+          if (el !== undefined) anchorEdge = edgeOf(el);
         }
       }
 
@@ -1201,6 +1235,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (wasAtBottom) {
         scrollToBottom();
         updateScrollToBottomBtn();
+      } else if (anchorMessageId !== null) {
+        // The anchor above was applied against estimates for the rows the
+        // rebuild put above the reader (a prepended page); renderWindow has
+        // now measured the ones it built, so re-place the row and re-window
+        // until it stays put, as scrollToMessage settles.
+        const idx = virtualItems.findIndex(
+          (item) => item.kind === "message" && item.message.id === anchorMessageId,
+        );
+        if (idx !== -1) {
+          for (let pass = 0; pass < 3; pass++) {
+            if (!placeIndex(idx, anchorOffsetInItem)) break;
+          }
+          // Then by its real edge: the rebuilt row is on screen now.
+          const el = contentContainer?.children[idx - renderedStart];
+          if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
+        }
       }
       log.debug("renderAll END");
     } finally {
@@ -1489,7 +1539,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAll();
     updateJumpToPresentPill();
     const openedAtDivider = openAtDividerIfReady();
-    if (openedAtDivider) renderWindow();
     updateUnreadBar();
     // A deferred divider still moves the view later, so only the bottom
     // scrolls are skipped when the open already landed on it.
@@ -1788,14 +1837,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     olderLoadingRow = null;
   }
 
+  /** Scroll so row `idx` sits `offset` px below the top of the view and
+   *  render there; false when it already does. Each pass can build and
+   *  measure rows above the target, moving it, so callers settle in a few. */
+  function placeIndex(idx: number, offset: number): boolean {
+    if (root === null) return false;
+    const target = Math.max(0, offsetBefore(idx) + offset);
+    if (Math.abs(target - root.scrollTop) < 1) return false;
+    root.scrollTop = target;
+    renderWindow();
+    return true;
+  }
+
   /** Scroll so row `idx` is centred; false when it was already centred. */
   function centreOnIndex(idx: number): boolean {
     if (root === null) return false;
-    const centred = Math.max(0, offsetBefore(idx) - (root.clientHeight - getItemHeight(idx)) / 2);
-    if (centred === root.scrollTop) return false;
-    root.scrollTop = centred;
-    renderWindow();
-    return true;
+    return placeIndex(idx, -(root.clientHeight - getItemHeight(idx)) / 2);
   }
 
   function scrollToMessage(messageId: number): boolean {

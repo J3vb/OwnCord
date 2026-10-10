@@ -35,6 +35,10 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  // The unread count a test gives the channel would otherwise leak a NEW
+  // divider into the next test's list.
+  setChannels([]);
+  setActiveChannel(null);
 }
 
 function makeMessage(id: number): Message {
@@ -199,5 +203,58 @@ describe("MessageList — history prepend keeps the reading position (OC-0248)",
     expect(container.querySelector('[data-testid="message-1"]')).toBeNull();
     expect(container.querySelector('[data-testid="message-51"]')).not.toBeNull();
     expect(root.scrollTop).toBeGreaterThan(1000);
+  });
+  // The rows a prepend inserts above the reader are not rendered when the
+  // anchor is first applied, so their heights are estimates. Once renderWindow
+  // has built and measured them, the anchored row must still sit where it was
+  // in the viewport: the scroll offset is re-applied against the measured
+  // heights, instead of staying at the estimate-derived value.
+  it("keeps the anchored row at its viewport offset once the prepended rows are measured", async () => {
+    const MEASURED_ROW = 100; // every rendered message row (the estimate is 61)
+    const MEASURED_DIVIDER = 32;
+    const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement): number {
+        return this.classList.contains("message") ? MEASURED_ROW : MEASURED_DIVIDER;
+      },
+    });
+    try {
+      const initial = Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
+      setMessages(initial);
+      setHasMore(true);
+      mount();
+      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      // 8px into message 51, the oldest loaded row, right under the day divider.
+      root.scrollTop = MEASURED_DIVIDER + 8;
+      root.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+
+      const older = Array.from({ length: 50 }, (_, i) => makeMessage(1 + i));
+      setMessages([...older, ...initial]);
+      messagesStore.flush();
+
+      // Where the anchored row really is: the top spacer plus every rendered
+      // row above it, as the browser would lay them out.
+      const rows = [...container.querySelectorAll<HTMLElement>(".virtual-content > *")];
+      const anchorRow = container.querySelector<HTMLElement>('[data-testid="message-51"]');
+      expect(anchorRow).not.toBeNull();
+      const spacer = parseFloat(
+        container.querySelector<HTMLElement>(".virtual-spacer-top")!.style.height,
+      );
+      const above = rows
+        .slice(0, rows.indexOf(anchorRow!))
+        .reduce((h, el) => h + el.offsetHeight, 0);
+      expect(root.scrollTop).toBe(spacer + above + 8);
+    } finally {
+      if (offsetHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight;
+      }
+    }
   });
 });
