@@ -49,10 +49,6 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
-- Clicking a message author's name or avatar, or an @mention, did nothing. It now opens that person's profile card, and the name and mentions can be reached and opened with the keyboard.
-
-### Fixed
-
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
@@ -62,11 +58,6 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
-
-### Changed
-
-**Messages & files**
-
 - Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
 
 ## v2.2.0-beta.2
