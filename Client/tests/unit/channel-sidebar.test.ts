@@ -836,7 +836,7 @@ describe("ChannelSidebar", () => {
 
     const btn = container.querySelector(
       "[data-testid='create-channel-empty']",
-    ) as HTMLButtonElement | null;
+    );
     expect(btn).not.toBeNull();
     btn!.click();
     expect(onCreateChannel).toHaveBeenCalledWith("");
