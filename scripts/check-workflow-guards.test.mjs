@@ -10,11 +10,11 @@ import {
 
 const good = [
   "name: X",
-  "concurrency:",
-  "  group: x-${{ github.event.issue.number }}",
-  "  cancel-in-progress: true",
   "jobs:",
   "  j:",
+  "    concurrency:",
+  "      group: x-${{ github.event.issue.number }}",
+  "      cancel-in-progress: true",
   "    if: |",
   "      contains(fromJSON('[\"someone\"]'), github.actor) && true",
   "    runs-on: ubuntu-latest",
@@ -33,6 +33,18 @@ test("a missing timeout-minutes is caught", () => {
 
 test("a missing concurrency group is caught", () => {
   assert.ok(missing(good.replace("concurrency:", "# concurrency:")).includes("concurrency group"));
+});
+
+test("concurrency on a different job or at workflow level does not count", () => {
+  const body = good.split("\n").slice(3, 6);
+  const bare = good.replace(body.join("\n") + "\n", "");
+  const other = (extra) => bare.replace("jobs:\n", "jobs:\n" + extra);
+  assert.ok(missing(other("  other:\n" + body.join("\n") + "\n")).includes("concurrency group"));
+  assert.ok(
+    missing("concurrency:\n  group: g\n  cancel-in-progress: true\n" + bare).includes(
+      "concurrency group",
+    ),
+  );
 });
 
 test("cancel-in-progress: false is caught", () => {
