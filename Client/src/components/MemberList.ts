@@ -20,7 +20,7 @@ import { createMemberContextMenu } from "@components/AdminActions";
 import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
-import { roleHasPermission } from "@lib/permissions";
+import { positionForRole, roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "./message-list/avatar";
 import { readableRoleColor } from "@lib/themes";
 import { showToast } from "@lib/toast";
@@ -58,12 +58,18 @@ const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["admin", "moderator", "mem
  * Role names an admin can assign, taken from the server's role list. "owner" is
  * excluded — ownership transfer isn't a context-menu action.
  */
-function assignableRoleNames(): readonly string[] {
-  const roles = channelsStore
-    .getState()
-    .roles.map((r) => r.name.toLowerCase())
-    .filter((name) => name !== "owner");
-  return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
+function assignableRoleNames(actorPosition: number | undefined): readonly string[] {
+  const all = channelsStore.getState().roles;
+  if (all.length === 0) return FALLBACK_ASSIGNABLE_ROLES;
+  return all
+    .filter(
+      // The server refuses a role at or above the actor's own rank; with no
+      // positions to compare it stays the authority.
+      (r) =>
+        r.name.toLowerCase() !== "owner" &&
+        (actorPosition === undefined || r.position === undefined || r.position < actorPosition),
+    )
+    .map((r) => r.name.toLowerCase());
 }
 
 /** Which moderation menu items the signed-in user may see. */
@@ -362,16 +368,30 @@ function createMemberItem(
     // taken once at mount -- dispatcher.ts keeps authStore.user.role
     // current on every self MEMBER_UPDATE precisely so gates like this one
     // see a promotion/demotion without waiting for the sidebar to rebuild.
-    const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
+    const actorRole = authStore.getState().user?.role ?? opts.currentUserRole;
+    const baseGates = moderationGates(actorRole);
+    // The server refuses moderation of a member ranked at or above the actor
+    // and any role assignment at or above the actor's own rank; mirror both so
+    // the menu never offers a request that cannot succeed. Unknown positions
+    // (an older server) leave the decision to the server.
+    const actorPosition = positionForRole(actorRole);
+    const targetPosition = positionForRole(member.role);
+    const outranks =
+      actorPosition === undefined || targetPosition === undefined || actorPosition > targetPosition;
+    // Roles come from the server's `ready` payload — a hardcoded list made
+    // custom roles unreachable and, worse, unresolvable to a role id, so
+    // picking one silently did nothing.
+    const availableRoles = assignableRoleNames(actorPosition);
+    const gates: ModerationGates = {
+      canKick: baseGates.canKick && outranks,
+      canBan: baseGates.canBan && outranks,
+      canManageRoles: baseGates.canManageRoles && outranks && availableRoles.length > 0,
+    };
     const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
     closeActiveMenu();
     releaseMenuDismiss();
 
-    // Roles come from the server's `ready` payload — a hardcoded list made
-    // custom roles unreachable and, worse, unresolvable to a role id, so
-    // picking one silently did nothing.
-    const availableRoles = assignableRoleNames();
     const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
 
     activeMenu = createMemberContextMenu({

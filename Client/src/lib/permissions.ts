@@ -53,6 +53,16 @@ export function roleHasPermission(roleName: string, perm: Permission): boolean {
 }
 
 /**
+ * Hierarchy rank of the role named `roleName` (higher outranks lower), or
+ * undefined when the role is unknown or the server sent no positions. Callers
+ * treat undefined as "cannot tell" and leave the decision to the server.
+ */
+export function positionForRole(roleName: string): number | undefined {
+  const name = roleName.toLowerCase();
+  return channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name)?.position;
+}
+
+/**
  * Effective permission bits for the signed-in user, from the role list the
  * server sends in `ready`. Returns 0 when the role is unknown (pre-`ready`,
  * or a role the server didn't send) — deny by default.
