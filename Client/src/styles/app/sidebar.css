@@ -451,6 +451,7 @@
   font-weight: 700;
   color: var(--on-fill);
   flex-shrink: 0;
+  overflow: hidden;
 }
 .voice-user-item.speaking .vu-avatar {
   box-shadow:

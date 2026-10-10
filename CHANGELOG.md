@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- Voice participants in the sidebar now show their profile picture left of their name instead of a solid coloured circle; the initial only appears when they have no picture or it fails to load.
 - A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
 
 **Messages & files**
