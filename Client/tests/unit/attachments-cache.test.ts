@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMock, putSpy, brokerImageMock, idbData } = vi.hoisted(() => ({
+const { fetchMock, putSpy, brokerImageMock, idbData, idbStub } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
   putSpy: vi.fn<(value: unknown, key: string) => void>(),
   brokerImageMock: vi.fn<any>(),
   /** The stub's durable store: what survives an app restart. */
   idbData: new Map<string, unknown>(),
+  /** What the stub saw: connections opened, whole-store reads, index creation. */
+  idbStub: {
+    opens: 0,
+    getAll: 0,
+    getAllKeys: 0,
+    createIndex: vi.fn<(name: string, keyPath: string) => void>(),
+    dbs: [] as Record<string, unknown>[],
+  },
 }));
 
 /** When set, a transaction completes only when the test calls `fire()`. */
@@ -47,28 +55,88 @@ vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: v
 
 vi.stubGlobal("indexedDB", {
   open: () => {
-    const db = {
+    idbStub.opens += 1;
+    const indexNames = { contains: () => false };
+    const db: Record<string, unknown> = {
       objectStoreNames: { contains: () => true },
       createObjectStore: vi.fn(),
       close: vi.fn(),
+      onversionchange: null,
+      onclose: null,
       transaction: () => {
+        // A transaction completes once every request it made, including the
+        // ones chained from a callback, has delivered its result.
+        let pending = 0;
+        let ended = false;
+        const hold = holdTx.hold;
         const tx: Record<string, unknown> = {
           oncomplete: null,
           onabort: null,
           onerror: null,
           objectStore: () => {
+            const settle = (): void => {
+              if (hold) return;
+              Promise.resolve().then(() => {
+                if (pending === 0) complete();
+              });
+            };
             const request = (result: unknown): Record<string, unknown> => {
               const req: Record<string, unknown> = { onsuccess: null, onerror: null, result };
+              pending += 1;
               Promise.resolve().then(() => {
                 const fn = req.onsuccess as ((ev: Event) => void) | null;
                 fn?.(new Event("success"));
+                pending -= 1;
+                settle();
               });
               return req;
             };
+            const cursorRequest = (entries: [string, unknown][]): Record<string, unknown> => {
+              const req: Record<string, unknown> = { onsuccess: null, onerror: null, result: null };
+              let next = 0;
+              const step = (): void => {
+                pending += 1;
+                Promise.resolve().then(() => {
+                  const entry = entries[next++];
+                  req.result =
+                    entry === undefined
+                      ? null
+                      : {
+                          key: entry[0],
+                          primaryKey: entry[0],
+                          value: entry[1],
+                          delete: () => {
+                            idbData.delete(entry[0]);
+                          },
+                          continue: step,
+                        };
+                  const fn = req.onsuccess as ((ev: Event) => void) | null;
+                  fn?.(new Event("success"));
+                  pending -= 1;
+                  settle();
+                });
+              };
+              step();
+              return req;
+            };
+            const usedOrder = (): [string, unknown][] =>
+              [...idbData.entries()]
+                .filter(([, v]) => typeof (v as { used?: unknown } | null)?.used === "number")
+                .toSorted(
+                  (a, b) => (a[1] as { used: number }).used - (b[1] as { used: number }).used,
+                );
             return {
               get: (key: string) => request(idbData.get(key)),
-              getAllKeys: () => request([...idbData.keys()]),
-              getAll: () => request([...idbData.values()]),
+              getAllKeys: () => {
+                idbStub.getAllKeys += 1;
+                return request([...idbData.keys()]);
+              },
+              getAll: () => {
+                idbStub.getAll += 1;
+                return request([...idbData.values()]);
+              },
+              openCursor: () => cursorRequest([...idbData.entries()]),
+              index: () => ({ openCursor: () => cursorRequest(usedOrder()) }),
               put: (value: unknown, key: string) => {
                 putSpy(value, key);
                 idbData.set(key, value);
@@ -80,17 +148,23 @@ vi.stubGlobal("indexedDB", {
           },
         };
         const complete = (): void => {
+          if (ended) return;
+          ended = true;
           const fn = tx.oncomplete as ((ev: Event) => void) | null;
           fn?.(new Event("complete"));
         };
-        if (holdTx.hold) holdTx.fire = complete;
-        else Promise.resolve().then(complete);
+        if (hold) holdTx.fire = complete;
+        else Promise.resolve().then(() => pending === 0 && complete());
         return tx;
       },
     };
+    idbStub.dbs.push(db);
 
     const req: Record<string, unknown> = {
       result: db,
+      transaction: {
+        objectStore: () => ({ indexNames, createIndex: idbStub.createIndex }),
+      },
       onsuccess: null,
       onerror: null,
       onupgradeneeded: null,
@@ -108,6 +182,7 @@ vi.stubGlobal("indexedDB", {
 import {
   clearAttachmentCaches,
   EXTERNAL_IMAGE_CACHE_MAX,
+  EXTERNAL_IMAGE_CACHE_MAX_BYTES,
   clearExternalImageCache,
   fetchExternalImage,
   fetchImageAsObjectUrl,
@@ -128,6 +203,12 @@ function imageResponse() {
     arrayBuffer: vi.fn().mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
   };
 }
+
+// The tests rewrite the stub's store directly, so each starts on a new
+// connection: the module counts the stored bytes once per connection.
+beforeEach(() => {
+  for (const db of idbStub.dbs.splice(0)) (db.onclose as (() => void) | null)?.();
+});
 
 describe("attachment cache clearing", () => {
   beforeEach(() => {
@@ -372,6 +453,68 @@ describe("attachment cache clearing", () => {
     img.dispatchEvent(new Event("error"));
     await vi.waitFor(() => expect(img.src).toBe(`blob:avatar-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
   });
+
+  /** A broker blob that reports `bytes` without allocating them. */
+  function bigBlob(bytes: number): Blob {
+    const blob = new Blob(["x"]);
+    Object.defineProperty(blob, "size", { value: bytes });
+    return blob;
+  }
+
+  it("bounds broker-fetched blob: URLs by bytes", async () => {
+    // A broker image may be 16 MB, so a count cap alone can pin ~1.6 GB of
+    // blob memory outside the JS heap.
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({
+      ok: true,
+      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+    });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:bytes-${++next}`);
+    const revoke = vi.fn();
+    URL.revokeObjectURL = revoke;
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const first = (await fetchExternalImage({ url: url(1) }))!;
+    await fetchExternalImage({ url: url(2) });
+    expect(revoke).not.toHaveBeenCalled(); // 0.8 of the cap: nothing evicted
+
+    const third = (await fetchExternalImage({ url: url(3) }))!;
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith(first); // the oldest goes first
+
+    const calls = brokerImageMock.mock.calls.length;
+    expect(await fetchExternalImage({ url: url(3) })).toBe(third); // still cached
+    expect(brokerImageMock.mock.calls.length).toBe(calls);
+  });
+
+  it("an evicted-by-bytes external image is re-requested when shown again", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({
+      ok: true,
+      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+    });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:bytes-live-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const img = document.createElement("img");
+    recoverEvictedImage(img, { url: url(1) });
+    img.src = (await fetchExternalImage({ url: url(1) }))!;
+    expect(img.src).toBe("blob:bytes-live-1");
+
+    await fetchExternalImage({ url: url(2) });
+    await fetchExternalImage({ url: url(3) });
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:bytes-live-1");
+
+    const calls = brokerImageMock.mock.calls.length;
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe("blob:bytes-live-4"));
+    expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
+  });
 });
 
 // B7-13: the server-content caches belong to one signed-in account. Every key
@@ -557,6 +700,21 @@ describe("one download per attachment (DP-56)", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("the missing-image set is bounded", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+    const missing = (i: number): string => `https://example.com/api/v1/files/gone-${i}`;
+
+    for (let i = 1; i <= 1001; i++) {
+      await fetchImageAsObjectUrl(missing(i));
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+
+    await fetchImageAsObjectUrl(missing(1001)); // recent: still remembered
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+    await fetchImageAsObjectUrl(missing(1)); // oldest: dropped, asked for again
+    expect(fetchMock).toHaveBeenCalledTimes(1002);
+  });
 });
 
 // DP-16: server images are blob: URLs over byte-bounded caches, not base64
@@ -710,5 +868,129 @@ describe("server image caches (DP-16)", () => {
     await vi.waitFor(() => expect(img.getAttribute("src")).toBe("blob:server-2"));
     expect(brokerImageMock).not.toHaveBeenCalledWith(expect.anything(), { url: url(1) });
     expect(otherError).not.toHaveBeenCalled();
+  });
+});
+
+// One shared connection, and a write that never reads the whole store: opening
+// a channel of new avatars used to open the database twice per image and
+// materialise every stored Blob on each write.
+describe("image database connection and eviction", () => {
+  const url = (i: number): string => `https://example.com/api/v1/files/${i}`;
+  const key = (i: number): string => `example.com#1|${url(i)}`;
+  const N = 5;
+
+  function sizedResponse(bytes: number) {
+    return {
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(bytes)),
+    };
+  }
+
+  /** The browser closing the stub's connections, then a fresh count. */
+  function startFreshConnection(): void {
+    for (const db of idbStub.dbs.splice(0)) {
+      (db.onclose as (() => void) | null)?.();
+    }
+    idbStub.opens = 0;
+    idbStub.getAll = 0;
+    idbStub.getAllKeys = 0;
+    idbStub.createIndex.mockClear();
+  }
+
+  beforeEach(async () => {
+    fetchMock.mockReset();
+    putSpy.mockReset();
+    idbData.clear();
+    clearAttachmentCaches();
+    setServerHost("example.com");
+    setAttachmentCacheScope("example.com#1");
+    await new Promise((r) => setTimeout(r, 0)); // let the scope prune settle
+    startFreshConnection();
+    document.body.innerHTML = "";
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  async function fetchMany(count: number): Promise<void> {
+    fetchMock.mockImplementation(() => Promise.resolve(imageResponse()));
+    for (let i = 1; i <= count; i++) await fetchImageAsObjectUrl(url(i));
+    await vi.waitFor(() => expect(idbData.size).toBe(count));
+  }
+
+  it("opens the image database once for many reads and writes", async () => {
+    await fetchMany(N);
+    clearAttachmentCaches();
+    for (let i = 1; i <= N; i++) await fetchImageAsObjectUrl(url(i)); // all from disk
+    expect(fetchMock).toHaveBeenCalledTimes(N);
+
+    expect(idbStub.opens).toBe(1);
+  });
+
+  it("a write never reads the whole store", async () => {
+    await fetchMany(N);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(idbStub.getAll).toBe(0);
+    expect(idbStub.getAllKeys).toBe(0);
+  });
+
+  it("creates an index on the read time when the database upgrades", async () => {
+    await fetchMany(1);
+
+    expect(idbStub.createIndex).toHaveBeenCalledWith("used", "used");
+  });
+
+  it("drops the least recently read entries by index once past the byte budget", async () => {
+    const kb = 1024;
+    // Insertion order differs from read order, so only `used` can pick the victims.
+    idbData.set(key(1), { blob: new Blob(["b"]), bytes: 512 * kb, used: 20 });
+    idbData.set(key(2), { blob: new Blob(["a"]), bytes: 512 * kb, used: 10 });
+    idbData.set(key(3), { blob: new Blob(["c"]), bytes: IMAGE_DB_MAX_BYTES - 1024 * kb, used: 30 });
+    fetchMock.mockResolvedValue(sizedResponse(1024 * kb));
+
+    await fetchImageAsObjectUrl(url(4));
+
+    await vi.waitFor(() => expect([...idbData.keys()].toSorted()).toEqual([key(3), key(4)]));
+    expect(idbStub.getAll).toBe(0);
+    expect(idbStub.getAllKeys).toBe(0);
+  });
+
+  it("keeps everything while the store is within its byte budget", async () => {
+    idbData.set(key(1), { blob: new Blob(["a"]), bytes: IMAGE_DB_MAX_BYTES - 3, used: 1 });
+    fetchMock.mockResolvedValue(imageResponse());
+
+    await fetchImageAsObjectUrl(url(2));
+
+    await vi.waitFor(() => expect(idbData.has(key(2))).toBe(true));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(idbData.has(key(1))).toBe(true);
+  });
+
+  it.each(["onclose", "onversionchange"])(
+    "reopens after the browser fires %s on the connection",
+    async (event) => {
+      fetchMock.mockImplementation(() => Promise.resolve(imageResponse()));
+      await fetchImageAsObjectUrl(url(1));
+      await vi.waitFor(() => expect(idbData.has(key(1))).toBe(true));
+      expect(idbStub.opens).toBe(1);
+
+      (idbStub.dbs.at(-1)![event] as () => void)();
+      await fetchImageAsObjectUrl(url(2));
+
+      await vi.waitFor(() => expect(idbData.has(key(2))).toBe(true));
+      expect(idbStub.opens).toBe(2);
+    },
+  );
+
+  it("does not write when the scope moved on while the database opened", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    await fetchImageAsObjectUrl(url(1));
+    setAttachmentCacheScope("example.com#2");
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(idbData.size).toBe(0);
   });
 });
