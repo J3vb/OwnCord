@@ -836,9 +836,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const hadFocus = ref.verify?.contains(document.activeElement) === true;
     if (key !== ref.verifyKey) {
       ref.verifyKey = key;
+      if (focusedShield === ref.verify) focusedShield = null;
       ref.verify?.remove();
       ref.verify = null;
-      focusedShield = null;
       if (v !== null) ref.verify = buildShield(userId, v, dm);
     }
     placeShield(userId, ref);
