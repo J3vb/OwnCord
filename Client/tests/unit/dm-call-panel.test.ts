@@ -950,6 +950,34 @@ describe("DmCallPanel — video in the call", () => {
     root.remove();
   });
 
+  it("does not steal focus back after the shield was blurred and the grid mutates", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    shield(root, OTTO)!.focus();
+    shield(root, OTTO)!.blur();
+    cell.appendChild(document.createElement("span"));
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(document.body);
+    root.remove();
+  });
+
   it("leaves one shield on a camera tile across a panel rebuild", async () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();

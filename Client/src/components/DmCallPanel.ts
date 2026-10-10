@@ -867,8 +867,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     el.addEventListener("focus", () => (shieldFocusedFor = userId), { signal: disposable.signal });
     el.addEventListener(
       "blur",
-      (e) => {
-        if (e.relatedTarget instanceof Element) shieldFocusedFor = null;
+      () => {
+        if (el.isConnected) shieldFocusedFor = null;
       },
       { signal: disposable.signal },
     );
@@ -1033,11 +1033,22 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   return {
     mount(container: Element): void {
       container.appendChild(root);
-      const tiles = new MutationObserver(() => {
+      const tiles = new MutationObserver((records) => {
         for (const [userId, ref] of avatars) {
+          const shield = ref.verify;
+          const detached =
+            shield !== null &&
+            records.some((r) =>
+              Array.from(r.removedNodes).some((n) => n === shield || n.contains(shield)),
+            );
           placeShield(userId, ref);
           const active = document.activeElement;
-          if (shieldFocusedFor === userId && (active === null || active === document.body)) {
+          if (
+            detached &&
+            shieldFocusedFor === userId &&
+            (active === null || active === document.body)
+          ) {
+            shieldFocusedFor = null;
             focusFallback(userId)?.focus();
           }
         }
