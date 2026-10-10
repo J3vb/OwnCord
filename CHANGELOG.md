@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
 
+**Messages**
+
+- Switching channels no longer resets the slow-mode countdown on the Send button; it keeps counting from when you sent, including for a send acknowledged after you left.
+
 ### Changed
 
 **Messages & files**

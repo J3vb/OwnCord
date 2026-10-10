@@ -2345,6 +2345,53 @@ describe("createChannelController", () => {
       }
     });
 
+    it("bases a late acknowledgement's cooldown on when the message was sent", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        let n = 0;
+        (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        capturedMessageInputOpts.onSend("hello", null, []);
+        switchTo(ctrl, 43);
+
+        // The ack only arrives 20 s later (a paused renderer, say).
+        vi.advanceTimersByTime(20_000);
+        (wsHandler(opts, "chat_send_ok") as (payload: unknown, id?: string) => void)({}, "cid-2");
+        switchTo(ctrl, 42);
+
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 10s");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the send time past the observed window so a later increase still gates", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        // The 30 s window passes while the channel stays mounted.
+        vi.advanceTimersByTime(31_000);
+        switchTo(ctrl, 43);
+        vi.advanceTimersByTime(9000);
+        updateChannel({ id: 42, slow_mode: 60 });
+        channelsStore.flush();
+        switchTo(ctrl, 42);
+
+        // The server still holds the send, so 60 s from it leaves 20 s.
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 20s");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("keeps the send time through a temporary slow-mode reduction", () => {
       vi.useFakeTimers();
       try {

@@ -161,8 +161,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // not forget the send time. Controller-scoped like the drafts above, so it
   // dies with the session; an entry is dropped once its largest window passed.
   const slowModeSentAtByChannel = new Map<number, { sentAt: number; window: number }>();
-  const recordSlowModeSend = (id: number, seconds: number): void => {
-    slowModeSentAtByChannel.set(id, { sentAt: Date.now(), window: seconds });
+  const recordSlowModeSend = (id: number, seconds: number, sentAt = Date.now()): void => {
+    slowModeSentAtByChannel.set(id, { sentAt, window: seconds });
+  };
+  // The server prunes its rate-limit timestamps only every few minutes and
+  // evaluates the retained ones against the current window, so a raised
+  // setting can still reject a send whose largest-observed window has passed.
+  const SLOW_MODE_RETENTION_MS = 5 * 60 * 1000;
+  const slowModeRetained = (id: number): boolean => {
+    const entry = slowModeSentAtByChannel.get(id);
+    return (
+      entry !== undefined &&
+      Date.now() < entry.sentAt + Math.max(entry.window * 1000, SLOW_MODE_RETENTION_MS)
+    );
   };
   const slowModeWindowOver = (id: number): boolean => {
     const entry = slowModeSentAtByChannel.get(id);
@@ -190,6 +201,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // mounted when it arrives.
       channelId: number;
       clientMessageId?: string;
+      // When the client handed this message to the socket (epoch ms): a late
+      // ack's cooldown starts here, not when the ack is finally received.
+      sentAt: number;
     }
   >();
   // OC-0433: performSend has two dispatch paths — a plain text send with a
@@ -489,7 +503,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           timestamp,
         });
-        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
+        draftByCorrelation.set(cid, {
+          content,
+          replyTo,
+          attachments,
+          channelId,
+          clientMessageId,
+          sentAt: Date.now(),
+        });
         markSendFailed(cid, "OFFLINE");
         if (persistId !== undefined) {
           // Nothing will deliver this text: it was never handed to a socket, so
@@ -522,7 +543,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           timestamp,
         });
-        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
+        draftByCorrelation.set(cid, {
+          content,
+          replyTo,
+          attachments,
+          channelId,
+          clientMessageId,
+          sentAt: Date.now(),
+        });
         // A live socket can lose an ACK without disconnecting. End the spinner
         // honestly; only a server ACK/echo ever calls a message delivered.
         const timer = window.setTimeout(() => {
@@ -1067,10 +1095,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Keep ticking past a zero gate until the largest observed window is
         // over, so a setting raised again meanwhile re-gates the composer.
         refreshComposerState();
-        if (slowModeWindowOver(channelId)) {
-          slowModeSentAtByChannel.delete(channelId);
-          stopSlowModeTicker();
-        }
+        if (slowModeWindowOver(channelId)) stopSlowModeTicker();
       }, 1000);
     };
     const startSlowMode = (seconds: number): void => {
@@ -1098,10 +1123,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       ws.on("chat_send_ok", (payload, correlationId) => {
         if (!ownsSession()) return;
         const sameChannel = sentToMountedChannel(correlationId);
-        const sentTo =
-          correlationId === undefined
-            ? undefined
-            : draftByCorrelation.get(correlationId)?.channelId;
+        const sentDraft =
+          correlationId === undefined ? undefined : draftByCorrelation.get(correlationId);
+        const sentTo = sentDraft?.channelId;
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
         // switch, so its draft must too), which means nothing else would ever
@@ -1130,7 +1154,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // A late ack for a channel the user has left: charge that channel's
           // cooldown now, without arming this mounted channel's ticker.
           const seconds = channelsStore.getState().channels.get(sentTo)?.slowMode ?? 0;
-          if (seconds > 0 && !canManageMessages()) recordSlowModeSend(sentTo, seconds);
+          if (seconds > 0 && !canManageMessages()) {
+            recordSlowModeSend(sentTo, seconds, sentDraft?.sentAt);
+          }
         }
       }),
     );
@@ -1225,8 +1251,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     refreshComposerState();
     // Returning to a channel still inside its cooldown: re-arm the countdown.
-    if (!slowModeWindowOver(channelId) && !canManageMessages()) armSlowModeTicker();
-    else slowModeSentAtByChannel.delete(channelId);
+    if (canManageMessages()) slowModeSentAtByChannel.delete(channelId);
+    else if (!slowModeWindowOver(channelId) || slowModeRemaining() > 0) armSlowModeTicker();
+    else if (!slowModeRetained(channelId)) slowModeSentAtByChannel.delete(channelId);
     composerGatingUnsubs.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
