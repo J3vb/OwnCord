@@ -124,10 +124,17 @@ describe("screen share FPS", () => {
     });
 
     it("simulcasts medium and high only", () => {
-      expect(isScreenShareSimulcast("low")).toBe(false);
-      expect(isScreenShareSimulcast("medium")).toBe(true);
-      expect(isScreenShareSimulcast("high")).toBe(true);
-      expect(isScreenShareSimulcast("source")).toBe(false);
+      expect(isScreenShareSimulcast("low", 30)).toBe(false);
+      expect(isScreenShareSimulcast("medium", 30)).toBe(true);
+      expect(isScreenShareSimulcast("high", 30)).toBe(true);
+      expect(isScreenShareSimulcast("source", 30)).toBe(false);
+    });
+
+    it("drops the lower layer for High at 120 fps, as Source does", () => {
+      // Encoding both layers in turn held a 1080p120 share to 40-50 fps.
+      expect(isScreenShareSimulcast("high", 120)).toBe(false);
+      expect(isScreenShareSimulcast("high", 60)).toBe(true);
+      expect(isScreenShareSimulcast("medium", 120)).toBe(true);
     });
 
     it("adds one text-friendly 720p layer of at most 1.2 Mbps and 15 fps", () => {

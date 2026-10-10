@@ -63,6 +63,7 @@ vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
+  getLocalScreenshareFps: vi.fn().mockResolvedValue(57),
   setRemoteVideoView: vi.fn(),
 }));
 
@@ -1165,6 +1166,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       setWindowFullscreen: (on: boolean) => Promise<void>;
       callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
       getStreamStats: (tileId: number) => Promise<unknown>;
+      getLocalShareFps: () => Promise<number | null>;
       setStreamView: (tileId: number, view: { enabled: boolean }) => void;
     };
 
@@ -1176,6 +1178,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
     await cbs.getStreamStats(10);
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+    // Your own share's tile reads the rate it is sending.
+    await expect(cbs.getLocalShareFps()).resolves.toBe(57);
     // A tile's view goes to that user's screen share or camera the same way.
     cbs.setStreamView(10 + SCREENSHARE_TILE_ID_OFFSET, { enabled: false });
     expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "screenshare", { enabled: false });

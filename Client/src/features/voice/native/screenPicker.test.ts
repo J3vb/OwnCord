@@ -69,6 +69,14 @@ describe("pickScreenSource", () => {
     });
   });
 
+  it("publishes a High pick at 120 fps without the lower layer", async () => {
+    host.pick = () => ({ source: "screen:277", quality: "high", fps: 120 });
+    await expect(pickScreenSource()).resolves.toMatchObject({
+      maxFramerate: 120,
+      simulcast: false,
+    });
+  });
+
   it("defaults the dialog to the screen share's own quality (720p30)", async () => {
     let seen: unknown;
     host.pick = (opts) => {

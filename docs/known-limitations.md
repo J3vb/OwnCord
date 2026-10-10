@@ -116,6 +116,9 @@ Each item links to the guidance that owns it.
   host's LAN address or hostname instead, so voice goes through the server's
   `/livekit` tunnel —
   [Linux desktop voice](deployment.md#linux-desktop-voice).
+- **On Linux Wayland, screen shares top out at 60 fps.** The PipeWire capture
+  is negotiated at 60 fps, so the screen-share picker disables 120 fps there
+  and a saved 120 falls back to 60.
 
 ## FAQ
 

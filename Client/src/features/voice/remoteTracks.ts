@@ -6,6 +6,7 @@ import { VideoQuality, type Room } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
+  getLocalScreenshareFps as doGetLocalScreenshareFps,
 } from "../../lib/screenShare";
 import { parseUserId } from "./sessionState";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
@@ -76,6 +77,11 @@ export class RemoteTracks {
 
   getLocalScreenshareStream(): MediaStream | null {
     return doGetLocalScreenshareStream(this.getRoom());
+  }
+
+  /** The frame rate your screen share is sending (its own tile's readout). */
+  getLocalScreenshareFps(): Promise<number | null> {
+    return doGetLocalScreenshareFps(this.getRoom());
   }
 
   /** One receiver sample of a user's camera or screen share, for the video
