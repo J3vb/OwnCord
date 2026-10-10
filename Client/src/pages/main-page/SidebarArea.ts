@@ -54,7 +54,7 @@ import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
-import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
+import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
 import { trackCurrentView } from "../../features/navigation/contentView";
@@ -315,6 +315,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   }
 
   const syncAuditBtn = (): void => {
+    headerInviteBtn.style.display = canManageInvites() ? "" : "none";
     auditBtn.style.display = canViewAuditLog() ? "" : "none";
     if (moderationBtn !== null) {
       moderationBtn.style.display = canModerateMembers() ? "" : "none";

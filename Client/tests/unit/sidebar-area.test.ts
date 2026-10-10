@@ -559,22 +559,29 @@ describe("SidebarArea", () => {
     const testIds = (buttons: HTMLButtonElement[]): Array<string | null> =>
       buttons.map((b) => b.getAttribute("data-testid"));
 
-    it("shows a plain member Invite alone", () => {
+    it("shows a plain member no actions (Invite needs MANAGE_INVITES)", () => {
       signInAs(Permission.SEND_MESSAGES);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual([]);
+      cleanup(result);
+    });
+
+    it("shows Invite alone for MANAGE_INVITES", () => {
+      signInAs(Permission.MANAGE_INVITES);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn"]);
       cleanup(result);
     });
 
     it("adds Audit Log for VIEW_AUDIT_LOG alone", () => {
-      signInAs(Permission.VIEW_AUDIT_LOG);
+      signInAs(Permission.MANAGE_INVITES | Permission.VIEW_AUDIT_LOG);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn", "audit-log-btn"]);
       cleanup(result);
     });
 
     it("adds Moderation for MODERATE_MEMBERS alone", () => {
-      signInAs(Permission.MODERATE_MEMBERS);
+      signInAs(Permission.MANAGE_INVITES | Permission.MODERATE_MEMBERS);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn", "moderation-btn"]);
       cleanup(result);
@@ -3323,6 +3330,71 @@ describe("SidebarArea", () => {
 
       expect(mockOpenUrl).not.toHaveBeenCalled();
       expect(show).toHaveBeenCalledWith("Not connected to a server", "error");
+      cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Invite entry point
+  // -------------------------------------------------------------------------
+  //
+  // The invite routes are MANAGE_INVITES-only on the server, so the button is
+  // hidden from roles without the bit instead of failing on click.
+
+  describe("invite entry point", () => {
+    function signInAs(roleName: string, permissions: number): void {
+      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: roleName },
+        isAuthenticated: true,
+      }));
+    }
+
+    function inviteBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
+      return result.sidebarWrapper.querySelector("[data-testid='invite-btn']");
+    }
+
+    it("is shown to a role holding MANAGE_INVITES", () => {
+      signInAs("Inviter", Permission.MANAGE_INVITES);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is shown to ADMINISTRATOR", () => {
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is hidden from a role without the bit", () => {
+      signInAs("Member", Permission.SEND_MESSAGES);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).toBe("none");
+      cleanup(result);
+    });
+
+    it("follows a role list that arrives or changes after mount", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: "Member" },
+        isAuthenticated: true,
+      }));
+      setRoles([]);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).toBe("none");
+
+      setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.MANAGE_INVITES }]);
+      channelsStore.flush();
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+
+      setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.SEND_MESSAGES }]);
+      channelsStore.flush();
+      expect(inviteBtn(result)?.style.display).toBe("none");
       cleanup(result);
     });
   });

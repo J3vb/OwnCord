@@ -805,9 +805,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
-    // the sidebar's first control that is not hidden (a hidden header action,
-    // such as Mark All as Read with nothing unread, would swallow the focus
-    // call and leave it on <body>): the first of them that takes focus.
+    // the sidebar's first control that is not hidden (a hidden header action
+    // — Invite or Audit Log without the permission, Mark All as Read with
+    // nothing unread — would swallow the focus call and leave it on <body>):
+    // the first of them that takes focus.
     const focusReachable = (): HTMLElement | null => {
       const candidates = [
         chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),

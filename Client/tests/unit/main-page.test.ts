@@ -3011,6 +3011,55 @@ describe("MainPage — B9-4 content view wiring", () => {
   });
 });
 
+describe("MainPage — focus fallback skips hidden sidebar buttons", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  // A member without MANAGE_INVITES has the sidebar's Invite button hidden
+  // (inline display:none), and it is the first button in the sidebar. The
+  // channel controller's focusFallback (declining the NSFW gate) must not
+  // spend its attempt on it: focusing a hidden control is a no-op and focus
+  // would stay on <body>. jsdom does not compute display, so it would take
+  // the hidden button's focus; the assertion reads the inline style instead.
+  it("lands focus on the first visible sidebar button, not a hidden one", () => {
+    const sidebar = container.querySelector<HTMLElement>(
+      "[data-testid='app-layout'] > :first-child",
+    )!;
+    const hiddenInvite = document.createElement("button");
+    hiddenInvite.style.display = "none";
+    const visible = document.createElement("button");
+    sidebar.append(hiddenInvite, visible);
+
+    const { focusFallback } = mockCreateChannelController.mock.calls.at(-1)![0] as {
+      focusFallback: () => void;
+    };
+    focusFallback();
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBeInstanceOf(HTMLButtonElement);
+    expect((document.activeElement as HTMLElement).style.display).not.toBe("none");
+    expect(document.activeElement).toBe(visible);
+  });
+});
+
 describe("MainPage — focus fallback when the channel is declined", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
