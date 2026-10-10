@@ -31,6 +31,7 @@ import {
 } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
+import { markActiveChannelReadOnUnload } from "@lib/read-state";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
 import { resetSafetyStore } from "./features/safety/store";
 import {
@@ -1370,6 +1371,9 @@ window.addEventListener("beforeunload", () => {
     ws.send({ type: "voice_leave", payload: {} });
   }
   deactivatePendingMessages();
+  // Messages read live never raise an unread count, so no other path records
+  // them as read before the window closes.
+  markActiveChannelReadOnUnload();
   api.endSession();
   // Flush any buffered log entries to disk before the window closes.
   void flushLogs();

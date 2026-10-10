@@ -52,7 +52,14 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
-import { markChannelRead, hasUnread, isChannelAway, setLiveTailInView } from "@lib/read-state";
+import {
+  markChannelRead,
+  hasUnread,
+  isChannelAway,
+  isChannelCovered,
+  noteLiveMessageSeen,
+  setLiveTailInView,
+} from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -363,6 +370,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let newDividerAnchorId: number | null = null;
   /** Set while the divider waits for a revisit's refetched tail. */
   let newDividerDeferred = false;
+  /** The loaded-and-empty welcome state is what the region currently shows. */
+  let loadedEmptyShown = false;
 
   /**
    * Resolve the NEW divider's position for this rebuild. Prefers the latched
@@ -605,6 +614,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     markChannelRead(options.channelId);
   }
 
+  /**
+   * A live message was appended while the reader had the live tail in view. The
+   * dispatcher does not count it unread, so markReadIfSeen (gated on a local
+   * unread count) never sends for it; tell the server it was seen, throttled
+   * (lib/read-state.ts). Same away and deferred-divider checks as above, plus
+   * the Settings overlay and content views, which cover a still-mounted list.
+   */
+  function markLiveArrivalSeen(): void {
+    if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (isChannelAway(options.channelId) || isChannelCovered()) return;
+    if (newDividerDeferred) return;
+    noteLiveMessageSeen(options.channelId, disposable.signal);
+  }
+
   // ---------------------------------------------------------------------------
   // Render visible window
   // ---------------------------------------------------------------------------
@@ -787,6 +811,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       }
+      loadedEmptyShown = loadState === null;
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -1424,12 +1449,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         () => {
           // Optimistic rows (id 0) sit at the tail; live rows land before them.
           const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
+          // The loaded-and-empty welcome state was on screen, so a first row
+          // is a live arrival and not the first page landing.
+          const firstLive = prevLast === 0 && loadedEmptyShown;
           const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();
           }
-          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
-            // Only an append counts: a window swap drops the previous last row.
+          // Only an append counts: a window swap drops the previous last row.
+          const appended =
+            firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
+          if (!wasBottom && appended) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
@@ -1437,6 +1467,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           }
           updateScrollToBottomBtn();
           settleUnreadNav();
+          if (wasBottom && appended && allMessages.some((m) => m.id > prevLast)) {
+            markLiveArrivalSeen();
+          }
         },
       ),
     );

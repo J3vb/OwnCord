@@ -11,6 +11,8 @@
 import { channelsStore, clearUnread } from "@stores/channels.store";
 import { dmStore, clearDmUnread } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
+import { uiStore } from "@stores/ui.store";
+import { dialogOpen } from "./dialogOpen";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();
@@ -37,6 +39,19 @@ export function isChannelAway(channelId: number): boolean {
   return !document.hasFocus() || isWindowDetached(channelId) || liveTailOutOfView.has(channelId);
 }
 
+/**
+ * Whether something full-screen sits over the chat although the channel is
+ * still active: the Settings overlay (the list stays mounted and the window
+ * stays focused behind it), a content view, or an open modal dialog such as the
+ * Quick Switcher. `isChannelAway` cannot see
+ * either, and must not change (it decides unread counting), so the paths that
+ * mark a channel read for messages "seen live" ask this as well.
+ */
+export function isChannelCovered(): boolean {
+  const { settingsOpen, activeView } = uiStore.getState();
+  return settingsOpen || activeView !== null || dialogOpen();
+}
+
 /** Sends one `mark_read` over the socket. */
 export type MarkReadSender = (channelId: number) => void;
 
@@ -50,6 +65,7 @@ let sender: MarkReadSender | null = null;
  */
 export function setMarkReadSender(next: MarkReadSender | null): void {
   sender = next;
+  cancelPendingLiveSeen();
   // A re-registration means a new connection (MainPage mounts once per
   // session), so anything `markAllRead` still had queued belongs to the
   // previous server. Channel ids are per-server, so letting those fire would
@@ -167,4 +183,68 @@ export function markAllRead(): number {
     }
   }
   return ids.length;
+}
+
+/**
+ * How long a live-seen `mark_read` waits for further arrivals. Well inside the
+ * server's budget (see above) for any one channel, and short enough that
+ * closing the app a moment after a message lands has already advanced the
+ * read state.
+ */
+const LIVE_SEEN_MARK_READ_MS = 1000;
+
+/** One trailing timer per channel whose live arrivals are waiting to be sent. */
+const pendingLiveSeen = new Map<number, ReturnType<typeof setTimeout>>();
+
+function cancelPendingLiveSeen(): void {
+  for (const t of pendingLiveSeen.values()) clearTimeout(t);
+  pendingLiveSeen.clear();
+}
+
+/**
+ * A message landed at the bottom of a channel the reader is watching (the
+ * active channel, window focused, live tail in view), so it is read. The
+ * dispatcher deliberately does not count such a message unread, which means no
+ * other path tells the server: the next `ready` would bring the channel back
+ * as "N new" after a restart. Send `mark_read` for it.
+ *
+ * Trailing-edge and per channel: the first arrival arms one timer and later
+ * ones ride it, so a burst costs one send, the send covers the last message,
+ * and sends for one channel stay at least `LIVE_SEEN_MARK_READ_MS` apart.
+ * `signal` is the mounted list's lifetime; its abort drops the pending send
+ * (leaving the channel is covered by the channel switch, which marks it read).
+ *
+ * The send is skipped if the channel shows an unread badge by the time it
+ * fires: something arrived while the reader was away, and only the reader
+ * getting back to the bottom (`MessageList`'s `markReadIfSeen`) may mark that.
+ */
+export function noteLiveMessageSeen(channelId: number, signal: AbortSignal): void {
+  if (signal.aborted || pendingLiveSeen.has(channelId)) return;
+  const release = (): void => {
+    clearTimeout(timer);
+    if (pendingLiveSeen.get(channelId) === timer) pendingLiveSeen.delete(channelId);
+  };
+  const timer = setTimeout(() => {
+    signal.removeEventListener("abort", release);
+    if (pendingLiveSeen.get(channelId) === timer) pendingLiveSeen.delete(channelId);
+    // Settings or a dialog may have opened since the arrival that armed this.
+    if (!hasUnread(channelId) && !isChannelCovered()) markChannelRead(channelId);
+  }, LIVE_SEEN_MARK_READ_MS);
+  pendingLiveSeen.set(channelId, timer);
+  signal.addEventListener("abort", release, { once: true });
+}
+
+/**
+ * Best-effort `mark_read` as the app closes. The last messages of a session are
+ * usually read live and the throttled send above may not have fired yet; a
+ * channel switch marks the old channel read but closing the window does not.
+ * Same predicate as the live path: the active channel, with the reader not away
+ * from it, nothing covering the chat, and no unread badge (a badge means
+ * something arrived unseen).
+ */
+export function markActiveChannelReadOnUnload(): void {
+  const active = channelsStore.getState().activeChannelId;
+  if (active === null || isChannelAway(active) || isChannelCovered() || hasUnread(active)) return;
+  cancelPendingLiveSeen();
+  markChannelRead(active);
 }
