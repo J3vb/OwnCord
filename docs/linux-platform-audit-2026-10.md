@@ -96,8 +96,8 @@ the same way. `tauri.conf.json:29` lists only `http://ipc.localhost`;
 | `emit`/`listen` events                                                        | Rust → TS JSON | Small JSON on every path (`ws-message`, `ws-state`, `cert-tofu`, `upload-progress`, `update-progress`, `ptt-state`, `voice-shortcut`, `status-change`, `notification-click`, `native-voice`) | `ws_proxy.rs:302`, `update_commands.rs:466`, `native_voice/mod.rs:216`                                                                                                       |
 | `set_unread_badge`, `notify_message`, `native_voice_*`, credentials, settings | JSON/scalars   | Same on both transports                                                                                                                                                                      | `Client/src/platform/desktop/*.ts`                                                                                                                                           |
 
-All 72 `#[tauri::command]` functions registered at `lib.rs:168-265` were
-checked; `update_commands.rs:426` returns `Vec<u8>` from a private helper, not
+All 67 command entries registered at `lib.rs:168-265` (66 in a normal Linux
+release: `open_devtools` is feature-gated) were checked; `update_commands.rs:426` returns `Vec<u8>` from a private helper, not
 a command. There is no existing normalisation helper in `Client/src`.
 
 ### 2.3 Decision: harden the one site, do not wrap `invoke`
@@ -234,7 +234,10 @@ carries:
   event (`session.rs:121-190`);
 - the WebKitGTK version (`webkit2gtk` package), the compositor,
   `XDG_SESSION_TYPE` and whether `WAYLAND_DISPLAY` was set;
-- `gst-inspect-1.0 v4l2src pipewiresrc decodebin videoscale` output, and the
+- `gst-inspect-1.0` output for each of `v4l2src`, `pipewiresrc`, `decodebin`
+  and `videoscale` (one invocation per element, e.g.
+  `for e in v4l2src pipewiresrc decodebin videoscale; do gst-inspect-1.0 "$e"; done`),
+  and the
   camera's format list (`v4l2-ctl --list-formats-ext`);
 - for a screen share: X11 or portal, the source kind (screen or window), and
   whether `WEBKIT_DISABLE_DMABUF_RENDERER` was set;
