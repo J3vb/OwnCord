@@ -4,9 +4,9 @@
  * Exercises the member context menu built by `AdminActions.createMemberContextMenu`
  * over the real `MemberList` → `SidebarMemberSection.onBan/onKick/onToggleBlock`
  * wiring:
- *   - Ban: reason + duration collected, PATCH /admin/api/users/{id} sent with
+ *   - Ban: reason + duration collected, PATCH /api/v1/moderation/members/{id} sent with
  *     `banned:true`, `ban_reason` and `ban_duration_hours` (omitted when permanent).
- *   - Force Logout: two-click confirm, DELETE /admin/api/users/{id}/sessions.
+ *   - Force Logout: two-click confirm, DELETE /api/v1/moderation/members/{id}/sessions.
  *   - Block: two-click confirm, PUT /api/v1/blocks/{id}; Unblock: one click,
  *     DELETE /api/v1/blocks/{id}.
  *
@@ -96,12 +96,12 @@ const ADMIN_ROUTES = [
   { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
   { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
   { pattern: "/api/v1/blocks", status: 200, body: { blocked_user_ids: [] } },
-  // GET /admin/api/users?limit=… — the banned-list walk on every roster change.
-  { pattern: "/admin/api/users", status: 200, body: [] },
-  // PATCH /admin/api/users/{id} — ban, unban and role change. The trailing
+  // GET /api/v1/moderation/members?limit=… — the banned-list walk on every roster change.
+  { pattern: "/api/v1/moderation/members", status: 200, body: [] },
+  // PATCH /api/v1/moderation/members/{id} — ban, unban and role change. The trailing
   // slash outranks the list pattern above in the mock's longest-match sort.
-  { pattern: "/admin/api/users/", method: "PATCH", status: 200, body: {} },
-  { pattern: "/admin/api/users/2/sessions", method: "DELETE", status: 204, body: null },
+  { pattern: "/api/v1/moderation/members/", method: "PATCH", status: 200, body: {} },
+  { pattern: "/api/v1/moderation/members/2/sessions", method: "DELETE", status: 204, body: null },
   { pattern: "/api/v1/blocks/2", method: "PUT", status: 200, body: {} },
   { pattern: "/api/v1/blocks/2", method: "DELETE", status: 200, body: {} },
 ];
@@ -161,7 +161,7 @@ test.describe("Admin moderation — member context menu", () => {
 
     const call = await waitForCall(
       page,
-      (c) => (c.url ?? "").includes("/admin/api/users/2") && c.method === "PATCH",
+      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
     );
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
     expect(body.banned).toBe(true);
@@ -181,7 +181,7 @@ test.describe("Admin moderation — member context menu", () => {
 
     const call = await waitForCall(
       page,
-      (c) => (c.url ?? "").includes("/admin/api/users/2") && c.method === "PATCH",
+      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
     );
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
     expect(body.banned).toBe(true);
@@ -210,7 +210,8 @@ test.describe("Admin moderation — member context menu", () => {
     await logout.click();
     const call = await waitForCall(
       page,
-      (c) => (c.url ?? "").includes("/admin/api/users/2/sessions") && c.method === "DELETE",
+      (c) =>
+        (c.url ?? "").includes("/api/v1/moderation/members/2/sessions") && c.method === "DELETE",
     );
     expect(call.method).toBe("DELETE");
     expect((await fetchCalls(page)).filter((c) => c.method === "DELETE")).toHaveLength(1);
