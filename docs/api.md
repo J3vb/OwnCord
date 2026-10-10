@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 181 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 184 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -166,6 +166,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/moderation/appeals/{id}`                                    |
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
 | POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
+| GET     | `/api/v1/moderation/members/`                                        |
+| PATCH   | `/api/v1/moderation/members/{id}`                                    |
+| DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
 | POST    | `/api/v1/moderation/queue/{id}/act`                                  |
@@ -2429,6 +2432,18 @@ Nothing leaves a closed state — closing an already-closed report answers
 #### Response 204 No Content
 
 ---
+
+### Member actions: `/api/v1/moderation/members`
+
+`GET /`, `PATCH /{id}` and `DELETE /{id}/sessions` are the member-list actions
+of the desktop client (list members with their ban state, ban/unban and change
+role, force logout). They run the same handlers, the same bearer-token
+authentication and the same `ModerationService` permission and rank checks as
+`/admin/api/users`, `/admin/api/users/{id}` and `/admin/api/users/{id}/sessions`
+(request and response shapes are identical), but live outside `/admin` so a
+reverse proxy that answers `/admin` with a web page does not break them, and
+they are not subject to `server.admin_allowed_cidrs`. A role the caller does not
+outrank, or a role at or above the caller's own, is refused with `403`.
 
 ### POST /api/v1/moderation/queue/{id}/act
 
