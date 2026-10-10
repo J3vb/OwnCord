@@ -12,9 +12,14 @@ import { bindGifFavoritesApi, resetGifFavorites, isGifFavorite, toggleGifFavorit
 
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
+const consent = vi.hoisted(() => ({ allowed: true }));
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
+  externalAllowed: () => consent.allowed,
+  requestExternalItem: async () => {
+    consent.allowed = true;
+    return true;
+  },
 }));
 
 vi.mock("@lib/gifProvider", () => ({
@@ -1123,6 +1128,29 @@ describe("GifPicker", () => {
         picker.destroy();
       } finally {
         vi.useRealTimers();
+      }
+    });
+
+    it("granting consent on the Favorites tab renders the favorites and keeps focus", async () => {
+      consent.allowed = false;
+      try {
+        const api = favApi();
+        const { picker } = makePicker({ api });
+        container.appendChild(picker.element);
+        await settle();
+        const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
+        tabs[1]!.click();
+        await settle();
+        picker.element.querySelector<HTMLButtonElement>(".gp-consent")!.click();
+        await settle();
+        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
+          (i) => i.dataset.fullUrl,
+        );
+        expect(urls).toEqual(favs.map((f) => f.url));
+        expect(document.activeElement).toBe(tabs[1]);
+        picker.destroy();
+      } finally {
+        consent.allowed = true;
       }
     });
 
