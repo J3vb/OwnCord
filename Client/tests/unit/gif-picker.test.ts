@@ -3,7 +3,13 @@ import { createGifPicker } from "@components/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { GifApi, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
+import {
+  bindGifFavoritesApi,
+  resetGifFavorites,
+  isGifFavorite,
+  toggleGifFavorite,
+} from "@stores/gifFavorites.store";
 
 // ---------------------------------------------------------------------------
 // Module mock — must be hoisted before imports in vitest
@@ -11,9 +17,14 @@ import type { GifApi, GifResult } from "@lib/gifProvider";
 
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
+const consent = vi.hoisted(() => ({ allowed: true }));
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
+  externalAllowed: () => consent.allowed,
+  requestExternalItem: async () => {
+    consent.allowed = true;
+    return true;
+  },
 }));
 
 vi.mock("@lib/gifProvider", () => ({
@@ -58,9 +69,12 @@ const SEARCH_GIFS: readonly GifResult[] = [makeGif("s1"), makeGif("s2")];
 // Helpers
 // ---------------------------------------------------------------------------
 
-const stubApi: GifApi = {
+const stubApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(),
   gifTrending: vi.fn(),
+  gifFavorites: vi.fn().mockResolvedValue({ favorites: [] }),
+  addGifFavorite: vi.fn().mockResolvedValue(undefined),
+  removeGifFavorite: vi.fn().mockResolvedValue(undefined),
 };
 
 function makePicker(overrides?: Partial<GifPickerOptions>) {
@@ -70,6 +84,7 @@ function makePicker(overrides?: Partial<GifPickerOptions>) {
     onClose: overrides?.onClose ?? vi.fn(),
     onUnavailable: overrides?.onUnavailable,
   };
+  bindGifFavoritesApi(options.api);
   const picker = createGifPicker(options);
   return { picker, options };
 }
@@ -941,6 +956,235 @@ describe("GifPicker", () => {
       await Promise.resolve();
 
       expect(vi.mocked(searchGifs)).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  describe("favorites", () => {
+    const favs = [
+      {
+        url: "https://media.klipy.com/full/f1.gif",
+        preview_url: "https://media.klipy.com/preview/f1.gif",
+        title: "Fav 1",
+      },
+      {
+        url: "https://media.klipy.com/full/f2.gif",
+        preview_url: "https://media.klipy.com/preview/f2.gif",
+        title: "Fav 2",
+      },
+    ];
+
+    function favApi(initial = favs): GifApi & GifFavoritesApi {
+      return {
+        ...stubApi,
+        gifFavorites: vi.fn().mockResolvedValue({ favorites: initial }),
+        addGifFavorite: vi.fn().mockResolvedValue(undefined),
+        removeGifFavorite: vi.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    };
+
+    beforeEach(() => resetGifFavorites());
+
+    it("puts a star on every result, pressed only for saved GIFs", async () => {
+      const api = favApi([
+        { url: TRENDING_GIFS[1]!.fullUrl, preview_url: TRENDING_GIFS[1]!.url, title: "x" },
+      ]);
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const stars = picker.element.querySelectorAll<HTMLButtonElement>(".gp-item .gp-star");
+      expect(stars.length).toBe(TRENDING_GIFS.length);
+      expect(stars[0]!.getAttribute("aria-pressed")).toBe("false");
+      expect(stars[1]!.getAttribute("aria-pressed")).toBe("true");
+      picker.destroy();
+    });
+
+    it("clicking a star saves the GIF without sending it", async () => {
+      const api = favApi([]);
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ api, onSelect });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelector<HTMLButtonElement>(".gp-item .gp-star")!.click();
+      await settle();
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(api.addGifFavorite).toHaveBeenCalledWith({
+        url: TRENDING_GIFS[0]!.fullUrl,
+        preview_url: TRENDING_GIFS[0]!.url,
+        title: TRENDING_GIFS[0]!.title,
+      });
+      expect(isGifFavorite(TRENDING_GIFS[0]!.fullUrl)).toBe(true);
+      expect(picker.element.querySelector(".gp-item .gp-star")!.getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      picker.destroy();
+    });
+
+    it("the F key on a focused GIF toggles its favorite", async () => {
+      const api = favApi([]);
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const item = picker.element.querySelector<HTMLElement>(".gp-item")!;
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await settle();
+      expect(api.addGifFavorite).toHaveBeenCalledTimes(1);
+      picker.destroy();
+    });
+
+    it("the Favorites tab lists saved GIFs newest first and sends one on click", async () => {
+      const api = favApi();
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ api, onSelect });
+      container.appendChild(picker.element);
+      await settle();
+      const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
+      expect(tabs.length).toBe(2);
+      tabs[1]!.click();
+      await settle();
+      expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
+      const items = picker.element.querySelectorAll<HTMLElement>(".gp-item");
+      expect(Array.from(items).map((i) => i.dataset.fullUrl)).toEqual(favs.map((f) => f.url));
+      items[1]!.click();
+      expect(onSelect).toHaveBeenCalledWith(favs[1]!.url);
+      picker.destroy();
+    });
+
+    it("unstarring in the Favorites tab removes the GIF from the list", async () => {
+      const api = favApi();
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+      await settle();
+      picker.element.querySelector<HTMLButtonElement>(".gp-item .gp-star")!.click();
+      await settle();
+      expect(api.removeGifFavorite).toHaveBeenCalledWith(favs[0]!.url);
+      expect(picker.element.querySelectorAll(".gp-item").length).toBe(1);
+      picker.destroy();
+    });
+
+    it("shows an empty state when nothing is saved", async () => {
+      const { picker } = makePicker({ api: favApi([]) });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+      await settle();
+      expect(picker.element.querySelector(".gp-empty")!.textContent).toBe(
+        messagingText("gif.favoritesEmpty"),
+      );
+      picker.destroy();
+    });
+
+    it("removing the focused favorite moves focus to a neighbouring GIF", async () => {
+      const api = favApi();
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+      await settle();
+      const first = picker.element.querySelector<HTMLElement>(".gp-item")!;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await settle();
+      const remaining = picker.element.querySelector<HTMLElement>(".gp-item")!;
+      expect(remaining.dataset.fullUrl).toBe(favs[1]!.url);
+      expect(document.activeElement).toBe(remaining);
+      picker.destroy();
+    });
+
+    it("removing the last favorite moves focus to the Favorites tab", async () => {
+      const api = favApi([favs[0]!]);
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
+      tabs[1]!.click();
+      await settle();
+      const item = picker.element.querySelector<HTMLElement>(".gp-item")!;
+      item.focus();
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await settle();
+      expect(document.activeElement).toBe(tabs[1]);
+      picker.destroy();
+    });
+
+    it("a search pending when Favorites opens does not replace the favorites grid", async () => {
+      vi.useFakeTimers();
+      try {
+        const api = favApi();
+        const { picker } = makePicker({ api });
+        container.appendChild(picker.element);
+        await settle();
+        const input = picker.element.querySelector<HTMLInputElement>("input")!;
+        input.value = "cats";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+        await vi.advanceTimersByTimeAsync(1000);
+        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
+          (i) => i.dataset.fullUrl,
+        );
+        expect(urls).toEqual(favs.map((f) => f.url));
+        picker.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("granting consent on the Favorites tab renders the favorites and keeps focus", async () => {
+      consent.allowed = false;
+      try {
+        const api = favApi();
+        const { picker } = makePicker({ api });
+        container.appendChild(picker.element);
+        await settle();
+        const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
+        tabs[1]!.click();
+        await settle();
+        picker.element.querySelector<HTMLButtonElement>(".gp-consent")!.click();
+        await settle();
+        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
+          (i) => i.dataset.fullUrl,
+        );
+        expect(urls).toEqual(favs.map((f) => f.url));
+        const imgs = picker.element.querySelectorAll<HTMLImageElement>(".gp-item .gp-img");
+        expect(imgs.length).toBe(favs.length);
+        imgs.forEach((img) => expect(img.src).toMatch(/^blob:/));
+        favs.forEach((f) =>
+          expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: f.preview_url }),
+        );
+        expect(document.activeElement).toBe(tabs[1]);
+        picker.destroy();
+      } finally {
+        consent.allowed = true;
+      }
+    });
+
+    it("ignores a second toggle of the same GIF while one is in flight", async () => {
+      const api = favApi([]);
+      bindGifFavoritesApi(api);
+      await settle();
+      const fav = { url: favs[0]!.url, preview_url: favs[0]!.preview_url, title: "t" };
+      await Promise.all([toggleGifFavorite(fav), toggleGifFavorite(fav)]);
+      expect(api.addGifFavorite).toHaveBeenCalledTimes(1);
+      expect(api.removeGifFavorite).not.toHaveBeenCalled();
+      expect(isGifFavorite(fav.url)).toBe(true);
+    });
+
+    it("a load from before a reset never lands in the next session", async () => {
+      let resolveLoad!: (v: { favorites: typeof favs }) => void;
+      const api = favApi();
+      api.gifFavorites = vi.fn(() => new Promise((r) => (resolveLoad = r)));
+      bindGifFavoritesApi(api);
+      resetGifFavorites();
+      resolveLoad({ favorites: favs });
+      await settle();
+      expect(isGifFavorite(favs[0]!.url)).toBe(false);
     });
   });
 });

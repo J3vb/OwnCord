@@ -1313,6 +1313,17 @@ export interface GifApiResult {
   };
 }
 
+/** One saved GIF (GET /api/v1/gif/favorites). */
+export interface GifFavorite {
+  readonly url: string;
+  readonly preview_url: string;
+  readonly title: string;
+}
+
+export interface GifFavoritesResponse {
+  readonly favorites: readonly GifFavorite[];
+}
+
 /** Envelope for both GIF endpoints. */
 export interface GifSearchResponse {
   readonly results: readonly GifApiResult[];

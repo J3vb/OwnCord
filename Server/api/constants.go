@@ -59,6 +59,10 @@ const (
 	// stays under this; it exists to bound abuse of the operator's Klipy quota.
 	gifRateLimitPerMinute = 30
 
+	// gifFavoritesRateLimitPerMinute bounds favorite list/add/remove per IP;
+	// there is no upstream call, so it is looser than the proxy's.
+	gifFavoritesRateLimitPerMinute = 300
+
 	// ownModerationRateLimitPerMinute is the maximum GET
 	// /api/v1/users/me/moderation reads per IP per minute.
 	ownModerationRateLimitPerMinute = 30

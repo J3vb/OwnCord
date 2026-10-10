@@ -96,6 +96,9 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// survive the subject's erasure untouched.
 	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, uid, chID)
 	exec(`INSERT INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)`, other, chID)
+	// GIF favorites (migration 059): the subject's rows are erased, another user's survive.
+	exec(`INSERT INTO gif_favorites (user_id, url, preview_url) VALUES (?, 'https://media.klipy.com/s.gif', 'https://media.klipy.com/s.gif')`, uid)
+	exec(`INSERT INTO gif_favorites (user_id, url, preview_url) VALUES (?, 'https://media.klipy.com/o.gif', 'https://media.klipy.com/o.gif')`, other)
 	// The wire envelope shape (ws.wrapWithSeq): the ids live under payload.
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (1, 'typing', ?, ?)`, fmt.Sprintf(`{"seq":1,"type":"typing","payload":{"user_id":%d}}`, uid), chID)
 	exec(`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (2, 'chat_message', ?, ?)`, fmt.Sprintf(`{"seq":2,"type":"chat_message","payload":{"user":{"id":%d}}}`, uid), chID)
@@ -321,6 +324,9 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM nsfw_acknowledgements`); n != 1 {
 		t.Errorf("nsfw acknowledgements left = %d, want 1 (the other user's)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM gif_favorites`); n != 1 {
+		t.Errorf("gif favorites left = %d, want 1 (the other user's)", n)
 	}
 }
 

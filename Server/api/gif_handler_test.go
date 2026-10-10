@@ -29,7 +29,7 @@ func buildGIFRouter(database *db.DB, apiKey string) http.Handler {
 	limiter := auth.NewRateLimiter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = apiKey
-	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg, database)
 	return r
 }
 
@@ -381,7 +381,7 @@ func TestGIFRateLimitBucketIsSeparate(t *testing.T) {
 	r := chi.NewRouter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = "server-side-key"
-	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg, database)
 
 	for range 31 {
 		gifGET(t, r, "/api/v1/gif/trending", token)

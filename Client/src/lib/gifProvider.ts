@@ -16,6 +16,12 @@ const DEFAULT_LIMIT = 20;
 /** The slice of the API client the GIF picker needs. */
 export type GifApi = Pick<ApiClient, "gifSearch" | "gifTrending">;
 
+/** The slice of the API client that saves a user's favorite GIFs. */
+export type GifFavoritesApi = Pick<
+  ApiClient,
+  "gifFavorites" | "addGifFavorite" | "removeGifFavorite"
+>;
+
 export interface GifResult {
   readonly id: string;
   readonly title: string;
@@ -30,7 +36,7 @@ export interface GifResult {
 // ---------------------------------------------------------------------------
 
 /** Validate that a URL originates from a trusted Klipy CDN domain. */
-function isAllowedGifUrl(url: string): boolean {
+export function isAllowedGifUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (

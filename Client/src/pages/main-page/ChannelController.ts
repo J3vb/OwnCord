@@ -13,6 +13,7 @@ import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
+import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
@@ -798,6 +799,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         { signal: promptOwner.signal },
       );
     }
+
+    // Bound before any message renders so GIFs in messages get their star.
+    bindGifFavoritesApi(api);
 
     // MessageList
     messageList = createMessageList({
