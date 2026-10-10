@@ -217,6 +217,20 @@ describe("SidebarArea — Mark All as Read", () => {
     });
   });
 
+  it("moves focus to Invite before hiding the activated button", async () => {
+    mount(CHANNELS);
+    button().focus();
+    expect(document.activeElement).toBe(button());
+
+    button().click();
+
+    await vi.waitFor(() => {
+      expect(shown(button())).toBe(false);
+    });
+    const invite = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="invite-btn"]');
+    expect(document.activeElement).toBe(invite);
+  });
+
   it("stops following the stores once the sidebar area is torn down", async () => {
     mount([CHANNELS[1]!]);
     const btn = button();

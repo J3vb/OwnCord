@@ -239,7 +239,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     markAllRead();
   });
   const syncMarkAllBtn = (): void => {
-    markAllBtn.style.display = unreadChannelIds().length > 0 ? "" : "none";
+    const show = unreadChannelIds().length > 0;
+    // Hiding the focused button would drop focus to <body>; hand it to the
+    // neighbouring header action (Invite) so the next Tab starts nearby.
+    if (!show && document.activeElement === markAllBtn) {
+      headerActions.querySelector<HTMLElement>('[data-testid="invite-btn"]')?.focus();
+    }
+    markAllBtn.style.display = show ? "" : "none";
   };
   syncMarkAllBtn();
   headerActions.appendChild(markAllBtn);
