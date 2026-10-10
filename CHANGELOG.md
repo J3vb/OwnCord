@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Voice**
+
+- Your own avatar in the user panel at the bottom left now shows the green speaking ring while you talk in voice, as voice-channel members do; it stays off while you are muted, deafened or not holding push-to-talk.
+
 ### Fixed
 
 **Voice**
@@ -71,6 +77,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- On Windows and macOS, other people's speaking rings now light as you hear them speak, about 90 ms sooner than before (they used to wait for the voice server's speaker update); after they stop, the ring stays lit a little longer to avoid flicker.
 - With enhanced noise suppression on, joining voice no longer downloads the noise model every time; it is fetched once and reused for later joins.
 
 **Messages & files**

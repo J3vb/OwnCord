@@ -15,6 +15,7 @@ import {
   setLocalScreenshare,
   setListenOnly,
   setSpeakers,
+  setLevelSpeakers,
   setLocalGateSpeaking,
   setVoiceConfig,
   getChannelVoiceUsers,
@@ -624,6 +625,51 @@ describe("voice store", () => {
       const before = voiceStore.getState().voiceUsers.get(10)?.get(1);
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)).toBe(before);
+    });
+  });
+
+  describe("setLevelSpeakers", () => {
+    beforeEach(() => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+      joinVoiceChannel(10);
+    });
+
+    afterEach(() => {
+      setLevelSpeakers(new Set());
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    const remoteSpeaking = () => voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking;
+
+    it("lights a remote ring from its received audio before LiveKit reports it", () => {
+      setLevelSpeakers(new Set([2]));
+      expect(remoteSpeaking()).toBe(true);
+      setLevelSpeakers(new Set());
+      expect(remoteSpeaking()).toBe(false);
+    });
+
+    it("keeps the ring lit while either source says the user is speaking", () => {
+      setSpeakers({ channel_id: 10, speakers: [2] });
+      setLevelSpeakers(new Set());
+      expect(remoteSpeaking()).toBe(true);
+      setLevelSpeakers(new Set([2]));
+      setSpeakers({ channel_id: 10, speakers: [] });
+      expect(remoteSpeaking()).toBe(true);
+      setLevelSpeakers(new Set());
+      expect(remoteSpeaking()).toBe(false);
     });
   });
 

@@ -9,6 +9,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
@@ -66,6 +67,17 @@ const STATUS_TEXT = {
   invisible: "status.invisible",
   offline: "status.offline",
 } as const satisfies Readonly<Record<UserStatus, string>>;
+
+/** The same speaking ring as the user's own voice-channel row, while their
+ *  mic is live: never through a mute, a deafen or a released push-to-talk. */
+function selfSpeaking(s: VoiceState): boolean {
+  const id = authStore.getState().user?.id;
+  const self =
+    s.currentChannelId === null || id === undefined
+      ? undefined
+      : s.voiceUsers.get(s.currentChannelId)?.get(id);
+  return self?.speaking === true && !s.localMuted && !s.localDeafened && s.pttGated !== true;
+}
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
   const disposable = new Disposable();
@@ -289,6 +301,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     // Initial render
     updateFromState();
+
+    avatarEl.classList.toggle("speaking", selfSpeaking(voiceStore.getState()));
+    disposable.onStoreChange(voiceStore, selfSpeaking, (speaking: boolean) =>
+      avatarEl?.classList.toggle("speaking", speaking),
+    );
 
     // Subscribe to auth changes. Also reflects a custom_status that arrives
     // (or changes) through authStore — a later auth_ok, or the settings
