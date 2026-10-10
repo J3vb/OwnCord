@@ -106,7 +106,7 @@ describe("Server/admin/static — dismissable notices", () => {
     expect(cards(content)).toHaveLength(0);
 
     // Same problem, newer sighting: still dismissed.
-    server.warnings = [warning({ last_observed: "2026-09-23T13:00:00Z", occurrences: 9 })];
+    server.warnings = [warning({ last_observed: "2026-09-23T13:00:00Z" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(0);
 
