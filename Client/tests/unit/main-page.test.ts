@@ -79,6 +79,7 @@ vi.mock("@lib/notificationSound", () => ({
 vi.mock("../../src/features/direct-messages/callAlerts", () => ({
   alertIncomingCall: vi.fn(),
   alertMissedCall: vi.fn(),
+  clearIncomingCall: vi.fn(),
 }));
 
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
