@@ -1070,6 +1070,29 @@ describe("GifPicker", () => {
       picker.destroy();
     });
 
+    it("moves focus to the search box when a late 404 hides the focused Favorites tab", async () => {
+      let reject: (e: unknown) => void = () => {};
+      const api = favApi([]);
+      api.gifFavorites = vi.fn(
+        () =>
+          new Promise<never>((_, rej) => {
+            reject = rej;
+          }),
+      );
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const tab = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!;
+      tab.click();
+      tab.focus();
+      expect(document.activeElement).toBe(tab);
+      reject(new ApiClientError(404, "NOT_FOUND", "nope"));
+      await settle();
+      expect(picker.element.classList.contains("gp-no-favorites")).toBe(true);
+      expect(document.activeElement).toBe(picker.element.querySelector(".gp-search"));
+      picker.destroy();
+    });
+
     it("shows an empty state when nothing is saved", async () => {
       const { picker } = makePicker({ api: favApi([]) });
       container.appendChild(picker.element);

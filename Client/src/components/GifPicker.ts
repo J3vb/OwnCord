@@ -236,8 +236,10 @@ export function createGifPicker(options: GifPickerOptions): {
   // Keep stars (and the Favorites list) in step with the shared store.
   const syncSupport = (): void => {
     const unsupported = gifFavoritesStore.getState().unsupported;
-    root.classList.toggle("gp-no-favorites", unsupported);
     if (unsupported && showingFavorites) selectTab(false);
+    // The tabs are about to be hidden: do not drop a focused tab to <body>.
+    if (unsupported && tabs.contains(document.activeElement)) searchInput.focus();
+    root.classList.toggle("gp-no-favorites", unsupported);
   };
   syncSupport();
   const unsubscribe = gifFavoritesStore.subscribe(() => {
