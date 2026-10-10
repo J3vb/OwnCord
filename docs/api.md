@@ -1432,10 +1432,10 @@ URLs on `klipy.com` or a subdomain; an empty `preview_url` defaults to `url`.
 A `title` over 200 bytes is cut on a character boundary. Saving a GIF that is
 already a favorite changes nothing. Responds `204`.
 
-| Status | Code                 | When                                  |
-| ------ | -------------------- | ------------------------------------- |
-| 400    | `INVALID_INPUT`      | Malformed body or a disallowed URL    |
-| 401    | `UNAUTHORIZED`       | No valid session                      |
+| Status | Code                 | When                                 |
+| ------ | -------------------- | ------------------------------------ |
+| 400    | `INVALID_INPUT`      | Malformed body or a disallowed URL   |
+| 401    | `UNAUTHORIZED`       | No valid session                     |
 | 409    | `GIF_FAVORITES_FULL` | The caller already has 250 favorites |
 
 ### DELETE /api/v1/gif/favorites
