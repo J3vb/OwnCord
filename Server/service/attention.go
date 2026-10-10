@@ -428,7 +428,7 @@ func (s *AttentionService) settle(sig AttentionSignal, title, action string) {
 		}
 		detail := strings.Join(parts, " · ")
 		if w == nil {
-			w = &AttentionWarning{ID: sig.ID, FirstObserved: now}
+			w = &AttentionWarning{ID: sig.ID}
 			s.warnings[sig.ID] = w
 		}
 		if w.Occurrences == 0 || w.RecoveredAt != nil {
