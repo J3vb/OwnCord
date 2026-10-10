@@ -23,6 +23,7 @@ import {
 import { externalConsentText } from "../i18n/externalConsent";
 import { contentText } from "../i18n/content";
 import { messagingText } from "../i18n/messaging";
+import { gifFavoritesText } from "../i18n/gifFavorites";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,7 +55,7 @@ const GIF_LIMIT = 20;
 
 function setStarState(star: HTMLElement, on: boolean): void {
   star.setAttribute("aria-pressed", String(on));
-  star.setAttribute("aria-label", messagingText(on ? "gif.unfavorite" : "gif.favorite"));
+  star.setAttribute("aria-label", gifFavoritesText(on ? "unfavorite" : "favorite"));
   star.classList.toggle("on", on);
   star.textContent = on ? "\u2605" : "\u2606";
 }
@@ -94,18 +95,18 @@ export function createGifPicker(options: GifPickerOptions): {
     role: "tab",
     "aria-selected": "true",
   });
-  setText(tabBrowse, messagingText("gif.tabBrowse"));
+  setText(tabBrowse, gifFavoritesText("tabBrowse"));
   const tabFavorites = createElement("button", {
     type: "button",
     class: "gp-tab",
     role: "tab",
     "aria-selected": "false",
   });
-  setText(tabFavorites, messagingText("gif.tabFavorites"));
+  setText(tabFavorites, gifFavoritesText("tabFavorites"));
   const tabs = createElement("div", {
     class: "gp-tabs",
     role: "tablist",
-    "aria-label": messagingText("gif.tabsLabel"),
+    "aria-label": gifFavoritesText("tabsLabel"),
   });
   tabs.append(tabBrowse, tabFavorites);
   header.appendChild(tabs);
@@ -157,7 +158,7 @@ export function createGifPicker(options: GifPickerOptions): {
       title: cell.dataset.title ?? "",
     });
     if (!ok && !signal.aborted) {
-      searchInput.setAttribute("title", messagingText("gif.favoriteFailed"));
+      searchInput.setAttribute("title", gifFavoritesText("favoriteFailed"));
     }
   }
 
@@ -187,7 +188,7 @@ export function createGifPicker(options: GifPickerOptions): {
     if (favs.length === 0) {
       clearChildren(gridArea);
       const empty = createElement("div", { class: "gp-empty", role: "status" });
-      setText(empty, messagingText("gif.favoritesEmpty"));
+      setText(empty, gifFavoritesText("favoritesEmpty"));
       gridArea.appendChild(empty);
       return;
     }

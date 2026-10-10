@@ -10,7 +10,11 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
 
-import { renderInlineImage } from "../../src/components/message-list/media";
+import {
+  renderInlineImage,
+  setInlineImageDecorator,
+} from "../../src/components/message-list/media";
+import { gifFavoriteStar } from "../../src/components/message-list/gifFavoriteStar";
 import { bindGifFavoritesApi, isGifFavorite, resetGifFavorites } from "@stores/gifFavorites.store";
 import { ApiClientError } from "@lib/api";
 import type { GifFavoritesApi } from "@lib/gifProvider";
@@ -31,6 +35,7 @@ function api(initial: readonly string[] = []): GifFavoritesApi {
 describe("star on GIFs in messages", () => {
   beforeEach(() => {
     resetGifFavorites();
+    setInlineImageDecorator(gifFavoriteStar);
     URL.createObjectURL = vi.fn(() => "blob:test/1");
     imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
   });

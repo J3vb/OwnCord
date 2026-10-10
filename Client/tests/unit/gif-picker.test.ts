@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createGifPicker } from "@components/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
+import { gifFavoritesText } from "../../src/i18n/gifFavorites";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
 import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
@@ -1076,7 +1077,7 @@ describe("GifPicker", () => {
       picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
       await settle();
       expect(picker.element.querySelector(".gp-empty")!.textContent).toBe(
-        messagingText("gif.favoritesEmpty"),
+        gifFavoritesText("favoritesEmpty"),
       );
       picker.destroy();
     });

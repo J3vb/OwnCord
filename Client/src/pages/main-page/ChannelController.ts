@@ -14,6 +14,8 @@ import type { ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
+import { setInlineImageDecorator } from "@components/message-list/media";
+import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
@@ -847,6 +849,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Bound before any message renders so GIFs in messages get their star.
     bindGifFavoritesApi(api);
+    setInlineImageDecorator(gifFavoriteStar);
 
     // MessageList
     messageList = createMessageList({

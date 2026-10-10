@@ -8,13 +8,7 @@ import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
-import { isAllowedGifUrl } from "@lib/gifProvider";
 import { loadPref } from "@lib/preferences";
-import {
-  gifFavoritesAvailable,
-  isGifFavorite,
-  toggleGifFavorite,
-} from "@stores/gifFavorites.store";
 import { messagingText } from "../../i18n/messaging";
 import {
   clearExternalImageCache,
@@ -320,28 +314,11 @@ function displayHost(url: string): string {
   }
 }
 
-/** Star that saves a Klipy GIF from a message to the user's favorites. */
-function renderFavoriteStar(url: string): HTMLButtonElement {
-  const star = createElement("button", { type: "button", class: "msg-gif-fav" });
-  const sync = (): void => {
-    const on = isGifFavorite(url);
-    star.setAttribute("aria-pressed", String(on));
-    star.setAttribute("aria-label", messagingText(on ? "gif.unfavorite" : "gif.favorite"));
-    star.classList.toggle("on", on);
-    star.hidden = !gifFavoritesAvailable() && document.activeElement !== star;
-    star.textContent = on ? "\u2605" : "\u2606";
-  };
-  sync();
-  star.addEventListener("click", (e) => {
-    e.stopPropagation();
-    void toggleGifFavorite({ url, preview_url: url, title: "" }).then(sync);
-  });
-  // The saved list can load after this message rendered; re-read it when the
-  // viewer reaches for the star rather than holding a store subscription.
-  star.addEventListener("pointerenter", sync);
-  star.addEventListener("focus", sync);
-  star.addEventListener("blur", sync);
-  return star;
+/** Decorates every inline image; the main page registers the GIF favorite star,
+ *  so its store and copy stay out of the lazy chunk that shares this module. */
+let imageDecorator: ((url: string) => HTMLElement | null) | null = null;
+export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null) | null): void {
+  imageDecorator = fn;
 }
 
 /** Render a direct image/GIF URL as an inline image with lightbox. */
@@ -378,7 +355,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.appendChild(watermark);
   }
 
-  if (isAllowedGifUrl(url) && gifFavoritesAvailable()) wrap.appendChild(renderFavoriteStar(url));
+  const extra = imageDecorator?.(url);
+  if (extra) wrap.appendChild(extra);
 
   // The failure line and its bounded retry sit beside the image; the image is
   // hidden, not discarded, so retry can reuse it and tests keep one element.
