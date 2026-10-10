@@ -17,10 +17,7 @@ import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
-import {
-  closeUserProfilePopup,
-  openUserProfilePopup,
-} from "../features/profiles/openUserProfilePopup";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
@@ -210,6 +207,13 @@ function handleOutsideClick(e: MouseEvent): void {
   }
 }
 
+/**
+ * Closers for the profile popups this list opened. destroy() runs only these:
+ * each is a no-op once another opener replaced its popup, so a card MessageList
+ * opened stays up when the sidebar switches away from the member list.
+ */
+const ownPopupClosers = new Set<() => void>();
+
 function createMemberItem(
   member: Member,
   colorVar: string,
@@ -278,7 +282,7 @@ function createMemberItem(
     // row, so that snapshot's `status` can be stale. The opener re-resolves
     // against the live store so the popup always agrees with the dot it was
     // opened from; the snapshot is only the fallback.
-    openUserProfilePopup({
+    const close = openUserProfilePopup({
       userId: member.id,
       anchorX,
       anchorY,
@@ -294,6 +298,7 @@ function createMemberItem(
         list?.querySelector<HTMLElement>(".member-item") ??
         null,
     });
+    ownPopupClosers.add(close);
   };
   item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(
@@ -597,7 +602,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function destroy(): void {
     closeActiveMenu();
-    closeUserProfilePopup();
+    for (const close of ownPopupClosers) close();
+    ownPopupClosers.clear();
     releaseMenuDismiss();
     disposable.destroy();
     renderOwner?.destroy();
