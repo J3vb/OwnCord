@@ -212,6 +212,36 @@ describe("renderAttachment — video", () => {
     expect(row.querySelector(".msg-media-play")).toBeNull();
   });
 
+  it("resumes playback on the audio player when the video was playing", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "paused", { value: false });
+    playMock.mockClear();
+    video.dispatchEvent(new Event("loadedmetadata"));
+    const audio = document.querySelector(".msg-audio audio");
+    expect(playMock).toHaveBeenCalledTimes(1);
+    expect(playMock.mock.contexts[0]).toBe(audio);
+  });
+
+  it("moves focus to the download button when the chip replaces a focused player", async () => {
+    const video = await playedVideo();
+    (document.querySelector(".msg-video .msg-file-download") as HTMLElement).focus();
+    video.dispatchEvent(new Event("error"));
+    expect(document.activeElement).toBe(document.querySelector(".msg-file .msg-file-download"));
+  });
+
+  it("moves focus to the download button when the audio row replaces a focused video", async () => {
+    const video = await playedVideo();
+    (document.querySelector(".msg-video .msg-file-download") as HTMLElement).focus();
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(document.activeElement).toBe(document.querySelector(".msg-audio .msg-file-download"));
+  });
+
+  it("leaves focus alone when the swap happens while nothing in the player has it", async () => {
+    const video = await playedVideo();
+    video.dispatchEvent(new Event("error"));
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("sizes a player to the clip's real ratio once metadata loads", async () => {
     const video = await playedVideo();
     Object.defineProperty(video, "videoWidth", { value: 1080 });

@@ -1035,6 +1035,13 @@ function buildPlayButton(
   return btn;
 }
 
+/** Replace `wrap` with `next`, handing keyboard focus on if `wrap` held it. */
+function swapKeepingFocus(wrap: HTMLElement, next: HTMLElement): void {
+  const hadFocus = wrap.contains(document.activeElement);
+  wrap.replaceWith(next);
+  if (hadFocus) next.querySelector<HTMLElement>(".msg-file-download")?.focus();
+}
+
 /** Inline <video> player. Sized by the same .msg-image box as images so a
  *  video never blows the message column out; the source arrives on play
  *  because it needs the session token attached. A clip the engine cannot
@@ -1049,7 +1056,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     const note = createElement("div", { class: "msg-file-note", role: "status" });
     setText(note, messageStatusText("file.cannotPlay"));
     chip.querySelector(".msg-file-meta")?.appendChild(note);
-    wrap.replaceWith(chip);
+    swapKeepingFocus(wrap, chip);
   };
   video.addEventListener("error", unplayable, { once: true });
   video.addEventListener("loadedmetadata", () => {
@@ -1072,7 +1079,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     const note = createElement("div", { class: "msg-file-note", role: "status" });
     setText(note, messageStatusText("file.noPicture"));
     row.querySelector(".msg-file-meta")?.appendChild(note);
-    wrap.replaceWith(row);
+    swapKeepingFocus(wrap, row);
     if (wasPlaying && row.isConnected) {
       void audio.play().catch((err: unknown) => {
         log.debug("Media playback refused", { error: String(err) });
