@@ -383,7 +383,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // height so future virtual-scroll rebuilds start at the correct size.
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener("load", () => {
+  // Once per load: a GIF freeze/unfreeze changes src and would re-run it (a
+  // forced layout each time). load() re-arms it for a retry.
+  const onLoad = (): void => {
     log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
     // A retry that succeeds hands keyboard focus from the retry to the image.
     const refocus = failure.contains(document.activeElement);
@@ -394,7 +396,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
     const h = wrap.offsetHeight;
     if (h > 0) cacheImageHeight(url, h);
     if (refocus) img.focus();
-  });
+  };
+  img.addEventListener("load", onLoad, { once: true });
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
   // When the animateGifs pref is disabled, start frozen so the first frame is
@@ -432,6 +435,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.style.minHeight = `${cachedH ?? 200}px`;
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
+    img.addEventListener("load", onLoad, { once: true });
     void loadExternalImage({ url }).then((result) => {
       if (!result.ok) {
         showFailure(result.failure);

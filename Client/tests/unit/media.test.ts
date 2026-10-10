@@ -435,6 +435,38 @@ describe("media.ts", () => {
       expect(document.activeElement).toBe(wrap.querySelector("img"));
     });
 
+    it("the inline image load handler runs once", async () => {
+      const wrap = renderInlineImage("https://example.com/once.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      const heightReads = vi.fn(() => 120);
+      Object.defineProperty(wrap, "offsetHeight", { get: heightReads, configurable: true });
+
+      const img = wrap.querySelector("img")!;
+      img.dispatchEvent(new Event("load"));
+      img.dispatchEvent(new Event("load"));
+
+      expect(heightReads).toHaveBeenCalledTimes(1);
+    });
+
+    it("a retry after a prior load still lands in the loaded state", async () => {
+      const wrap = renderInlineImage("https://example.com/reload.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      fireImgLoad(wrap);
+      fireImgError(wrap);
+      expect(wrap.dataset.mediaState).toBe("failed");
+
+      imageMock.mockResolvedValueOnce(imageResponse("image/png"));
+      wrap.querySelector<HTMLButtonElement>(".msg-media-retry")!.click();
+      await vi.waitFor(() => {
+        expect(wrap.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+      });
+      fireImgLoad(wrap);
+      expect(wrap.dataset.mediaState).toBe("loaded");
+      expect(wrap.querySelector("img")!.hidden).toBe(false);
+    });
+
     it("does not cache height of 0", async () => {
       const url = "https://example.com/zero-height.png";
       const wrap = renderInlineImage(url);
