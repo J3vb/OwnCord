@@ -328,7 +328,7 @@ function renderFavoriteStar(url: string): HTMLButtonElement {
     star.setAttribute("aria-pressed", String(on));
     star.setAttribute("aria-label", messagingText(on ? "gif.unfavorite" : "gif.favorite"));
     star.classList.toggle("on", on);
-    star.hidden = !gifFavoritesAvailable();
+    star.hidden = !gifFavoritesAvailable() && document.activeElement !== star;
     star.textContent = on ? "\u2605" : "\u2606";
   };
   sync();
@@ -340,6 +340,7 @@ function renderFavoriteStar(url: string): HTMLButtonElement {
   // viewer reaches for the star rather than holding a store subscription.
   star.addEventListener("pointerenter", sync);
   star.addEventListener("focus", sync);
+  star.addEventListener("blur", sync);
   return star;
 }
 

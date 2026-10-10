@@ -51,6 +51,27 @@ describe("star on GIFs in messages", () => {
     expect(star === null || star.hidden).toBe(true);
   });
 
+  it("a star drawn before a 404 hides on hover, but not while it holds focus", async () => {
+    const pendingApi = api();
+    let reject!: (e: unknown) => void;
+    pendingApi.gifFavorites = vi.fn(() => new Promise((_, r) => (reject = r)));
+    bindGifFavoritesApi(pendingApi);
+    const wrap = renderInlineImage(URL_);
+    document.body.appendChild(wrap);
+    const star = wrap.querySelector<HTMLButtonElement>(".msg-gif-fav")!;
+    const other = renderInlineImage(URL_).querySelector<HTMLButtonElement>(".msg-gif-fav")!;
+    document.body.appendChild(other.parentElement!);
+    reject(new ApiClientError(404, "NOT_FOUND", "nope"));
+    await flush();
+    star.focus();
+    expect(star.hidden).toBe(false);
+    expect(document.activeElement).toBe(star);
+    star.blur();
+    expect(star.hidden).toBe(true);
+    other.dispatchEvent(new Event("pointerenter"));
+    expect(other.hidden).toBe(true);
+  });
+
   it("has no star on a non-Klipy image", async () => {
     bindGifFavoritesApi(api());
     await flush();
