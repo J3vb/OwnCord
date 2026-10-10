@@ -36,7 +36,8 @@ function loadRNNoiseBytes(): Promise<ArrayBuffer> {
 /** Load the worklet and WASM into `audioContext` and return a ready node. */
 export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNNoiseNode> {
   await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
-  const cachedBytes = await loadRNNoiseBytes();
+  const bytesPromise = loadRNNoiseBytes();
+  const cachedBytes = await bytesPromise;
 
   const node = new AudioWorkletNode(audioContext, "rnnoise-processor", {
     numberOfInputs: 1,
@@ -54,7 +55,14 @@ export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNN
   const wasmBytes = cachedBytes.slice(0);
   // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
   node.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
-  await initPromise;
+  try {
+    await initPromise;
+  } catch (err) {
+    // The worklet rejected these bytes (200 with an HTML fallback, truncated
+    // wasm): drop the cache so the next join refetches instead of reusing them.
+    if (rnnoiseBytes === bytesPromise) rnnoiseBytes = null;
+    throw err;
+  }
 
   log.info("RNNoise AudioWorklet processing active");
 

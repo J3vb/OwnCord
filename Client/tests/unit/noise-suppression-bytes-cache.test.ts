@@ -15,6 +15,7 @@ interface PostedInit {
 describe("createRNNoiseNode bytes cache", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let posted: PostedInit[];
+  let workletReplies: Array<{ type: string; message?: string }>;
   const realFetch = globalThis.fetch;
 
   function makeContext(): AudioContext {
@@ -26,6 +27,7 @@ describe("createRNNoiseNode bytes cache", () => {
   beforeEach(() => {
     vi.resetModules();
     posted = [];
+    workletReplies = [];
     fetchMock = vi.fn(async () => new Response(new Uint8Array(WASM_LENGTH).buffer));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     class FakeAudioWorkletNode {
@@ -37,7 +39,8 @@ describe("createRNNoiseNode bytes cache", () => {
         postMessage: (message, transfer) => {
           if (message.type !== "init") return;
           posted.push({ message, transfer });
-          queueMicrotask(() => this.port.onmessage?.({ data: { type: "ready" } } as MessageEvent));
+          const reply = workletReplies.shift() ?? { type: "ready" };
+          queueMicrotask(() => this.port.onmessage?.({ data: reply } as MessageEvent));
         },
       };
       disconnect = vi.fn();
@@ -93,5 +96,15 @@ describe("createRNNoiseNode bytes cache", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(posted).toHaveLength(1);
+  });
+
+  it("drops the cached bytes when the worklet rejects them, so the next join refetches", async () => {
+    workletReplies.push({ type: "error", message: "compile failed" });
+    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+
+    await expect(createRNNoiseNode(makeContext())).rejects.toThrow("compile failed");
+    await createRNNoiseNode(makeContext());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
