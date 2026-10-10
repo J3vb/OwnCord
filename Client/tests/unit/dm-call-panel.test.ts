@@ -7,13 +7,25 @@ vi.mock("@lib/livekitSession", () => ({
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../../src/features/voice/peerVerification", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/peerVerification")>()),
+  openIdentityMismatchModal: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   createDmCallPanel,
   deriveCallView,
   type DmCallPanelComponent,
   type DmCallPanelOptions,
 } from "../../src/components/DmCallPanel";
-import { voiceStore, type VoiceUser } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  setPeerVerification,
+  clearPeerVerifications,
+  clearPeerVerification,
+  type VoiceUser,
+} from "../../src/stores/voice.store";
+import { openIdentityMismatchModal } from "../../src/features/voice/peerVerification";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile, updatePresence } from "../../src/stores/members.store";
@@ -100,8 +112,22 @@ function mount(opts = options()): { opts: MockedOptions; root: HTMLElement } {
   return { opts, root };
 }
 
+/** Stand in for the shared grid hosting the avatar tiles the panel hands it. */
+function hostAvatars(opts: MockedOptions): void {
+  const hostEl = panel!.videoElement()!;
+  const calls = opts.videoGrid.setPeople.mock.calls;
+  const people = calls[calls.length - 1]![0] as { content: HTMLElement }[];
+  for (const p of people) hostEl.appendChild(p.content);
+}
+
 const q = (root: HTMLElement, id: string) =>
   root.querySelector<HTMLButtonElement>(`[data-testid='${id}']`);
+
+const shield = (root: HTMLElement, id: number) =>
+  root.querySelector<HTMLElement>(`.dcp-avatar[data-user-id='${id}'] .dcp-verify`);
+// Wherever it sits: on the avatar, or on a camera tile in the grid.
+const anyShield = (root: HTMLElement) => root.querySelector<HTMLElement>(".dcp-verify");
+const timer = (root: HTMLElement) => root.querySelector(".dcp-timer")!.textContent;
 
 beforeEach(() => {
   host = document.createElement("div");
@@ -173,6 +199,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearPeerVerifications();
+  voiceStore.flush();
   panel?.destroy?.();
   panel = null;
   host.remove();
@@ -241,6 +269,16 @@ describe("deriveCallView", () => {
         outgoing: { channelId: DM, phase: "no-answer", pending: [OTTO] },
       }),
     ).toMatchObject({ kind: "unanswered", reason: "no-answer" });
+  });
+
+  it("reports an offline callee as unanswered at once (D-14)", () => {
+    expect(
+      deriveCallView({
+        ...base,
+        voice: { currentChannelId: DM, voiceUsers: room(SELF) },
+        outgoing: { channelId: DM, phase: "offline", pending: [OTTO] },
+      }),
+    ).toMatchObject({ kind: "unanswered", reason: "offline" });
   });
 
   it("is connected as soon as anyone else is in the room, whatever the ring said", () => {
@@ -349,6 +387,21 @@ describe("DmCallPanel — caller side", () => {
     const { root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
+  });
+
+  it("says an offline callee is offline, with Ring again and Leave call (D-14)", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { opts, root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "offline", pending: [OTTO] });
+
+    expect(root.dataset.state).toBe("unanswered");
+    expect(q(root, "dcp-caption")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector(".dcp-status")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector("[data-testid='dm-call-live']")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+    q(root, "dcp-ring-again")!.click();
+    expect(opts.onRingAgain).toHaveBeenCalledWith(DM);
+    expect(q(root, "dcp-leave-call")).not.toBeNull();
   });
 
   it("drops the callee's tile once the call went unanswered, keeping both actions", () => {
@@ -584,6 +637,111 @@ describe("DmCallPanel — after the other person leaves (D-11)", () => {
   });
 });
 
+describe("DmCallPanel — peer identity verification (D-09)", () => {
+  it("shows each peer's shield in the call as it resolves, and none for you", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(shield(root, OTTO)).toBeNull();
+
+    setPeerVerification({
+      userId: OTTO,
+      status: "verified",
+      safetyNumber: "1234 5678",
+      sessionFingerprint: "ab:cd",
+    });
+    voiceStore.flush();
+    const badge = shield(root, OTTO)!;
+    expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-check");
+    expect(badge.title).toBe("Identity verified · Safety number: 1234 5678");
+    expect(badge.tagName).toBe("SPAN");
+    expect(shield(root, SELF)).toBeNull();
+  });
+
+  it("a blocked peer shows a red shield whose button opens the re-trust prompt", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+
+    const badge = shield(root, OTTO)!;
+    expect(badge.tagName).toBe("BUTTON");
+    expect(badge.classList.contains("mismatch")).toBe(true);
+    expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-alert");
+    expect(badge.getAttribute("aria-label")).toContain("Blocked");
+    badge.click();
+    expect(openIdentityMismatchModal).toHaveBeenCalledWith(
+      OTTO,
+      "Otto",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+  });
+
+  it("hands the re-trust modal a focus fallback that lands on the replacement shield", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    shield(root, OTTO)!.click();
+    const fallback = vi.mocked(openIdentityMismatchModal).mock.calls.at(-1)![3]!;
+
+    // The modal holds focus while Trust New Key lands the new verification.
+    const trust = document.body.appendChild(document.createElement("button"));
+    trust.focus();
+    setPeerVerification({
+      userId: OTTO,
+      status: "verified",
+      safetyNumber: "1234 5678",
+      sessionFingerprint: "ab:cd",
+    });
+    voiceStore.flush();
+    trust.remove();
+    fallback()!.focus();
+    expect(document.activeElement).toBe(shield(root, OTTO));
+
+    clearPeerVerification(OTTO);
+    voiceStore.flush();
+    fallback()!.focus();
+    expect(document.activeElement).not.toBe(document.body);
+    root.remove();
+  });
+});
+
+describe("DmCallPanel — call timer (D-10)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("counts from when the other person joined, so both sides show the same length", () => {
+    vi.useFakeTimers();
+    // The caller joins and rings for 5 s before the callee answers.
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+    vi.advanceTimersByTime(5000);
+    expect(timer(root)).toBe("00:00");
+
+    panel!.setOutgoing(null);
+    patchVoice({
+      voiceUsers: new Map([[DM, new Map([vu(SELF), vu(OTTO)].map((u) => [u.userId, u]))]]),
+    });
+    vi.advanceTimersByTime(3000);
+    // The callee, who joined 5 s later, sees 00:03 too.
+    expect(timer(root)).toBe("00:03");
+  });
+});
+
 describe("DmCallPanel — controls while the call connects (D-08)", () => {
   it("disables camera and share until the voice session is connected", () => {
     setVoice(DM, [vu(SELF)]);
@@ -734,6 +892,195 @@ describe("DmCallPanel — video in the call", () => {
     expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
     expect(people[0]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
+  });
+
+  it("moves a blocked peer's shield with their camera tile, and back when it goes", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const onAvatar = shield(root, OTTO)!;
+    expect(onAvatar).not.toBeNull();
+
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    const badge = cell.querySelector<HTMLElement>(".dcp-verify")!;
+    expect(badge).toBe(onAvatar);
+    expect(badge.tagName).toBe("BUTTON");
+    badge.click();
+    expect(openIdentityMismatchModal).toHaveBeenCalledWith(
+      OTTO,
+      "Otto",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+
+    cell.remove();
+    await Promise.resolve();
+    expect(shield(root, OTTO)).toBe(badge);
+  });
+
+  it("keeps focus on a focused shield when its camera tile is swapped away", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    const badge = anyShield(root)!;
+    badge.focus();
+    expect(document.activeElement).toBe(badge);
+    cell.remove();
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(anyShield(root));
+    root.remove();
+  });
+
+  it("does not steal focus back after the shield was blurred and the grid mutates", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    anyShield(root)!.focus();
+    anyShield(root)!.blur();
+    cell.appendChild(document.createElement("span"));
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(document.body);
+    root.remove();
+  });
+
+  it("refocuses the shield when blur fires before its tile is detached", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    const badge = anyShield(root)!;
+    badge.focus();
+    badge.dispatchEvent(new FocusEvent("blur"));
+    cell.remove();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(anyShield(root));
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(anyShield(root));
+    root.remove();
+  });
+
+  it("does not refocus a shield the panel itself replaced on rebuild", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    anyShield(root)!.focus();
+    q(root, "dcp-collapse")!.click();
+    q(root, "dcp-collapse")?.click();
+    voiceStore.flush();
+    await Promise.resolve();
+    (document.activeElement as HTMLElement | null)?.blur();
+    cell.remove();
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(document.body);
+    root.remove();
+  });
+
+  it("leaves one shield on a camera tile across a panel rebuild", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    hostAvatars(opts);
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    q(root, "dcp-collapse")!.click();
+    q(root, "dcp-collapse")?.click();
+    voiceStore.flush();
+    await Promise.resolve();
+
+    expect(cell.querySelectorAll(".dcp-verify")).toHaveLength(1);
   });
 
   it("keeps your own video once the call went unanswered, without the absent callee's tile", () => {

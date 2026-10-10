@@ -17,6 +17,8 @@ export interface IdentityMismatchModalOptions {
   /** The peer's newly-delivered identity-key fingerprint (safety number) for
    *  out-of-band verification before re-pinning; null when it can't be computed. */
   readonly fingerprint: string | null;
+  /** Where focus goes on close when the opener has since been replaced. */
+  readonly focusFallback?: () => HTMLElement | null;
   readonly onAccept: () => void;
   readonly onReject: () => void;
 }
@@ -116,7 +118,7 @@ export function createIdentityMismatchModal(
     );
 
     container.appendChild(overlay);
-    restoreFocus = focusDialog(modal);
+    restoreFocus = focusDialog(modal, options.focusFallback);
   }
 
   function destroy(): void {
