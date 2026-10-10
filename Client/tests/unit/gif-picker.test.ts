@@ -4,7 +4,12 @@ import { messagingText } from "../../src/i18n/messaging";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
 import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
-import { bindGifFavoritesApi, resetGifFavorites, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
+import {
+  bindGifFavoritesApi,
+  resetGifFavorites,
+  isGifFavorite,
+  toggleGifFavorite,
+} from "@stores/gifFavorites.store";
 
 // ---------------------------------------------------------------------------
 // Module mock — must be hoisted before imports in vitest

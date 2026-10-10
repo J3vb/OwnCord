@@ -8,11 +8,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
-import {
-  gifFavoritesStore,
-  isGifFavorite,
-  toggleGifFavorite,
-} from "@stores/gifFavorites.store";
+import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
   recoverEvictedImage,
