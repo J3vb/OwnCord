@@ -2319,6 +2319,62 @@ describe("createChannelController", () => {
       }
     });
 
+    it("records a late acknowledgement against the channel it was sent to", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        let n = 0;
+        (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        // cid-1 is channel_focus; the send in channel 42 gets cid-2 and is
+        // not acknowledged before the user switches away.
+        capturedMessageInputOpts.onSend("hello", null, []);
+        switchTo(ctrl, 43);
+
+        (wsHandler(opts, "chat_send_ok") as (payload: unknown, id?: string) => void)({}, "cid-2");
+        // Only channel 42 is gated, and not while channel 43 is mounted.
+        expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+
+        vi.advanceTimersByTime(5000);
+        switchTo(ctrl, 42);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 25s");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the send time through a temporary slow-mode reduction", () => {
+      vi.useFakeTimers();
+      try {
+        seedTwoChannels();
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        switchTo(ctrl, 43);
+        updateChannel({ id: 42, slow_mode: 5 });
+        channelsStore.flush();
+        vi.advanceTimersByTime(10_000);
+        // Back in the channel with the lowered setting the gate is open...
+        switchTo(ctrl, 42);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
+
+        // ...but the server's larger window is still running, so raising the
+        // setting again must find the original send time.
+        switchTo(ctrl, 43);
+        updateChannel({ id: 42, slow_mode: 30 });
+        channelsStore.flush();
+        vi.advanceTimersByTime(2000);
+        switchTo(ctrl, 42);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 18s");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("does not re-arm once the cooldown has expired", () => {
       vi.useFakeTimers();
       try {
