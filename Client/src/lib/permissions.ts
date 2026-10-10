@@ -41,10 +41,11 @@ export function isLegacyAdminRole(roleName: string): boolean {
  * server that sent none) the legacy owner/admin name check stands in — a mask
  * of 0 would otherwise hide moderation from every actual admin.
  *
- * This is the single derivation every moderation affordance uses, so the
- * member-list gates and the voice moderation menu cannot drift apart. Drives
- * affordances only — the server is still the authority on every action, and
- * enforces the rank rule the client cannot evaluate.
+ * This is the single derivation every moderation affordance uses for the
+ * permission bits, so the member-list gates and the voice moderation menu
+ * cannot drift apart. The member list also mirrors the rank rule through
+ * `positionForRole`; the voice moderation menu does not. Drives affordances
+ * only — the server is still the authority on every action and on rank.
  */
 export function roleHasPermission(roleName: string, perm: Permission): boolean {
   const perms = permissionsForRole(roleName);
