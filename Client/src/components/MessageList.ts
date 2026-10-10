@@ -738,6 +738,33 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // per dropped call, so the image-height oscillation it stops cannot restart.
   let renderWindowSuppressed = false;
 
+  /** Slide the rendered window to [start, end), which overlaps it: release the
+   *  rows that left, render only the rows that entered, keep the rest. */
+  function shiftWindow(start: number, end: number): void {
+    if (contentContainer === null) return;
+    // Record the rows' heights before any of them leave.
+    measureRendered();
+    const rows = [...contentContainer.children] as HTMLElement[];
+    for (let i = 0; i < rows.length; i++) {
+      const globalIdx = renderedStart + i;
+      if (globalIdx < start || globalIdx >= end) releaseRow(rows[i]!);
+    }
+    const head = document.createDocumentFragment();
+    for (let i = start; i < renderedStart; i++) {
+      head.appendChild(renderVirtualItem(virtualItems[i]!));
+    }
+    const tail = document.createDocumentFragment();
+    for (let i = renderedEnd; i < end; i++) {
+      tail.appendChild(renderVirtualItem(virtualItems[i]!));
+    }
+    contentContainer.insertBefore(head, contentContainer.firstChild);
+    contentContainer.appendChild(tail);
+    renderedStart = start;
+    renderedEnd = end;
+    measureRendered();
+    updateSpacers();
+  }
+
   function renderWindow(): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
       return;
@@ -782,6 +809,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // prevents the height oscillation loop where images loading → height
     // change → range recalculation → DOM rebuild → images reload → repeat.
     const rangeAlreadyRendered = renderedStart >= 0 && start >= renderedStart && end <= renderedEnd;
+    // A scroll that only slides the window keeps the rows still in range and
+    // builds just the ones entering it. It is cheap and never reloads a kept
+    // row's media, so it neither consumes the rebuild breaker below nor can
+    // feed the height oscillation that breaker guards.
+    if (
+      !rangeAlreadyRendered &&
+      renderedStart >= 0 &&
+      start < renderedEnd &&
+      end > renderedStart &&
+      contentContainer.children.length === renderedEnd - renderedStart
+    ) {
+      shiftWindow(start, end);
+      return;
+    }
     if (!rangeAlreadyRendered) {
       // Rate-limit DOM rebuilds only (expensive path).
       // Scroll-driven spacer updates are cheap and don't need limiting.
