@@ -86,7 +86,7 @@ function runNativePeer(
   args: string[],
   onLine?: (line: NativeLine) => void,
 ): { child: ChildProcess; done: Promise<NativeLine[]> } {
-  const { child } = startProcess(resolve(nativePeer!), args, process.cwd(), {
+  const { child, log } = startProcess(resolve(nativePeer!), args, process.cwd(), {
     ...process.env,
     RUST_LOG: "warn",
   });
@@ -105,7 +105,9 @@ function runNativePeer(
   });
   const done = new Promise<NativeLine[]>((resolveDone, reject) => {
     child.on("exit", (code: number | null) =>
-      code === 0 ? resolveDone(lines) : reject(new Error(`native peer exited ${code}`)),
+      code === 0
+        ? resolveDone(lines)
+        : reject(new Error(`native peer exited ${code}: ${log().slice(-2000)}`)),
     );
   });
   return { child, done };
@@ -157,7 +159,7 @@ async function joinBrowserPeer(
         .LivekitClient;
       const meters = new Map<string, { sumSq: number; samples: number }>();
       const videos = new Map<string, { frames: number; width: number; height: number }>();
-      const state = { encErrors: 0, subscribed: [] as string[], meters, videos };
+      const state = { encErrors: 0, reconnects: 0, subscribed: [] as string[], meters, videos };
       (window as unknown as { __interop: typeof state }).__interop = state;
       const keyProvider = new lk.ExternalE2EEKeyProvider();
       await keyProvider.setKey(keyBase64);
@@ -167,6 +169,11 @@ async function joinBrowserPeer(
       await room.setE2EEEnabled(true);
       room.on(lk.RoomEvent.EncryptionError, () => {
         state.encErrors++;
+      });
+      // The SFU can answer a failed negotiation with a full reconnect, which
+      // drops every subscription until the peer republishes.
+      room.on(lk.RoomEvent.Reconnecting, () => {
+        state.reconnects++;
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
       room.on(lk.RoomEvent.TrackSubscribed, (track, pub, participant) => {
@@ -182,6 +189,14 @@ async function joinBrowserPeer(
               ? `${participant.identity}#screen`
               : participant.identity;
           videos.set(key, v);
+          // Tells a peer cycling its camera that this subscription is fully
+          // negotiated, so it may unpublish the camera (see the native
+          // example's `--camera-cycles`).
+          if (pub.source === lk.Track.Source.Camera)
+            void room.localParticipant.publishData(new TextEncoder().encode(pub.trackSid), {
+              reliable: true,
+              topic: "camera-subscribed",
+            });
           const onFrame = (_now: number, meta: { width: number; height: number }) => {
             v.frames++;
             v.width = meta.width;
@@ -224,6 +239,7 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
       window as unknown as {
         __interop: {
           encErrors: number;
+          reconnects: number;
           subscribed: string[];
           meters: Map<string, { sumSq: number; samples: number }>;
           videos: Map<string, { frames: number; width: number; height: number }>;
@@ -234,6 +250,7 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
     const v = state.videos.get(identity);
     return {
       encErrors: state.encErrors,
+      reconnects: state.reconnects,
       subscribed: state.subscribed,
       rms: m && m.samples > 0 ? Math.sqrt(m.sumSq / m.samples) : 0,
       samples: m?.samples ?? 0,
@@ -446,8 +463,10 @@ test("native and browser peers decode each other's video with the same key", asy
   // Same reason as the screen-share test below: `videoSubscribed` fires on the
   // first publish, before the five camera stop/start cycles land, so measure
   // from the peer's settled `camera-after` phase, not from subscription.
+  // Budget: the example waits up to 5 s for a subscriber to bind each of the
+  // six cameras (the first plus five cycles), on top of join and publish.
   await expect
-    .poll(() => threads.some((t) => t.phase === "camera-after"), { timeout: 30_000 })
+    .poll(() => threads.some((t) => t.phase === "camera-after"), { timeout: 60_000 })
     .toBe(true);
   await page.waitForTimeout(4_000);
   await resetBrowserMeters(page);
@@ -462,6 +481,7 @@ test("native and browser peers decode each other's video with the same key", asy
   console.log(
     `browser decoded native video: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
   );
+  expect(browser.reconnects, "the SFU forced the browser peer to reconnect").toBe(0);
   expect(browser.videoFrames).toBeGreaterThan(5 * 10);
   expect([browser.videoWidth, browser.videoHeight]).toEqual([640, 360]);
   expect(browser.encErrors).toBe(0);
