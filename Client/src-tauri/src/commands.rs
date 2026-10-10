@@ -86,7 +86,7 @@ pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Optio
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
     let value = store
-        .get(&crate::tofu::cert_store_key(&host))
+        .get(crate::tofu::cert_store_key(&host))
         .and_then(|v| {
             if let Value::String(s) = v {
                 Some(s)
