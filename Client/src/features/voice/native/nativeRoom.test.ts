@@ -285,6 +285,33 @@ describe("NativeRoom connect/disconnect", () => {
     expect(published).toEqual(["TR_again"]);
   });
 
+  it("raises no TrackPublished for a trackPublished envelope replayed during connect", async () => {
+    const room = createNativeRoom(audio);
+    const published: string[] = [];
+    room.on("trackPublished", (pub) => published.push((pub as { trackSid: string }).trackSid));
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({
+      session: 3,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_queued") },
+    });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.remoteParticipants.get("user-2")?.trackPublications.size).toBe(1);
+    expect(published).toEqual([]);
+
+    emit({
+      session: 3,
+      event: {
+        type: "trackPublished",
+        identity: "user-2",
+        track: video("TR_live", "screen_share"),
+      },
+    });
+    expect(published).toEqual(["TR_live"]);
+  });
+
   it("ignores events for another session", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");

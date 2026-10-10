@@ -1588,6 +1588,44 @@ describe("LiveKitSession", () => {
       expect(setSubscribed).toHaveBeenCalledWith(false);
     });
 
+    it("sweeps the existing participants' publications into the new room on reconnect", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 9,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const setSubscribed = vi.fn();
+      const publication = { kind: "audio", source: "microphone", setSubscribed };
+      mockRoom.remoteParticipants = new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            audioTrackPublications: new Map(),
+            trackPublications: new Map([["TR_a", publication]]),
+          },
+        ],
+      ]);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        9,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setSubscribed).toHaveBeenCalledWith(true);
+    });
+
     // Pre-refactor parity: the reconnect success path re-installed both
     // DeviceManager callbacks right after setVoiceStatus("connected"). The
     // extraction's mid-attempt wiring set only room + audio pipeline, so the
