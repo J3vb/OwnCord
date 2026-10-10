@@ -276,6 +276,7 @@ describe("handleTrackSubscribed", () => {
 
   it("hands camera video to the remote-video callback", () => {
     const h = build();
+    h.spies.isWatched.mockReturnValue(true);
 
     h.handlers.handleTrackSubscribed(
       videoTrack(),
@@ -293,8 +294,20 @@ describe("handleTrackSubscribed", () => {
     expect(isScreenshare).toBe(false);
   });
 
+  it("unsubscribes and ignores video that is no longer watched", () => {
+    const h = build();
+    const setSubscribed = vi.fn();
+    const p = { source: Track.Source.Camera, setSubscribed } as unknown as RemoteTrackPublication;
+
+    h.handlers.handleTrackSubscribed(videoTrack(), p, participant("user-7:tok"));
+
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+    expect(setSubscribed).toHaveBeenCalledWith(false);
+  });
+
   it("flags screenshare video as such", () => {
     const h = build();
+    h.spies.isWatched.mockReturnValue(true);
 
     h.handlers.handleTrackSubscribed(
       videoTrack(),

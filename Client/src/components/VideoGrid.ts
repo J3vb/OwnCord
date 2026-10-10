@@ -1301,9 +1301,10 @@ export function createVideoGrid(): VideoGridComponent {
     }
     applyNames(entry, username, config?.name ?? username);
     cells.set(userId, entry);
+    const asked = pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
     // Not watched yet: Watch stream, unless the voice roster already asked.
-    else if (pendingWatch.delete(userId)) callbacks.setStreamWatched?.(userId, true);
+    else if (asked) callbacks.setStreamWatched?.(userId, true);
     else setStopped(userId, true, false);
     root.appendChild(cell);
     applySpeaking();
@@ -1357,6 +1358,7 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function removeStream(userId: number): void {
+    pendingWatch.delete(userId);
     const entry = cells.get(userId);
     if (entry === undefined) return;
 
@@ -1404,6 +1406,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  Deleting the current key mid-iteration is well-defined for Map — no
    *  entries are skipped — so this needs no snapshot copy of the keys. */
   function clearStreams(): void {
+    for (const id of pendingWatch) callbacks.setStreamWatched?.(id, false);
     pendingWatch.clear();
     for (const userId of cells.keys()) {
       removeStream(userId);

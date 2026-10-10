@@ -114,6 +114,10 @@ export class RemoteTracks {
     pub.setEnabled(view.enabled);
   }
 
+  clearWatched(): void {
+    this.watched.clear();
+  }
+
   isWatched(userId: number, type: "camera" | "screenshare"): boolean {
     return this.watched.has(`${userId}:${type}`);
   }

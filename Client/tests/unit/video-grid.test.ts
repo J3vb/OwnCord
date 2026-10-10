@@ -1492,6 +1492,21 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
     });
 
+    it("a used roster watch does not start a later stream of the same tile", () => {
+      grid.watch(SCREEN);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(true);
+    });
+
+    it("clearStreams un-watches a roster watch that never got a tile", () => {
+      grid.watch(SCREEN);
+      setStreamWatched.mockClear();
+      grid.clearStreams();
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+    });
+
     it("watch() on an offered tile watches it; a channel change drops a pending one", () => {
       grid.addStream(SCREEN, "Otto (Screen)", null, screen);
       grid.watch(SCREEN);

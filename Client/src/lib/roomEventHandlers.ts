@@ -230,9 +230,13 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       const cb = deps.getOnRemoteVideoCallback();
+      const isScreenshare = publication.source === Track.Source.ScreenShare;
+      if (userId > 0 && !deps.isWatched(userId, isScreenshare)) {
+        publication.setSubscribed(false);
+        return;
+      }
       if (userId > 0 && cb !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
-        const isScreenshare = publication.source === Track.Source.ScreenShare;
         cb(userId, stream, isScreenshare);
       }
       log.debug("Remote video track subscribed", { userId, trackSid: track.sid });

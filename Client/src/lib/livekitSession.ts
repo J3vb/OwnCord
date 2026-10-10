@@ -759,6 +759,7 @@ export class LiveKitSession {
 
   leaveVoice(sendWs = true): void {
     this._rejoinPending = false;
+    this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }
 

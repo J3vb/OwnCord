@@ -205,5 +205,12 @@ describe("RemoteTracks", () => {
       expect(() => tracks.watch(7, "camera", true)).not.toThrow();
       expect(tracks.isWatched(7, "camera")).toBe(true);
     });
+
+    it("clearWatched forgets every watch", () => {
+      const tracks = new RemoteTracks(() => null);
+      tracks.watch(7, "screenshare", true);
+      tracks.clearWatched();
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+    });
   });
 });
