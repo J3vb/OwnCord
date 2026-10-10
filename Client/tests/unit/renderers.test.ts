@@ -297,6 +297,21 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("marks the author name and avatar as a keyboard-reachable profile control", () => {
+      const msg = makeMessage({ user: { id: 42, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const author = container.querySelector(".msg-author");
+      expect(author?.getAttribute("data-user-id")).toBe("42");
+      expect(author?.getAttribute("role")).toBe("button");
+      expect(author?.getAttribute("tabindex")).toBe("0");
+      expect(container.querySelector(".msg-avatar")?.getAttribute("data-user-id")).toBe("42");
+
+      ac.abort();
+    });
+
     it("offers Report on someone else's message only, and passes its id (B9-10)", () => {
       const onReportClick = vi.fn();
       const ac = new AbortController();

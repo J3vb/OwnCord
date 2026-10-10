@@ -18,6 +18,7 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
 import { discardMedia } from "@lib/media-visibility";
 
@@ -1271,6 +1272,40 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   // ---------------------------------------------------------------------------
+  // Profile popup (author name, avatar, @mention chip)
+  // ---------------------------------------------------------------------------
+
+  /** Closes the popup this list opened; null until one has been. */
+  let closeProfilePopup: (() => void) | null = null;
+
+  /** The author name, avatar or user @mention chip `target` is inside, if any.
+   *  @everyone/@here chips carry no `data-user-id`, so they never match. */
+  function profileControlOf(target: EventTarget | null): HTMLElement | null {
+    if (!(target instanceof Element)) return null;
+    const control = target.closest<HTMLElement>(
+      ".msg-author[data-user-id], .msg-avatar[data-user-id], .mention[data-user-id]",
+    );
+    if (control === null || contentContainer === null || !contentContainer.contains(control)) {
+      return null;
+    }
+    return control;
+  }
+
+  function openProfileFrom(target: EventTarget | null, anchorX: number, anchorY: number): void {
+    const control = profileControlOf(target);
+    if (control === null) return;
+    const userId = Number(control.dataset["userId"]);
+    if (!Number.isInteger(userId) || userId <= 0) return;
+    closeProfilePopup = openUserProfilePopup({
+      userId,
+      anchorX,
+      anchorY,
+      signal: disposable.signal,
+      fallbackFocus: () => (control.isConnected ? control : null),
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Mount / Destroy
   // ---------------------------------------------------------------------------
 
@@ -1340,6 +1375,39 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       signal: disposable.signal,
       passive: true,
     });
+
+    // One delegated pair of listeners opens a user's profile from an author
+    // name, an avatar or an @mention chip, so no row carries its own handler
+    // (rows are rebuilt by virtual scrolling). Owned by disposable.signal.
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        const control = profileControlOf(e.target);
+        if (control === null) return;
+        // A mention can be the label of a masked link ([@name](https://...)),
+        // which would otherwise also navigate: the anchor's default action, and
+        // main.ts's bubbling document listener that hands target=_blank links
+        // to the system browser. Handle the click here and stop it, but only
+        // inside an anchor so other document-level dismissals still see it.
+        e.preventDefault();
+        if (control.closest("a") !== null) e.stopPropagation();
+        openProfileFrom(control, e.clientX, e.clientY);
+      },
+      { signal: disposable.signal },
+    );
+    contentContainer.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const control = profileControlOf(e.target);
+        if (control === null) return;
+        e.preventDefault();
+        const rect = control.getBoundingClientRect();
+        openProfileFrom(control, rect.left, rect.bottom);
+      },
+      { signal: disposable.signal },
+    );
+    disposable.signal.addEventListener("abort", () => closeProfilePopup?.(), { once: true });
 
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
@@ -1579,7 +1647,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const avatar = el.querySelector<HTMLElement>(".msg-avatar");
       if (avatar !== null) {
         avatar.replaceWith(
-          createAvatarElement(author, { className: "msg-avatar", background: roleColor }),
+          createAvatarElement(author, {
+            className: "msg-avatar",
+            background: roleColor,
+            attrs: { "data-user-id": String(msg.user.id) },
+          }),
         );
       }
     }

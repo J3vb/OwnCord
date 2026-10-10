@@ -77,6 +77,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
 
+**Messages**
+
+- Clicking an author name, avatar or @mention in a message now opens that person's profile card.
+
 **Voice and video**
 
 - On Windows, a popped-out stream or camera no longer leaves an empty black window behind when the stream ends or you choose Bring back; the window now closes.
