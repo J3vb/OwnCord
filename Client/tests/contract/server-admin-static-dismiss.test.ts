@@ -36,6 +36,7 @@ interface Server {
   warnings: unknown[];
   update: Record<string, unknown>;
   config?: Record<string, unknown>;
+  signals?: unknown[];
 }
 
 async function boot(server: Server, userId = 1) {
@@ -49,7 +50,7 @@ async function boot(server: Server, userId = 1) {
           p === "/setup/status"
             ? { needs_setup: false }
             : p === "/attention"
-              ? { evaluated_at: "2026-09-23T12:00:00Z", signals: [], warnings: server.warnings }
+              ? { evaluated_at: "2026-09-23T12:00:00Z", signals: server.signals ?? [], warnings: server.warnings }
               : p === "/updates"
                 ? server.update
                 : p === "/config/settings"
@@ -114,11 +115,21 @@ describe("Server/admin/static — dismissable notices", () => {
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(0);
 
-    // The problem changed (new severity, then new title): it shows again.
-    server.warnings = [warning({ severity: "critical" })];
+    // The warning clears, then the same warning returns as a new incident.
+    server.warnings = [];
+    content = await paint(dom, booted.bridge);
+    server.warnings = [warning({ first_observed: "2026-09-24T08:00:00Z" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
-    server.warnings = [warning({ severity: "critical", title: "Writes are badly queueing" })];
+
+    // The problem changed (new severity, then new title): it shows again.
+    click(dom, content.querySelector(".attn-warning .notice-dismiss"));
+    content = await paint(dom, booted.bridge);
+    expect(cards(content)).toHaveLength(0);
+    server.warnings = [warning({ first_observed: "2026-09-24T08:00:00Z", severity: "critical" })];
+    content = await paint(dom, booted.bridge);
+    expect(cards(content)).toHaveLength(1);
+    server.warnings = [warning({ first_observed: "2026-09-24T08:00:00Z", severity: "critical", title: "Writes are badly queueing" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
   });
@@ -137,6 +148,19 @@ describe("Server/admin/static — dismissable notices", () => {
     expect(content.querySelector('[data-action="restoreDismissed"]')?.textContent).toContain(
       "1 dismissed",
     );
+  });
+
+  it("closes the health checks once their only warning is dismissed", async () => {
+    const okSignal = { id: "disk", label: "Disk space", status: "ok", detail: "", observed_at: "2026-09-23T12:00:00Z" };
+    const server: Server = { warnings: [warning()], update: {}, signals: [okSignal] };
+    const booted = await boot(server);
+    dom = booted.dom;
+    let content = await paint(dom, booted.bridge);
+    const checks = () => content.querySelector("#healthChecks") as HTMLDetailsElement;
+    expect(checks().open).toBe(true);
+    click(dom, content.querySelector(".attn-warning .notice-dismiss"));
+    content = await paint(dom, booted.bridge);
+    expect(checks().open).toBe(false);
   });
 
   it("counts the dismissed update strip in the restore link and restores it", async () => {
