@@ -14,6 +14,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 // configEnumOptions lists the allowed values of the four enum keys, so the
@@ -49,7 +50,27 @@ type configSettingRow struct {
 
 type configSettingsResponse struct {
 	RestartPending bool               `json:"restart_pending"`
+	RestartHandoff string             `json:"restart_handoff"`
 	Settings       []configSettingRow `json:"settings"`
+}
+
+// restartHandoff names how this process comes back after a panel restart, for
+// the confirm dialog: "container" (the engine's restart policy), "supervisor"
+// (systemd or NSSM), "spawn" (it starts its own replacement) or
+// "unsupervised" (restart_mode is supervised but no supervisor is detected,
+// so nothing may start it again).
+func restartHandoff(cfg *config.Config) string {
+	mode, _ := updater.ResolveRestartMode(cfg.Server.RestartMode)
+	switch {
+	case mode == updater.RestartModeSpawn:
+		return "spawn"
+	case updater.RunningInContainer():
+		return "container"
+	case updater.RunningUnderSupervisor():
+		return "supervisor"
+	default:
+		return "unsupervised"
+	}
 }
 
 // buildConfigSettings renders one row per editable key, in EditableKeys order.
@@ -96,7 +117,7 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 		}
 		rows = append(rows, row)
 	}
-	return configSettingsResponse{RestartPending: pending, Settings: rows}
+	return configSettingsResponse{RestartPending: pending, RestartHandoff: restartHandoff(cfg), Settings: rows}
 }
 
 // secretConfigured reports whether the running config holds a non-empty value
@@ -295,21 +316,26 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 	}
 }
 
-// handleRestartForConfig restarts the server to apply saved overrides, through
-// the same restart machinery update, restore and the setup wizard use.
-func handleRestartForConfig(database *db.DB, opts SetupOptions) http.HandlerFunc {
+// handleRestartForConfig restarts the server — to apply saved overrides, or
+// on its own from the panel's Restart server button — through the same
+// restart machinery update, restore and the setup wizard use.
+func handleRestartForConfig(database *db.DB, opts SetupOptions, pending *atomic.Bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !tryDirectRestartPending() {
 			writeRestartConflict(w)
 			return
 		}
+		reason := "manual"
+		if pending.Load() {
+			reason = "config_change"
+		}
 		actor := actorFromContext(r)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "server_restart_requested", "server", 0, "config_change")
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "server_restart_requested", "server", 0, reason)
 		writeJSON(w, http.StatusAccepted, map[string]bool{"restarting": true})
 		restartFn := opts.Restart
 		if restartFn == nil {
 			restartFn = requestRestart
 		}
-		go restartFn("config_change")
+		go restartFn(reason)
 	}
 }

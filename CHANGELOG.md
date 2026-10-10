@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- The admin panel's Server configuration page has a **Restart server** button. It and Restart now open one dialog that warns that everyone is briefly disconnected, says how the server comes back (container restart policy, service manager, or its own replacement), then waits and reloads the panel.
+
 **Voice**
 
 - Your own avatar in the user panel at the bottom left now shows the green speaking ring while you talk in voice, as voice-channel members do; it stays off while you are muted, deafened or not holding push-to-talk.

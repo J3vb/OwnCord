@@ -335,10 +335,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 // registerConfigOverrideRoutes mounts the Owner-only admin-panel config
 // overrides: reading and writing config-overrides.json and restarting the
-// process to apply them. Changing a server-wide setting and restarting is
-// gated like backups and updates.
+// process to apply them (or on demand). Changing a server-wide setting and
+// restarting is gated like backups and updates.
 func registerConfigOverrideRoutes(r chi.Router, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
 	ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
 	ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
-	ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts))
+	ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts, pending))
 }

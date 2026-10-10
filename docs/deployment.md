@@ -188,12 +188,13 @@ image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the
 server binary into a container and genuinely want in-place self-update can
 set `OWNCORD_CONTAINER=0` to opt back in.
 
-The admin panel's backup **restore** (and a setup-wizard restart) does work
-in containers: the server drains and exits cleanly, relying on the
-container's restart policy to relaunch it. The shipped `docker-compose.yml`
+The admin panel's backup **restore**, its **Restart server** and **Restart
+now** buttons, and a setup-wizard restart do work in containers: the server
+drains and exits cleanly, relying on the container's restart policy to
+relaunch it. The shipped `docker-compose.yml`
 sets `restart: unless-stopped`, which covers this; if you run the container
-by hand, pass `--restart unless-stopped` or the restore leaves the container
-stopped.
+by hand, pass `--restart unless-stopped` or a restore or restart leaves the
+container stopped.
 
 ### LiveKit in Docker
 
@@ -287,8 +288,8 @@ in its header comments. The important choices it encodes:
 - `Restart=always` — two deliberate exits rely on it: the server exits
   nonzero (rather than limping along) when its WebSocket dispatch loop dies,
   and it exits **cleanly** after an admin-panel self-update, backup restore,
-  or setup-wizard restart, expecting systemd to relaunch it running the
-  swapped binary (the server auto-detects systemd via `INVOCATION_ID` and
+  Restart server, or setup-wizard restart, expecting systemd to relaunch it
+  running the swapped binary (the server auto-detects systemd via `INVOCATION_ID` and
   hands off this way instead of spawning a child that the unit's cgroup
   cleanup would kill). `systemctl stop` still stops it — systemd never
   auto-restarts an explicitly stopped unit. **Update the unit file before

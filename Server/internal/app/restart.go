@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	restartModeSpawn      = "spawn"
-	restartModeSupervised = "supervised"
+	restartModeSpawn      = updater.RestartModeSpawn
+	restartModeSupervised = updater.RestartModeSupervised
 
 	// RestartBackstopDelay sets when a stalled drain enters the emergency
 	// handoff. Run's
@@ -206,23 +206,14 @@ func (rc *RestartCoordinator) handoff(log *slog.Logger, wedged bool) (exitCode i
 }
 
 // resolveRestartMode turns cfg.Server.RestartMode into the effective handoff
-// mode. Explicit "spawn"/"supervised" win; "auto" (or empty, or an unknown
-// value after a warning) detects: containers and supervised services exit
-// for their supervisor/engine to relaunch, everything else spawns its own
-// replacement.
+// mode (updater.ResolveRestartMode), warning on a value it does not know.
 func resolveRestartMode(cfgVal string, log *slog.Logger) string {
-	switch cfgVal {
-	case restartModeSpawn, restartModeSupervised:
-		return cfgVal
-	case "", "auto":
-	default:
+	mode, known := updater.ResolveRestartMode(cfgVal)
+	if !known {
 		log.Warn("unknown server.restart_mode, using auto detection",
 			"value", cfgVal, "valid", "auto|spawn|supervised")
 	}
-	if updater.RunningInContainer() || updater.RunningUnderSupervisor() {
-		return restartModeSupervised
-	}
-	return restartModeSpawn
+	return mode
 }
 
 // spawnReplacement and spawnDetached are the replacement-process spawners,
