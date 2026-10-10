@@ -118,7 +118,13 @@ pub fn list_devices() -> Vec<CameraDevice> {
 /// elements it needs at least one of: `device_source` opens a device through
 /// `v4l2src` or `pipewiresrc` (or the monitor's own element), so either source
 /// alone suffices.
-const REQUIRED_CAMERA_ELEMENTS: [&str; 3] = ["decodebin", "videoconvert", "appsink"];
+const REQUIRED_CAMERA_ELEMENTS: [&str; 5] = [
+    "decodebin",
+    "videoconvert",
+    "videoscale",
+    "capsfilter",
+    "appsink",
+];
 const CAMERA_SOURCE_ELEMENTS: [&str; 2] = ["v4l2src", "pipewiresrc"];
 
 /// Whether the host can capture cameras, in the shape the webview's support
