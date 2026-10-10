@@ -28,7 +28,7 @@ import { createAvatarElement } from "@components/message-list/avatar";
 import type { MountableComponent } from "@lib/safe-render";
 import type { RingState, OutgoingCallState } from "@lib/call-ring";
 import { voiceStore, isSelfMuted } from "@stores/voice.store";
-import type { VoiceState, VoiceStatus, VoiceUser } from "@stores/voice.store";
+import type { PeerVerification, VoiceState, VoiceStatus, VoiceUser } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -831,15 +831,23 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const v = voice.peerVerifications?.get(userId) ?? null;
     const key =
       v === null ? "" : `${v.status}|${v.safetyNumber ?? ""}|${v.sessionFingerprint ?? ""}`;
-    if (key === ref.verifyKey) return;
-    ref.verifyKey = key;
     const hadFocus = ref.verify?.contains(document.activeElement) === true;
-    ref.verify?.remove();
-    ref.verify = null;
-    if (v === null) {
-      if (hadFocus) focusFallback(userId)?.focus();
-      return;
+    if (key !== ref.verifyKey) {
+      ref.verifyKey = key;
+      ref.verify?.remove();
+      ref.verify = null;
+      if (v !== null) ref.verify = buildShield(userId, v, dm);
     }
+    // A camera tile replaces the avatar tile in the grid, so the shield moves with the person.
+    const host =
+      videoEl.querySelector<HTMLElement>(
+        `.video-cell[data-user-id='${userId}'][data-stream-type='camera']`,
+      ) ?? ref.wrap;
+    if (ref.verify !== null && ref.verify.parentElement !== host) host.appendChild(ref.verify);
+    if (hadFocus) focusFallback(userId)?.focus();
+  }
+
+  function buildShield(userId: number, v: PeerVerification, dm: DmChannel): HTMLElement {
     const { icon, color, title } = verifyPresentation(v);
     const cls = `dcp-verify ${v.status}`;
     const el =
@@ -855,14 +863,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
           // A tile in the video grid has its own click.
           e.stopPropagation();
           const name = resolvePerson(userId, dm, voiceStore.getState(), currentUserId()).name;
-          void openIdentityMismatchModal(userId, name, disposable.signal, () => focusFallback(userId));
+          void openIdentityMismatchModal(userId, name, disposable.signal, () =>
+            focusFallback(userId),
+          );
         },
         { signal: disposable.signal },
       );
     }
-    ref.wrap.appendChild(el);
-    ref.verify = el;
-    if (hadFocus) focusFallback(userId)?.focus();
+    return el;
   }
 
   /** In-place updates that never rebuild: rings, badges, controls, status. */

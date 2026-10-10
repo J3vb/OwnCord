@@ -212,6 +212,11 @@ button.dcp-verify:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+.video-cell > .dcp-verify {
+  right: 8px;
+  top: 8px;
+  z-index: 3;
+}
 .dcp-avatar--sm .dcp-verify {
   width: 18px;
   height: 18px;

@@ -884,6 +884,38 @@ describe("DmCallPanel — video in the call", () => {
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
+  it("moves a blocked peer's shield onto their camera tile, where it still opens the re-trust prompt", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    expect(shield(root, OTTO)).not.toBeNull();
+
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    patchVoice({ localCamera: true });
+    voiceStore.flush();
+
+    const badge = cell.querySelector<HTMLElement>(".dcp-verify")!;
+    expect(badge.tagName).toBe("BUTTON");
+    badge.click();
+    expect(openIdentityMismatchModal).toHaveBeenCalledWith(
+      OTTO,
+      "Otto",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+  });
+
   it("keeps your own video once the call went unanswered, without the absent callee's tile", () => {
     setVoice(DM, [vu(SELF)]);
     const { opts, root } = mount();
