@@ -156,6 +156,16 @@ describe("connectAndSetup", () => {
     expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
   });
 
+  it("offers the adopted room's published streams once the join is connected", async () => {
+    const { host, join } = setup();
+    const room = fakeRoom();
+    host.createRoom.mockResolvedValueOnce(room);
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
+
+    expect(host.sweepPublications).toHaveBeenCalledExactlyOnceWith(room);
+  });
+
   it("SRE-M2: records a failure after the room connected at stage activate", async () => {
     const { host, join } = setup();
     host.restoreLocalVoiceState.mockRejectedValueOnce(new Error("mic denied"));

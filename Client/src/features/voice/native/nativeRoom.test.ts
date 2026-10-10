@@ -256,6 +256,35 @@ describe("NativeRoom connect/disconnect", () => {
     expect(room.remoteParticipants.get("user-2")?.audioTrackPublications.size).toBe(1);
   });
 
+  it("raises no TrackPublished for the snapshot replayed during connect, only for a later one", async () => {
+    const room = createNativeRoom(audio);
+    const published: string[] = [];
+    room.on("trackPublished", (pub) => published.push((pub as { trackSid: string }).trackSid));
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({
+      session: 3,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_first")] }],
+      },
+    });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.remoteParticipants.get("user-2")?.trackPublications.size).toBe(1);
+    expect(published).toEqual([]);
+
+    emit({
+      session: 3,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_again")] }],
+      },
+    });
+    expect(published).toEqual(["TR_again"]);
+  });
+
   it("ignores events for another session", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");

@@ -287,6 +287,7 @@ export class NativeRoom {
   private unsubscribe: (() => void) | null = null;
   /** Events that arrived before connect() resolved with this room's id. */
   private pending: NativeVoiceEnvelope[] | null = null;
+  private replayingConnect = false;
   /** The live screen capture's track; null when not capturing. */
   private screen: NativeScreenTrack | null = null;
   /** The live camera capture's track; null when off. Its preview is the
@@ -415,7 +416,12 @@ export class NativeRoom {
     this.counted = true;
     const queued = this.pending;
     this.pending = null;
-    for (const envelope of queued ?? []) this.onEnvelope(envelope);
+    this.replayingConnect = true;
+    try {
+      for (const envelope of queued ?? []) this.onEnvelope(envelope);
+    } finally {
+      this.replayingConnect = false;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -734,7 +740,7 @@ export class NativeRoom {
    *  while deafened is unsubscribed here — the native counterpart of
    *  AudioElements.handleTrackSubscribedAudio's guard, which never runs on
    *  Linux because no TrackSubscribed is raised. Stream audio is exempt. */
-  private addPublication(identity: string, track: NativeVoiceTrack): void {
+  private addPublication(identity: string, track: NativeVoiceTrack, announce = true): void {
     const p = this.participant(identity);
     if (p.trackPublications.has(track.sid)) return;
     const pub = new NativeRemotePublication(this, identity, track);
@@ -748,7 +754,7 @@ export class NativeRoom {
     // shortcut: the backend auto-subscribes, so an unwatched stream flows until
     // this event's handler unsubscribes it (opt-in watching); connect the native
     // session with auto_subscribe off if that first moment of video matters.
-    this.emit(RoomEvent.TrackPublished, pub, p);
+    if (announce) this.emit(RoomEvent.TrackPublished, pub, p);
   }
 
   private clearDecryptTimer(identity: string): void {
@@ -769,7 +775,8 @@ export class NativeRoom {
         this.remoteParticipants.clear();
         for (const info of event.participants) {
           this.participant(info.identity);
-          for (const t of info.tracks) this.addPublication(info.identity, t);
+          for (const t of info.tracks)
+            this.addPublication(info.identity, t, !this.replayingConnect);
         }
         this.emit(RoomEvent.Connected);
         break;

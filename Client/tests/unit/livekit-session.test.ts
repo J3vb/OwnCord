@@ -1568,6 +1568,7 @@ describe("LiveKitSession", () => {
           "remote-user",
           {
             audioTrackPublications: new Map([["audio", { setSubscribed }]]),
+            trackPublications: new Map(),
           },
         ],
       ]);
