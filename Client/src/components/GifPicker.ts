@@ -335,8 +335,13 @@ export function createGifPicker(options: GifPickerOptions): {
           consentBtn?.remove();
           consentBtn = null;
           gridArea.hidden = false;
-          searchInput.focus();
-          void loadGifs(searchInput.value.trim());
+          if (showingFavorites) {
+            tabFavorites.focus();
+            renderFavorites();
+          } else {
+            searchInput.focus();
+            void loadGifs(searchInput.value.trim());
+          }
         });
       },
       { signal },
