@@ -1009,6 +1009,38 @@ describe("DmCallPanel — video in the call", () => {
     root.remove();
   });
 
+  it("does not refocus a shield the panel itself replaced on rebuild", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    shield(root, OTTO)!.focus();
+    q(root, "dcp-collapse")!.click();
+    q(root, "dcp-collapse")?.click();
+    voiceStore.flush();
+    await Promise.resolve();
+    (document.activeElement as HTMLElement | null)?.blur();
+    cell.remove();
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(document.body);
+    root.remove();
+  });
+
   it("leaves one shield on a camera tile across a panel rebuild", async () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();

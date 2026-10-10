@@ -751,6 +751,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
 
     for (const child of Array.from(body.childNodes)) if (child !== videoEl) child.remove();
     for (const ref of avatars.values()) ref.verify?.remove();
+    focusedShield = null;
     avatars = new Map();
     people = [];
     controls = { mute: null, deafen: null, camera: null, share: null };
@@ -837,6 +838,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       ref.verifyKey = key;
       ref.verify?.remove();
       ref.verify = null;
+      focusedShield = null;
       if (v !== null) ref.verify = buildShield(userId, v, dm);
     }
     placeShield(userId, ref);
@@ -853,7 +855,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (ref.verify.parentElement !== host) host.appendChild(ref.verify);
   }
 
-  let shieldFocusedFor: number | null = null;
+  let focusedShield: HTMLElement | null = null;
 
   function buildShield(userId: number, v: PeerVerification, dm: DmChannel): HTMLElement {
     const { icon, color, title } = verifyPresentation(v);
@@ -864,14 +866,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         : createElement("span", { class: cls, title, role: "img", "aria-label": title });
     el.style.color = color;
     el.appendChild(createIcon(icon, 14));
-    el.addEventListener("focus", () => (shieldFocusedFor = userId), { signal: disposable.signal });
+    el.addEventListener("focus", () => (focusedShield = el), { signal: disposable.signal });
     el.addEventListener(
       "blur",
       () =>
         setOwnedTimeout(
           disposable.signal,
           () => {
-            if (el.isConnected && document.activeElement !== el) shieldFocusedFor = null;
+            if (focusedShield === el && el.isConnected && document.activeElement !== el) {
+              focusedShield = null;
+            }
           },
           0,
         ),
@@ -1050,10 +1054,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
           const active = document.activeElement;
           if (
             detached &&
-            shieldFocusedFor === userId &&
+            shield === focusedShield &&
             (active === null || active === document.body)
           ) {
-            shieldFocusedFor = null;
+            focusedShield = null;
             focusFallback(userId)?.focus();
           }
         }
@@ -1083,6 +1087,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     },
     destroy(): void {
       destroyed = true;
+      focusedShield = null;
       if (peopleGiven) options.videoGrid?.setPeople([]);
       if (timerInterval !== null) {
         clearInterval(timerInterval);
