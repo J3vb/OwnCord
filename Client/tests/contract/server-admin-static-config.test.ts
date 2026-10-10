@@ -392,7 +392,7 @@ describe("Server/admin/static — Server configuration page", () => {
     expect(doc.getElementById("restartWait")).toBeNull();
   });
 
-  it("blocks the restart while the page has unsaved edits, and drops the leave-site guard once it restarts", async () => {
+  it("blocks the restart while the page has unsaved edits", async () => {
     const calls: FetchCall[] = [];
     const { doc, bridge } = await bootRestart(calls, CONFIG_SETTINGS);
 

@@ -324,7 +324,7 @@ function configMovedAddress(){
 }
 
 function configNewAddressHTML(addr){
-  return'<div class="modal-header"><h3>Restarting</h3></div><div class="modal-body"><p>The server is restarting to apply the saved configuration. This page cannot follow a port or scheme change, so open the panel at:</p>'
+  return'<div class="modal-header"><h3>Restarting</h3></div><div class="modal-body"><p>The server is restarting. This page cannot follow a port or scheme change, so open the panel at:</p>'
     +'<p><a href="'+esc(addr)+'">'+esc(addr)+'</a></p></div>';
 }
 
