@@ -55,6 +55,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Messages**
+
+- A link wrapped in `||spoiler||` no longer shows a link preview or inline image before you reveal it.
+
 **Desktop UI**
 
 - The Mark All as Read button was never visible: it sat in a sidebar header that is hidden. It now shows as an icon beside Invite in the server header whenever a channel or DM is unread.

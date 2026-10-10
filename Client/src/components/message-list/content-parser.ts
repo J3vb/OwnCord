@@ -40,6 +40,15 @@ export const INLINE_CODE_REGEX = /`([^`]+)`/g;
 export const URL_REGEX = /https?:\/\/[^\s<>"']+/g;
 /** `[text](url)` — used to keep masked links from spawning link embeds. */
 export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
+/**
+ * `||hidden||` — used to keep spoilered URLs from spawning embeds. Mirrors
+ * the tokeniser in `@lib/markdown`: the span closes at the first `||` after
+ * its opener, holds at least one character (so `||||` is not a spoiler), may
+ * span lines and blank lines (the tokeniser keeps an open spoiler together
+ * across a paragraph break), a lone `|` is text, and a backslash escape
+ * (`\|`) is content that never closes the span.
+ */
+export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
 
