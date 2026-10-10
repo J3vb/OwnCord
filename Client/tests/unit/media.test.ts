@@ -1497,6 +1497,11 @@ describe("media.ts", () => {
       expect(extractUrls("||a\\|b https://example.com/x||")).toEqual([]);
     });
 
+    it("keeps a URL inside a spoiler that spans a blank line", () => {
+      expect(extractUrls("||secret\n\nhttps://example.com/a.png||")).toEqual([]);
+      expect(extractUrls("||secret\n  \nhttps://example.com/a.png||")).toEqual([]);
+    });
+
     it("counts an escaped pipe right after the opener as spoiler content", () => {
       expect(extractUrls("||\\|a https://example.com/x||")).toEqual([]);
     });
