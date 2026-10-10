@@ -1995,18 +1995,22 @@ describe("MessageInput", () => {
 
   // ── Paste file handling ──
 
-  it("pasting an image file triggers upload", async () => {
+  it.each([
+    ["paste.png", "image/png"],
+    ["clip.mov", "video/quicktime"],
+    ["clip.mp4", "video/mp4"],
+  ])("pasting %s triggers upload", async (filename, type) => {
     const onUploadFile = vi.fn(async () => ({
       id: "paste-1",
       url: "http://x",
-      filename: "paste.png",
+      filename,
     }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    const file = new File(["img"], "paste.png", { type: "image/png" });
+    const file = new File(["bytes"], filename, { type });
 
     // ClipboardEvent is not available in jsdom, so create a plain Event and
     // attach clipboardData manually
@@ -2018,7 +2022,7 @@ describe("MessageInput", () => {
         items: [
           {
             kind: "file",
-            type: "image/png",
+            type,
             getAsFile: () => file,
           },
         ],

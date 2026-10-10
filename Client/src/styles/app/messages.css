@@ -1023,7 +1023,8 @@ ul.md-list-nested {
 .msg-file-name:hover {
   text-decoration: underline;
 }
-.msg-file-size {
+.msg-file-size,
+.msg-file-note {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
@@ -1058,6 +1059,7 @@ ul.md-list-nested {
   display: block;
   max-width: 100%;
   max-height: 300px;
+  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {

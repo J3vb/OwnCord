@@ -101,6 +101,16 @@ func isUnsafeInlineMIME(mimeType string) bool {
 	return false
 }
 
+// sniffMIME is http.DetectContentType plus QuickTime, which the WHATWG sniffing
+// table it follows leaves out: a .mov whose ftyp box names the "qt  " brand
+// would otherwise be stored as application/octet-stream and never play inline.
+func sniffMIME(header []byte) string {
+	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
+		return "video/quicktime"
+	}
+	return http.DetectContentType(header)
+}
+
 // safeStorageErrorMessage maps a storage.Save error to a client-safe
 // "upload rejected" body. Full detail always goes to slog.Warn at the call
 // site — this only decides what crosses the HTTP boundary. storage.Save's
@@ -391,7 +401,7 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
 		return storedUpload{}, false
 	}
-	mime := http.DetectContentType(sniffBuf[:n])
+	mime := sniffMIME(sniffBuf[:n])
 	// Reconstruct the full stream: the sniffed bytes plus the remainder.
 	body := io.MultiReader(bytes.NewReader(sniffBuf[:n]), file)
 
