@@ -75,8 +75,12 @@ impl WsState {
             debug!("[ws_proxy] dropping existing connection");
         }
         *tx_lock = None;
+        // Bump first: the read task's auth_ok activation checks the generation
+        // under the session lock, so once on_claimed's clear has run, a
+        // superseded attempt's set_if already sees the newer generation.
+        let claimed = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         on_claimed();
-        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+        claimed
     }
 
     /// Install `tx` as the live sender if `generation` is still current.
@@ -314,11 +318,12 @@ pub async fn ws_connect<R: Runtime>(
                     // Native-side authenticated event: the server answered the
                     // auth message over this pinned socket. Set the host before
                     // relaying so it is active by the time the page sees it.
-                    if is_auth_ok(&text) && generation_read.load(Ordering::SeqCst) == my_generation
-                    {
+                    if is_auth_ok(&text) {
                         app_read
                             .state::<crate::active_session::ActiveSession>()
-                            .set(&host_read);
+                            .set_if(&host_read, || {
+                                generation_read.load(Ordering::SeqCst) == my_generation
+                            });
                     }
                     let _ = app_read.emit("ws-message", text);
                 },
@@ -813,6 +818,20 @@ mod tests {
     // second ws_connect without awaiting or cancelling the first, so two
     // attempts can be in flight over one slot. Mirrors the ptt.rs
     // ATOMICRACE-001 guard.
+
+    #[tokio::test]
+    async fn the_generation_is_already_bumped_when_the_session_clear_runs() {
+        // set_if's currency check relies on this order: a clear that ran
+        // before the bump would let a superseded attempt set its host after it.
+        let state = WsState::new();
+        let before = state.generation.load(Ordering::SeqCst);
+        let mut seen = before;
+        let claimed = state
+            .begin_connection_with(|| seen = state.generation.load(Ordering::SeqCst))
+            .await;
+        assert_eq!(seen, claimed);
+        assert_ne!(seen, before);
+    }
 
     #[tokio::test]
     async fn the_session_clear_runs_under_the_slot_lock() {

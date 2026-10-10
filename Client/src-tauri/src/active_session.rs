@@ -42,9 +42,22 @@ impl ActiveSession {
 
     /// Record the host a login was verified for. Set only from the relayed
     /// `auth_ok`; marks both the active session and a verified host.
+    #[cfg(test)]
     pub fn set(&self, host: &str) {
+        self.set_if(host, || true);
+    }
+
+    /// `set`, but only if `still_current` holds. The check runs under the same
+    /// lock `clear_active_unless` takes, so a connection claim that bumps the
+    /// generation first makes this refuse, and one that bumps it after clears
+    /// the host this just set: a superseded attempt can never leave its host
+    /// active.
+    pub fn set_if(&self, host: &str, still_current: impl FnOnce() -> bool) {
         let key = crate::tofu::cert_store_key(host);
         let mut state = self.lock();
+        if !still_current() {
+            return;
+        }
         state.verified_hosts.insert(key.clone());
         state.host = Some(key);
     }
@@ -328,6 +341,23 @@ mod tests {
         session.set("chat.example.com");
         assert!(session.ensure("other.example.com", false).is_err());
         assert!(session.ensure("Chat.Example.com:443", false).is_ok());
+    }
+
+    #[test]
+    fn set_if_checks_under_the_session_lock_and_refuses_a_superseded_attempt() {
+        let session = ActiveSession::new();
+        let mut held = false;
+        session.set_if("chat.example.com", || {
+            held = session.state.try_lock().is_err();
+            true
+        });
+        assert!(held, "the currency check must run under the session lock");
+        assert!(session.ensure("chat.example.com", false).is_ok());
+
+        session.clear_active_unless("other.example.com");
+        session.set_if("dead.example.com", || false);
+        assert!(session.ensure("dead.example.com", false).is_err());
+        assert!(session.ensure("dead.example.com", true).is_err());
     }
 
     #[test]
