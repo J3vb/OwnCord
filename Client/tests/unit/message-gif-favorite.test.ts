@@ -45,7 +45,7 @@ describe("star on GIFs in messages", () => {
     bindGifFavoritesApi(old);
     await flush();
     const pending = api();
-    pending.gifFavorites = vi.fn(() => new Promise(() => {}));
+    pending.gifFavorites = vi.fn(() => new Promise<never>(() => {}));
     bindGifFavoritesApi(pending);
     const star = renderInlineImage(URL_).querySelector<HTMLButtonElement>(".msg-gif-fav");
     expect(star === null || star.hidden).toBe(true);
@@ -54,7 +54,7 @@ describe("star on GIFs in messages", () => {
   it("a star drawn before a 404 hides on hover, but not while it holds focus", async () => {
     const pendingApi = api();
     let reject!: (e: unknown) => void;
-    pendingApi.gifFavorites = vi.fn(() => new Promise((_, r) => (reject = r)));
+    pendingApi.gifFavorites = vi.fn(() => new Promise<never>((_, r) => (reject = r)));
     bindGifFavoritesApi(pendingApi);
     const wrap = renderInlineImage(URL_);
     document.body.appendChild(wrap);
