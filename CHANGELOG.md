@@ -51,9 +51,8 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
-- The Invite button now shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
 - The Mark All as Read button was never visible: it sat in a sidebar header that is hidden. It now shows as an icon beside Invite in the server header whenever a channel or DM is unread.
-- A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
+- The Invite button now shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
 
 **Voice**
 
@@ -63,6 +62,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
 - On Linux, GIF picker previews and linked images no longer show as broken images when the webview falls back to its slower internal message channel; the log now says when that happens.
+
+**Desktop UI**
+
+- A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
 
 **Voice and video**
 
