@@ -20,6 +20,7 @@ import {
   serverPin,
   updaterTarget,
   waitFor,
+  waitForUpdaterRestart,
   type ArtifactDriver,
 } from "../support/artifact-app";
 import { startNativeUpdateServer } from "../support/native-update-server";
@@ -126,6 +127,8 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     expect(gateway.targets()).toContain(updaterTarget());
     expect(new Set(gateway.targets())).toEqual(new Set([updaterTarget()]));
     expect(gateway.downloads()).toBe(1);
+    // Kill the installer's own restart of the new version, not race it.
+    await waitForUpdaterRestart();
     await relaunch();
     await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
     expect(await appVersion(app!)).toBe(version);
