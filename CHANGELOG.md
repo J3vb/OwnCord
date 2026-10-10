@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Desktop UI**
+
+- The Mark All as Read button was never visible: it sat in a sidebar header that is hidden. It now shows as an icon beside Invite in the server header whenever a channel or DM is unread.
+
 **Voice**
 
 - A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.

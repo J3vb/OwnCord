@@ -44,6 +44,7 @@ import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
 import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
+import { markAllRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
@@ -222,6 +223,36 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   const headerActions = createElement("div", { class: "sidebar-header-actions" });
+
+  // Mark All as Read: a server-wide action, so it lives in this header rather
+  // than in ChannelSidebar's own header (hidden here, see sidebar.css). First in
+  // the row so it appearing and disappearing does not move Invite. Shown only
+  // while a channel or DM is unread; those badges live in channels.store and
+  // dm.store.
+  const markAllBtn = headerAction(
+    shellText("channel.markAllRead"),
+    shellText("channel.markAllRead"),
+    "check",
+    "mark-all-read",
+  );
+  markAllBtn.addEventListener("click", () => {
+    markAllRead();
+  });
+  const syncMarkAllBtn = (): void => {
+    const show = unreadChannelIds().length > 0;
+    // Hiding the focused button would drop focus to <body>; hand it to the
+    // neighbouring header action (Invite) so the next Tab starts nearby.
+    if (!show && document.activeElement === markAllBtn) {
+      headerActions.querySelector<HTMLElement>('[data-testid="invite-btn"]')?.focus();
+    }
+    markAllBtn.style.display = show ? "" : "none";
+  };
+  syncMarkAllBtn();
+  headerActions.appendChild(markAllBtn);
+  unsubscribers.push(
+    channelsStore.subscribeSelector((s) => s.channels, syncMarkAllBtn),
+    dmStore.subscribeSelector((s) => s.channels, syncMarkAllBtn),
+  );
 
   const headerInviteCtrl = createInviteManagerController({ api, getRoot });
   const headerInviteBtn = headerAction(

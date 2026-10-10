@@ -3010,3 +3010,48 @@ describe("MainPage — B9-4 content view wiring", () => {
     expect(uiStore.getState().activeView).toBeNull();
   });
 });
+
+describe("MainPage — focus fallback when the channel is declined", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    mockCreateChannelController.mockClear();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: null,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  // Declining the age-restricted gate leaves the channel and hands focus to
+  // `focusFallback`. With no composer on screen it must land on a sidebar
+  // control that can actually take focus: the header's first button (Mark All
+  // as Read) is hidden while nothing is unread, and focusing a hidden button is
+  // a silent no-op that leaves focus on <body>.
+  it("lands on a visible sidebar button, skipping a hidden first one", () => {
+    const sidebar = container.querySelector("[data-testid='app-layout']")!.firstElementChild!;
+    const hidden = document.createElement("button");
+    hidden.style.display = "none";
+    const shown = document.createElement("button");
+    sidebar.append(hidden, shown);
+
+    const { focusFallback } = mockCreateChannelController.mock.calls.at(-1)![0] as {
+      focusFallback: () => void;
+    };
+    focusFallback();
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(shown);
+  });
+});

@@ -90,7 +90,7 @@
 .sidebar-content-inner .channel-sidebar-header {
   display: none;
 }
-/* Invite, Audit Log and Moderation: one row of quiet icon buttons on the
+/* Mark All as Read, Invite, Audit Log and Moderation: one row of quiet icon buttons on the
    header's trailing edge, beside the name or, when both do not fit, on a row
    of their own under it. The row never splits. */
 .sidebar-header-actions {
@@ -157,28 +157,6 @@
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--header-primary);
-}
-/* Mark All as Read — only rendered visible while something is unread. */
-.sidebar-mark-all-read {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0;
-}
-.sidebar-mark-all-read.visible {
-  display: flex;
-}
-.sidebar-mark-all-read:hover {
-  background: var(--bg-hover);
-  color: var(--text-normal);
 }
 .channel-list {
   flex: 1;
