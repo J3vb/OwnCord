@@ -35,6 +35,7 @@ const warning = (over: Record<string, unknown> = {}) => ({
 interface Server {
   warnings: unknown[];
   update: Record<string, unknown>;
+  config?: Record<string, unknown>;
 }
 
 async function boot(server: Server, userId = 1) {
@@ -51,8 +52,8 @@ async function boot(server: Server, userId = 1) {
               ? { evaluated_at: "2026-09-23T12:00:00Z", signals: [], warnings: server.warnings }
               : p === "/updates"
                 ? server.update
-                : p === "/stats"
-                  ? {}
+                : p === "/config/settings"
+                  ? (server.config ?? {})
                   : {};
         return { ok: true, status: 200, json: async () => json } as Response;
       }) as typeof fetch;
@@ -108,13 +109,55 @@ describe("Server/admin/static — dismissable notices", () => {
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(0);
 
-    // The problem changed (new severity, then new text): it shows again.
+    // A live measurement drifting in the detail text does not bring it back.
+    server.warnings = [warning({ detail: "20000.0 ms/min" })];
+    content = await paint(dom, booted.bridge);
+    expect(cards(content)).toHaveLength(0);
+
+    // The problem changed (new severity, then new title): it shows again.
     server.warnings = [warning({ severity: "critical" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
-    server.warnings = [warning({ detail: "20000.0 ms/min" })];
+    server.warnings = [warning({ severity: "critical", title: "Writes are badly queueing" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
+  });
+
+  it("headline and checks count only the warnings still shown", async () => {
+    const server: Server = { warnings: [warning({ severity: "critical" })], update: {} };
+    const booted = await boot(server);
+    dom = booted.dom;
+    let content = await paint(dom, booted.bridge);
+    const title = () => content.querySelector("#attnTitle");
+    expect(title()?.textContent).toContain("1 problem needs your attention");
+    click(dom, content.querySelector(".attn-warning .notice-dismiss"));
+    content = await paint(dom, booted.bridge);
+    expect(title()?.textContent).toBe("Everything is running normally");
+    expect(content.querySelector(".health-hero.ok")).toBeTruthy();
+    expect(content.querySelector('[data-action="restoreDismissed"]')?.textContent).toContain(
+      "1 dismissed",
+    );
+  });
+
+  it("counts the dismissed update strip in the restore link and restores it", async () => {
+    const server: Server = {
+      warnings: [warning()],
+      update: { update_available: true, current: "v1.0.0", latest: "v1.1.0" },
+    };
+    const booted = await boot(server);
+    dom = booted.dom;
+    let content = await paint(dom, booted.bridge);
+    click(dom, content.querySelector(".update-strip .notice-dismiss"));
+    content = await paint(dom, booted.bridge);
+    click(dom, content.querySelector(".attn-warning .notice-dismiss"));
+    content = await paint(dom, booted.bridge);
+    expect(content.querySelector('[data-action="restoreDismissed"]')?.textContent).toContain(
+      "2 dismissed",
+    );
+    click(dom, content.querySelector('[data-action="restoreDismissed"]'));
+    content = await paint(dom, booted.bridge);
+    expect(cards(content)).toHaveLength(1);
+    expect(content.querySelector(".update-strip")).toBeTruthy();
   });
 
   it("keeps dismissals per admin and can bring them back", async () => {
@@ -158,11 +201,13 @@ describe("Server/admin/static — dismissable notices", () => {
     expect(content.querySelector(".update-strip")).toBeTruthy();
   });
 
-  it("never offers a dismiss on the pending-restart banner", () => {
-    // The banner is blocking: it re-shows on every load until the restart.
-    const i = ADMIN_HTML.indexOf("data&&data.restart_pending");
-    expect(i).toBeGreaterThan(0);
-    const banner = ADMIN_HTML.slice(i, ADMIN_HTML.indexOf("restartForConfig", i));
-    expect(banner).not.toContain("notice-dismiss");
+  it("never offers a dismiss on the pending-restart banner", async () => {
+    const server: Server = { warnings: [], update: {}, config: { restart_pending: true, settings: [] } };
+    const booted = await boot(server);
+    dom = booted.dom;
+    booted.bridge.state.section = "config";
+    const content = await paint(dom, booted.bridge);
+    expect(content.querySelector('[data-action="restartForConfig"]')).toBeTruthy();
+    expect(content.querySelector(".notice-dismiss")).toBeNull();
   });
 });
