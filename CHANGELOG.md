@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Voice**
+
+- A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
+
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
