@@ -9,7 +9,6 @@ import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@lib/preferences";
-import { messagingText } from "../../i18n/messaging";
 import {
   clearExternalImageCache,
   fetchExternalImage,
