@@ -53,6 +53,8 @@ interface StatsTrack {
 export class RemoteTracks {
   onRemoteVideoCallback: RemoteVideoCallback | null = null;
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
+  /** The streams the viewer watches, as `${userId}:${type}`. */
+  private readonly watched = new Set<string>();
 
   constructor(private readonly getRoom: () => Room | null) {}
 
@@ -105,18 +107,47 @@ export class RemoteTracks {
    *  size. */
   setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
     const pub = this.publication(userId, type);
-    if (pub === undefined) return;
+    // An unwatched stream is not subscribed: there is no layer to ask for.
+    if (pub?.isSubscribed !== true) return;
     if (view.size !== undefined) pub.setVideoDimensions(view.size);
     else if (view.enabled) pub.setVideoQuality(VideoQuality.HIGH);
     pub.setEnabled(view.enabled);
   }
 
-  private publication(userId: number, type: "camera" | "screenshare") {
+  clearWatched(): void {
+    this.watched.clear();
+  }
+
+  isWatched(userId: number, type: "camera" | "screenshare"): boolean {
+    return this.watched.has(`${userId}:${type}`);
+  }
+
+  /** Watch a user's camera or screen share (with its audio), or stop: the
+   *  subscription follows. A stream not yet published is subscribed when it
+   *  is (roomEventHandlers' handleTrackPublished asks isWatched). */
+  watch(userId: number, type: "camera" | "screenshare", on: boolean): void {
+    const key = `${userId}:${type}`;
+    if (on) this.watched.add(key);
+    else this.watched.delete(key);
+    const sources =
+      type === "screenshare" ? (["screenshare", "screen_share_audio"] as const) : [type];
+    for (const source of sources) this.publication(userId, source)?.setSubscribed(on);
+  }
+
+  /** Forget watches whose stream the room does not publish. */
+  dropUnpublishedWatches(): void {
+    for (const key of this.watched) {
+      const [userId, type] = key.split(":") as [string, "camera" | "screenshare"];
+      if (this.publication(Number(userId), type) === undefined) this.watched.delete(key);
+    }
+  }
+
+  /** A user's publication of a source, or of the camera or screen share. */
+  private publication(userId: number, source: "camera" | "screenshare" | "screen_share_audio") {
+    const name = source === "screenshare" ? "screen_share" : source;
     for (const participant of this.getRoom()?.remoteParticipants.values() ?? []) {
       if (parseUserId(participant.identity) !== userId) continue;
-      return participant.getTrackPublication(
-        (type === "screenshare" ? "screen_share" : "camera") as never,
-      );
+      return participant.getTrackPublication(name as never);
     }
     return undefined;
   }

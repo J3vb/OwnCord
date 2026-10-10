@@ -8,11 +8,13 @@ import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
 import { setJoinedVoiceStatus } from "@lib/roomEventHandlers";
 import { releaseRoom } from "../features/voice/releaseRoom";
+import { ROOM_CONNECT_OPTIONS } from "../features/voice/sessionState";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("livekitReconnect");
 
 export interface ReconnectDeps {
+  sweepPublications(room: Room): void;
   /** Current session state accessor. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- state shape is owned by LiveKitSession; reconnect only reads .type/.ac/.channelId
   getState: () => any;
@@ -248,7 +250,7 @@ export async function attemptAutoReconnect(
       }
 
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
-      await newRoom.connect(resolvedUrl, token);
+      await newRoom.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
 
       if (superseded()) {
         log.info("Auto-reconnect aborted after room connect");
@@ -268,6 +270,7 @@ export async function attemptAutoReconnect(
         lastDirectUrl: directUrl,
       });
       setJoinedVoiceStatus(newRoom);
+      deps.sweepPublications(newRoom);
       logIceConnectionInfo(newRoom);
       newRoom.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
       // RT-6: the saved input goes in before the mic is re-captured, as on

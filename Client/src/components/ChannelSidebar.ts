@@ -507,6 +507,7 @@ function renderVoiceChannelItem(
               onVoiceJoin(channel.id);
               if (refused) return;
             }
+            if (voiceStore.getState().currentChannelId !== channel.id) return;
             const tileId = user.screenshare
               ? user.userId + SCREENSHARE_TILE_ID_OFFSET
               : user.userId;

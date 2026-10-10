@@ -15,6 +15,17 @@ vi.mock("livekit-client", () => ({
     EncryptionError: "encryptionError",
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
+    TrackPublished: "trackPublished",
+    TrackUnpublished: "trackUnpublished",
+  },
+  Track: {
+    Kind: { Audio: "audio", Video: "video" },
+    Source: {
+      Camera: "camera",
+      Microphone: "microphone",
+      ScreenShare: "screen_share",
+      ScreenShareAudio: "screen_share_audio",
+    },
   },
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
 }));
@@ -243,6 +254,62 @@ describe("NativeRoom connect/disconnect", () => {
     await connecting;
     expect([...room.remoteParticipants.keys()]).toEqual(["user-2"]);
     expect(room.remoteParticipants.get("user-2")?.audioTrackPublications.size).toBe(1);
+  });
+
+  it("raises no TrackPublished for the snapshot replayed during connect, only for a later one", async () => {
+    const room = createNativeRoom(audio);
+    const published: string[] = [];
+    room.on("trackPublished", (pub) => published.push((pub as { trackSid: string }).trackSid));
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({
+      session: 3,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_first")] }],
+      },
+    });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.remoteParticipants.get("user-2")?.trackPublications.size).toBe(1);
+    expect(published).toEqual([]);
+
+    emit({
+      session: 3,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_again")] }],
+      },
+    });
+    expect(published).toEqual(["TR_again"]);
+  });
+
+  it("raises no TrackPublished for a trackPublished envelope replayed during connect", async () => {
+    const room = createNativeRoom(audio);
+    const published: string[] = [];
+    room.on("trackPublished", (pub) => published.push((pub as { trackSid: string }).trackSid));
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({
+      session: 3,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_queued") },
+    });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.remoteParticipants.get("user-2")?.trackPublications.size).toBe(1);
+    expect(published).toEqual([]);
+
+    emit({
+      session: 3,
+      event: {
+        type: "trackPublished",
+        identity: "user-2",
+        track: video("TR_live", "screen_share"),
+      },
+    });
+    expect(published).toEqual(["TR_live"]);
   });
 
   it("ignores events for another session", async () => {
@@ -850,6 +917,92 @@ describe("NativeRoom remote video", () => {
     emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
     expect(order).toEqual(["trackUnsubscribed", "participantDisconnected"]);
     expect(host.renderers[0]!.disposed).toBe(true);
+  });
+
+  it("raises TrackPublished for a new publication and TrackUnpublished when it goes", async () => {
+    const room = createNativeRoom(audio);
+    const order: string[] = [];
+    room.on("trackPublished", (pub) =>
+      order.push(`published ${(pub as { trackSid: string }).trackSid}`),
+    );
+    room.on("trackUnsubscribed", () => order.push("trackUnsubscribed"));
+    room.on("trackUnpublished", (pub) =>
+      order.push(`unpublished ${(pub as { trackSid: string }).trackSid}`),
+    );
+    room.on("participantDisconnected", () => order.push("participantDisconnected"));
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_s", "screen_share") },
+    });
+    emit({ session: 1, event: { type: "trackUnpublished", identity: "user-2", sid: "TR_s" } });
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
+    // livekit-client's order: unsubscribed, then unpublished, then the leave.
+    expect(order).toEqual([
+      "published TR_v",
+      "published TR_s",
+      "unpublished TR_s",
+      "trackUnsubscribed",
+      "unpublished TR_v",
+      "participantDisconnected",
+    ]);
+  });
+
+  it("opt-in watching: the backend's auto-subscription of an unwatched stream raises no track", async () => {
+    const room = createNativeRoom(audio);
+    const watched = new Set<string>();
+    const onRemoteVideo = vi.fn();
+    const handlers = createRoomEventHandlers({
+      isWatched: (uid: number, screen: boolean) => watched.has(`${uid}:${String(screen)}`),
+      getOnRemoteVideoCallback: () => onRemoteVideo,
+    } as unknown as RoomEventDeps);
+    room.on("trackPublished", (pub, p) => handlers.handleTrackPublished(pub as never, p as never));
+    room.on("trackSubscribed", (t, pub, p) =>
+      handlers.handleTrackSubscribed(t as never, pub as never, p as never),
+    );
+    await room.connect("u", "t");
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[]) {}
+      },
+    );
+
+    // The backend subscribes every track as it is published; the shared
+    // handler unsubscribes the camera at once, and the late subscription
+    // that was already on its way is dropped.
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    expect(host.renderers).toHaveLength(0);
+    expect(onRemoteVideo).toHaveBeenCalledTimes(1);
+    expect(onRemoteVideo).toHaveBeenCalledWith(2, null, false);
+
+    // Watch: subscribed again, and the stream arrives.
+    watched.add("2:false");
+    room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.setSubscribed(true);
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-2", "TR_v", true]]);
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(host.renderers).toHaveLength(1);
+    expect(onRemoteVideo).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
   });
 
   it("disposes every renderer on disconnect", async () => {

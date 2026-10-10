@@ -13,7 +13,7 @@ import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
-import type { SessionState } from "./sessionState";
+import { ROOM_CONNECT_OPTIONS, type SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
 import { setJoinedVoiceStatus } from "../../lib/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
@@ -52,7 +52,9 @@ export interface JoinHost {
   reapplyMuteGain(): void;
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
-  leaveVoice(sendWs: boolean): void;
+  leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
+  /** Offer the adopted room's already-published streams (Watch stream tiles). */
+  sweepPublications(room: Room): void;
   handleVoiceTokenRefresh(token: string): void;
   /** The session's own connectAndSetup, so the drain loop re-enters through it. */
   connectAndSetup(
@@ -96,8 +98,8 @@ export class JoinOrchestration {
   private setState(next: SessionState): void {
     this.host.setState(next);
   }
-  private leaveVoice(sendWs: boolean): void {
-    this.host.leaveVoice(sendWs);
+  private leaveVoice(sendWs: boolean, keepWatched = false): void {
+    this.host.leaveVoice(sendWs, keepWatched);
   }
   private createRoom(channelId: number): Promise<Room> {
     return this.host.createRoom(channelId);
@@ -179,7 +181,7 @@ export class JoinOrchestration {
     // OR-with-server-value guard, joining the new channel as a phantom key
     // holder the server never elected (OC-0020).
     if (this._room !== null || this._state.type === "reconnecting") {
-      this.leaveVoice(false);
+      this.leaveVoice(false, true);
     } else if (this._state.type === "connecting") {
       // OC-0001: the pending-join drain loop (handleVoiceToken) re-enters
       // this function while `_state` is still "connecting" — there is no
@@ -310,7 +312,7 @@ export class JoinOrchestration {
         if (attempt > 1) countJoinRetry(traceId);
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
-          await localRoom.connect(resolvedUrl, token);
+          await localRoom.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
 
           // Checkpoint 2: after room.connect() — the primary race window.
           if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
@@ -405,6 +407,7 @@ export class JoinOrchestration {
         });
         // Room connected and E2EE key ready — the call is now secured.
         setJoinedVoiceStatus(localRoom);
+        this.host.sweepPublications(localRoom);
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.

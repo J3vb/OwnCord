@@ -794,6 +794,7 @@ describe("ChannelSidebar", () => {
       camera: false,
       screenshare: true,
     });
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
     const voiceUserItem = container.querySelector(".voice-user-item") as HTMLElement;

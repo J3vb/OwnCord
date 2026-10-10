@@ -932,7 +932,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token", {
+        autoSubscribe: false,
+      });
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
@@ -945,7 +947,9 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token", {
+        autoSubscribe: false,
+      });
     });
 
     it("handles mic permission denied gracefully", async () => {
@@ -1051,8 +1055,12 @@ describe("LiveKitSession", () => {
       await firstJoin;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
-      expect(mockRoom.connect).toHaveBeenNthCalledWith(1, "ws://localhost:7881", "first-token");
-      expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token");
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(1, "ws://localhost:7881", "first-token", {
+        autoSubscribe: false,
+      });
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token", {
+        autoSubscribe: false,
+      });
       expect(mockRoom.startAudio).toHaveBeenCalledTimes(1);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
     });
@@ -1560,6 +1568,7 @@ describe("LiveKitSession", () => {
           "remote-user",
           {
             audioTrackPublications: new Map([["audio", { setSubscribed }]]),
+            trackPublications: new Map(),
           },
         ],
       ]);
@@ -1577,6 +1586,53 @@ describe("LiveKitSession", () => {
       await reconnectPromise;
 
       expect(setSubscribed).toHaveBeenCalledWith(false);
+    });
+
+    it("sweeps the existing participants' publications into the new room on reconnect", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 9,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const setSubscribed = vi.fn();
+      const publication = { kind: "audio", source: "microphone", setSubscribed };
+      const setCameraSubscribed = vi.fn();
+      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
+      const onRemoteVideo = vi.fn();
+      session.setOnRemoteVideo(onRemoteVideo);
+      mockRoom.remoteParticipants = new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            audioTrackPublications: new Map(),
+            trackPublications: new Map<string, unknown>([
+              ["TR_a", publication],
+              ["TR_v", camera],
+            ]),
+          },
+        ],
+      ]);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        9,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setSubscribed).toHaveBeenCalledWith(true);
+      expect(setCameraSubscribed).toHaveBeenCalledWith(false);
+      expect(onRemoteVideo).toHaveBeenCalledWith(7, null, false);
     });
 
     // Pre-refactor parity: the reconnect success path re-installed both
@@ -1847,7 +1903,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => []),
         attach: vi.fn(() => audioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       expect(() =>
@@ -1871,7 +1928,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => [secondAudioEl]),
         attach: vi.fn(() => secondAudioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
@@ -1901,7 +1959,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => [secondAudioEl]),
         attach: vi.fn(() => secondAudioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
@@ -2951,7 +3010,7 @@ describe("LiveKitSession", () => {
       // sweep and, once elected key holder, wedges the channel's E2EE for all
       // subsequent joiners. Mirror the reconnect-exhausted give-up path.
       expect(mockRoom.connect).not.toHaveBeenCalled();
-      expect(leaveSpy).toHaveBeenCalledWith(true);
+      expect(leaveSpy).toHaveBeenCalledWith(true, false);
       expect(leaveVoiceChannel).toHaveBeenCalled();
 
       keyExchangeSpy.mockRestore();
@@ -3051,7 +3110,8 @@ describe("LiveKitSession", () => {
       const leaveSpy = vi.spyOn(session, "leaveVoice");
       await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880", true);
 
-      expect(leaveSpy).toHaveBeenCalledWith(false);
+      // Channel switch is an internal teardown: it keeps the viewer's watches.
+      expect(leaveSpy).toHaveBeenCalledWith(false, true);
       leaveSpy.mockRestore();
     });
   });
@@ -3946,6 +4006,7 @@ describe("LiveKitSession", () => {
       // membership, so the loop must not connect on the old token.
       mockRoom.connect.mockResolvedValue(undefined);
 
+      (session as any)._remoteTracks.watch(7, "screenshare", true);
       const loop = startLoop();
       await vi.advanceTimersByTimeAsync(1_000);
       wsState = "reconnecting";
@@ -3957,6 +4018,7 @@ describe("LiveKitSession", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await loop;
 
+      expect((session as any)._remoteTracks.isWatched(7, "screenshare")).toBe(true);
       // Never connects on the old token with no membership behind it.
       expect(mockRoom.connect).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
@@ -4711,7 +4773,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("fresh-token", "/livekit", 1, "ws://localhost:7880", true);
 
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "fresh-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "fresh-token", {
+        autoSubscribe: false,
+      });
       expect((session as any)._state.type).toBe("connected");
     });
   });

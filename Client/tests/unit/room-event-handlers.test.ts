@@ -71,6 +71,7 @@ interface Harness {
     onRemoteVideo: ReturnType<typeof vi.fn>;
     onRemoteVideoRemoved: ReturnType<typeof vi.fn>;
     onError: ReturnType<typeof vi.fn>;
+    isWatched: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -95,6 +96,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     onRemoteVideo: vi.fn(),
     onRemoteVideoRemoved: vi.fn(),
     onError: vi.fn(),
+    isWatched: vi.fn((_userId: number, _isScreenshare: boolean) => false),
   };
 
   const deps: RoomEventDeps = {
@@ -104,6 +106,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     getAudioElements: () => audioElements,
     getOnRemoteVideoCallback: () => spies.onRemoteVideo,
     getOnRemoteVideoRemovedCallback: () => spies.onRemoteVideoRemoved,
+    isWatched: spies.isWatched,
     getOnErrorCallback: () => spies.onError,
     isConnecting: () => false,
     isReconnecting: () => false,
@@ -271,8 +274,36 @@ describe("handleTrackSubscribed", () => {
     expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
   });
 
+  it("unsubscribes and ignores screen-share audio that is no longer watched", () => {
+    const h = build();
+    const setSubscribed = vi.fn();
+    const p = {
+      source: Track.Source.ScreenShareAudio,
+      setSubscribed,
+    } as unknown as RemoteTrackPublication;
+
+    h.handlers.handleTrackSubscribed(audioTrack(), p, participant("user-7:tok"));
+
+    expect(h.audioElements.handleTrackSubscribedAudio).not.toHaveBeenCalled();
+    expect(setSubscribed).toHaveBeenCalledWith(false);
+  });
+
+  it("hands watched screen-share audio to the audio elements", () => {
+    const h = build();
+    h.spies.isWatched.mockImplementation((_u: number, isScreenshare: boolean) => isScreenshare);
+    const track = audioTrack();
+    const publication = pub(Track.Source.ScreenShareAudio);
+    const p = participant("user-7:tok");
+
+    h.handlers.handleTrackSubscribed(track, publication, p);
+
+    expect(h.spies.isWatched).toHaveBeenCalledWith(7, true);
+    expect(h.audioElements.handleTrackSubscribedAudio).toHaveBeenCalledWith(track, publication, p);
+  });
+
   it("hands camera video to the remote-video callback", () => {
     const h = build();
+    h.spies.isWatched.mockReturnValue(true);
 
     h.handlers.handleTrackSubscribed(
       videoTrack(),
@@ -290,8 +321,20 @@ describe("handleTrackSubscribed", () => {
     expect(isScreenshare).toBe(false);
   });
 
+  it("unsubscribes and ignores video that is no longer watched", () => {
+    const h = build();
+    const setSubscribed = vi.fn();
+    const p = { source: Track.Source.Camera, setSubscribed } as unknown as RemoteTrackPublication;
+
+    h.handlers.handleTrackSubscribed(videoTrack(), p, participant("user-7:tok"));
+
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+    expect(setSubscribed).toHaveBeenCalledWith(false);
+  });
+
   it("flags screenshare video as such", () => {
     const h = build();
+    h.spies.isWatched.mockReturnValue(true);
 
     h.handlers.handleTrackSubscribed(
       videoTrack(),
@@ -316,6 +359,7 @@ describe("handleTrackSubscribed", () => {
 
   it("skips video when no callback is registered", () => {
     const h = build({ getOnRemoteVideoCallback: () => null });
+    h.spies.isWatched.mockReturnValue(true);
 
     expect(() => {
       h.handlers.handleTrackSubscribed(
@@ -343,19 +387,21 @@ describe("handleTrackUnsubscribed", () => {
     );
   });
 
-  it("detaches the video element and notifies the removal callback", () => {
+  it("detaches the video element and puts its tile back to Watch", () => {
     const h = build();
     const track = videoTrack();
 
     h.handlers.handleTrackUnsubscribed(track, pub(Track.Source.Camera), participant("user-9:tok"));
 
     // Without detach the <video> keeps the old MediaStream and the tile freezes
-    // on the last frame instead of clearing.
+    // on the last frame instead of clearing. The stream is still published, so
+    // its tile stays to be watched again; only the unpublish removes it.
     expect(track.detach).toHaveBeenCalled();
-    expect(h.spies.onRemoteVideoRemoved).toHaveBeenCalledWith(9, false);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(9, null, false);
+    expect(h.spies.onRemoteVideoRemoved).not.toHaveBeenCalled();
   });
 
-  it("flags screenshare removal as such", () => {
+  it("flags a screenshare's placeholder as such", () => {
     const h = build();
 
     h.handlers.handleTrackUnsubscribed(
@@ -364,7 +410,7 @@ describe("handleTrackUnsubscribed", () => {
       participant("user-9:tok"),
     );
 
-    expect(h.spies.onRemoteVideoRemoved).toHaveBeenCalledWith(9, true);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(9, null, true);
   });
 
   it("still detaches when the identity is unparseable", () => {
@@ -374,11 +420,11 @@ describe("handleTrackUnsubscribed", () => {
     h.handlers.handleTrackUnsubscribed(track, pub(Track.Source.Camera), participant("garbage"));
 
     expect(track.detach).toHaveBeenCalled();
-    expect(h.spies.onRemoteVideoRemoved).not.toHaveBeenCalled();
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
   });
 
-  it("tolerates a missing removal callback", () => {
-    const h = build({ getOnRemoteVideoRemovedCallback: () => null });
+  it("tolerates a missing video callback", () => {
+    const h = build({ getOnRemoteVideoCallback: () => null });
 
     expect(() => {
       h.handlers.handleTrackUnsubscribed(
@@ -386,6 +432,147 @@ describe("handleTrackUnsubscribed", () => {
         pub(Track.Source.Camera),
         participant("user-9:tok"),
       );
+    }).not.toThrow();
+  });
+});
+
+// ── opt-in watching: what is subscribed ────────────────────────────────────
+
+/** A remote publication whose subscription the handlers set. */
+function remotePub(
+  source: Track.Source,
+): RemoteTrackPublication & { setSubscribed: ReturnType<typeof vi.fn> } {
+  const kind =
+    source === Track.Source.Camera || source === Track.Source.ScreenShare
+      ? Track.Kind.Video
+      : Track.Kind.Audio;
+  return {
+    source,
+    kind,
+    trackSid: `TR_${source}`,
+    setSubscribed: vi.fn(),
+  } as unknown as RemoteTrackPublication & { setSubscribed: ReturnType<typeof vi.fn> };
+}
+
+describe("handleTrackPublished (opt-in watching)", () => {
+  it("does not subscribe a new camera, and offers it as a tile to watch", () => {
+    const h = build();
+    const camera = remotePub(Track.Source.Camera);
+
+    h.handlers.handleTrackPublished(camera, participant("user-7:tok"));
+
+    expect(h.spies.isWatched).toHaveBeenCalledWith(7, false);
+    expect(camera.setSubscribed).toHaveBeenCalledWith(false);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(7, null, false);
+  });
+
+  it("does not subscribe a new screen share or its audio", () => {
+    const h = build();
+    const screen = remotePub(Track.Source.ScreenShare);
+    const audio = remotePub(Track.Source.ScreenShareAudio);
+
+    h.handlers.handleTrackPublished(screen, participant("user-7:tok"));
+    h.handlers.handleTrackPublished(audio, participant("user-7:tok"));
+
+    expect(h.spies.isWatched).toHaveBeenCalledWith(7, true);
+    expect(screen.setSubscribed).toHaveBeenCalledWith(false);
+    expect(audio.setSubscribed).toHaveBeenCalledWith(false);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledTimes(1);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(7, null, true);
+  });
+
+  it("subscribes a stream the viewer is watching (a republish), with no placeholder", () => {
+    const h = build();
+    h.spies.isWatched.mockReturnValue(true);
+    const screen = remotePub(Track.Source.ScreenShare);
+    const audio = remotePub(Track.Source.ScreenShareAudio);
+
+    h.handlers.handleTrackPublished(screen, participant("user-7:tok"));
+    h.handlers.handleTrackPublished(audio, participant("user-7:tok"));
+
+    expect(screen.setSubscribed).toHaveBeenCalledWith(true);
+    expect(audio.setSubscribed).toHaveBeenCalledWith(true);
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+  });
+
+  it("subscribes a voice, unless deafened", () => {
+    const h = build();
+    const mic = remotePub(Track.Source.Microphone);
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(h.spies.isWatched).not.toHaveBeenCalled();
+  });
+
+  it("offers no tile for an unparseable identity", () => {
+    const h = build();
+    const camera = remotePub(Track.Source.Camera);
+
+    h.handlers.handleTrackPublished(camera, participant("garbage"));
+
+    expect(camera.setSubscribed).toHaveBeenCalledWith(false);
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+  });
+
+  it("applies the same rule to everyone already in the room on connect", () => {
+    const h = build();
+    const camera = remotePub(Track.Source.Camera);
+    const mic = remotePub(Track.Source.Microphone);
+    const room = {
+      remoteParticipants: new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            trackPublications: new Map([
+              ["c", camera],
+              ["m", mic],
+            ]),
+          },
+        ],
+      ]),
+    } as unknown as Room;
+
+    h.handlers.handleConnected(room);
+
+    expect(camera.setSubscribed).toHaveBeenCalledWith(false);
+    expect(mic.setSubscribed).toHaveBeenCalledWith(true);
+    expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(7, null, false);
+  });
+});
+
+describe("handleTrackUnpublished", () => {
+  it("removes the stream's tile", () => {
+    const h = build();
+
+    h.handlers.handleTrackUnpublished(
+      remotePub(Track.Source.ScreenShare),
+      participant("user-9:tok"),
+    );
+
+    expect(h.spies.onRemoteVideoRemoved).toHaveBeenCalledWith(9, true);
+  });
+
+  it("ignores audio and unparseable identities", () => {
+    const h = build();
+
+    h.handlers.handleTrackUnpublished(
+      remotePub(Track.Source.Microphone),
+      participant("user-9:tok"),
+    );
+    h.handlers.handleTrackUnpublished(remotePub(Track.Source.Camera), participant("garbage"));
+
+    expect(h.spies.onRemoteVideoRemoved).not.toHaveBeenCalled();
+  });
+
+  it("tolerates a missing removal callback", () => {
+    const h = build({ getOnRemoteVideoRemovedCallback: () => null });
+
+    expect(() => {
+      h.handlers.handleTrackUnpublished(remotePub(Track.Source.Camera), participant("user-9:tok"));
     }).not.toThrow();
   });
 });

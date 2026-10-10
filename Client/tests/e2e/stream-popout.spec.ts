@@ -140,6 +140,30 @@ test.describe("stream pop-out window", () => {
     await expect(tile(page).locator("[data-tile-control='pip']")).toBeFocused();
   });
 
+  test("the stream's volume and mute go along into the window, usable there", async ({ page }) => {
+    await mountGrid(page);
+    await tile(page).hover();
+    const [popup] = await Promise.all([
+      page.waitForEvent("popup"),
+      tile(page).locator("[data-tile-control='pip']").click(),
+    ]);
+    await expect(popup.locator(".video-popout video")).toHaveCount(1);
+
+    // Shown without a hover, on the left of the window's full-screen control.
+    const slider = popup.locator(".video-popout .tile-volume-slider");
+    const mute = popup.locator(".video-popout .tile-mute-btn");
+    await expect(slider).toHaveAttribute("aria-label", "peer voice volume");
+    await expect(popup.locator(".video-popout .video-tile-overlay")).toHaveCSS("opacity", "1");
+    expect(await keyboardReachable(popup, slider)).toBe(true);
+    await mute.click();
+    await expect(mute).toHaveAttribute("aria-label", "Unmute");
+    expect(await findUnnamedControls(popup.locator("body"))).toEqual([]);
+
+    // Closing the window brings them back to the tile, still muted.
+    await popup.close();
+    await expect(tile(page).locator(".tile-mute-btn")).toHaveAttribute("aria-label", "Unmute");
+  });
+
   test("the popup document runs under the app's CSP, styled and playing", async ({ page }) => {
     await page.route("**/*", async (route) => {
       if (route.request().resourceType() !== "document") return route.fallback();

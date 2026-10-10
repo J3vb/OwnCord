@@ -65,13 +65,18 @@ test("a real remote camera produces a labelled tile while the local self tile ha
   await expect(selfTile).toHaveAttribute("data-stream-type", "camera");
   await expect(selfTile.locator(".video-tile-overlay")).toHaveCount(0);
 
-  // A real remote camera arrives as its own tile with audio controls, and its
-  // media actually decodes on this client.
+  // A real remote camera arrives as its own tile with audio controls, offered
+  // with Watch stream: nothing of it is received until alice clicks it
+  // (opt-in watching), and then its media actually decodes on this client.
   const bobTile = alice.locator(".video-cell[data-user-id='2']");
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(bobTile).toBeVisible({ timeout: 10_000 });
   await expect(bobTile.locator(".video-username")).toHaveText("bob");
   await expect(bobTile.locator(".tile-mute-btn")).toBeVisible();
+  const watch = bobTile.locator("[data-tile-control='watch']");
+  await expect(watch).toHaveText("Watch stream");
+  expect(await videoBytesOver(alice, 2_000)).toBe(0);
+  await watch.click();
   await expectDecodedMedia(alice, true);
 
   // Plain grid layout, not focus mode: both tiles live directly under the grid.
@@ -90,12 +95,12 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(alice.locator(".video-cell[data-user-id='1']")).toBeVisible({ timeout: 10_000 });
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
-  await expectDecodedMedia(alice, true);
 
-  // The sidebar watch affordance focuses the peer's tile.
+  // The sidebar watch affordance watches the peer's stream and focuses its tile.
   const bobRow = alice.locator(".voice-user-item[data-voice-uid='2']");
   await expect(bobRow.locator(".vu-status")).toBeVisible({ timeout: 10_000 });
   await bobRow.click();
+  await expectDecodedMedia(alice, true);
   const grid = alice.locator("[data-testid='video-grid']");
   await expect(grid).toHaveClass(/focus-mode/, { timeout: 5_000 });
   await expect(alice.locator(".video-focus-main .video-cell[data-user-id='2']")).toHaveClass(
@@ -175,9 +180,10 @@ test("a tile's mute button and volume slider change the peer's real playback vol
 
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
-  await expectDecodedMedia(alice, true);
   const tile = alice.locator(".video-cell[data-user-id='2']");
   await expect(tile).toBeVisible({ timeout: 10_000 });
+  await tile.locator("[data-tile-control='watch']").click();
+  await expectDecodedMedia(alice, true);
 
   const muteBtn = tile.locator(".tile-mute-btn");
   await expect(muteBtn).toHaveAttribute("aria-label", "Mute");
@@ -240,17 +246,39 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
     "starting a share must announce voice_screenshare(enabled: true)",
   ).toBe(true);
 
-  // Remote side: the peer can watch the real screenshare and actually decodes
-  // its video frames.
+  // Remote side: the share is offered as a tile, not pushed to the peer
+  // (opt-in watching): nothing of it arrives until they watch it.
+  const bobScreen = bob.locator(
+    "[data-testid='video-grid'] .video-cell[data-stream-type='screenshare']",
+  );
+  await expect(bobScreen.locator("[data-tile-control='watch']")).toBeAttached({
+    timeout: 10_000,
+  });
+  await expect(bob.locator("[data-testid='video-grid-slot']")).toBeHidden();
+  expect(await videoBytesOver(bob, 2_000)).toBe(0);
+
+  // The peer watches the real screenshare and actually decodes its video
+  // frames, with the stream's own volume control on the tile.
   const aliceRow = bob.locator(".voice-user-item[data-voice-uid='1']");
   await expect(aliceRow.locator(".vu-live-badge")).toBeVisible({ timeout: 10_000 });
   await aliceRow.click();
   await expect(bob.locator("[data-testid='video-grid-slot']")).toBeVisible({ timeout: 5_000 });
-  const bobScreen = bob.locator(
-    "[data-testid='video-grid'] .video-cell[data-stream-type='screenshare']",
-  );
   await expect(bobScreen).toBeVisible({ timeout: 10_000 });
   await expect(bobScreen.locator(".video-username")).toHaveText("alice (Screen)");
+  await expect(bobScreen.locator(".tile-volume-slider")).toHaveAttribute(
+    "aria-label",
+    "alice stream volume",
+  );
+  await expectDecodedMedia(bob, true);
+
+  // Stop watching unsubscribes: the tile goes back to Watch stream and no
+  // more video arrives; Watch brings it back.
+  await bobScreen.hover();
+  await bobScreen.locator("[data-tile-control='stop']").click();
+  await expect(bobScreen.locator("[data-tile-control='watch']")).toBeVisible();
+  await bob.waitForTimeout(1_500);
+  expect(await videoBytesOver(bob, 2_000)).toBe(0);
+  await bobScreen.locator("[data-tile-control='watch']").click();
   await expectDecodedMedia(bob, true);
 
   // Stop: UI clears, the announcement goes out, and every tile/stream is gone.

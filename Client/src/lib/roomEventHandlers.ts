@@ -67,7 +67,12 @@ export function setJoinedVoiceStatus(room: import("livekit-client").Room): void 
 
 // --- Callback types ---
 
-type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;
+/** A null stream: published but not watched, a tile with a Watch button. */
+type RemoteVideoCallback = (
+  userId: number,
+  stream: MediaStream | null,
+  isScreenshare: boolean,
+) => void;
 type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean) => void;
 
 // --- Dependencies passed from LiveKitSession ---
@@ -79,6 +84,8 @@ export interface RoomEventDeps {
   getAudioElements: () => AudioElements;
   getOnRemoteVideoCallback: () => RemoteVideoCallback | null;
   getOnRemoteVideoRemovedCallback: () => RemoteVideoRemovedCallback | null;
+  /** The viewer chose to watch this user's camera or screen share. */
+  isWatched: (userId: number, isScreenshare: boolean) => boolean;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
   isReconnecting: () => boolean;
@@ -118,6 +125,16 @@ export interface RoomEventHandlers {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ) => void;
+  readonly handleTrackPublished: (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => void;
+  readonly handleTrackUnpublished: (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => void;
+  /** The room joined: the participants already in it publish no TrackPublished. */
+  readonly handleConnected: (room: import("livekit-client").Room) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
@@ -246,12 +263,24 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
+      if (
+        publication.source === Track.Source.ScreenShareAudio &&
+        userId > 0 &&
+        !deps.isWatched(userId, true)
+      ) {
+        publication.setSubscribed(false);
+        return;
+      }
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       const cb = deps.getOnRemoteVideoCallback();
+      const isScreenshare = publication.source === Track.Source.ScreenShare;
+      if (userId > 0 && !deps.isWatched(userId, isScreenshare)) {
+        publication.setSubscribed(false);
+        return;
+      }
       if (userId > 0 && cb !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
-        const isScreenshare = publication.source === Track.Source.ScreenShare;
         cb(userId, stream, isScreenshare);
       }
       log.debug("Remote video track subscribed", { userId, trackSid: track.sid });
@@ -269,8 +298,51 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     } else if (track.kind === Track.Kind.Video) {
       track.detach();
       const isScreenshare = publication.source === Track.Source.ScreenShare;
-      if (userId > 0) deps.getOnRemoteVideoRemovedCallback()?.(userId, isScreenshare);
+      // Still published: its tile goes back to Watch (handleTrackUnpublished removes it).
+      if (userId > 0) deps.getOnRemoteVideoCallback()?.(userId, null, isScreenshare);
       log.debug("Remote video track unsubscribed", { userId, trackSid: track.sid });
+    }
+  };
+
+  /** Opt-in watching: the room connects without auto-subscribe, so this is
+   *  what subscribes. A voice plays unless deafened; a camera or a screen
+   *  share (and its audio) only once the viewer watches it, and until then
+   *  its tile offers Watch. */
+  const handleTrackPublished = (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ): void => {
+    const userId = parseUserId(participant.identity);
+    const isVideo = publication.kind === Track.Kind.Video;
+    if (!isVideo && publication.source !== Track.Source.ScreenShareAudio) {
+      publication.setSubscribed(!voiceStore.getState().localDeafened);
+      return;
+    }
+    const isScreenshare = publication.source !== Track.Source.Camera;
+    const watched = userId > 0 && deps.isWatched(userId, isScreenshare);
+    publication.setSubscribed(watched);
+    if (isVideo && !watched && userId > 0) {
+      deps.getOnRemoteVideoCallback()?.(userId, null, isScreenshare);
+    }
+  };
+
+  const handleTrackUnpublished = (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ): void => {
+    const userId = parseUserId(participant.identity);
+    if (publication.kind !== Track.Kind.Video || userId <= 0) return;
+    deps.getOnRemoteVideoRemovedCallback()?.(
+      userId,
+      publication.source === Track.Source.ScreenShare,
+    );
+  };
+
+  const handleConnected = (room: import("livekit-client").Room): void => {
+    for (const participant of room.remoteParticipants.values()) {
+      for (const publication of participant.trackPublications.values()) {
+        handleTrackPublished(publication, participant);
+      }
     }
   };
 
@@ -469,6 +541,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleLocalTrackPublished,
     handleTrackSubscribed,
     handleTrackUnsubscribed,
+    handleTrackPublished,
+    handleTrackUnpublished,
+    handleConnected,
     handleActiveSpeakersChanged,
     handleAudioPlaybackChanged,
     handleDisconnected,

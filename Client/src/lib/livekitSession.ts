@@ -270,7 +270,8 @@ export class LiveKitSession {
     reapplyMuteGain: () => this.reapplyMuteGain(),
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
-    leaveVoice: (sendWs) => this.leaveVoice(sendWs),
+    leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),
+    sweepPublications: (room) => this.sweepPublications(room),
     handleVoiceTokenRefresh: (token) => this.handleVoiceTokenRefresh(token),
     connectAndSetup: (t, u, c, d, k) => this.connectAndSetup(t, u, c, d, k),
   });
@@ -351,6 +352,8 @@ export class LiveKitSession {
       getAudioElements: () => this._audioElements,
       getOnRemoteVideoCallback: () => this.onRemoteVideoCallback,
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
+      isWatched: (userId, isScreenshare) =>
+        this._remoteTracks.isWatched(userId, isScreenshare ? "screenshare" : "camera"),
       getOnErrorCallback: () => this.onErrorCallback,
       isConnecting: () => this._connecting,
       isReconnecting: () => this._state.type === "reconnecting",
@@ -478,12 +481,13 @@ export class LiveKitSession {
           : "released";
       },
       rejoinVoice: () => {
-        this.leaveVoice(false);
+        this.leaveVoice(false, true);
         this._rejoinPending = true;
         setVoiceStatus("joining");
         this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
+      sweepPublications: (room) => this.sweepPublications(room),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
       disconnectSupersededLocalRoom: (room) => this._join.disconnectSupersededLocalRoom(room),
@@ -755,8 +759,14 @@ export class LiveKitSession {
     return this._media.retryMicPermission();
   }
 
-  leaveVoice(sendWs = true): void {
+  private sweepPublications(room: Room): void {
+    this._eventHandlers.handleConnected(room);
+    this._remoteTracks.dropUnpublishedWatches();
+  }
+
+  leaveVoice(sendWs = true, keepWatched = false): void {
     this._rejoinPending = false;
+    if (!keepWatched) this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }
 
@@ -901,6 +911,11 @@ export class LiveKitSession {
     this._remoteTracks.setRemoteVideoView(userId, type, view);
   }
 
+  /** Watch a remote camera or screen share, or stop: opt-in watching. */
+  setRemoteVideoWatched(userId: number, type: "camera" | "screenshare", on: boolean): void {
+    this._remoteTracks.watch(userId, type, on);
+  }
+
   getRoom(): Room | null {
     return this._room;
   }
@@ -995,6 +1010,7 @@ export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
+export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
