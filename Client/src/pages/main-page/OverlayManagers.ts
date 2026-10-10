@@ -22,7 +22,7 @@ import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { formatInviteLink } from "@lib/deep-link";
 import { shellText } from "../../i18n/shell";
-import { dialogOpen } from "./GlobalKeybinds";
+import { dialogOpen } from "@lib/dialogOpen";
 
 const log = createLogger("overlays");
 
