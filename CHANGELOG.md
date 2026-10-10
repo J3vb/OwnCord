@@ -59,6 +59,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Voice**
+
+- With enhanced noise suppression on, joining voice no longer downloads the noise model every time; it is fetched once and reused for later joins.
+
 **Messages & files**
 
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
