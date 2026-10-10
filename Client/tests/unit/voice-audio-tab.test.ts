@@ -364,18 +364,15 @@ describe("VoiceAudioTab UI structure", () => {
     ]);
     emitDeviceChange();
 
-    // The saved device is gone: the selection falls back to Default, which
-    // the call now captures, and the saved pick stays listed as disconnected
-    // and not pickable so it is not silently forgotten (DP-31).
+    // The saved device is gone: it stays the selection, marked disconnected
+    // and not pickable, rather than silently reading as Default (DP-31).
     await vi.waitFor(() => {
       const values = Array.from(inputSelect.querySelectorAll("option")).map((o) => o.value);
       expect(values).toEqual(["", "mic-2", "mic-1"]);
     });
-    expect(inputSelect.value).toBe("");
-    const gone = inputSelect.querySelector<HTMLOptionElement>('option[value="mic-1"]')!;
-    expect(gone.textContent).toBe("Mic 1 (disconnected)");
-    expect(gone.disabled).toBe(true);
-    expect(localStorage.getItem("owncord:settings:audioInputDevice")).toBe(JSON.stringify("mic-1"));
+    expect(inputSelect.value).toBe("mic-1");
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1 (disconnected)");
+    expect(inputSelect.selectedOptions[0]!.disabled).toBe(true);
 
     // Plugged back in: the entry is an ordinary one again.
     nav.setDevices([
@@ -400,12 +397,10 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const inputSelect = el.querySelectorAll("select")[0]!;
-    await vi.waitFor(() =>
-      expect(inputSelect.querySelector('option[value="abcdef0123456789"]')?.textContent).toBe(
-        "Microphone (abcdef01) (disconnected)",
-      ),
+    await vi.waitFor(() => expect(inputSelect.value).toBe("abcdef0123456789"));
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe(
+      "Microphone (abcdef01) (disconnected)",
     );
-    expect(inputSelect.value).toBe("");
     ac.abort();
   });
 

@@ -15,14 +15,29 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 use webview2_com::SetPermissionStateCompletedHandler;
 use windows_core::{Interface, HSTRING};
 
-/// Allow microphone and camera for the window's own origin in its profile.
-pub fn allow_media_capture<R: Runtime>(window: &WebviewWindow<R>) {
-    let origin = match window.url() {
-        Ok(url) => url.origin().ascii_serialization(),
-        Err(e) => {
-            log::warn!("windows_media: no window URL, device names stay hidden: {e}");
-            return;
-        }
+/// The origin tauri serves the main window from: the dev server in dev, the
+/// custom-protocol host in a release build. Taken from config rather than
+/// `window.url()`, which reads `about:blank` until the first navigation commits.
+fn app_origin(config: &tauri::Config, https: bool) -> Option<String> {
+    let url = if tauri::is_dev() {
+        config.build.dev_url.clone()?
+    } else {
+        let scheme = if https { "https" } else { "http" };
+        url::Url::parse(&format!("{scheme}://tauri.localhost")).ok()?
+    };
+    let origin = url.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
+}
+
+/// Allow microphone and camera for the app's own origin in the window's profile.
+pub fn allow_media_capture<R: Runtime>(
+    window: &WebviewWindow<R>,
+    config: &tauri::Config,
+    https: bool,
+) {
+    let Some(origin) = app_origin(config, https) else {
+        log::warn!("windows_media: no app origin, device names stay hidden");
+        return;
     };
     let result = window.with_webview(move |webview| {
         // SAFETY: COM calls on the live controller, on the webview's own thread.

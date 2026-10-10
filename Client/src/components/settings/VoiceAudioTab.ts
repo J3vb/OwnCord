@@ -538,10 +538,9 @@ function buildVoiceAudioTabInner(
    * Called on build and again on every `devicechange`, so unplugging a headset
    * with the panel open removes it from the list instead of leaving a dead
    * entry the user can select. A saved microphone or speaker that has vanished
-   * reads as "Default", which the call falls back to, and stays listed as a
-   * disabled "(disconnected)" entry: the voice session keeps it saved and
-   * switches back to it when it returns (DP-31). A vanished camera reads as
-   * "Default".
+   * stays the selection as a disabled "(disconnected)" entry: the voice
+   * session keeps it too and switches back to it when it returns (DP-31). A
+   * vanished camera reads as "Default".
    */
   async function populateDevices(): Promise<void> {
     const selects: Array<[HTMLSelectElement, MediaDeviceKind, string, string]> = [
@@ -588,7 +587,8 @@ function buildVoiceAudioTabInner(
           deviceLabels.set(d.deviceId, name);
           select.appendChild(createElement("option", { value: d.deviceId }, name));
         }
-        if (saved !== "" && !savedStillPresent && kind !== "videoinput") {
+        const keepSaved = savedStillPresent || kind !== "videoinput";
+        if (saved !== "" && !savedStillPresent && keepSaved) {
           const device = deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
           select.appendChild(
             hidden
@@ -600,7 +600,7 @@ function buildVoiceAudioTabInner(
                 ),
           );
         }
-        select.value = savedStillPresent || (hidden && kind !== "videoinput") ? saved : "";
+        select.value = keepSaved ? saved : "";
       }
       // "Default" is a preference; name the device the call really captures,
       // which can lag the system default after an unplug and replug. Only a

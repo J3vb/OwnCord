@@ -300,7 +300,7 @@ pub fn run() {
                 let window = builder.build()?;
                 // WebView2 hides device names until mic/camera are allowed.
                 #[cfg(windows)]
-                windows_media::allow_media_capture(&window);
+                windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if matches!(event, tauri::WindowEvent::Destroyed) {
