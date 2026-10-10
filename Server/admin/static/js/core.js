@@ -574,7 +574,7 @@ function noteBadgeSource(path,data){
   let v;
   const firstPage=/^\/registrations\?limit=\d+&offset=0$/.test(path);
   if((path==='/registrations'||firstPage)&&Array.isArray(data))v=['pending',(firstPage?data.length>REGISTRATIONS_PAGE:data.length>=REGISTRATIONS_PAGE)?REGISTRATIONS_PAGE+'+':data.length];
-  else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at).length];
+  else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at&&!isDismissed('attn:'+w.id,attnSig(w))).length];
   else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
   if(!v||state.badges[v[0]]===v[1])return;
   state.badges[v[0]]=v[1];
@@ -613,6 +613,29 @@ function navigateTo(id){
 }
 
 function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}clearLogLevelTimer();state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');resetShell();showOverlay('loginOverlay')}
+
+/* ═══ Dismissable notices ═══ */
+/* A dashboard notice (a warning card, the update strip) can be dismissed. The
+   panel has no per-admin preferences store, so this lives in localStorage,
+   keyed by admin id, noticeId -> a hash of what the notice says; it stays hidden
+   until that text changes. Blocking banners (restart pending) never use it. */
+const DISMISS_KEY='admin_dismissed';
+function noticeSig(...parts){let h=5381;const t=parts.join('\u241f');for(let i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))|0;return String(h>>>0)}
+function dismissStore(){try{return JSON.parse(localStorage.getItem(DISMISS_KEY)||'{}')||{}}catch(e){return{}}}
+function dismissedFor(){const m=dismissStore()[state.me&&state.me.id];return m&&typeof m==='object'?m:{}}
+function isDismissed(id,sig){return dismissedFor()[id]===sig}
+function dismissNotice(id,sig){
+  const all=dismissStore(),uid=state.me&&state.me.id;if(uid===undefined||uid===null)return;
+  all[uid]=Object.assign(dismissedFor(),{[id]:sig});
+  try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* storage unavailable: the dismiss does not stick */}
+  renderContent();
+}
+function restoreDismissed(){
+  const all=dismissStore();delete all[state.me&&state.me.id];
+  try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* nothing was stored */}
+  renderContent();
+}
+function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-label="Dismiss '+esc(what)+'" title="Dismiss" data-action="dismissNotice" data-args="'+actArgs(id,sig)+'">&times;</button>'}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
@@ -658,7 +681,7 @@ function delegateActions(type,attr){
 delegateActions('click','data-action');
 delegateActions('input','data-input-action');
 delegateActions('change','data-change-action');
-Object.assign(ACTIONS,{closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,
+Object.assign(ACTIONS,{closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,dismissNotice,restoreDismissed,
   closeNav(){closeNav()},
   toggleUserMenu(){if(isUserMenuOpen())closeUserMenu(true);else openUserMenu()},
   closeModalAndRefresh(){if(dismissModal())renderContent()},

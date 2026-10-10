@@ -3468,8 +3468,9 @@ Nothing here is exported off the host.
   and `delivery` raise at the floor; samples above the floor are not learned.
 - A warning's `id` is its signal's id. A signal that keeps failing updates
   `last_observed`. One that recovers gets `recovered_at` and is listed for 24
-  hours; if it fails again in that window, the same entry reopens and
-  `occurrences` increments. Active warnings are listed first, critical before
+  hours; if it fails again in that window, the same entry reopens,
+  `first_observed` resets to when it fired again, and `occurrences`
+  increments. Active warnings are listed first, critical before
   warning. The state is in memory, so a restart resets warning history;
   active problems re-raise within the next sample intervals, about two
   minutes (a rate needs a first sample plus two sustained ones).

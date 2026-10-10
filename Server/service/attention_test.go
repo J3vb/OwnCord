@@ -376,8 +376,8 @@ func TestAttention_WarningsAreDeduplicated(t *testing.T) {
 		}
 	}
 	w := warning(rep, "delivery")
-	if n != 1 || w.Occurrences != 2 || w.RecoveredAt != nil || !w.FirstObserved.Equal(firstAt) {
-		t.Fatalf("recurrence = %d entries, %+v; want one reopened entry with two occurrences", n, w)
+	if n != 1 || w.Occurrences != 2 || w.RecoveredAt != nil || !w.FirstObserved.After(firstAt) || !w.FirstObserved.Equal(w.LastObserved) {
+		t.Fatalf("recurrence = %d entries, %+v; want one reopened entry with two occurrences and a fresh first_observed", n, w)
 	}
 }
 
