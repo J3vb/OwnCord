@@ -28,6 +28,7 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
+import { createAvatarElement } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
@@ -354,10 +355,12 @@ function renderVoiceChannelItem(
       const member = membersStore.getState().members.get(user.userId);
       const resolved = member !== undefined ? memberDisplayName(member) : user.username;
 
-      const initial = resolved.length > 0 ? resolved.charAt(0).toUpperCase() : "?";
-      const avatar = createElement("div", { class: "vu-avatar" }, initial);
-      avatar.style.background = pickAvatarColor(resolved);
-      row.appendChild(avatar);
+      row.appendChild(
+        createAvatarElement(
+          { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
+          { className: "vu-avatar", background: pickAvatarColor(resolved) },
+        ),
+      );
 
       const label = resolved || shellText("common.unknown");
       const nameEl = createElement("span", { class: "vu-name" }, label);

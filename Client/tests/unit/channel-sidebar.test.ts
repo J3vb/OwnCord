@@ -29,6 +29,15 @@ vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
   };
 });
 
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
+});
+
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
   addChannel,
@@ -874,9 +883,7 @@ describe("ChannelSidebar", () => {
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
     sidebar.mount(container);
 
-    const btn = container.querySelector(
-      "[data-testid='create-channel-empty']",
-    ) as HTMLButtonElement | null;
+    const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
     expect(onCreateChannel).toHaveBeenCalledWith("");
@@ -1049,6 +1056,74 @@ describe("ChannelSidebar", () => {
     expect(avatar!.textContent).toBe("Z");
     // Avatar should have a background color set
     expect((avatar as HTMLElement).style.background).not.toBe("");
+  });
+
+  it("renders the member's profile picture in the voice row, keeping the speaking class", async () => {
+    setChannels(testChannels);
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          72,
+          {
+            id: 72,
+            username: "Pic",
+            avatar: "/api/v1/files/pic",
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 72,
+      username: "Pic",
+      muted: false,
+      deafened: false,
+      speaking: true,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const row = container.querySelector(".voice-user-item")!;
+    expect(row.classList.contains("speaking")).toBe(true);
+    const avatar = row.querySelector<HTMLElement>(".vu-avatar")!;
+    await vi.waitFor(() => {
+      expect(avatar.querySelector<HTMLImageElement>(".avatar-img")?.getAttribute("src")).toBe(
+        "data:image/png;base64,AAAA",
+      );
+    });
+    expect(avatar.querySelector(".avatar-initial")).toBeNull();
+  });
+
+  it("keeps the initial for a voice user whose member has no avatar", () => {
+    setChannels(testChannels);
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          73,
+          { id: 73, username: "Nopic", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 73,
+      username: "Nopic",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const avatar = container.querySelector(".vu-avatar")!;
+    expect(avatar.querySelector(".avatar-img")).toBeNull();
+    expect(avatar.textContent).toBe("N");
   });
 
   it("shows '?' avatar for user with empty username", () => {
