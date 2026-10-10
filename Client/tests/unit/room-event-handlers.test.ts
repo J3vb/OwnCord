@@ -428,14 +428,52 @@ describe("handleActiveSpeakersChanged", () => {
     expect(users?.get(3)?.speaking).toBe(false);
   });
 
-  it("clears speaking when the list empties", () => {
-    seedVoiceUsers(12, [7]);
-    const h = build();
-    h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+  describe("anti-flicker hold", () => {
+    const speaking = () => voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking;
 
-    h.handlers.handleActiveSpeakersChanged([]);
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    expect(voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking).toBe(false);
+    it("keeps a dropped speaker lit for 200 ms, then clears them", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+
+      h.handlers.handleActiveSpeakersChanged([]);
+      expect(speaking()).toBe(true);
+      vi.advanceTimersByTime(199);
+      expect(speaking()).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(speaking()).toBe(false);
+    });
+
+    it("never goes dark for a speaker who returns within the hold", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      h.handlers.handleActiveSpeakersChanged([]);
+      vi.advanceTimersByTime(100);
+
+      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      vi.advanceTimersByTime(500);
+
+      expect(speaking()).toBe(true);
+    });
+
+    it("drops the pending hold when the session resets", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      h.handlers.handleActiveSpeakersChanged([]);
+
+      h.handlers.resetEncryptionRecovery();
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   it("ignores participants with an unparseable identity", () => {

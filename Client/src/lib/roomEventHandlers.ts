@@ -50,6 +50,8 @@ const SIGNAL_RESUME_BUDGET_MS = 10_000;
  *  goes quiet for most of each minute; only a gap longer than that window
  *  means the frames decrypt again. */
 const DECRYPT_QUIET_MS = 65_000;
+/** A speaker LiveKit drops stays lit this long, so a ring does not blink off between words. */
+const SPEAKER_HOLD_MS = 200;
 
 /** RT-9: the status a room that has just finished joining reports. The key
  *  can arrive over WS after the SFU dropped and livekit-client is already
@@ -177,6 +179,40 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   function resetEncryptionRecovery(): void {
     clearDecryptQuietTimer();
     degradedBy = null;
+    clearSpeakerHold();
+  }
+
+  let liveSpeakers = new Set<number>();
+  const speakerHoldUntil = new Map<number, number>();
+  let speakerHoldTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearSpeakerHold(): void {
+    if (speakerHoldTimer !== null) {
+      clearTimeout(speakerHoldTimer);
+      speakerHoldTimer = null;
+    }
+    speakerHoldUntil.clear();
+    liveSpeakers = new Set();
+  }
+
+  function publishSpeakers(channelId: number): void {
+    const now = Date.now();
+    for (const [userId, until] of speakerHoldUntil) {
+      if (until <= now || liveSpeakers.has(userId)) speakerHoldUntil.delete(userId);
+    }
+    const published = [...new Set([...liveSpeakers, ...speakerHoldUntil.keys()])];
+    published.sort((x, y) => x - y);
+    setSpeakers({ channel_id: channelId, speakers: published });
+    if (speakerHoldTimer !== null) clearTimeout(speakerHoldTimer);
+    speakerHoldTimer = null;
+    if (speakerHoldUntil.size === 0) return;
+    speakerHoldTimer = setTimeout(
+      () => {
+        speakerHoldTimer = null;
+        publishSpeakers(channelId);
+      },
+      Math.min(...speakerHoldUntil.values()) - now,
+    );
   }
 
   function removeAutoplayUnlock(): void {
@@ -241,13 +277,19 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   const handleActiveSpeakersChanged = (speakers: Participant[]): void => {
     const channelId = deps.getCurrentChannelId();
     if (channelId === null) return;
-    const speakerIds: number[] = [];
+    const live = new Set<number>();
     for (const speaker of speakers) {
       const userId = parseUserId(speaker.identity);
-      if (userId > 0) speakerIds.push(userId);
+      if (userId > 0) live.add(userId);
     }
-    speakerIds.sort((x, y) => x - y);
-    setSpeakers({ channel_id: channelId, speakers: speakerIds });
+    const now = Date.now();
+    for (const userId of liveSpeakers) {
+      if (!live.has(userId) && !speakerHoldUntil.has(userId)) {
+        speakerHoldUntil.set(userId, now + SPEAKER_HOLD_MS);
+      }
+    }
+    liveSpeakers = live;
+    publishSpeakers(channelId);
   };
 
   const handleAudioPlaybackChanged = (): void => {

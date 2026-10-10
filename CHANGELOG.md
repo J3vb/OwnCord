@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Voice**
+
+- Your own avatar in the user panel at the bottom left now shows the green speaking ring while you talk in voice, as voice-channel members do; it stays off while you are muted, deafened or not holding push-to-talk.
+
 ### Fixed
 
 **Desktop UI**
@@ -83,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- Speaking rings now light about as the voice is heard, instead of 120-140 ms later, and no longer blink off between words. A hand-managed livekit.yaml should copy the new audio block from livekit.yaml.example (update_interval 100).
 - With enhanced noise suppression on, joining voice no longer downloads the noise model every time; it is fetched once and reused for later joins.
 
 **Messages & files**

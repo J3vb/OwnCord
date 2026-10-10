@@ -22,6 +22,14 @@
   color: var(--on-fill);
   cursor: pointer;
 }
+/* The same speaking ring as a voice-channel row (sidebar.css), while the
+   user talks in voice. */
+.user-bar .ub-avatar.speaking {
+  box-shadow:
+    0 0 0 2px var(--green),
+    0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
+  animation: speak-pulse 1.5s ease-in-out infinite;
+}
 /* The status picker's own trigger dot now lives here instead of a separate
    static dot — same corner, but it's the real thing: colored per status and
    clickable to open the picker. Sizing/border override lives with the rest

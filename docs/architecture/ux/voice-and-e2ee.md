@@ -117,7 +117,7 @@ the accepted cost.
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                 |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
-| speaking       | Green ring on the speaking user's tile/avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers)                                                                                                               |
+| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers)                                                                            |
 
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a

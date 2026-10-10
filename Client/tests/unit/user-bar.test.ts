@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 import { createUserBar } from "@components/UserBar";
+import {
+  voiceStore,
+  resetVoiceStore,
+  setVoiceStates,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  setLocalGateSpeaking,
+  setLocalMuted,
+  setLocalDeafened,
+  setPttGated,
+} from "@stores/voice.store";
 
 vi.mock("@stores/ui.store", () => ({
   openSettings: vi.fn(),
@@ -229,5 +240,58 @@ describe("UserBar", () => {
     authStore.flush();
 
     expect(container.querySelector(".ub-avatar span")?.textContent).toBe("Z");
+  });
+
+  describe("speaking ring", () => {
+    const ringed = (): boolean =>
+      container.querySelector(".ub-avatar")?.classList.contains("speaking") ?? false;
+    /** Apply a voice-store change and deliver its notification. */
+    const act = (fn: () => void): void => {
+      fn();
+      voiceStore.flush();
+    };
+
+    beforeEach(() => {
+      setAuthState({ username: "alice" }, true);
+      setVoiceStates([{ channel_id: 10, user_id: 1, muted: false, deafened: false }]);
+      joinVoiceChannel(10);
+      comp = createUserBar();
+      comp.mount(container);
+    });
+
+    afterEach(() => {
+      setLocalGateSpeaking(null);
+      resetVoiceStore();
+      voiceStore.flush();
+    });
+
+    it("rings the avatar while the local user speaks in voice", () => {
+      expect(ringed()).toBe(false);
+      act(() => setLocalGateSpeaking(true));
+      expect(ringed()).toBe(true);
+      act(() => setLocalGateSpeaking(false));
+      expect(ringed()).toBe(false);
+    });
+
+    it("drops the ring when the user mutes, deafens or releases push-to-talk", () => {
+      act(() => setLocalGateSpeaking(true));
+      act(() => setLocalMuted(true));
+      expect(ringed()).toBe(false);
+      act(() => setLocalMuted(false));
+      expect(ringed()).toBe(true);
+      act(() => setLocalDeafened(true));
+      expect(ringed()).toBe(false);
+      act(() => setLocalDeafened(false));
+      act(() => setPttGated(true));
+      expect(ringed()).toBe(false);
+      act(() => setPttGated(false));
+      expect(ringed()).toBe(true);
+    });
+
+    it("drops the ring on leaving voice", () => {
+      act(() => setLocalGateSpeaking(true));
+      act(() => leaveVoiceChannel());
+      expect(ringed()).toBe(false);
+    });
   });
 });
