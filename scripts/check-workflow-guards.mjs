@@ -18,6 +18,9 @@
 // cost is that these checks are about presence and shape, not semantics — which
 // is the honest limit of what a regression test can claim here.
 //
+// Known limits: text-level, written for one workflow file. It assumes 2-space job
+// indentation and a job-level `if:`, and does not parse YAML edge cases beyond that.
+//
 // Scope: workflows that reference a metered secret. Add one to METERED below
 // when a new workflow starts spending. Separately, every workflow is checked
 // for a reference to the updater signing key, which only release.yml may hold.
@@ -40,7 +43,7 @@ const METERED = [".github/workflows/claude.yml"];
 const gatedJobs = (src) =>
   (src.split(/^jobs:\s*$/m)[1] ?? "")
     .split(/^(?=  (?:[\w-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$)/m)
-    .filter((job) => /github\.actor/.test(job));
+    .filter((job) => /github\.actor/.test(job.match(/^ {4}if:.*\n(?: {5,}.*\n?)*/m)?.[0] ?? ""));
 
 // The indented body of a gated job's own `concurrency:` mapping, so a `group` or
 // `cancel-in-progress` key elsewhere in the job (an env, a step) cannot satisfy it.

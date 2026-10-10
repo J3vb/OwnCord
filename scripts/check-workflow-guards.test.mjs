@@ -75,6 +75,15 @@ test("a gated job header with a trailing comment or quoted key still splits", ()
   }
 });
 
+test("a helper job that mentions github.actor outside its if is not gated", () => {
+  const helper = (body) => `\n  helper:\n    runs-on: ubuntu-latest\n${body}`;
+  assert.equal(auditWorkflow(good + helper("    env:\n      A: ${{ github.actor }}")).length, 0);
+  assert.equal(
+    auditWorkflow(good + helper("    steps:\n      - run: echo ${{ github.actor }}")).length,
+    0,
+  );
+});
+
 test("cancel-in-progress: false is caught", () => {
   assert.ok(
     missing(good.replace("  cancel-in-progress: true", "  cancel-in-progress: false")).includes(
