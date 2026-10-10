@@ -433,6 +433,7 @@ func (s *AttentionService) settle(sig AttentionSignal, title, action string) {
 		}
 		if w.Occurrences == 0 || w.RecoveredAt != nil {
 			w.Occurrences++
+			w.FirstObserved = now
 		}
 		w.Severity, w.Title, w.Detail, w.Action = sig.Status, title, detail, action
 		w.LastObserved, w.RecoveredAt = now, nil
