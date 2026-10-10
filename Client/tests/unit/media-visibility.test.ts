@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as mediaVisibility from "../../src/lib/media-visibility";
 import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/media-visibility";
+
+// Resolved off the namespace so a missing export fails the assertion, not the import.
+const discardMedia = (mediaVisibility as Record<string, unknown>).discardMedia as (
+  img: HTMLImageElement,
+) => void;
 
 // Mock IntersectionObserver
 let observerCallback: IntersectionObserverCallback;
@@ -264,6 +270,50 @@ describe("media-visibility", () => {
     pauseAllMedia();
     // Should not throw
     expect(img.src).toBe("data:image/png;base64,frozen");
+    cleanup();
+  });
+
+  it("discardMedia stops observing a frozen GIF without reloading it", () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg("https://example.com/cat.gif");
+    const wrap = createWrapper();
+    observeMedia(img, "https://example.com/cat.gif", wrap);
+    fireIntersection([{ target: img, isIntersecting: false }]);
+    expect(img.src.startsWith("data:")).toBe(true);
+
+    discardMedia(img);
+    expect(unobserveMock).toHaveBeenCalledWith(img);
+    expect(img.src).toBe("data:image/png;base64,frozen");
+
+    unobserveMock.mockClear();
+    discardMedia(img);
+    expect(unobserveMock).not.toHaveBeenCalled();
+    expect(img.src).toBe("data:image/png;base64,frozen");
+    cleanup();
+  });
+
+  it("discardMedia clears a pending auto-timer", () => {
+    const img = createFakeImg("https://example.com/cat.gif");
+    const wrap = createWrapper();
+    observeMedia(img, "https://example.com/cat.gif", wrap);
+    discardMedia(img);
+    const cleanup = setupCanvasMocks();
+    vi.advanceTimersByTime(15_000);
+    const canvas = document.createElement("canvas");
+    expect(canvas.toDataURL).not.toHaveBeenCalled();
+    expect(img.src).toBe("https://example.com/cat.gif");
+    cleanup();
+  });
+
+  it("pauseAllMedia after discard does not touch the discarded image", () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg("https://example.com/cat.gif");
+    const wrap = createWrapper();
+    observeMedia(img, "https://example.com/cat.gif", wrap);
+    discardMedia(img);
+    pauseAllMedia();
+    expect(img.src).toBe("https://example.com/cat.gif");
+    expect(wrap.classList.contains("gif-paused")).toBe(false);
     cleanup();
   });
 });
