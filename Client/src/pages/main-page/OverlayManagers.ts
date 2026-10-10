@@ -21,7 +21,7 @@ import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { shellText } from "../../i18n/shell";
-import { dialogOpen } from "./GlobalKeybinds";
+import { dialogOpen } from "@lib/dialogOpen";
 
 const log = createLogger("overlays");
 
