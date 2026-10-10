@@ -236,7 +236,7 @@ Peer identity state lives in `voice.store` (per-participant
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)                                                          | Interaction                               |
+| State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
 | `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
@@ -251,8 +251,8 @@ at warn, and a warning toast naming the peer stays until dismissed
 for the rest of the call. `mismatch` is now only a pinned peer whose key is no
 longer delivered, or an announce that fails verification.
 
-The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
-opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so
+The mismatch modal (`createIdentityMismatchModal()`, `components/IdentityMismatchModal.ts`;
+opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust New Key" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
 was displayed, not a fresh store read, so a malicious server cannot swap the

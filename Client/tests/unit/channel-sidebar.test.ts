@@ -2444,7 +2444,7 @@ describe("ChannelSidebar voice identity badge", () => {
       expect(btn).not.toBeNull();
       return btn;
     });
-    expectConsole("warn", /\[ChannelSidebar\] E2EE: could not compute changed-key fingerprint/);
+    expectConsole("warn", /\[peer-verification\] E2EE: could not compute changed-key fingerprint/);
     trustBtn.click();
 
     expect(mockRePinPeerIdentity).not.toHaveBeenCalled();

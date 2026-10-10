@@ -540,6 +540,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     outgoingCall?.start(
       channelId,
       (online.length > 0 ? online : all).map((p) => p.id),
+      // A 1:1 callee shown offline is told at once (D-14). The ring above still
+      // went out: an invisible contact shows offline but can answer.
+      dm?.isGroup === false && online.length === 0,
     );
   }
 
@@ -1078,6 +1081,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
       onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
+      onRingEnd: (ring) => void callAlerts().then((m) => m.clearIncomingCall(ring)),
     });
     callBanner = createIncomingCallBanner({
       onAccept: () => acceptRing(false),
@@ -1114,7 +1118,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             const text =
               state.phase === "declined"
                 ? dmCallText("declinedStatus", { name })
-                : dmCallText("noAnswerStatus");
+                : state.phase === "offline"
+                  ? dmCallText("offline", { name })
+                  : dmCallText("noAnswerStatus");
             showToast(text, "info", 6000);
           }
         }

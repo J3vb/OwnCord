@@ -44,6 +44,8 @@ export interface RingControllerOptions {
   /** The ring ended with nobody answering (DP-24): the timeout, or the ringer
    *  hanging up first (D-07). An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
+  /** The ring ended, however it ended; reported before `onMissed` (D-13). */
+  readonly onRingEnd?: (state: RingState) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
@@ -82,9 +84,11 @@ export function createRingController(opts: RingControllerOptions): RingControlle
       timer = null;
     }
     if (state === null) return;
+    const ended = state;
     state = null;
     opts.onChime(false);
     opts.onRingStateChange(null);
+    opts.onRingEnd?.(ended);
   }
 
   function incoming(next: RingState): void {
@@ -145,6 +149,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
  *
  *      (none) --start--> ringing --every callee declined--> declined
  *                                --30s, nobody joined-----> no-answer
+ *      (none) --start, 1:1 callee offline--> offline        no window, no ringback
  *      any    --clear--> (none)   someone joined, or the caller left
  *
  * The server holds no call record, so the caller's only signals are the
@@ -153,7 +158,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
  * A declined or unanswered call leaves the caller in the room (Ring again),
  * so `clear` is the only way back to (none).
  */
-export type OutgoingCallPhase = "ringing" | "declined" | "no-answer";
+export type OutgoingCallPhase = "ringing" | "declined" | "no-answer" | "offline";
 
 export interface OutgoingCallState {
   readonly channelId: number;
@@ -173,8 +178,10 @@ export interface OutgoingCallOptions {
 }
 
 export interface OutgoingCall {
-  /** A ring went out (or went out again) to these callees. */
-  readonly start: (channelId: number, calleeIds: readonly number[]) => void;
+  /** A ring went out (or went out again) to these callees. `offline`: the
+   *  1:1 callee shows as offline, so say so at once rather than ring back for
+   *  the whole window (D-14). */
+  readonly start: (channelId: number, calleeIds: readonly number[], offline?: boolean) => void;
   /** A callee's call_declined arrived. Ignored for any other channel. */
   readonly declined: (channelId: number, userId: number) => void;
   /** Someone joined, or the caller left: the ring is over. */
@@ -209,8 +216,12 @@ export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
     opts.onChange(next);
   }
 
-  function start(channelId: number, calleeIds: readonly number[]): void {
+  function start(channelId: number, calleeIds: readonly number[], offline = false): void {
     stopTimer();
+    if (offline) {
+      set({ channelId, phase: "offline", pending: [...calleeIds] });
+      return;
+    }
     timer = setTimer(() => {
       timer = null;
       if (state?.phase === "ringing") set({ ...state, phase: "no-answer" });
