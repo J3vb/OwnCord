@@ -816,9 +816,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (live.textContent !== text) setText(live, text);
   }
 
-  /** A peer's identity shield, as in the channel roster (D-09): redrawn only
-   *  when their verification changes. A blocked peer's is a button that opens
-   *  the re-trust prompt, since nothing else says why they cannot be heard. */
+  /** Where focus goes when the focused shield is replaced: the new shield, else the avatar. */
   function focusFallback(userId: number): HTMLElement | null {
     const ref = avatars.get(userId);
     const el = ref?.verify ?? ref?.wrap ?? null;
@@ -826,6 +824,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return el;
   }
 
+  /** A peer's identity shield, as in the channel roster (D-09): redrawn only
+   *  when their verification changes. A blocked peer's is a button that opens
+   *  the re-trust prompt, since nothing else says why they cannot be heard. */
   function syncVerify(userId: number, ref: AvatarRef, voice: VoiceState, dm: DmChannel): void {
     const v = voice.peerVerifications?.get(userId) ?? null;
     const key =

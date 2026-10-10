@@ -18,9 +18,6 @@ import { dmCallText } from "../../i18n/dmCall";
 
 const log = createLogger("call-alerts");
 
-/** The channel whose ring notification is up, so only a shown one is withdrawn. */
-let shownRing: number | null = null;
-
 /**
  * The OS popup for `ring`. DND promises no desktop notifications (OC-0037),
  * and while the window is focused the banner is already on screen, so neither
@@ -29,7 +26,6 @@ let shownRing: number | null = null;
 function popup(title: string, ring: RingState, ringing: boolean): void {
   if (loadUserStatus() === "dnd" || !loadPref<boolean>("desktopNotifications", true)) return;
   if (document.hasFocus()) return;
-  if (ringing) shownRing = ring.channelId;
   desktop.notifier
     .showCall(
       title,
@@ -67,8 +63,6 @@ export function alertMissedCall(ring: RingState): void {
 /** The ring ended, however it ended: withdraw its notification, which would
  *  otherwise sit in the notification centre offering a call that is over (D-13). */
 export function clearIncomingCall(ring: RingState): void {
-  if (shownRing !== ring.channelId) return;
-  shownRing = null;
   desktop.notifier
     .clearCall(ring.channelId)
     .catch((err: unknown) => log.debug("Call notification not withdrawn", err));

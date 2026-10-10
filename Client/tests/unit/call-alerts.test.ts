@@ -105,16 +105,9 @@ describe("an incoming call", () => {
   });
 
   // D-13: the ring's toast must not outlive the ring in the notification centre.
-  it("withdraws the ring's notification when the ring ends, and only one that was shown", () => {
-    alertIncomingCall(ring);
-    clearIncomingCall(ring);
+  it("withdraws the ring's notification when the ring ends", () => {
     clearIncomingCall(ring);
     expect(clearCall.mock.calls).toEqual([[50]]);
-
-    vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    alertIncomingCall(ring);
-    clearIncomingCall(ring);
-    expect(clearCall).toHaveBeenCalledTimes(1);
   });
 
   // The banner is the answer surface while the app is in front of the user;
