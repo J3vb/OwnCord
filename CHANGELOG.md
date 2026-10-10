@@ -69,10 +69,6 @@ and only when it changes something a contributor or fork holder must do
 - After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
 - A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 
-**Linux desktop**
-
-- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
-
 ### Changed
 
 **Voice**
@@ -84,6 +80,10 @@ and only when it changes something a contributor or fork holder must do
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
 - Scrolling a long channel no longer redraws every message on screen each time the view moves; only the rows that come into view are built.
 - Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
+
+**Linux desktop**
+
+- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
 
 ## v2.2.0-beta.2
 
