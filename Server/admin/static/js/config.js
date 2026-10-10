@@ -210,10 +210,6 @@ async function sendConfigPatch(body,headers){
   try{
     const data=await api('PATCH','/config/settings',body,headers);
     state._configPending=null;
-    /* A null removes the override; remember it so a restart after a port or
-       scheme reset can show the config.yaml fallback address. */
-    state._configReset=state._configReset||{};
-    Object.keys(body).forEach(k=>{if(body[k]===null)state._configReset[k]=true;else delete state._configReset[k]});
     closeModal();
     applyConfigResponse(data);
     showToast('Configuration saved — restart to apply');
@@ -301,28 +297,24 @@ async function resetConfigKey(key){
   }
   try{
     const data=await api('PATCH','/config/settings',{[key]:null});
-    state._configReset=state._configReset||{};
-    state._configReset[key]=true;
     applyConfigResponse(data);
     showToast('Setting reset');
   }catch(e){showToast(e.message,'error')}
 }
 
-function discardConfig(){state._configPending=null;state._configReset=null;renderContent()}
+function discardConfig(){state._configPending=null;renderContent()}
 
 /* A port or scheme change moves the panel: the old origin will not answer the
    reload poll, so show the new address instead of waitForRestart. */
 function configMovedAddress(){
   const data=state._configData||{};
   const row=k=>(data.settings||[]).find(s=>s.key===k)||{};
-  const reset=state._configReset||{};
   /* The value after the next restart: a saved override, else the config.yaml
-     fallback when this session removed the override, else the running value. */
+     fallback (which a host-side edit may have moved), else the running value. */
   const post=key=>{
     const r=row(key);
     if(r.override!=null)return r.override;
-    if(reset[key]&&r.fallback!=null)return r.fallback;
-    return r.value;
+    return r.fallback!=null?r.fallback:r.value;
   };
   const port=post('server.port'),mode=post('tls.mode');
   const moved=(row('server.port').value!=null&&port!==row('server.port').value)||
@@ -341,7 +333,7 @@ function configNewAddressHTML(addr){
 const RESTART_HANDOFF={
   container:'The server exits and the container\'s restart policy starts it again. Without a restart policy (restart: unless-stopped) it stays stopped.',
   supervisor:'The server exits and its service manager (systemd or NSSM) starts it again.',
-  spawn:'No process supervisor was detected, so the server starts its own replacement before it exits. If it does not come back, start it on the host.',
+  spawn:'The server starts its own replacement before it exits. If it does not come back, start it on the host.',
   unsupervised:'No process supervisor was detected, but server.restart_mode is supervised: the server exits and stays stopped unless something outside it starts it again.'
 };
 
@@ -349,12 +341,14 @@ const RESTART_HANDOFF={
 function openRestartDialog(){
   const data=state._configData||{};
   const handoff=RESTART_HANDOFF[data.restart_handoff];
+  const unsaved=!!state.configChanged;
   const lead=data.restart_pending?'The server restarts and applies the saved configuration.':'The server restarts.';
   openModal('<div class="modal-header"><h3>Restart the server?</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
     +'<p>'+lead+' Everyone connected, including you, is disconnected for a moment and may need to sign in again.</p>'
+    +(unsaved?'<p class="auth-error" id="restartUnsaved" role="alert" style="display:block">You have unsaved changes on this page. They will not apply on restart: save or discard them first.</p>':'')
     +(handoff?'<p class="setting-desc" style="margin-top:12px">'+esc(handoff)+'</p>':'')
     +'<p class="auth-error" id="restartErr" role="alert"></p></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restartConfirmBtn" data-action="confirmRestart">Restart server</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restartConfirmBtn"'+(unsaved?' disabled':'')+' data-action="confirmRestart">Restart server</button></div>');
 }
 
 async function confirmRestart(){
@@ -364,6 +358,7 @@ async function confirmRestart(){
   lockModal(true);
   try{
     await api('POST','/restart');
+    setConfigChanged(false);
     if(addr)setModalHTML(configNewAddressHTML(addr));
     else{setModalHTML(restartingHTML('Restarting','The server is restarting.'));waitForRestart('restartWait')}
   }catch(e){

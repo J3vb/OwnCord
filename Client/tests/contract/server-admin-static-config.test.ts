@@ -392,10 +392,29 @@ describe("Server/admin/static — Server configuration page", () => {
     expect(doc.getElementById("restartWait")).toBeNull();
   });
 
+  it("blocks the restart while the page has unsaved edits, and drops the leave-site guard once it restarts", async () => {
+    const calls: FetchCall[] = [];
+    const { doc, bridge } = await bootRestart(calls, CONFIG_SETTINGS);
+
+    bridge.state.configChanged = true;
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    expect(modal(doc).textContent).toMatch(/unsaved changes.*will not apply/i);
+    const confirm = doc.getElementById("restartConfirmBtn") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    confirm.click();
+    await fn(bridge.confirmRestart, "confirmRestart")();
+    expect(posted(calls)).toBe(false);
+
+    bridge.state.configChanged = false;
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    expect((doc.getElementById("restartConfirmBtn") as HTMLButtonElement).disabled).toBe(false);
+    expect(modal(doc).textContent).not.toMatch(/unsaved/i);
+  });
+
   it.each([
     ["container", /restart policy/i],
     ["supervisor", /service manager/i],
-    ["spawn", /no process supervisor.*starts its own replacement/i],
+    ["spawn", /starts its own replacement.*start it on the host/i],
     ["unsupervised", /no process supervisor was detected.*stays stopped/i],
   ])("says how the server comes back when the handoff is %s", async (handoff, text) => {
     const calls: FetchCall[] = [];
