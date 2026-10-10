@@ -151,6 +151,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/emoji/{id}/image`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
+| DELETE  | `/api/v1/gif/favorites`                                              |
+| GET     | `/api/v1/gif/favorites`                                              |
+| PUT     | `/api/v1/gif/favorites`                                              |
 | GET     | `/api/v1/gif/search`                                                 |
 | GET     | `/api/v1/gif/trending`                                               |
 | GET     | `/api/v1/health`                                                     |

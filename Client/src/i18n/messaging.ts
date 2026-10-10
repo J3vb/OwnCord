@@ -63,6 +63,13 @@ export const messagingText = defineCatalog("messaging", {
   "gif.loading": "Loading...",
   "gif.empty": "No GIFs found",
   "gif.itemLabel": "GIF",
+  "gif.tabsLabel": "GIF sources",
+  "gif.tabBrowse": "Trending",
+  "gif.tabFavorites": "Favorites",
+  "gif.favoritesEmpty": "No favorites yet. Star a GIF to save it here.",
+  "gif.favorite": "Add to favorites",
+  "gif.unfavorite": "Remove from favorites",
+  "gif.favoriteFailed": "Couldn't update favorites",
 
   "emoji.searchPlaceholder": "Search emoji...",
   "emoji.listLabel": "Emoji",

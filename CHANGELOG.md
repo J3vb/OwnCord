@@ -53,6 +53,9 @@ and only when it changes something a contributor or fork holder must do
 
 - The admin panel's Server configuration page has a **Restart server** button. It and Restart now open one dialog that warns that everyone is briefly disconnected, says how the server comes back (container restart policy, service manager, or its own replacement), then waits and reloads the panel.
 - Dashboard warning cards and the update notice now have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until that problem clears or changes, and a "dismissed, show" link brings them back. The pending-restart banner on the Server config page stays until you restart.
+**Messaging**
+
+- You can now save GIFs as favorites, as in Discord. Star a GIF in the GIF picker or on a GIF in a message, then open the picker's new Favorites tab to send it again (newest first). Favorites are stored on your server, follow you across devices, and are capped at 250. The server needs a restart to apply the update (new database table).
 
 **Voice**
 

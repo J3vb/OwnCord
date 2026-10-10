@@ -7,7 +7,13 @@ import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
-import type { GifApi, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
+import {
+  bindGifFavoritesApi,
+  gifFavoritesStore,
+  isGifFavorite,
+  toggleGifFavorite,
+} from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
   recoverEvictedImage,
@@ -29,7 +35,7 @@ import { messagingText } from "../i18n/messaging";
 
 export interface GifPickerOptions {
   /** GIF endpoints on the user's own server. */
-  readonly api: GifApi;
+  readonly api: GifApi & Partial<GifFavoritesApi>;
   readonly onSelect: (gifUrl: string) => void;
   readonly onClose: () => void;
   /**
@@ -50,6 +56,13 @@ const GIF_LIMIT = 20;
 // ---------------------------------------------------------------------------
 // GifPicker
 // ---------------------------------------------------------------------------
+
+function setStarState(star: HTMLElement, on: boolean): void {
+  star.setAttribute("aria-pressed", String(on));
+  star.setAttribute("aria-label", messagingText(on ? "gif.unfavorite" : "gif.favorite"));
+  star.classList.toggle("on", on);
+  star.textContent = on ? "\u2605" : "\u2606";
+}
 
 export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;
@@ -78,6 +91,38 @@ export function createGifPicker(options: GifPickerOptions): {
   setText(attribution, messagingText("gif.attribution"));
   header.appendChild(attribution);
 
+  // Search/trending vs the user's saved GIFs. Only offered when the API can
+  // save favorites (the composer passes the full client).
+  const favoritesEnabled =
+    options.api.gifFavorites !== undefined &&
+    options.api.addGifFavorite !== undefined &&
+    options.api.removeGifFavorite !== undefined;
+  let showingFavorites = false;
+  const tabBrowse = createElement("button", {
+    type: "button",
+    class: "gp-tab active",
+    role: "tab",
+    "aria-selected": "true",
+  });
+  setText(tabBrowse, messagingText("gif.tabBrowse"));
+  const tabFavorites = createElement("button", {
+    type: "button",
+    class: "gp-tab",
+    role: "tab",
+    "aria-selected": "false",
+  });
+  setText(tabFavorites, messagingText("gif.tabFavorites"));
+  if (favoritesEnabled) {
+    bindGifFavoritesApi(options.api as GifApi & GifFavoritesApi);
+    const tabs = createElement("div", {
+      class: "gp-tabs",
+      role: "tablist",
+      "aria-label": messagingText("gif.tabsLabel"),
+    });
+    tabs.append(tabBrowse, tabFavorites);
+    header.appendChild(tabs);
+  }
+
   root.appendChild(header);
 
   // Grid area (scrollable). Announced as a flat listbox of GIF options with
@@ -103,6 +148,10 @@ export function createGifPicker(options: GifPickerOptions): {
       if (!(target instanceof Element)) return;
       const cell = target.closest<HTMLElement>(".gp-item");
       if (cell === null) return;
+      if (target.closest(".gp-star") !== null) {
+        void toggleCell(cell);
+        return;
+      }
       const fullUrl = cell.dataset.fullUrl;
       if (fullUrl === undefined) return;
       options.onSelect(fullUrl);
@@ -110,6 +159,82 @@ export function createGifPicker(options: GifPickerOptions): {
     },
     { signal },
   );
+
+  /** Star/unstar the GIF a grid cell shows. */
+  async function toggleCell(cell: HTMLElement): Promise<void> {
+    const url = cell.dataset.fullUrl;
+    if (url === undefined) return;
+    const ok = await toggleGifFavorite({
+      url,
+      preview_url: cell.dataset.previewUrl ?? url,
+      title: cell.dataset.title ?? "",
+    });
+    if (!ok && !signal.aborted) {
+      searchInput.setAttribute("title", messagingText("gif.favoriteFailed"));
+    }
+  }
+
+  gridArea.addEventListener(
+    "keydown",
+    (e) => {
+      if (!favoritesEnabled || e.key.toLowerCase() !== "f" || e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+      }
+      const cell = e.target instanceof Element ? e.target.closest<HTMLElement>(".gp-item") : null;
+      if (cell === null) return;
+      e.preventDefault();
+      void toggleCell(cell);
+    },
+    { signal },
+  );
+
+  function syncStars(): void {
+    for (const star of gridArea.querySelectorAll<HTMLButtonElement>(".gp-star")) {
+      const url = star.closest<HTMLElement>(".gp-item")?.dataset.fullUrl;
+      if (url !== undefined) setStarState(star, isGifFavorite(url));
+    }
+  }
+
+  function renderFavorites(): void {
+    const favs = gifFavoritesStore.getState().favorites;
+    if (favs.length === 0) {
+      clearChildren(gridArea);
+      const empty = createElement("div", { class: "gp-empty", role: "status" });
+      setText(empty, messagingText("gif.favoritesEmpty"));
+      gridArea.appendChild(empty);
+      return;
+    }
+    renderGifs(
+      favs.map((f) => ({ id: f.url, title: f.title, url: f.preview_url, fullUrl: f.url })),
+    );
+  }
+
+  function selectTab(favorites: boolean): void {
+    if (showingFavorites === favorites) return;
+    showingFavorites = favorites;
+    for (const [tab, on] of [
+      [tabBrowse, !favorites],
+      [tabFavorites, favorites],
+    ] as const) {
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", String(on));
+    }
+    searchInput.hidden = favorites;
+    ++currentRequestId; // drop any in-flight search render
+    if (favorites) renderFavorites();
+    else void loadGifs(searchInput.value.trim());
+  }
+
+  if (favoritesEnabled) {
+    tabBrowse.addEventListener("click", () => selectTab(false), { signal });
+    tabFavorites.addEventListener("click", () => selectTab(true), { signal });
+    // Keep stars (and the Favorites list) in step with the shared store.
+    const unsubscribe = gifFavoritesStore.subscribe(() => {
+      if (showingFavorites) renderFavorites();
+      else syncStars();
+    });
+    signal.addEventListener("abort", unsubscribe, { once: true });
+  }
 
   // Loading indicator
   const loadingEl = createElement("div", { class: "gp-loading", role: "status" });
@@ -148,6 +273,9 @@ export function createGifPicker(options: GifPickerOptions): {
         // Read by the delegated click handler on gridArea (see mount-time
         // listener above) instead of a per-cell listener.
         "data-full-url": gif.fullUrl,
+        "data-preview-url": gif.url,
+        "data-title": gif.title,
+        ...(favoritesEnabled ? { "aria-keyshortcuts": "F" } : {}),
       });
       // Klipy's CDN is still an external host: the thumbnail arrives through
       // the external-content broker, not as a URL the webview loads itself.
@@ -162,6 +290,15 @@ export function createGifPicker(options: GifPickerOptions): {
         if (src !== null) img.src = src;
       });
       item.appendChild(img);
+      if (favoritesEnabled) {
+        const star = createElement("button", {
+          type: "button",
+          class: "gp-star",
+          tabindex: "-1",
+        });
+        setStarState(star, isGifFavorite(gif.fullUrl));
+        item.appendChild(star);
+      }
 
       grid.appendChild(item);
     }
