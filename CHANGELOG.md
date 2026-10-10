@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
 
+**Voice and video**
+
+- On Windows, Settings > Voice & Audio lists your microphones, speakers and cameras by name again instead of nameless entries, and a saved device that is still plugged in no longer shows as "(disconnected)". A saved device that really is unplugged now shows "Default" as the selection, with the saved device still listed as disconnected until it comes back.
+
 ### Changed
 
 **Messages & files**

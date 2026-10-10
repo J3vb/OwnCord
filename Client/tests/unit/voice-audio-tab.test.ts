@@ -364,15 +364,18 @@ describe("VoiceAudioTab UI structure", () => {
     ]);
     emitDeviceChange();
 
-    // The saved device is gone: it stays the selection, marked disconnected
-    // and not pickable, rather than silently reading as Default (DP-31).
+    // The saved device is gone: the selection falls back to Default, which
+    // the call now captures, and the saved pick stays listed as disconnected
+    // and not pickable so it is not silently forgotten (DP-31).
     await vi.waitFor(() => {
       const values = Array.from(inputSelect.querySelectorAll("option")).map((o) => o.value);
       expect(values).toEqual(["", "mic-2", "mic-1"]);
     });
-    expect(inputSelect.value).toBe("mic-1");
-    expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1 (disconnected)");
-    expect(inputSelect.selectedOptions[0]!.disabled).toBe(true);
+    expect(inputSelect.value).toBe("");
+    const gone = inputSelect.querySelector<HTMLOptionElement>('option[value="mic-1"]')!;
+    expect(gone.textContent).toBe("Mic 1 (disconnected)");
+    expect(gone.disabled).toBe(true);
+    expect(localStorage.getItem("owncord:settings:audioInputDevice")).toBe(JSON.stringify("mic-1"));
 
     // Plugged back in: the entry is an ordinary one again.
     nav.setDevices([
@@ -397,10 +400,40 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const inputSelect = el.querySelectorAll("select")[0]!;
-    await vi.waitFor(() => expect(inputSelect.value).toBe("abcdef0123456789"));
-    expect(inputSelect.selectedOptions[0]!.textContent).toBe(
-      "Microphone (abcdef01) (disconnected)",
+    await vi.waitFor(() =>
+      expect(inputSelect.querySelector('option[value="abcdef0123456789"]')?.textContent).toBe(
+        "Microphone (abcdef01) (disconnected)",
+      ),
     );
+    expect(inputSelect.value).toBe("");
+    ac.abort();
+  });
+
+  it("does not list nameless devices or mark the saved ones disconnected while the webview hides the device list", async () => {
+    // Without a granted media permission Chromium (WebView2) answers
+    // enumerateDevices with one entry per kind, id and label both empty.
+    stubNavigator([
+      { kind: "audioinput", deviceId: "", label: "" },
+      { kind: "audiooutput", deviceId: "", label: "" },
+    ]);
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
+    localStorage.setItem("owncord:settings:audioOutputDevice", JSON.stringify("default"));
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const [inputSelect, outputSelect] = el.querySelectorAll("select");
+    await vi.waitFor(() => expect(inputSelect!.value).toBe("abcdef0123456789"));
+    for (const select of [inputSelect!, outputSelect!]) {
+      const options = Array.from(select.querySelectorAll("option"));
+      expect(options.map((o) => o.textContent)).not.toContain("Microphone ()");
+      expect(options.map((o) => o.textContent)).not.toContain("Speaker ()");
+      expect(options.some((o) => o.textContent?.includes("(disconnected)"))).toBe(false);
+      expect(options.some((o) => o.disabled)).toBe(false);
+    }
+    expect(inputSelect!.selectedOptions[0]!.textContent).toBe("Microphone (abcdef01)");
+    expect(outputSelect!.value).toBe("default");
     ac.abort();
   });
 

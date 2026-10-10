@@ -538,9 +538,10 @@ function buildVoiceAudioTabInner(
    * Called on build and again on every `devicechange`, so unplugging a headset
    * with the panel open removes it from the list instead of leaving a dead
    * entry the user can select. A saved microphone or speaker that has vanished
-   * stays the selection as a disabled "(disconnected)" entry: the voice
-   * session keeps it too and switches back to it when it returns (DP-31). A
-   * vanished camera reads as "Default".
+   * reads as "Default", which the call falls back to, and stays listed as a
+   * disabled "(disconnected)" entry: the voice session keeps it saved and
+   * switches back to it when it returns (DP-31). A vanished camera reads as
+   * "Default".
    */
   async function populateDevices(): Promise<void> {
     const selects: Array<[HTMLSelectElement, MediaDeviceKind, string, string]> = [
@@ -573,25 +574,33 @@ function buildVoiceAudioTabInner(
         // Keep the leading "Default" option, replace the rest.
         while (select.options.length > 1) select.remove(1);
         let savedStillPresent = false;
+        // Without a media permission the webview hides the list behind one
+        // nameless entry per kind, so whether the saved device is here is unknown.
+        let hidden = false;
         for (const d of devices) {
           if (d.kind !== kind) continue;
+          if (d.deviceId === "") {
+            hidden = true;
+            continue;
+          }
           if (d.deviceId === saved) savedStillPresent = true;
           const name = d.label || `${label} (${d.deviceId.slice(0, 8)})`;
           deviceLabels.set(d.deviceId, name);
           select.appendChild(createElement("option", { value: d.deviceId }, name));
         }
-        const keepSaved = savedStillPresent || kind !== "videoinput";
-        if (saved !== "" && !savedStillPresent && keepSaved) {
+        if (saved !== "" && !savedStillPresent && kind !== "videoinput") {
           const device = deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
           select.appendChild(
-            createElement(
-              "option",
-              { value: saved, disabled: "" },
-              t("voiceAudio.deviceDisconnected", { device }),
-            ),
+            hidden
+              ? createElement("option", { value: saved }, device)
+              : createElement(
+                  "option",
+                  { value: saved, disabled: "" },
+                  t("voiceAudio.deviceDisconnected", { device }),
+                ),
           );
         }
-        select.value = keepSaved ? saved : "";
+        select.value = savedStillPresent || (hidden && kind !== "videoinput") ? saved : "";
       }
       // "Default" is a preference; name the device the call really captures,
       // which can lag the system default after an unplug and replug. Only a
