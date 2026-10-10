@@ -47,13 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-- Images loaded through the app's content broker (GIF picker, linked images) no longer turn into garbage if the Linux webview falls back to its slower internal message channel; the log now says when that happens.
-
 ### Fixed
 
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
+- On Linux, GIF picker previews and linked images no longer show as broken images when the webview falls back to its slower internal message channel; the log now says when that happens.
 
 ### Changed
 
