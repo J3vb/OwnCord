@@ -50,7 +50,11 @@ async function boot(server: Server, userId = 1) {
           p === "/setup/status"
             ? { needs_setup: false }
             : p === "/attention"
-              ? { evaluated_at: "2026-09-23T12:00:00Z", signals: server.signals ?? [], warnings: server.warnings }
+              ? {
+                  evaluated_at: "2026-09-23T12:00:00Z",
+                  signals: server.signals ?? [],
+                  warnings: server.warnings,
+                }
               : p === "/updates"
                 ? server.update
                 : p === "/config/settings"
@@ -129,7 +133,13 @@ describe("Server/admin/static — dismissable notices", () => {
     server.warnings = [warning({ first_observed: "2026-09-24T08:00:00Z", severity: "critical" })];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
-    server.warnings = [warning({ first_observed: "2026-09-24T08:00:00Z", severity: "critical", title: "Writes are badly queueing" })];
+    server.warnings = [
+      warning({
+        first_observed: "2026-09-24T08:00:00Z",
+        severity: "critical",
+        title: "Writes are badly queueing",
+      }),
+    ];
     content = await paint(dom, booted.bridge);
     expect(cards(content)).toHaveLength(1);
   });
@@ -151,7 +161,13 @@ describe("Server/admin/static — dismissable notices", () => {
   });
 
   it("closes the health checks once their only warning is dismissed", async () => {
-    const okSignal = { id: "disk", label: "Disk space", status: "ok", detail: "", observed_at: "2026-09-23T12:00:00Z" };
+    const okSignal = {
+      id: "disk",
+      label: "Disk space",
+      status: "ok",
+      detail: "",
+      observed_at: "2026-09-23T12:00:00Z",
+    };
     const server: Server = { warnings: [warning()], update: {}, signals: [okSignal] };
     const booted = await boot(server);
     dom = booted.dom;
@@ -226,7 +242,11 @@ describe("Server/admin/static — dismissable notices", () => {
   });
 
   it("never offers a dismiss on the pending-restart banner", async () => {
-    const server: Server = { warnings: [], update: {}, config: { restart_pending: true, settings: [] } };
+    const server: Server = {
+      warnings: [],
+      update: {},
+      config: { restart_pending: true, settings: [] },
+    };
     const booted = await boot(server);
     dom = booted.dom;
     booted.bridge.state.section = "config";
