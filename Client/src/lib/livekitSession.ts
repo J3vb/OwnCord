@@ -270,7 +270,7 @@ export class LiveKitSession {
     reapplyMuteGain: () => this.reapplyMuteGain(),
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
-    leaveVoice: (sendWs) => this.leaveVoice(sendWs),
+    leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),
     handleVoiceTokenRefresh: (token) => this.handleVoiceTokenRefresh(token),
     connectAndSetup: (t, u, c, d, k) => this.connectAndSetup(t, u, c, d, k),
   });
@@ -757,9 +757,9 @@ export class LiveKitSession {
     return this._media.retryMicPermission();
   }
 
-  leaveVoice(sendWs = true): void {
+  leaveVoice(sendWs = true, keepWatched = false): void {
     this._rejoinPending = false;
-    this._remoteTracks.clearWatched();
+    if (!keepWatched) this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }
 

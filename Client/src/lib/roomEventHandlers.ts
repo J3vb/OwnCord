@@ -227,6 +227,14 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
+      if (
+        publication.source === Track.Source.ScreenShareAudio &&
+        userId > 0 &&
+        !deps.isWatched(userId, true)
+      ) {
+        publication.setSubscribed(false);
+        return;
+      }
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       const cb = deps.getOnRemoteVideoCallback();

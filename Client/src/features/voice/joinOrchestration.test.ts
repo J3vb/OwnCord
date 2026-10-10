@@ -124,6 +124,20 @@ describe("connectAndSetup", () => {
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
   });
 
+  it("keeps the viewer's watches when it leaves the old room to switch channels", async () => {
+    const room = fakeRoom();
+    const { host, join } = setup({
+      type: "connected",
+      room,
+      channelId: 1,
+      latestToken: "t",
+      lastUrl: "u",
+      lastDirectUrl: undefined,
+    } as SessionState);
+    await join.connectAndSetup("t", "u", 2);
+    expect(host.leaveVoice).toHaveBeenCalledWith(false, true);
+  });
+
   it("SRE-M2: records a URL-resolution failure at stage resolve and its url kind", async () => {
     const { host, join } = setup();
     host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));

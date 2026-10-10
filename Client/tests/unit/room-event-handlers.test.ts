@@ -274,6 +274,20 @@ describe("handleTrackSubscribed", () => {
     expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
   });
 
+  it("unsubscribes and ignores screen-share audio that is no longer watched", () => {
+    const h = build();
+    const setSubscribed = vi.fn();
+    const p = {
+      source: Track.Source.ScreenShareAudio,
+      setSubscribed,
+    } as unknown as RemoteTrackPublication;
+
+    h.handlers.handleTrackSubscribed(audioTrack(), p, participant("user-7:tok"));
+
+    expect(h.audioElements.handleTrackSubscribedAudio).not.toHaveBeenCalled();
+    expect(setSubscribed).toHaveBeenCalledWith(false);
+  });
+
   it("hands camera video to the remote-video callback", () => {
     const h = build();
     h.spies.isWatched.mockReturnValue(true);

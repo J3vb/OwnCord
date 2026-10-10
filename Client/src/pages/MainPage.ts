@@ -765,6 +765,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getToast: () => toast,
       onWatchStream: (userId) => {
         if (videoModeCtrl === null) return;
+        videoModeCtrl.checkVideoMode();
         videoModeCtrl.showVideoGrid();
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);

@@ -52,7 +52,7 @@ export interface JoinHost {
   reapplyMuteGain(): void;
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
-  leaveVoice(sendWs: boolean): void;
+  leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
   handleVoiceTokenRefresh(token: string): void;
   /** The session's own connectAndSetup, so the drain loop re-enters through it. */
   connectAndSetup(
@@ -96,8 +96,8 @@ export class JoinOrchestration {
   private setState(next: SessionState): void {
     this.host.setState(next);
   }
-  private leaveVoice(sendWs: boolean): void {
-    this.host.leaveVoice(sendWs);
+  private leaveVoice(sendWs: boolean, keepWatched = false): void {
+    this.host.leaveVoice(sendWs, keepWatched);
   }
   private createRoom(channelId: number): Promise<Room> {
     return this.host.createRoom(channelId);
@@ -179,7 +179,7 @@ export class JoinOrchestration {
     // OR-with-server-value guard, joining the new channel as a phantom key
     // holder the server never elected (OC-0020).
     if (this._room !== null || this._state.type === "reconnecting") {
-      this.leaveVoice(false);
+      this.leaveVoice(false, true);
     } else if (this._state.type === "connecting") {
       // OC-0001: the pending-join drain loop (handleVoiceToken) re-enters
       // this function while `_state` is still "connecting" — there is no
