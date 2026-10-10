@@ -664,7 +664,12 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
     expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-alert");
     expect(badge.getAttribute("aria-label")).toContain("Blocked");
     badge.click();
-    expect(openIdentityMismatchModal).toHaveBeenCalledWith(OTTO, "Otto", expect.any(AbortSignal));
+    expect(openIdentityMismatchModal).toHaveBeenCalledWith(
+      OTTO,
+      "Otto",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   it("hands the re-trust modal a focus fallback that lands on the replacement shield", () => {
