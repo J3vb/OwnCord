@@ -288,6 +288,19 @@ describe("handleTrackSubscribed", () => {
     expect(setSubscribed).toHaveBeenCalledWith(false);
   });
 
+  it("hands watched screen-share audio to the audio elements", () => {
+    const h = build();
+    h.spies.isWatched.mockImplementation((_u: number, isScreenshare: boolean) => isScreenshare);
+    const track = audioTrack();
+    const publication = pub(Track.Source.ScreenShareAudio);
+    const p = participant("user-7:tok");
+
+    h.handlers.handleTrackSubscribed(track, publication, p);
+
+    expect(h.spies.isWatched).toHaveBeenCalledWith(7, true);
+    expect(h.audioElements.handleTrackSubscribedAudio).toHaveBeenCalledWith(track, publication, p);
+  });
+
   it("hands camera video to the remote-video callback", () => {
     const h = build();
     h.spies.isWatched.mockReturnValue(true);

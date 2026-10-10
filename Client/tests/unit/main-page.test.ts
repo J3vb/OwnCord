@@ -228,6 +228,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       addStream: vi.fn(),
       removeStream: vi.fn(),
       clearStreams: vi.fn(),
+      watch: vi.fn(),
       hasStreams: vi.fn(() => false),
       setFocusedTile: vi.fn(),
       getFocusedTileId: vi.fn(() => null),
@@ -611,6 +612,50 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // checkVideoMode() call right after addStream sees a "channel change"
     // that isn't one and wipes the tile it was just given.
     expect(videoGrid.clearStreams).not.toHaveBeenCalled();
+  });
+
+  it("applies a cross-channel roster click's channel change before watching, so clearStreams cannot drop the watch", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(10, { ...textChannel(10, "lounge", 1), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    const user = (userId: number, screenshare: boolean) => ({
+      userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [9, new Map([[100, user(100, true)]])],
+        [10, new Map([[200, user(200, true)]])],
+      ]),
+    }));
+    voiceStore.flush();
+    channelsStore.flush();
+
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    grid.clearStreams.mockClear();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
+    container
+      .querySelector<HTMLElement>('.voice-user-item[data-voice-uid="200"]')!
+      .click();
+
+    expect(grid.watch).toHaveBeenCalledOnce();
+    expect(grid.clearStreams).toHaveBeenCalled();
+    expect(grid.clearStreams.mock.invocationCallOrder[0]!).toBeLessThan(
+      grid.watch.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {

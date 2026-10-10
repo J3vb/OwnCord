@@ -480,7 +480,7 @@ export class LiveKitSession {
           : "released";
       },
       rejoinVoice: () => {
-        this.leaveVoice(false);
+        this.leaveVoice(false, true);
         this._rejoinPending = true;
         setVoiceStatus("joining");
         this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });

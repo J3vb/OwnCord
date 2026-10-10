@@ -3954,6 +3954,7 @@ describe("LiveKitSession", () => {
       // membership, so the loop must not connect on the old token.
       mockRoom.connect.mockResolvedValue(undefined);
 
+      (session as any)._remoteTracks.watch(7, "screenshare", true);
       const loop = startLoop();
       await vi.advanceTimersByTimeAsync(1_000);
       wsState = "reconnecting";
@@ -3965,6 +3966,7 @@ describe("LiveKitSession", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await loop;
 
+      expect((session as any)._remoteTracks.isWatched(7, "screenshare")).toBe(true);
       // Never connects on the old token with no membership behind it.
       expect(mockRoom.connect).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
