@@ -99,6 +99,18 @@ describe("RemoteSpeaking", () => {
     expect(changes).toEqual([[2], []]);
   });
 
+  it("skips the stats read while no remote participant has a microphone track", async () => {
+    const { room } = fakeRoom();
+    const getStats = vi.fn(async () => new Map());
+    (
+      room as unknown as { engine: { pcManager: { subscriber: unknown } } }
+    ).engine.pcManager.subscriber = { getStats };
+    room.remoteParticipants.clear();
+    detector.setRoom(room);
+    await detector.poll();
+    expect(getStats).not.toHaveBeenCalled();
+  });
+
   it("clears its speakers when the room goes away", async () => {
     const { room, receive } = fakeRoom();
     detector.setRoom(room);

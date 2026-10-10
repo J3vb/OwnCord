@@ -407,6 +407,22 @@ describe("voice store", () => {
       expect(voiceStore.getState().currentChannelId).toBe(99);
     });
 
+    it("a new voice session does not inherit the last session's speaker lists", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 9, username: "me", avatar: null, role: "member" },
+      }));
+      joinVoiceChannel(10);
+      setSpeakers({ channel_id: 10, speakers: [5] });
+      leaveVoiceChannel();
+      expect(voiceStore.getState().serverSpeakers?.size).toBe(0);
+
+      joinVoiceChannel(10);
+      setSpeakers({ channel_id: 10, speakers: [5] });
+      joinVoiceChannel(20);
+      expect(voiceStore.getState().serverSpeakers?.size).toBe(0);
+    });
+
     it("leaveVoiceChannel clears currentChannelId", () => {
       joinVoiceChannel(42);
       leaveVoiceChannel();

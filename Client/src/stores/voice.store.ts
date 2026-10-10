@@ -371,6 +371,8 @@ export function joinVoiceChannel(channelId: number): void {
       // A fresh join starts clean — any degraded flag belongs to the
       // previous session's worker, not this one.
       encryptionDegraded: false,
+      serverSpeakers: new Set<number>(),
+      levelSpeakers: new Set<number>(),
     };
   });
 }
@@ -387,6 +389,8 @@ export function leaveVoiceChannel(): void {
       localServerMuted: false,
       localServerDeafened: false,
       encryptionDegraded: false,
+      serverSpeakers: new Set<number>(),
+      levelSpeakers: new Set<number>(),
     };
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {

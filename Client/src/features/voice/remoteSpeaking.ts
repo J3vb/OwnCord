@@ -57,18 +57,19 @@ export class RemoteSpeaking {
     if (room === null || manager === undefined || this.polling) return;
     this.polling = true;
     try {
-      // LiveKit receives media on the publisher in single-peer-connection
-      // mode; dual-connection sessions keep incoming tracks on the subscriber.
-      const report = await (manager.subscriber ?? manager.publisher)?.getStats();
-      if (this.room !== room || report === undefined) return;
       const users = new Map<string, number>();
       for (const p of room.remoteParticipants.values()) {
         const id = p.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack.id;
         if (id !== undefined) users.set(id, parseUserId(p.identity));
       }
+      // LiveKit receives media on the publisher in single-peer-connection
+      // mode; dual-connection sessions keep incoming tracks on the subscriber.
+      const stats = users.size === 0 ? null : (manager.subscriber ?? manager.publisher);
+      const report = stats === null ? undefined : await stats?.getStats();
+      if (this.room !== room) return;
       const now = Date.now();
       const counters = new Map<string, Counters>();
-      report.forEach((entry: Record<string, unknown>) => {
+      report?.forEach((entry: Record<string, unknown>) => {
         const { type, trackIdentifier: track, totalAudioEnergy: energy } = entry;
         const duration = entry.totalSamplesDuration;
         if (type !== "inbound-rtp" || typeof track !== "string") return;
