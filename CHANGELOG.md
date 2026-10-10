@@ -56,10 +56,11 @@ and only when it changes something a contributor or fork holder must do
 **Voice**
 
 - A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
+
 **Accounts & admin**
 
 - The member list no longer offers Change Role, Force Logout or Ban on members who outrank you, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
-- When something in front of the server (such as a reverse proxy) answers an admin action with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
+- When something in front of the server (such as a reverse proxy) answers a request with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
 
 **Messages & files**
 

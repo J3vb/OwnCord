@@ -199,7 +199,7 @@ export const connectText = defineCatalog("connect", {
   "session.connectTimeout":
     "Couldn't reach this server — it may be offline. Check your connection and try again.",
   "error.notJson":
-    "The server answered with a web page instead of the API. A reverse proxy may be blocking /admin.",
+    "The server answered with a web page instead of the API. A proxy or network gateway in front of it may be intercepting requests.",
   "session.loginFailedStatus": "Login failed ({status})",
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 
