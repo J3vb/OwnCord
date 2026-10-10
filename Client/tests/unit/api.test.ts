@@ -1318,17 +1318,17 @@ describe("API Client", () => {
   });
 
   describe("admin member endpoints", () => {
-    it("adminKickMember calls DELETE /admin/api/users/{id}/sessions", async () => {
+    it("adminKickMember calls DELETE /api/v1/moderation/members/{id}/sessions", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminKickMember(42);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42/sessions");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/members/42/sessions");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
 
-    it("adminBanMember calls PATCH /admin/api/users/{id} with banned:true", async () => {
+    it("adminBanMember calls PATCH /api/v1/moderation/members/{id} with banned:true", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminBanMember(42, "spamming");
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/members/42");
       expect(fetchCallOpts().method).toBe("PATCH");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ banned: true, ban_reason: "spamming" });
@@ -1341,10 +1341,10 @@ describe("API Client", () => {
       expect(body).toEqual({ banned: true, ban_reason: "" });
     });
 
-    it("adminUnbanMember calls PATCH /admin/api/users/{id} with banned:false", async () => {
+    it("adminUnbanMember calls PATCH /api/v1/moderation/members/{id} with banned:false", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminUnbanMember(42);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/members/42");
       expect(fetchCallOpts().method).toBe("PATCH");
       const body = JSON.parse(fetchCallOpts().body as string);
       // Only the flag: the ban reason is dropped with the ban itself.
@@ -1363,14 +1363,18 @@ describe("API Client", () => {
       expect(users).toHaveLength(502);
       expect(users[501]?.id).toBe(502);
       expect(mockFetch).toHaveBeenCalledTimes(2);
-      expect(fetchCallUrl(0)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=0");
-      expect(fetchCallUrl(1)).toBe("https://localhost:8443/admin/api/users?limit=500&offset=500");
+      expect(fetchCallUrl(0)).toBe(
+        "https://localhost:8443/api/v1/moderation/members?limit=500&offset=0",
+      );
+      expect(fetchCallUrl(1)).toBe(
+        "https://localhost:8443/api/v1/moderation/members?limit=500&offset=500",
+      );
     });
 
-    it("adminChangeRole calls PATCH /admin/api/users/{id} with role_id", async () => {
+    it("adminChangeRole calls PATCH /api/v1/moderation/members/{id} with role_id", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminChangeRole(42, 3);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/users/42");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/members/42");
       expect(fetchCallOpts().method).toBe("PATCH");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ role_id: 3 });

@@ -128,7 +128,7 @@ const DM_CHANNELS = [
   },
 ];
 
-/** `GET /admin/api/users` — one live permanent ban for the banned section. */
+/** `GET /api/v1/moderation/members` — one live permanent ban for the banned section. */
 const BANNED_USER = {
   id: 9,
   username: "banneduser",
@@ -154,8 +154,8 @@ async function mockDmSession(page: Page): Promise<void> {
         // Close / leave: DELETE /api/v1/dms/{id}.
         { pattern: "/api/v1/dms/", method: "DELETE", status: 200, body: { success: true } },
         // The banned-list walk on mount and on every roster change.
-        { pattern: "/admin/api/users", status: 200, body: [BANNED_USER] },
-        { pattern: "/admin/api/users/", method: "PATCH", status: 200, body: {} },
+        { pattern: "/api/v1/moderation/members", status: 200, body: [BANNED_USER] },
+        { pattern: "/api/v1/moderation/members/", method: "PATCH", status: 200, body: {} },
       ],
       simulateWsFlow: true,
       readyOverrides: {
@@ -452,7 +452,9 @@ test.describe("Banned members section", () => {
 
     const call = await waitForCall(
       page,
-      (c) => (c.url ?? "").includes(`/admin/api/users/${BANNED_USER.id}`) && c.method === "PATCH",
+      (c) =>
+        (c.url ?? "").includes(`/api/v1/moderation/members/${BANNED_USER.id}`) &&
+        c.method === "PATCH",
     );
     expect(call.method).toBe("PATCH");
     expect(JSON.parse(call.body ?? "{}")).toEqual({ banned: false });

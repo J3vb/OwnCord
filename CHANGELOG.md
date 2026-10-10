@@ -59,6 +59,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Accounts & admin**
 
+- Changing a member's role, banning, unbanning and force-logging-out from the member list no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. The server enforces the same permission and rank checks on both routes.
 - The member list no longer offers Change Role, Force Logout or Ban on members at or above your rank, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
 - When something in front of the server (such as a reverse proxy) answers a request with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
 

@@ -727,6 +727,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
   }
 
+  function memberRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return request<T>(method, `/moderation/members${path}`, body, signal);
+  }
+
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
   async function parseError(res: Response): Promise<ApiError> {
     try {
@@ -1578,10 +1587,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
     },
 
-    // ── Admin: Members ──────────────────────────────────────
+    // ── Members (moderation) ────────────────────────────────
+    // These ride /api/v1/moderation/members, not /admin/api: a reverse proxy in
+    // front of a server may answer /admin with a web page. The server runs the
+    // same handlers and rank checks on both (admin.NewMemberAPI).
 
     adminKickMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>("DELETE", `/users/${userId}/sessions`, undefined, signal);
+      return memberRequest<void>("DELETE", `/${userId}/sessions`, undefined, signal);
     },
 
     adminBanMember(
@@ -1590,9 +1602,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       durationHours?: number,
       signal?: AbortSignal,
     ): Promise<void> {
-      return adminRequest<void>(
+      return memberRequest<void>(
         "PATCH",
-        `/users/${userId}`,
+        `/${userId}`,
         {
           banned: true,
           ban_reason: reason ?? "",
@@ -1606,9 +1618,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     adminChangeRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>(
+      return memberRequest<void>(
         "PATCH",
-        `/users/${userId}`,
+        `/${userId}`,
         {
           role_id: roleId,
         },
@@ -1622,7 +1634,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * roster entry, so the roster needs no refreshing locally.
      */
     adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>("PATCH", `/users/${userId}`, { banned: false }, signal);
+      return memberRequest<void>("PATCH", `/${userId}`, { banned: false }, signal);
     },
 
     /**
@@ -1644,9 +1656,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           offset: String(pageIndex * pageSize),
         });
         // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
-        const page = await adminRequest<AdminUser[]>(
+        const page = await memberRequest<AdminUser[]>(
           "GET",
-          `/users?${params.toString()}`,
+          `?${params.toString()}`,
           undefined,
           signal,
         );
