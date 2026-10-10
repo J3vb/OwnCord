@@ -68,6 +68,13 @@ test("every actor-gated job needs its own concurrency block", () => {
   assert.ok(missing(good + second).includes("cancel-in-progress"));
 });
 
+test("a gated job header with a trailing comment or quoted key still splits", () => {
+  for (const header of ["  second: # metered job", '  "second":', "  'second': # x"]) {
+    const second = `\n${header}\n    if: github.actor == 'x'\n    runs-on: ubuntu-latest`;
+    assert.ok(missing(good + second).includes("concurrency group"), header);
+  }
+});
+
 test("cancel-in-progress: false is caught", () => {
   assert.ok(
     missing(good.replace("  cancel-in-progress: true", "  cancel-in-progress: false")).includes(

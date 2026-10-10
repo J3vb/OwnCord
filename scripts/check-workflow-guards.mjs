@@ -39,7 +39,7 @@ const METERED = [".github/workflows/claude.yml"];
 // by runs the actor condition skips and can cancel a live run.
 const gatedJobs = (src) =>
   (src.split(/^jobs:\s*$/m)[1] ?? "")
-    .split(/^(?=  [\w-]+:\s*$)/m)
+    .split(/^(?=  (?:[\w-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$)/m)
     .filter((job) => /github\.actor/.test(job));
 
 // The indented body of a gated job's own `concurrency:` mapping, so a `group` or
