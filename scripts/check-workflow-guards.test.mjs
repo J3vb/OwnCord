@@ -62,6 +62,12 @@ test("concurrency keys outside the gated job's own concurrency block do not coun
   assert.ok(missing(stray).includes("cancel-in-progress"));
 });
 
+test("every actor-gated job needs its own concurrency block", () => {
+  const second = "\n  second:\n    if: github.actor == 'x'\n    runs-on: ubuntu-latest";
+  assert.ok(missing(good + second).includes("concurrency group"));
+  assert.ok(missing(good + second).includes("cancel-in-progress"));
+});
+
 test("cancel-in-progress: false is caught", () => {
   assert.ok(
     missing(good.replace("  cancel-in-progress: true", "  cancel-in-progress: false")).includes(

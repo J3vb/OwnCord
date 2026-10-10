@@ -47,6 +47,9 @@ const gatedJobs = (src) =>
 const concurrencyBlocks = (src) =>
   gatedJobs(src).map((job) => job.match(/^ {4}concurrency:\s*\n((?: {5,}\S.*\n?)*)/m)?.[1] ?? "");
 
+// At least one gated job, and every one of them must pass.
+const gatedAll = (blocks, test) => blocks.length > 0 && blocks.every(test);
+
 export const CHECKS = [
   {
     name: "timeout-minutes",
@@ -55,13 +58,13 @@ export const CHECKS = [
   },
   {
     name: "concurrency group",
-    test: (src) => concurrencyBlocks(src).some((b) => /^\s*group:\s*\S/m.test(b)),
+    test: (src) => gatedAll(concurrencyBlocks(src), (b) => /^\s*group:\s*\S/m.test(b)),
     why: "a workflow consuming a metered credential must declare a concurrency group so repeated triggers collapse instead of running in parallel",
   },
   {
     name: "cancel-in-progress",
     test: (src) =>
-      concurrencyBlocks(src).some((b) => /^\s*cancel-in-progress:\s*true\s*$/m.test(b)),
+      gatedAll(concurrencyBlocks(src), (b) => /^\s*cancel-in-progress:\s*true\s*$/m.test(b)),
     why: "the concurrency group must set cancel-in-progress: true, or superseded runs keep spending",
   },
   {
