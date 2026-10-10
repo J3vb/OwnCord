@@ -62,11 +62,20 @@ impl WsState {
     /// sender. Every later step of that attempt is conditional on this value
     /// still being current.
     async fn begin_connection(&self) -> u64 {
+        self.begin_connection_with(|| {}).await
+    }
+
+    /// `begin_connection`, running `on_claimed` while the slot lock is held.
+    /// `ws_connect` clears the active session there: done after the claim, a
+    /// descheduled older attempt could wipe the host a newer attempt has
+    /// already authenticated and set.
+    async fn begin_connection_with(&self, on_claimed: impl FnOnce()) -> u64 {
         let mut tx_lock = self.tx.lock().await;
         if tx_lock.is_some() {
             debug!("[ws_proxy] dropping existing connection");
         }
         *tx_lock = None;
+        on_claimed();
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
     }
 
@@ -135,13 +144,17 @@ pub async fn ws_connect<R: Runtime>(
     info!("[ws_proxy] connecting to {}", url);
 
     // Drop any existing connection and claim this attempt's generation.
-    let my_generation = state.begin_connection().await;
     // The superseded connection's teardown sees a stale generation and skips
     // clearing the active host, so clear it here: if this attempt fails, no
-    // host may stay active without a live socket.
-    if let Some(session) = app.try_state::<crate::active_session::ActiveSession>() {
-        session.clear_active();
-    }
+    // host may stay active without a live socket. The clear runs inside the
+    // claim (under the slot lock) so it is ordered against newer attempts.
+    let my_generation = state
+        .begin_connection_with(|| {
+            if let Some(session) = app.try_state::<crate::active_session::ActiveSession>() {
+                session.clear_active();
+            }
+        })
+        .await;
 
     // Only allow secure WebSocket connections
     if !url.starts_with("wss://") {
@@ -798,6 +811,18 @@ mod tests {
     // second ws_connect without awaiting or cancelling the first, so two
     // attempts can be in flight over one slot. Mirrors the ptt.rs
     // ATOMICRACE-001 guard.
+
+    #[tokio::test]
+    async fn the_session_clear_runs_under_the_slot_lock() {
+        // A clear done after the claim could land after a newer attempt set its
+        // host; inside the claim it is ordered against every other attempt.
+        let state = WsState::new();
+        let mut held = false;
+        state
+            .begin_connection_with(|| held = state.tx.try_lock().is_err())
+            .await;
+        assert!(held, "on_claimed must run while the slot lock is held");
+    }
 
     #[tokio::test]
     async fn superseded_connect_does_not_take_the_sender_slot() {

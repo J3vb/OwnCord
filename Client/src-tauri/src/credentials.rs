@@ -464,6 +464,12 @@ pub struct SavedLoginResponse {
     pub body: String,
 }
 
+/// The server resolves login usernames with SQLite `COLLATE NOCASE`, which
+/// folds ASCII only, so `Alice` and `alice` are one account.
+fn usernames_match(stored: &str, submitted: &str) -> bool {
+    stored.eq_ignore_ascii_case(submitted)
+}
+
 /// Log in to `host` as `username` using the password saved in the credential
 /// store, returning the server's raw response.
 ///
@@ -491,7 +497,7 @@ pub async fn login_with_saved_password(
     let cred = stored
         .ok_or_else(|| "no stored credential for this host".to_string())
         .and_then(|blob| parse_credential_blob(&blob))?;
-    if cred.username != username {
+    if !usernames_match(&cred.username, &username) {
         return Err("username does not match the saved credential".to_string());
     }
     let password = cred
@@ -794,6 +800,16 @@ mod tests {
             identity_account("localhost:8443"),
             "identity:localhost:8443"
         );
+    }
+
+    #[test]
+    fn usernames_match_folds_ascii_case_like_the_server() {
+        assert!(usernames_match("Alice", "alice"));
+        assert!(usernames_match("alice", "ALICE"));
+        assert!(!usernames_match("alice", "alicia"));
+        // SQLite NOCASE folds ASCII only, so a non-ASCII case difference is a
+        // different account.
+        assert!(!usernames_match("Émile", "émile"));
     }
 
     #[test]
