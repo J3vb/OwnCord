@@ -74,6 +74,10 @@ and only when it changes something a contributor or fork holder must do
 - After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
 - A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 
+**Messages**
+
+- Switching channels no longer resets the slow-mode countdown on the Send button; it keeps counting from when you sent, including for a send acknowledged after you left.
+
 ### Changed
 
 **Voice**
