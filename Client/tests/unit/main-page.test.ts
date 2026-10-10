@@ -1553,6 +1553,52 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  describe("any error answering the ring ends the outgoing call", () => {
+    async function mountRinging(): Promise<HTMLElement> {
+      const ws = fakeWs();
+      uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+      openOneToOneDm(50);
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.dynamicImportSettled();
+      vi.mocked(stopRingback).mockClear();
+      vi.mocked(ws.send).mockImplementation((m) =>
+        (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+      );
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      finishCallJoin();
+      const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+      expect(panel.dataset.state).toBe("outgoing");
+      ringWs = ws;
+      return panel;
+    }
+    let ringWs: ReturnType<typeof fakeWs>;
+
+    it.each(["FORBIDDEN", "TIMED_OUT", "VOICE_ERROR", "INTERNAL"])(
+      "%s answering the ring stops the ringback and clears Calling",
+      async (code) => {
+        const panel = await mountRinging();
+
+        ringWs.emit("error", { code, message: "refused" }, "ring-id");
+
+        expect(stopRingback).toHaveBeenCalledTimes(1);
+        expect(panel.dataset.state).not.toBe("outgoing");
+        expect(panel.dataset.state).not.toBe("unanswered");
+        page.destroy?.();
+      },
+    );
+
+    it("a FORBIDDEN error answering another envelope leaves the call alone", async () => {
+      const panel = await mountRinging();
+
+      ringWs.emit("error", { code: "FORBIDDEN", message: "refused" }, "other-id");
+
+      expect(stopRingback).not.toHaveBeenCalled();
+      expect(panel.dataset.state).toBe("outgoing");
+      page.destroy?.();
+    });
+  });
+
   it("a callee's decline while the caller is on another channel shows one toast", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
