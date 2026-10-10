@@ -265,7 +265,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
 		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
 	// The client's member actions, reachable without the /admin prefix (see
-	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below.
+	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
+	// accept only a session or API token issued by this server, plus the
+	// per-action permission and rank checks.
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))

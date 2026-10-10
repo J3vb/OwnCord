@@ -71,7 +71,8 @@ func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, h
 // Authentication is the admin perimeter's (a session or API token whose role
 // holds a moderation bit) and authorisation is the same per-action permission
 // and rank check, in ModerationService. Unlike /admin it is not subject to
-// server.admin_allowed_cidrs: these are routine moderator actions, and the
+// server.admin_allowed_cidrs: these are routine moderator actions. They accept
+// only a session or API token issued by this server, and the permission and
 // rank checks, not the network, are what bound them.
 func NewMemberAPI(svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.Handler {
 	r := chi.NewRouter()

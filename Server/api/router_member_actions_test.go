@@ -171,3 +171,26 @@ func TestMemberActions_List_ReachableByModerator(t *testing.T) {
 		t.Fatalf("member list: status = %d, want 403", rr.Code)
 	}
 }
+
+func TestMemberActions_ForeignOrMissingToken_Unauthorised(t *testing.T) {
+	e := newMemberActionsEnv(t)
+	foreign, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	e.tokens["foreign"] = foreign
+	for _, actor := range []string{"", "foreign"} {
+		for _, c := range []struct{ method, path, body string }{
+			{http.MethodPatch, e.path("other"), `{"role_id":` + itoa(roleModerator) + `}`},
+			{http.MethodDelete, e.path("other") + "/sessions", ""},
+			{http.MethodGet, "/api/v1/moderation/members", ""},
+		} {
+			if rr := e.do(t, c.method, c.path, actor, c.body); rr.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s as %q: status = %d, want 401; body = %s", c.method, c.path, actor, rr.Code, rr.Body.String())
+			}
+		}
+	}
+	if got := e.roleOf(t, "other"); got != roleMember {
+		t.Fatalf("role after = %d, want %d", got, roleMember)
+	}
+}
