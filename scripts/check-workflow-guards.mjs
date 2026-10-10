@@ -18,6 +18,9 @@
 // cost is that these checks are about presence and shape, not semantics — which
 // is the honest limit of what a regression test can claim here.
 //
+// Known limits: text-level, written for one workflow file. It assumes 2-space job
+// indentation and a job-level `if:`, and does not parse YAML edge cases beyond that.
+//
 // Scope: workflows that reference a metered secret. Add one to METERED below
 // when a new workflow starts spending. Separately, every workflow is checked
 // for a reference to the updater signing key, which only release.yml may hold.
@@ -34,6 +37,22 @@ const METERED = [".github/workflows/claude.yml"];
 
 // Each check is (name, test, why). `why` is the failure message: it states the
 // invariant a contributor has to restore, not the history behind it.
+// The text of each job under `jobs:` that tests github.actor. Concurrency must
+// live in that block: a workflow-level group, or one on another job, is joined
+// by runs the actor condition skips and can cancel a live run.
+const gatedJobs = (src) =>
+  (src.split(/^jobs:\s*$/m)[1] ?? "")
+    .split(/^(?=  (?:[\w-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$)/m)
+    .filter((job) => /github\.actor/.test(job.match(/^ {4}if:.*\n(?: {5,}.*\n?)*/m)?.[0] ?? ""));
+
+// The indented body of a gated job's own `concurrency:` mapping, so a `group` or
+// `cancel-in-progress` key elsewhere in the job (an env, a step) cannot satisfy it.
+const concurrencyBlocks = (src) =>
+  gatedJobs(src).map((job) => job.match(/^ {4}concurrency:\s*\n((?: {5,}\S.*\n?)*)/m)?.[1] ?? "");
+
+// At least one gated job, and every one of them must pass.
+const gatedAll = (blocks, test) => blocks.length > 0 && blocks.every(test);
+
 export const CHECKS = [
   {
     name: "timeout-minutes",
@@ -42,12 +61,13 @@ export const CHECKS = [
   },
   {
     name: "concurrency group",
-    test: (src) => /^concurrency:\s*$/m.test(src) && /^\s*group:\s*\S/m.test(src),
+    test: (src) => gatedAll(concurrencyBlocks(src), (b) => /^\s*group:\s*\S/m.test(b)),
     why: "a workflow consuming a metered credential must declare a concurrency group so repeated triggers collapse instead of running in parallel",
   },
   {
     name: "cancel-in-progress",
-    test: (src) => /^\s*cancel-in-progress:\s*true\s*$/m.test(src),
+    test: (src) =>
+      gatedAll(concurrencyBlocks(src), (b) => /^\s*cancel-in-progress:\s*true\s*$/m.test(b)),
     why: "the concurrency group must set cancel-in-progress: true, or superseded runs keep spending",
   },
   {
