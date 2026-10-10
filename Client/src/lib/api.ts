@@ -281,6 +281,14 @@ export function errorText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+/** The webview's JSON/stream failure for a body that is not JSON. */
+function isNotJsonError(err: unknown): boolean {
+  return (
+    err instanceof SyntaxError ||
+    (err instanceof Error && /JSON|Unexpected token/.test(err.message))
+  );
+}
+
 export type OnUnauthorized = () => void;
 
 /**
@@ -675,7 +683,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         releaseTransport();
         return undefined as T;
       }
-      const data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+      let data: T;
+      try {
+        data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+      } catch (jsonErr) {
+        owner.assertCurrent();
+        // A 2xx that is not JSON (a proxy's web page in front of the API): the
+        // webview's parse error says nothing a user can act on.
+        if (!isNotJsonError(jsonErr)) throw jsonErr;
+        log.warn(`${label} response is not JSON`, {
+          method,
+          path,
+          status: res.status,
+          contentType: res.headers.get("content-type") ?? undefined,
+        });
+        throw new ApiClientError(res.status, "NOT_JSON", connectText("error.notJson"));
+      }
       owner.assertCurrent();
       return data;
     } finally {

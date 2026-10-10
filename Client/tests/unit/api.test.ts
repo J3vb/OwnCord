@@ -1377,6 +1377,23 @@ describe("API Client", () => {
     });
   });
 
+  describe("a 2xx response that is a web page, not JSON", () => {
+    it("surfaces the reverse-proxy message instead of a raw JSON parse error", async () => {
+      mockFetch.mockResolvedValue(
+        new Response("<!DOCTYPE html><html></html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      );
+      const err = await api.adminChangeRole(42, 3).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiClientError);
+      const text = errorText(err, "fallback");
+      expect(text).toContain("web page instead of the API");
+      expect(text).not.toContain("DOCTYPE");
+      expectConsole("warn", /response is not JSON.*"status":200.*text\/html/);
+    });
+  });
+
   describe("ApiClientError class", () => {
     it("has correct name, status, code, message properties", () => {
       const err = new ApiClientError(404, "NOT_FOUND", "Resource not found");

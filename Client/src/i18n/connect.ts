@@ -198,6 +198,8 @@ export const connectText = defineCatalog("connect", {
   "session.autoLoginFailedDetail": "Auto-login failed: {message}",
   "session.connectTimeout":
     "Couldn't reach this server — it may be offline. Check your connection and try again.",
+  "error.notJson":
+    "The server answered with a web page instead of the API. A reverse proxy may be blocking /admin.",
   "session.loginFailedStatus": "Login failed ({status})",
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 
