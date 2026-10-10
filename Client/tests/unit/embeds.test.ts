@@ -616,6 +616,29 @@ describe("renderGenericLinkPreview", () => {
     expect(card2.querySelector(".msg-embed-link-title")?.textContent).toBe("Cached Title");
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
+
+  it("the link-preview cache is bounded", async () => {
+    previewMock.mockImplementation((_partition, url) => Promise.resolve(previewOk(url)));
+    const link = (i: number): string => `https://news.example.com/post-${i}`;
+
+    for (let i = 1; i <= 501; i++) {
+      const card = renderGenericLinkPreview(link(i));
+      document.body.appendChild(card);
+      await vi.waitFor(
+        () => {
+          expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe(link(i));
+        },
+        { interval: 1 },
+      );
+    }
+    expect(previewMock).toHaveBeenCalledTimes(501);
+
+    renderGenericLinkPreview(link(501)); // recent: served from the cache
+    expect(previewMock).toHaveBeenCalledTimes(501);
+
+    renderGenericLinkPreview(link(1)); // oldest: evicted, asked for again
+    expect(previewMock).toHaveBeenCalledTimes(502);
+  });
 });
 
 // parseOgTags moved to Rust: the og_* tests in src-tauri/src/external_content.rs.

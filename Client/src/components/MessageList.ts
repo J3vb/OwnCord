@@ -20,7 +20,7 @@ import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
-import { unobserveMedia } from "@lib/media-visibility";
+import { discardMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
 import {
@@ -413,7 +413,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /** Discard one rendered row: stop tracking its media and abort its listeners. */
   function releaseRow(el: HTMLElement): void {
-    for (const img of el.querySelectorAll("img")) unobserveMedia(img);
+    for (const img of el.querySelectorAll("img")) discardMedia(img);
     rowOwners.get(el)?.destroy();
     rowOwners.delete(el);
     el.remove();
@@ -669,7 +669,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function releaseTrackedMedia(): void {
     if (contentContainer === null) return;
     for (const img of contentContainer.querySelectorAll("img")) {
-      unobserveMedia(img);
+      discardMedia(img);
     }
   }
 
