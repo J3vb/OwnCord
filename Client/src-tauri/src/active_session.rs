@@ -55,6 +55,18 @@ impl ActiveSession {
         self.lock().host = None;
     }
 
+    /// Clear the active host unless it is `host` (compared the way the cert
+    /// store does). A reconnect to the same server keeps its session, so the
+    /// identity-pin commands do not fail-close voice E2EE while the socket is
+    /// redialled; switching to a different server still clears it.
+    pub fn clear_active_unless(&self, host: &str) {
+        let key = crate::tofu::cert_store_key(host);
+        let mut state = self.lock();
+        if state.host.as_deref() != Some(key.as_str()) {
+            state.host = None;
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
         self.state
             .lock()
@@ -294,6 +306,28 @@ mod tests {
         assert!(session
             .ensure_identity_scope("7@other.example", false)
             .is_err());
+    }
+
+    #[test]
+    fn a_same_host_reconnect_keeps_the_session_and_a_switch_clears_it() {
+        let session = ActiveSession::new();
+        session.set("chat.example.com");
+        session.clear_active_unless("Chat.Example.com:443");
+        assert!(session.ensure("chat.example.com", false).is_ok());
+        session.clear_active_unless("other.example.com");
+        assert!(session.ensure("chat.example.com", false).is_err());
+        // The verified host outlives the clear, as with clear_active.
+        assert!(session.ensure("chat.example.com", true).is_ok());
+    }
+
+    #[test]
+    fn a_non_pre_session_guard_refuses_without_a_session_or_for_another_host() {
+        // get_identity_pin and store_identity_pin both call ensure(host, false).
+        let session = ActiveSession::new();
+        assert!(session.ensure("chat.example.com", false).is_err());
+        session.set("chat.example.com");
+        assert!(session.ensure("other.example.com", false).is_err());
+        assert!(session.ensure("Chat.Example.com:443", false).is_ok());
     }
 
     #[test]

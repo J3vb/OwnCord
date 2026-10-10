@@ -78,22 +78,30 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
 
 #[tauri::command]
 pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Option<String>, String> {
+    read_cert_pin(&app, &host)
+}
+
+/// The pinned fingerprint for `host`, read under the normalized cert-store key
+/// (the one `accept_cert_fingerprint` writes), so any spelling of the same
+/// server finds its pin.
+fn read_cert_pin<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    host: &str,
+) -> Result<Option<String>, String> {
     if host.is_empty() {
         return Err("host must not be empty".into());
     }
 
-    let store = crate::json_store::open(&app, CERTS_STORE)
+    let store = crate::json_store::open(app, CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
-    let value = store
-        .get(crate::tofu::cert_store_key(&host))
-        .and_then(|v| {
-            if let Value::String(s) = v {
-                Some(s)
-            } else {
-                None
-            }
-        });
+    let value = store.get(crate::tofu::cert_store_key(host)).and_then(|v| {
+        if let Value::String(s) = v {
+            Some(s)
+        } else {
+            None
+        }
+    });
 
     Ok(value)
 }
@@ -230,6 +238,32 @@ pub fn open_devtools(window: tauri::WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cert_pin_written_under_one_host_form_is_read_under_another() {
+        let app = tauri::test::mock_builder()
+            .manage(crate::json_store::JsonStores::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let handle = app.handle();
+        let fp = "aa:bb:cc:dd";
+        // accept_cert_fingerprint writes under the normalized key.
+        let store = crate::json_store::open(handle, CERTS_STORE).expect("store");
+        store.set(
+            crate::tofu::cert_store_key("Host.Example.COM:443"),
+            Value::String(fp.into()),
+        );
+
+        for host in [
+            "host.example.com",
+            "Host.Example.COM:443",
+            "HOST.example.com",
+        ] {
+            assert_eq!(read_cert_pin(handle, host).unwrap().as_deref(), Some(fp));
+        }
+        assert_eq!(read_cert_pin(handle, "other.example.com").unwrap(), None);
+        assert!(read_cert_pin(handle, "").is_err());
+    }
 
     #[test]
     fn allowed_key_owncord_prefix() {

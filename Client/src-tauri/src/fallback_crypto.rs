@@ -196,6 +196,40 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_first_use_callers_converge_on_one_key_and_leave_no_temp_file() {
+        // Many callers race the first creation: the losers hit the
+        // AlreadyExists branch and must read the winner's complete key.
+        let dir = std::env::temp_dir().join(format!(
+            "owncord-fallback-key-race-{}-{}",
+            std::process::id(),
+            test_key()[0]
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    load_or_create_key(&dir).unwrap()
+                })
+            })
+            .collect();
+        let keys: Vec<[u8; KEY_LEN]> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(keys.windows(2).all(|w| w[0] == w[1]), "callers disagree");
+        assert_eq!(keys[0], load_or_create_key(&dir).unwrap());
+        let strays: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(strays.is_empty(), "stray temp files: {strays:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn round_trips_a_secret() {
         let key = test_key();
         let blob = protect(&key, b"hunter2", b"aad").unwrap();

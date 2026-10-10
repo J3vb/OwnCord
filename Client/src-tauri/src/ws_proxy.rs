@@ -146,12 +146,14 @@ pub async fn ws_connect<R: Runtime>(
     // Drop any existing connection and claim this attempt's generation.
     // The superseded connection's teardown sees a stale generation and skips
     // clearing the active host, so clear it here: if this attempt fails, no
-    // host may stay active without a live socket. The clear runs inside the
-    // claim (under the slot lock) so it is ordered against newer attempts.
+    // host may stay active without a live socket. A reconnect to the same host
+    // keeps its session (clearing it would fail-close voice E2EE's identity-pin
+    // commands mid-redial). The clear runs inside the claim (under the slot
+    // lock) so it is ordered against newer attempts.
     let my_generation = state
         .begin_connection_with(|| {
             if let Some(session) = app.try_state::<crate::active_session::ActiveSession>() {
-                session.clear_active();
+                session.clear_active_unless(&tofu::extract_host(&url));
             }
         })
         .await;
