@@ -20,7 +20,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, setText, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { AvatarSubject } from "@lib/avatar";
@@ -867,9 +867,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     el.addEventListener("focus", () => (shieldFocusedFor = userId), { signal: disposable.signal });
     el.addEventListener(
       "blur",
-      () => {
-        if (el.isConnected) shieldFocusedFor = null;
-      },
+      () =>
+        setOwnedTimeout(
+          disposable.signal,
+          () => {
+            if (el.isConnected && document.activeElement !== el) shieldFocusedFor = null;
+          },
+          0,
+        ),
       { signal: disposable.signal },
     );
     if (v.status === "mismatch") {

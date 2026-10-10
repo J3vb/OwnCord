@@ -978,6 +978,37 @@ describe("DmCallPanel — video in the call", () => {
     root.remove();
   });
 
+  it("refocuses the shield when blur fires before its tile is detached", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    const badge = shield(root, OTTO)!;
+    badge.focus();
+    badge.dispatchEvent(new FocusEvent("blur"));
+    cell.remove();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(shield(root, OTTO));
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(shield(root, OTTO));
+    root.remove();
+  });
+
   it("leaves one shield on a camera tile across a panel rebuild", async () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();
