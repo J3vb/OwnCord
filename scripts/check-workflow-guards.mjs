@@ -42,7 +42,7 @@ export const CHECKS = [
   },
   {
     name: "concurrency group",
-    test: (src) => /^concurrency:\s*$/m.test(src) && /^\s*group:\s*\S/m.test(src),
+    test: (src) => /^\s*concurrency:\s*$/m.test(src) && /^\s*group:\s*\S/m.test(src),
     why: "a workflow consuming a metered credential must declare a concurrency group so repeated triggers collapse instead of running in parallel",
   },
   {
