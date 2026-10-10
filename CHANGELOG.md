@@ -51,7 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Admin panel**
 
-- Dashboard warning cards and the update notice now have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until its text changes, and a "dismissed, show" link brings them back. The pending-restart banner on the Server config page stays until you restart.
+- Dashboard warning cards and the update notice now have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until that problem clears or changes, and a "dismissed, show" link brings them back. The pending-restart banner on the Server config page stays until you restart.
 
 **Voice**
 

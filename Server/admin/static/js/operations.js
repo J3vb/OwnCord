@@ -94,7 +94,7 @@ function attnCounts(signals){
 }
 function attnWorst(c){return c.critical?'critical':c.warning?'warning':c.unknown?'unknown':'ok'}
 /* What a card says, not when it was last seen: a repeat sighting stays dismissed. */
-function attnSig(w){return noticeSig(w.severity,w.title,w.action)}
+function attnSig(w){return noticeSig(w.severity,w.title,w.first_observed)}
 function attnWarningCard(w){
   const rec=!!w.recovered_at;
   return'<div class="attn-card attn-warning '+(rec?'ok':w.severity==='critical'?'crit':'warn')+'" data-id="'+esc(w.id)+'">'+statusIcon(rec?'ok':w.severity)+'<div class="attn-body">'
@@ -138,7 +138,7 @@ function renderChecks(signals,counts,shown){
       +disclosure(statusIcon(attnWorst(jc))+'<span class="lbl">'+plural(jobs.length,'maintenance job','maintenance jobs')+'</span><span class="val">'+jobState+'</span>',list+'</ul>',jc.critical+jc.warning>0,'check-jobs');
   }
   body+='</div>';
-  return'<details class="section-card checks disclose" id="healthChecks"'+(counts.critical+counts.warning||active.length?' open':'')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
+  return'<details class="section-card checks disclose" id="healthChecks"'+(counts.critical+counts.warning||shown.length?' open':'')+'><summary class="section-card-header">'+I.chevronRight+'<h3>All health checks</h3><span class="checks-sum">'+sum.join(' · ')+'</span></summary>'+body+'</details>';
 }
 /* The headline, the active and recently recovered warnings (#attentionPanel),
    and the all-checks disclosure, returned apart so the dashboard can put the
