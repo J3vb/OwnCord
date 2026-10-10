@@ -27,6 +27,7 @@ import {
   finishJoinAttempt,
   setJoinUrlKind,
 } from "../../lib/voiceJoinTrace";
+import { noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -277,7 +278,7 @@ export class JoinOrchestration {
         // pendingJoin itself by transitioning to idle before the drain loop
         // ever reads it. Only run the give-up cleanup when nothing is queued.
         if (this._state.pendingJoin === null) {
-          this._onError?.("e2ee_timeout");
+          this._onError?.(voiceText("join.securingTimeout"));
           // The exchange timed out BEFORE room.connect(): no SFU participant
           // exists, so no LiveKit webhook will ever clean up, and the server
           // registered the join when it sent voice_token. Send voice_leave and
@@ -286,6 +287,7 @@ export class JoinOrchestration {
           // key-holder election.
           this.leaveVoice(true);
           leaveVoiceChannel();
+          noteJoinFailed();
         } else {
           // Leave state as "connecting" with pendingJoin intact so the finally
           // block and handleVoiceToken's drain loop can run the queued join.
@@ -470,6 +472,8 @@ export class JoinOrchestration {
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);
+        // A join the user already switched away from keeps the switch's wait.
+        if (voiceStore.getState().currentChannelId === channelId) noteJoinSucceeded();
         return true;
       }
       return false;
@@ -485,6 +489,9 @@ export class JoinOrchestration {
         (localRoom !== null && this.isStateConnected(channelId, localRoom))
       ) {
         failJoinAttempt(traceId);
+        if (this._state.type !== "connecting" || this._state.pendingJoin === null) {
+          noteJoinFailed();
+        }
       }
       if (localRoom !== null) {
         // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected

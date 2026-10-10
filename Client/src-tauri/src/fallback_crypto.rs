@@ -59,6 +59,21 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
     fs::create_dir_all(dir)
         .map_err(|e| format!("failed to create app data dir for fallback key: {e}"))?;
 
+    // Write the key to a uniquely named temp file first, then publish it with
+    // hard_link, which is atomic and fails if the final path already exists.
+    // The final path therefore never holds a partial key: a crash mid-write
+    // leaves only a stray temp file, and a concurrent loser always reads the
+    // winner's complete key.
+    let mut tag = [0u8; 8];
+    SystemRandom::new()
+        .fill(&mut tag)
+        .map_err(|_| "system RNG failed generating the fallback key".to_string())?;
+    let tag_hex: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp_path = dir.join(format!(
+        "{CREDENTIAL_FALLBACK_KEY_FILE}.{}.{tag_hex}.tmp",
+        std::process::id()
+    ));
+
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -66,11 +81,20 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    match options.open(&path) {
-        Ok(mut file) => finish_new_key_file(&path, key, || {
-            file.write_all(&key).and_then(|()| file.sync_all())
-        }),
-        // Lost the create race to another thread — use the winner's key.
+    let mut file = options
+        .open(&tmp_path)
+        .map_err(|e| format!("failed to create credential fallback key: {e}"))?;
+    finish_new_key_file(&tmp_path, key, || {
+        file.write_all(&key).and_then(|()| file.sync_all())
+    })?;
+    drop(file);
+
+    let linked = fs::hard_link(&tmp_path, &path);
+    let _ = fs::remove_file(&tmp_path);
+    match linked {
+        Ok(()) => Ok(key),
+        // Lost the create race to another thread — use the winner's key,
+        // which was fully written before it was published.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let bytes = fs::read(&path)
                 .map_err(|e| format!("failed to re-read credential fallback key: {e}"))?;
@@ -169,6 +193,40 @@ mod tests {
         let mut key = [0u8; KEY_LEN];
         SystemRandom::new().fill(&mut key).unwrap();
         key
+    }
+
+    #[test]
+    fn concurrent_first_use_callers_converge_on_one_key_and_leave_no_temp_file() {
+        // Many callers race the first creation: the losers hit the
+        // AlreadyExists branch and must read the winner's complete key.
+        let dir = std::env::temp_dir().join(format!(
+            "owncord-fallback-key-race-{}-{}",
+            std::process::id(),
+            test_key()[0]
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    load_or_create_key(&dir).unwrap()
+                })
+            })
+            .collect();
+        let keys: Vec<[u8; KEY_LEN]> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(keys.windows(2).all(|w| w[0] == w[1]), "callers disagree");
+        assert_eq!(keys[0], load_or_create_key(&dir).unwrap());
+        let strays: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(strays.is_empty(), "stray temp files: {strays:?}");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

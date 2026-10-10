@@ -83,7 +83,7 @@ stateDiagram-v2
 > a persistent "Secured" chip (shield icon) once the room key is ready and the room is
 > connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
-> badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves
+> badge. An E2EE-timeout still shows the "couldn't secure the voice call" message and auto-leaves
 > (`features/voice/joinOrchestration.ts` `connectAndSetup`). **Code vs. diagram note:** the client
 > actually runs the ECDH key exchange _before_ `room.connect()`, so `securing`
 > spans the key wait and the media connect; the state diagram below draws them in
@@ -236,7 +236,7 @@ Peer identity state lives in `voice.store` (per-participant
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)                                                          | Interaction                               |
+| State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
 | `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
@@ -251,8 +251,8 @@ at warn, and a warning toast naming the peer stays until dismissed
 for the rest of the call. `mismatch` is now only a pinned peer whose key is no
 longer delivered, or an announce that fails verification.
 
-The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
-opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so
+The mismatch modal (`createIdentityMismatchModal()`, `components/IdentityMismatchModal.ts`;
+opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust New Key" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
 was displayed, not a fresh store read, so a malicious server cannot swap the

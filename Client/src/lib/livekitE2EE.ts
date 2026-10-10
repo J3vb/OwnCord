@@ -227,7 +227,7 @@ export class E2EEManager {
    * or announces and waits for the key holder's offer.
    *
    * Returns false when the key exchange timed out after retry — the caller
-   * surfaces the "e2ee_timeout" error and leaves voice.
+   * surfaces the securing-timeout error and leaves voice.
    */
   async setupKeyExchange(isKeyHolder: boolean, channelId: number): Promise<boolean> {
     // Captured before any await so a clearState() that lands anywhere below

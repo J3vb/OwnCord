@@ -44,11 +44,12 @@ import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
 import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
+import { markAllRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -222,6 +223,36 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   const headerActions = createElement("div", { class: "sidebar-header-actions" });
+
+  // Mark All as Read: a server-wide action, so it lives in this header rather
+  // than in ChannelSidebar's own header (hidden here, see sidebar.css). First in
+  // the row so it appearing and disappearing does not move Invite. Shown only
+  // while a channel or DM is unread; those badges live in channels.store and
+  // dm.store.
+  const markAllBtn = headerAction(
+    shellText("channel.markAllRead"),
+    shellText("channel.markAllRead"),
+    "check",
+    "mark-all-read",
+  );
+  markAllBtn.addEventListener("click", () => {
+    markAllRead();
+  });
+  const syncMarkAllBtn = (): void => {
+    const show = unreadChannelIds().length > 0;
+    // Hiding the focused button would drop focus to <body>; hand it to the
+    // neighbouring header action (Invite) so the next Tab starts nearby.
+    if (!show && document.activeElement === markAllBtn) {
+      headerActions.querySelector<HTMLElement>('[data-testid="invite-btn"]')?.focus();
+    }
+    markAllBtn.style.display = show ? "" : "none";
+  };
+  syncMarkAllBtn();
+  headerActions.appendChild(markAllBtn);
+  unsubscribers.push(
+    channelsStore.subscribeSelector((s) => s.channels, syncMarkAllBtn),
+    dmStore.subscribeSelector((s) => s.channels, syncMarkAllBtn),
+  );
 
   const headerInviteCtrl = createInviteManagerController({ api, getRoot });
   const headerInviteBtn = headerAction(
@@ -459,13 +490,35 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above — instead of a bare `void` per call, which left a rejected or
-        // failed write unreported and the sidebar showing an order the
-        // server never accepted.
+        // above. A rejected PATCH is rolled back to its previous position only
+        // if no channel_update broadcast arrived for that channel since the
+        // request started (the server broadcasts before it answers, so a
+        // broadcast means the write landed) and it still shows the optimistic
+        // value. Only the broadcast counts: unread/mention badge mutations also
+        // replace the channel object but confirm nothing. A request that failed
+        // only because its response was lost is covered by the reconnect
+        // resync, so it needs no reconciliation here.
+        const touched = new Set<number>();
+        const unsubscribe = ws.on("channel_update", (payload) => {
+          touched.add(payload.id);
+        });
         void Promise.allSettled(
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
+          unsubscribe();
           if (results.some((r) => r.status === "rejected")) {
+            results.forEach((result, i) => {
+              const entry = reorders[i];
+              if (
+                result.status === "rejected" &&
+                entry !== undefined &&
+                !touched.has(entry.channelId) &&
+                channelsStore.getState().channels.get(entry.channelId)?.position ===
+                  entry.newPosition
+              ) {
+                updateChannelPosition(entry.channelId, entry.previousPosition);
+              }
+            });
             getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });

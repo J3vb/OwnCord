@@ -267,6 +267,53 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   ).toBe(true);
 });
 
+// A pop-out holds the stream's own <video>: when the stream ends, by any path,
+// the window goes with it rather than staying open on a dead frame.
+const shareEndings: Array<[string, (alice: Page, bob: Page) => Promise<void>]> = [
+  [
+    "the sharer stops sharing",
+    (alice) => alice.locator(".voice-widget button[aria-label='Screenshare']").click(),
+  ],
+  [
+    "the sharer leaves voice",
+    (alice) => alice.locator(".voice-widget.visible button[aria-label='Disconnect']").click(),
+  ],
+  ["the sharer's app goes away", (alice) => alice.close()],
+  [
+    "the watcher leaves voice",
+    (_alice, bob) => bob.locator(".voice-widget.visible button[aria-label='Disconnect']").click(),
+  ],
+];
+
+for (const [ending, end] of shareEndings) {
+  test(`a popped-out screen share closes its window when ${ending}`, async ({ alice, bob }) => {
+    await joinVoice(alice);
+    await joinVoice(bob);
+    const shareBtn = alice.locator(".voice-widget button[aria-label='Screenshare']");
+    await shareBtn.click();
+    await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
+
+    const aliceRow = bob.locator(".voice-user-item[data-voice-uid='1']");
+    await expect(aliceRow.locator(".vu-live-badge")).toBeVisible({ timeout: 10_000 });
+    await aliceRow.click();
+    const bobScreen = bob.locator(
+      "[data-testid='video-grid'] .video-cell[data-stream-type='screenshare']",
+    );
+    await expect(bobScreen).toBeVisible({ timeout: 10_000 });
+    await bobScreen.hover();
+    const [popup] = await Promise.all([
+      bob.waitForEvent("popup"),
+      bobScreen.locator("[data-tile-control='pip']").click(),
+    ]);
+    await expect(popup.locator(".video-popout video")).toHaveCount(1);
+
+    await end(alice, bob);
+
+    await expect.poll(() => popup.isClosed(), { timeout: 15_000 }).toBe(true);
+    await expect(bobScreen).toHaveCount(0);
+  });
+}
+
 test("guided diagnostics observes actual decoded incoming media without leaving extra capture", async ({
   alice,
   bob,

@@ -87,6 +87,14 @@ describeNotifierSuite(async () => {
         invoke.mock.calls
           .filter((call) => call[0] === "set_unread_badge")
           .map((call) => (call[1] as { count: number }).count),
+      ringsShown: () =>
+        invoke.mock.calls
+          .filter((call) => call[0] === "notify_message" && (call[1] as { ring?: boolean }).ring)
+          .map((call) => (call[1] as { channelId: number }).channelId),
+      callsCleared: () =>
+        invoke.mock.calls
+          .filter((call) => call[0] === "clear_call_notification")
+          .map((call) => (call[1] as { channelId: number }).channelId),
     },
   };
 });

@@ -174,6 +174,8 @@ pub fn run() {
             commands::get_cert_fingerprint,
             #[cfg(desktop)]
             message_notification::notify_message,
+            #[cfg(desktop)]
+            message_notification::clear_call_notification,
             unread_badge::set_unread_badge,
             commands::store_identity_pin,
             commands::get_identity_pin,

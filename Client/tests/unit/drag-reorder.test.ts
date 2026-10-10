@@ -378,6 +378,18 @@ describe("reorder index arithmetic", () => {
     expect(positionsOf(reorders)).toEqual({ 2: 0, 1: 1 });
   });
 
+  it("carries each channel's pre-drag position as previousPosition", () => {
+    signIn("owner");
+    const rig = buildRig([makeCh(1, 5), makeCh(2, 7), makeCh(3, 9)]);
+
+    drag(rig, 3, 0, "top"); // → [3, 1, 2]
+
+    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    const previous: Record<number, number> = {};
+    for (const r of reorders) previous[r.channelId] = r.previousPosition;
+    expect(previous).toEqual({ 3: 9, 1: 5, 2: 7 });
+  });
+
   it("only reports channels whose position actually changed", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2), makeCh(4, 3)]);

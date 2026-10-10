@@ -23,6 +23,7 @@ import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@li
 import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
+import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
@@ -540,6 +541,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     outgoingCall?.start(
       channelId,
       (online.length > 0 ? online : all).map((p) => p.id),
+      // A 1:1 callee shown offline is told at once (D-14). The ring above still
+      // went out: an invisible contact shows offline but can answer.
+      dm?.isGroup === false && online.length === 0,
     );
   }
 
@@ -574,6 +578,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // reconnected.
     if (uiStore.getState().connectionStatus !== "connected") {
       showToast(account("voice.canAnswerWhileReconnecting"), "error");
+      return;
+    }
+    const backoffText = joinBackoffText();
+    if (backoffText !== null) {
+      showToast(backoffText, "error");
       return;
     }
     const ring = ringCtrl?.current() ?? null;
@@ -796,12 +805,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
-    // the sidebar's first control: the first of them that takes focus.
+    // the sidebar's first control that is not hidden (a hidden header action,
+    // such as Mark All as Read with nothing unread, would swallow the focus
+    // call and leave it on <body>): the first of them that takes focus.
     const focusReachable = (): HTMLElement | null => {
       const candidates = [
         chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
         chatAreaResult.sidebarToggle,
-        sidebar.sidebarWrapper.querySelector<HTMLElement>("button"),
+        ...Array.from(sidebar.sidebarWrapper.querySelectorAll<HTMLElement>("button")).filter(
+          (b) => b.style.display !== "none" && b.style.visibility !== "hidden",
+        ),
       ];
       for (const el of candidates) {
         el?.focus();
@@ -1078,6 +1091,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
       onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
+      onRingEnd: (ring) => void callAlerts().then((m) => m.clearIncomingCall(ring)),
     });
     callBanner = createIncomingCallBanner({
       onAccept: () => acceptRing(false),
@@ -1114,7 +1128,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             const text =
               state.phase === "declined"
                 ? dmCallText("declinedStatus", { name })
-                : dmCallText("noAnswerStatus");
+                : state.phase === "offline"
+                  ? dmCallText("offline", { name })
+                  : dmCallText("noAnswerStatus");
             showToast(text, "info", 6000);
           }
         }

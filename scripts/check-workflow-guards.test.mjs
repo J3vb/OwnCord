@@ -5,16 +5,17 @@ import {
   autoConfirmEnablers,
   autoConfirmIsDefault,
   gstreamerBuildDepsMissing,
+  unboundedPlaywrightInstalls,
   signingKeyHolders,
 } from "./check-workflow-guards.mjs";
 
 const good = [
   "name: X",
-  "concurrency:",
-  "  group: x-${{ github.event.issue.number }}",
-  "  cancel-in-progress: true",
   "jobs:",
   "  j:",
+  "    concurrency:",
+  "      group: x-${{ github.event.issue.number }}",
+  "      cancel-in-progress: true",
   "    if: |",
   "      contains(fromJSON('[\"someone\"]'), github.actor) && true",
   "    runs-on: ubuntu-latest",
@@ -33,6 +34,55 @@ test("a missing timeout-minutes is caught", () => {
 
 test("a missing concurrency group is caught", () => {
   assert.ok(missing(good.replace("concurrency:", "# concurrency:")).includes("concurrency group"));
+});
+
+test("concurrency on a different job or at workflow level does not count", () => {
+  const body = good.split("\n").slice(3, 6);
+  const bare = good.replace(body.join("\n") + "\n", "");
+  const other = (extra) => bare.replace("jobs:\n", "jobs:\n" + extra);
+  assert.ok(missing(other("  other:\n" + body.join("\n") + "\n")).includes("concurrency group"));
+  assert.ok(
+    missing("concurrency:\n  group: g\n  cancel-in-progress: true\n" + bare).includes(
+      "concurrency group",
+    ),
+  );
+});
+
+test("concurrency keys outside the gated job's own concurrency block do not count", () => {
+  const bare = good.replace(/    concurrency:\n.*\n.*\n/, "");
+  const other = "\n  other:\n    concurrency:\n      group: g\n      cancel-in-progress: true\n";
+  // concurrency only on an unrelated job, which sits after the gated one
+  assert.ok(missing(bare + other).includes("concurrency group"));
+  assert.ok(missing(bare + other).includes("cancel-in-progress"));
+  // keys elsewhere in the gated job, with a concurrency block that lacks them
+  const stray = bare.replace(
+    "    runs-on",
+    "    concurrency:\n      queue: x\n    env:\n      group: g\n      cancel-in-progress: true\n    runs-on",
+  );
+  assert.ok(missing(stray).includes("concurrency group"));
+  assert.ok(missing(stray).includes("cancel-in-progress"));
+});
+
+test("every actor-gated job needs its own concurrency block", () => {
+  const second = "\n  second:\n    if: github.actor == 'x'\n    runs-on: ubuntu-latest";
+  assert.ok(missing(good + second).includes("concurrency group"));
+  assert.ok(missing(good + second).includes("cancel-in-progress"));
+});
+
+test("a gated job header with a trailing comment or quoted key still splits", () => {
+  for (const header of ["  second: # metered job", '  "second":', "  'second': # x"]) {
+    const second = `\n${header}\n    if: github.actor == 'x'\n    runs-on: ubuntu-latest`;
+    assert.ok(missing(good + second).includes("concurrency group"), header);
+  }
+});
+
+test("a helper job that mentions github.actor outside its if is not gated", () => {
+  const helper = (body) => `\n  helper:\n    runs-on: ubuntu-latest\n${body}`;
+  assert.equal(auditWorkflow(good + helper("    env:\n      A: ${{ github.actor }}")).length, 0);
+  assert.equal(
+    auditWorkflow(good + helper("    steps:\n      - run: echo ${{ github.actor }}")).length,
+    0,
+  );
 });
 
 test("cancel-in-progress: false is caught", () => {
@@ -148,5 +198,27 @@ test("a Tauri build install without the GStreamer dev packages is caught", () =>
       { name: "driver.yml", src: install("webkit2gtk-driver", "xvfb") },
     ]),
     ["bare.yml", "half.yml"],
+  );
+});
+
+// `playwright install --with-deps` and the standalone `playwright install-deps`
+// both run apt with no bound; a dead runner mirror then holds the step until the
+// job times out. The shared script bounds apt.
+test("a direct `playwright install --with-deps` or `install-deps` step is caught", () => {
+  const step = (cmd) => `      - name: Install Playwright browser\n        run: ${cmd}`;
+  assert.deepEqual(
+    unboundedPlaywrightInstalls([
+      { name: "bad.yml", src: `steps:\n${step("npx playwright install --with-deps chromium")}` },
+      { name: "short.yml", src: "      - run: npx playwright install --with-deps chromium" },
+      { name: "deps-only.yml", src: "      - run: npx playwright install-deps chromium" },
+      { name: "shared.yml", src: step("bash ../scripts/ci/playwright-install.sh") },
+      { name: "browser-only.yml", src: step("npx playwright install chromium") },
+      { name: "comment.yml", src: "      # was: npx playwright install --with-deps chromium" },
+    ]),
+    [
+      { name: "bad.yml", line: 3 },
+      { name: "short.yml", line: 1 },
+      { name: "deps-only.yml", line: 1 },
+    ],
   );
 });

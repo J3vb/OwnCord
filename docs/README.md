@@ -80,6 +80,7 @@ current status.
 
 | Audit                                                                                      | Scope                                                                                |
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| [client-perf-audit-2026-10.md](client-perf-audit-2026-10.md)                               | Client performance: startup, channel switch, scrolling, voice join, memory.          |
 | [linux-platform-audit-2026-10.md](linux-platform-audit-2026-10.md)                         | Linux desktop client vs Windows: IPC byte paths, WebKitGTK differences, what to fix. |
 | [audit-2026-09-23-windows-update-relaunch.md](audit-2026-09-23-windows-update-relaunch.md) | Windows client update: why the successor can start late (not conclusive).            |
 | [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md)             | Repository layout and contributor experience (`RL-01`…`RL-22`).                      |

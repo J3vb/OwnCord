@@ -62,12 +62,25 @@ impl WsState {
     /// sender. Every later step of that attempt is conditional on this value
     /// still being current.
     async fn begin_connection(&self) -> u64 {
+        self.begin_connection_with(|| {}).await
+    }
+
+    /// `begin_connection`, running `on_claimed` while the slot lock is held.
+    /// `ws_connect` clears the active session there: done after the claim, a
+    /// descheduled older attempt could wipe the host a newer attempt has
+    /// already authenticated and set.
+    async fn begin_connection_with(&self, on_claimed: impl FnOnce()) -> u64 {
         let mut tx_lock = self.tx.lock().await;
         if tx_lock.is_some() {
             debug!("[ws_proxy] dropping existing connection");
         }
         *tx_lock = None;
-        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+        // Bump first: the read task's auth_ok activation checks the generation
+        // under the session lock, so once on_claimed's clear has run, a
+        // superseded attempt's set_if already sees the newer generation.
+        let claimed = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        on_claimed();
+        claimed
     }
 
     /// Install `tx` as the live sender if `generation` is still current.
@@ -135,7 +148,19 @@ pub async fn ws_connect<R: Runtime>(
     info!("[ws_proxy] connecting to {}", url);
 
     // Drop any existing connection and claim this attempt's generation.
-    let my_generation = state.begin_connection().await;
+    // The superseded connection's teardown sees a stale generation and skips
+    // clearing the active host, so clear it here: if this attempt fails, no
+    // host may stay active without a live socket. A reconnect to the same host
+    // keeps its session (clearing it would fail-close voice E2EE's identity-pin
+    // commands mid-redial). The clear runs inside the claim (under the slot
+    // lock) so it is ordered against newer attempts.
+    let my_generation = state
+        .begin_connection_with(|| {
+            if let Some(session) = app.try_state::<crate::active_session::ActiveSession>() {
+                session.clear_active_unless(&tofu::extract_host(&url));
+            }
+        })
+        .await;
 
     // Only allow secure WebSocket connections
     if !url.starts_with("wss://") {
@@ -293,11 +318,12 @@ pub async fn ws_connect<R: Runtime>(
                     // Native-side authenticated event: the server answered the
                     // auth message over this pinned socket. Set the host before
                     // relaying so it is active by the time the page sees it.
-                    if is_auth_ok(&text) && generation_read.load(Ordering::SeqCst) == my_generation
-                    {
+                    if is_auth_ok(&text) {
                         app_read
                             .state::<crate::active_session::ActiveSession>()
-                            .set(&host_read);
+                            .set_if(&host_read, || {
+                                generation_read.load(Ordering::SeqCst) == my_generation
+                            });
                     }
                     let _ = app_read.emit("ws-message", text);
                 },
@@ -577,6 +603,9 @@ pub fn accept_cert_fingerprint<R: Runtime>(
     if !is_valid_cert_fingerprint(&fingerprint) {
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
+    // Pins are read under the normalized key (tofu::cert_store_key) by
+    // evaluate, the HTTP proxy and the LiveKit proxy; write them the same way.
+    let host = crate::tofu::cert_store_key(&host);
 
     let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to open certs store: {e}");
@@ -789,6 +818,32 @@ mod tests {
     // second ws_connect without awaiting or cancelling the first, so two
     // attempts can be in flight over one slot. Mirrors the ptt.rs
     // ATOMICRACE-001 guard.
+
+    #[tokio::test]
+    async fn the_generation_is_already_bumped_when_the_session_clear_runs() {
+        // set_if's currency check relies on this order: a clear that ran
+        // before the bump would let a superseded attempt set its host after it.
+        let state = WsState::new();
+        let before = state.generation.load(Ordering::SeqCst);
+        let mut seen = before;
+        let claimed = state
+            .begin_connection_with(|| seen = state.generation.load(Ordering::SeqCst))
+            .await;
+        assert_eq!(seen, claimed);
+        assert_ne!(seen, before);
+    }
+
+    #[tokio::test]
+    async fn the_session_clear_runs_under_the_slot_lock() {
+        // A clear done after the claim could land after a newer attempt set its
+        // host; inside the claim it is ordered against every other attempt.
+        let state = WsState::new();
+        let mut held = false;
+        state
+            .begin_connection_with(|| held = state.tx.try_lock().is_err())
+            .await;
+        assert!(held, "on_claimed must run while the slot lock is held");
+    }
 
     #[tokio::test]
     async fn superseded_connect_does_not_take_the_sender_slot() {
