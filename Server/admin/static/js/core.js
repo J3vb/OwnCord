@@ -627,7 +627,7 @@ function isDismissed(id,sig){return dismissedFor()[id]===sig}
 function dismissNotice(id,sig){
   const all=dismissStore(),uid=state.me&&state.me.id;if(uid===undefined||uid===null)return;
   all[uid]=Object.assign(dismissedFor(),{[id]:sig});
-  try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* private mode: hidden until the next render */}
+  try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* storage unavailable: the dismiss does not stick */}
   renderContent();
 }
 function restoreDismissed(){
