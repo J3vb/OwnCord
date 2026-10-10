@@ -48,6 +48,7 @@ import {
   enableCamera,
   getRemoteVideoStats,
   setRemoteVideoView,
+  setRemoteVideoWatched,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -766,6 +767,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (videoModeCtrl === null) return;
         videoModeCtrl.showVideoGrid();
         videoModeCtrl.setFocus(userId);
+        videoGrid?.watch(userId);
       },
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
@@ -1423,6 +1425,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
           : setRemoteVideoView(tileId, "camera", view),
+      setStreamWatched: (tileId, on) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? setRemoteVideoWatched(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", on)
+          : setRemoteVideoWatched(tileId, "camera", on),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
     });

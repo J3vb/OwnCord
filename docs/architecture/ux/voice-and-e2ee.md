@@ -130,9 +130,15 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, also 0–100 %) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
 `components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
-volumes apart and offers Mute stream and **Stop watching**, which hides the
-stream behind a **Watch stream** card (the track stays subscribed but receives
-no video; opt-in watching is open question Q3). Your own screen share is covered by what
+volumes apart and offers Mute stream and **Stop watching**. Watching is
+opt-in, Discord-style: a remote camera or screen share arrives as a tile behind
+a **Watch stream** card, and nothing of it (screen-share audio included) is
+subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
+out; Stop watching unsubscribes it and returns the card. The room connects with
+`autoSubscribe: false`: `handleTrackPublished` (`lib/roomEventHandlers.ts`)
+subscribes each voice unless deafened, and `RemoteTracks.watch` the streams.
+On Linux the native backend still auto-subscribes, so it unsubscribes an
+unwatched stream as it is published. Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
@@ -145,7 +151,8 @@ accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's pro
 second subscription), which can be maximised or go full screen from its own control, F or a
 double-click. No capability names the pop-out label on purpose (capabilities only grant IPC;
 the pop-out has none, and the main window drives its full screen by label), and the about:blank
-popup inherits the app's CSP. The tile shows **Bring back**, and closing the window returns the video; closing the main window closes every pop-out. Where
+popup inherits the app's CSP. The stream's volume and mute go along into the window, shown over the video.
+The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
 no window opens the video stays in the grid. Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover

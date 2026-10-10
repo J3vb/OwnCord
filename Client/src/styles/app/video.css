@@ -262,6 +262,14 @@
 .video-popout__fullscreen:focus-visible {
   opacity: 1;
 }
+/* The stream's volume, taken along from its tile: always shown, on the left
+   of the full-screen control. */
+.video-popout .video-tile-overlay {
+  right: auto;
+  bottom: 12px;
+  left: 12px;
+  opacity: 1;
+}
 /* Your own screen share: what is going out, never a hall of mirrors. */
 .video-self-cover {
   position: absolute;

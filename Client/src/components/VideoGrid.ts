@@ -63,6 +63,9 @@ export interface VideoGridCallbacks {
   readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
   /** What a remote tile shows now, so its stream sends only that. */
   readonly setStreamView?: (tileId: number, view: VideoView) => void;
+  /** Opt-in watching: the viewer watches a remote stream, or stops. Nothing
+   *  is received until they do. */
+  readonly setStreamWatched?: (tileId: number, watched: boolean) => void;
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
@@ -77,7 +80,17 @@ export interface GridPerson {
 }
 
 export interface VideoGridComponent extends MountableComponent {
-  addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
+  /** A null stream: a remote stream published but not watched, drawn with
+   *  Watch stream (opt-in watching). A stream makes it play. */
+  addStream(
+    userId: number,
+    username: string,
+    stream: MediaStream | null,
+    config?: TileConfig,
+  ): void;
+  /** Watch a remote stream (the voice roster's click), now or as soon as
+   *  its tile is offered. */
+  watch(tileId: number): void;
   /** Update an already-open tile's label and the person's name in its
    *  control labels in place (e.g. a mid-call rename). No-op if no tile is
    *  open for this id — callers don't need to know whether the tile exists. */
@@ -247,6 +260,8 @@ interface CellEntry {
   name: string;
   /** Draw a volume set elsewhere (remote tiles only). */
   applyVolume?: (volume: number, muted: boolean) => void;
+  /** The volume controls (remote tiles only): they go along into a pop-out. */
+  volumeOverlay?: HTMLElement;
   /** The previous receiver sample, for the frame rate. */
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
@@ -381,6 +396,8 @@ export function createVideoGrid(): VideoGridComponent {
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
   let viewResizeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Streams the voice roster asked to watch before their tile was offered. */
+  const pendingWatch = new Set<number>();
   /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
 
@@ -926,11 +943,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
     if (isFullscreen(tileId)) leaveFullscreen();
     // Popping out a stopped tile means watching it: its video is hidden.
-    if (entry.el.classList.contains("video-cell--stopped")) setStopped(tileId, false);
+    if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
     const popout = openPopout({
       title: voiceText("tile.popoutTitle", { name: username }),
       video: entry.video,
+      // The stream's volume and mute, where it is being watched.
+      controls: entry.volumeOverlay,
       onClosed: (byUser) => bringBack(entry, byUser),
       setWindowFullscreen: (on, label) =>
         callbacks.setWindowFullscreen?.(on, label) ?? Promise.resolve(),
@@ -974,6 +993,7 @@ export function createVideoGrid(): VideoGridComponent {
     pip?.setAttribute("aria-pressed", "false");
     if (hadFocus) pip?.focus();
     entry.el.insertBefore(entry.video, entry.el.firstChild);
+    if (entry.volumeOverlay !== undefined) entry.el.appendChild(entry.volumeOverlay);
     entry.video.play()?.catch(() => {});
     syncViews();
   }
@@ -982,9 +1002,16 @@ export function createVideoGrid(): VideoGridComponent {
     return focusedTileId;
   }
 
-  /** Stop watching (or hide your own preview) locally, or bring it back. The
-   *  stream stays subscribed: opt-in watching is a separate decision (Q3). */
-  function setStopped(tileId: number, stopped: boolean): void {
+  /** Watch a remote stream or stop (opt-in watching): it is subscribed only
+   *  while watched. */
+  function setWatching(tileId: number, on: boolean): void {
+    callbacks.setStreamWatched?.(tileId, on);
+    setStopped(tileId, !on);
+  }
+
+  /** Draw a tile stopped (behind Watch stream, or your own hidden preview)
+   *  or playing. `moveFocus` false for a change the user did not make here. */
+  function setStopped(tileId: number, stopped: boolean, moveFocus = true): void {
     const entry = cells.get(tileId);
     if (entry === undefined) return;
     const cell = entry.el;
@@ -995,7 +1022,9 @@ export function createVideoGrid(): VideoGridComponent {
     cell.querySelector(".video-stopped")?.remove();
     const self = entry.config?.isSelf === true;
     if (!stopped) {
-      restoreFocusedControl({ userId: tileId, control: self ? "hide-preview" : "stop" });
+      if (moveFocus) {
+        restoreFocusedControl({ userId: tileId, control: self ? "hide-preview" : "stop" });
+      }
       return;
     }
     const cover = createElement("div", { class: "video-stopped" });
@@ -1006,11 +1035,23 @@ export function createVideoGrid(): VideoGridComponent {
     );
     again.addEventListener("click", (e) => {
       e.stopPropagation();
-      setStopped(tileId, false);
+      if (self) setStopped(tileId, false);
+      else setWatching(tileId, true);
     });
     cover.appendChild(again);
     cell.appendChild(cover);
-    again.focus();
+    if (moveFocus) again.focus();
+  }
+
+  function watch(tileId: number): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) {
+      pendingWatch.add(tileId);
+      callbacks.setStreamWatched?.(tileId, true);
+      return;
+    }
+    if (entry.config?.isSelf === true) return;
+    if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
   }
 
   function buildSelfCover(tileId: number, stream: MediaStream, hasAudio: boolean): HTMLDivElement {
@@ -1068,19 +1109,37 @@ export function createVideoGrid(): VideoGridComponent {
   function addStream(
     userId: number,
     username: string,
-    stream: MediaStream,
+    stream: MediaStream | null,
     config?: TileConfig,
   ): void {
     if (root === null) return;
 
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
-    if (existing !== undefined) {
+    if (existing !== undefined && stream === null) {
+      // No longer received (not watched): back to Watch stream.
+      existing.trackCleanup?.();
+      existing.trackCleanup = undefined;
+      existing.video.srcObject = null;
+      setTrackMuted(existing, false);
+      if (!existing.el.classList.contains("video-cell--stopped")) setStopped(userId, true, false);
+      applyNames(existing, username, config?.name ?? username);
+      return;
+    }
+    if (existing !== undefined && stream !== null) {
+      // Received only while watched: a stream on a tile showing Watch plays.
+      if (
+        existing.config?.isSelf !== true &&
+        existing.el.classList.contains("video-cell--stopped")
+      ) {
+        setStopped(userId, false, false);
+      }
       const video = existing.video;
       // Only replace srcObject if the underlying tracks changed
       const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
       const newTracks = stream.getTracks();
       const tracksMatch =
+        video.srcObject != null &&
         oldTracks.length === newTracks.length &&
         oldTracks.every((t, i) => t.id === newTracks[i]?.id);
       if (!tracksMatch) {
@@ -1104,10 +1163,12 @@ export function createVideoGrid(): VideoGridComponent {
       playsinline: "",
     });
     video.muted = true;
-    video.srcObject = stream;
-    video.play()?.catch((err) => {
-      log.debug("Video autoplay rejected (new tile)", { userId, err });
-    });
+    if (stream !== null) {
+      video.srcObject = stream;
+      video.play()?.catch((err) => {
+        log.debug("Video autoplay rejected (new tile)", { userId, err });
+      });
+    }
 
     const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
@@ -1197,10 +1258,11 @@ export function createVideoGrid(): VideoGridComponent {
     if (config !== undefined && !config.isSelf) {
       const volume = buildVolumeControls(config);
       entry.applyVolume = volume.apply;
+      entry.volumeOverlay = volume.overlay;
       cell.appendChild(volume.overlay);
       nav.insertBefore(
         tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
-          setStopped(userId, true),
+          setWatching(userId, false),
         ),
         back,
       );
@@ -1217,7 +1279,7 @@ export function createVideoGrid(): VideoGridComponent {
             signal: entry.listeners.signal,
             onVolumeChange: (isScreenshare, level, muted) =>
               applyVolume(config.audioUserId, isScreenshare, level, muted),
-            onStopWatching: () => setStopped(userId, true),
+            onStopWatching: () => setWatching(userId, false),
           });
         });
       cell.addEventListener(
@@ -1234,12 +1296,15 @@ export function createVideoGrid(): VideoGridComponent {
 
     // Your own screen share: say what is going out instead of showing a
     // hall of mirrors, with Stop sharing always at hand.
-    if (config?.isSelf === true && config.isScreenshare) {
+    if (config?.isSelf === true && config.isScreenshare && stream !== null) {
       cell.appendChild(buildSelfCover(userId, stream, config.hasAudio === true));
     }
     applyNames(entry, username, config?.name ?? username);
     cells.set(userId, entry);
-    attachTrackLifecycle(userId, stream);
+    if (stream !== null) attachTrackLifecycle(userId, stream);
+    // Not watched yet: Watch stream, unless the voice roster already asked.
+    else if (pendingWatch.delete(userId)) callbacks.setStreamWatched?.(userId, true);
+    else setStopped(userId, true, false);
     root.appendChild(cell);
     applySpeaking();
     applyUserAudioState();
@@ -1300,6 +1365,10 @@ export function createVideoGrid(): VideoGridComponent {
     const savedFocus = captureFocusedControl();
 
     entry.popout?.close();
+    // The stream is gone: so is the watch (a new one starts unwatched).
+    if (entry.config !== undefined && !entry.config.isSelf) {
+      callbacks.setStreamWatched?.(userId, false);
+    }
     if (entry.trackCleanup) {
       entry.trackCleanup();
       entry.trackCleanup = undefined;
@@ -1335,6 +1404,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  Deleting the current key mid-iteration is well-defined for Map — no
    *  entries are skipped — so this needs no snapshot copy of the keys. */
   function clearStreams(): void {
+    pendingWatch.clear();
     for (const userId of cells.keys()) {
       removeStream(userId);
     }
@@ -1487,6 +1557,7 @@ export function createVideoGrid(): VideoGridComponent {
     mount,
     destroy,
     addStream,
+    watch,
     setLabel,
     removeStream,
     clearStreams,

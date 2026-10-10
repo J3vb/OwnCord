@@ -73,8 +73,13 @@ and only when it changes something a contributor or fork holder must do
 - Clicking a voice channel again while it was still connecting or securing left it at once, so repeated clicks cycled join/leave on the server several times a second — a repeat click now leaves the join running (Disconnect still ends it).
 - After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
 - A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
+- A screen share watched in a pop-out window had no volume or mute controls (since v2.2.0-beta.2); the stream's volume and mute are now in the window.
 
 ### Changed
+
+**Voice and video**
+
+- Someone else's screen share or camera no longer plays for everyone straight away; it shows up as a tile with Watch stream, and nothing of it (its audio included) is received until you click it. Stop watching returns the tile to Watch stream.
 
 **Voice**
 

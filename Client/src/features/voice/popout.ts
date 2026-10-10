@@ -28,6 +28,9 @@ const CLOSED_POLL_MS = 300;
 export interface PopoutOptions {
   readonly title: string;
   readonly video: HTMLVideoElement;
+  /** Controls shown over the video in the window (the stream's volume): the
+   *  caller's to put back, with the video. */
+  readonly controls?: HTMLElement;
   /** The window is gone, closed by the user (`byUser`) or by close(): the
    *  video is the caller's to put back. Called once. */
   readonly onClosed: (byUser: boolean) => void;
@@ -119,7 +122,11 @@ export function openPopout(opts: PopoutOptions): Popout | null {
       if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
       doc.head.appendChild(copy);
     }
-    root.replaceChildren(opts.video, button);
+    root.replaceChildren(
+      opts.video,
+      ...(opts.controls === undefined ? [] : [opts.controls]),
+      button,
+    );
     doc.body.appendChild(root);
     doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {
       signal,

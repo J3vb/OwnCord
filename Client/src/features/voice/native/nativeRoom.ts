@@ -745,6 +745,10 @@ export class NativeRoom {
       voiceStore.getState().localDeafened
     )
       pub.setSubscribed(false);
+    // shortcut: the backend auto-subscribes, so an unwatched stream flows until
+    // this event's handler unsubscribes it (opt-in watching); connect the native
+    // session with auto_subscribe off if that first moment of video matters.
+    this.emit(RoomEvent.TrackPublished, pub, p);
   }
 
   private clearDecryptTimer(identity: string): void {
@@ -775,8 +779,10 @@ export class NativeRoom {
       case "participantDisconnected": {
         const p = this.remoteParticipants.get(event.identity);
         // livekit-client raises the track unsubscriptions before the leave.
-        for (const pub of p?.trackPublications.values() ?? [])
+        for (const pub of p?.trackPublications.values() ?? []) {
           this.unsubscribeVideo(event.identity, pub);
+          this.emit(RoomEvent.TrackUnpublished, pub, p);
+        }
         this.remoteParticipants.delete(event.identity);
         this.clearDecryptTimer(event.identity);
         if (p !== undefined) this.emit(RoomEvent.ParticipantDisconnected, p);
@@ -788,13 +794,17 @@ export class NativeRoom {
       case "trackSubscribed": {
         this.addPublication(event.identity, event.track);
         const pub = this.participant(event.identity).trackPublications.get(event.track.sid)!;
-        if (pub.kind === "video") this.subscribeVideo(event.identity, pub);
+        // The backend auto-subscribes: one already unsubscribed (not watched)
+        // was on its way, and raises nothing.
+        if (pub.kind === "video" && pub.isSubscribed) this.subscribeVideo(event.identity, pub);
         break;
       }
       case "trackUnpublished": {
-        const pubs = this.remoteParticipants.get(event.identity)?.trackPublications;
-        this.unsubscribeVideo(event.identity, pubs?.get(event.sid));
-        pubs?.delete(event.sid);
+        const p = this.remoteParticipants.get(event.identity);
+        const pub = p?.trackPublications.get(event.sid);
+        this.unsubscribeVideo(event.identity, pub);
+        p?.trackPublications.delete(event.sid);
+        if (pub !== undefined) this.emit(RoomEvent.TrackUnpublished, pub, p);
         break;
       }
       case "trackUnsubscribed":

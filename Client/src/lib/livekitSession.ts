@@ -351,6 +351,8 @@ export class LiveKitSession {
       getAudioElements: () => this._audioElements,
       getOnRemoteVideoCallback: () => this.onRemoteVideoCallback,
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
+      isWatched: (userId, isScreenshare) =>
+        this._remoteTracks.isWatched(userId, isScreenshare ? "screenshare" : "camera"),
       getOnErrorCallback: () => this.onErrorCallback,
       isConnecting: () => this._connecting,
       isReconnecting: () => this._state.type === "reconnecting",
@@ -901,6 +903,11 @@ export class LiveKitSession {
     this._remoteTracks.setRemoteVideoView(userId, type, view);
   }
 
+  /** Watch a remote camera or screen share, or stop: opt-in watching. */
+  setRemoteVideoWatched(userId: number, type: "camera" | "screenshare", on: boolean): void {
+    this._remoteTracks.watch(userId, type, on);
+  }
+
   getRoom(): Room | null {
     return this._room;
   }
@@ -995,6 +1002,7 @@ export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
+export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);

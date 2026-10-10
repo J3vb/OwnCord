@@ -11,11 +11,16 @@ export function parseUserId(identity: string): number {
   return 0;
 }
 
+/** A null stream: published but not watched (opt-in watching). */
 export type RemoteVideoCallback = (
   userId: number,
-  stream: MediaStream,
+  stream: MediaStream | null,
   isScreenshare: boolean,
 ) => void;
+/** Opt-in watching: the room connects with nothing auto-subscribed.
+ *  roomEventHandlers' handleTrackPublished subscribes each voice, and a
+ *  camera or screen share only once its tile is watched (RemoteTracks.watch). */
+export const ROOM_CONNECT_OPTIONS = { autoSubscribe: false } as const;
 export type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean) => void;
 export type PendingVoiceJoin = {
   readonly token: string;

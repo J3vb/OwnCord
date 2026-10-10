@@ -37,6 +37,17 @@ function roomWithPublication(identity: string, source: string, publication: unkn
   } as unknown as Room;
 }
 
+/** A room whose user has these sources published, each with a setSubscribed spy. */
+function roomWithSources(identity: string, sources: string[]) {
+  const pubs = new Map(sources.map((source) => [source, { setSubscribed: vi.fn() }]));
+  const room = {
+    remoteParticipants: new Map([
+      [identity, { identity, getTrackPublication: (s: string) => pubs.get(s) }],
+    ]),
+  } as unknown as Room;
+  return { room, pub: (source: string) => pubs.get(source)!.setSubscribed };
+}
+
 describe("RemoteTracks", () => {
   it("stores and clears both remote-video callbacks", () => {
     const tracks = new RemoteTracks(() => null);
@@ -107,6 +118,7 @@ describe("RemoteTracks", () => {
     it("asks for the layer before enabling, and only disables a hidden tile", () => {
       const calls: string[] = [];
       const publication = {
+        isSubscribed: true,
         setEnabled: (on: boolean) => calls.push(`enabled ${String(on)}`),
         setVideoQuality: (q: VideoQuality) => calls.push(`quality ${String(q)}`),
         setVideoDimensions: (d: { width: number; height: number }) =>
@@ -141,6 +153,57 @@ describe("RemoteTracks", () => {
         roomWithPublication("user-8", "camera", { setEnabled }),
       ).setRemoteVideoView(7, "camera", view);
       expect(setEnabled).not.toHaveBeenCalled();
+    });
+
+    it("leaves a stream nobody watches alone: it is not subscribed", () => {
+      const setEnabled = vi.fn();
+      new RemoteTracks(() =>
+        roomWithPublication("user-7", "camera", { isSubscribed: false, setEnabled }),
+      ).setRemoteVideoView(7, "camera", { enabled: false });
+      expect(setEnabled).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("watch (opt-in watching)", () => {
+    it("watches nothing until asked", () => {
+      const tracks = new RemoteTracks(() => null);
+      expect(tracks.isWatched(7, "camera")).toBe(false);
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+    });
+
+    it("subscribes a screen share and its audio on watch, and unsubscribes both on stop", () => {
+      const { room, pub } = roomWithSources("user-7:tok", [
+        "camera",
+        "screen_share",
+        "screen_share_audio",
+      ]);
+      const tracks = new RemoteTracks(() => room);
+
+      tracks.watch(7, "screenshare", true);
+      expect(tracks.isWatched(7, "screenshare")).toBe(true);
+      expect(tracks.isWatched(7, "camera")).toBe(false);
+      expect(pub("screen_share")).toHaveBeenLastCalledWith(true);
+      expect(pub("screen_share_audio")).toHaveBeenLastCalledWith(true);
+      expect(pub("camera")).not.toHaveBeenCalled();
+
+      tracks.watch(7, "screenshare", false);
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+      expect(pub("screen_share")).toHaveBeenLastCalledWith(false);
+      expect(pub("screen_share_audio")).toHaveBeenLastCalledWith(false);
+    });
+
+    it("subscribes only the camera for a camera watch", () => {
+      const { room, pub } = roomWithSources("user-7", ["camera", "screen_share"]);
+      const tracks = new RemoteTracks(() => room);
+      tracks.watch(7, "camera", true);
+      expect(pub("camera")).toHaveBeenCalledWith(true);
+      expect(pub("screen_share")).not.toHaveBeenCalled();
+    });
+
+    it("remembers a watch made before the stream is published, with no room", () => {
+      const tracks = new RemoteTracks(() => null);
+      expect(() => tracks.watch(7, "camera", true)).not.toThrow();
+      expect(tracks.isWatched(7, "camera")).toBe(true);
     });
   });
 });

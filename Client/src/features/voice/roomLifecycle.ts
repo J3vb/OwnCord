@@ -278,6 +278,9 @@ export class RoomLifecycle {
   private wireRoomEvents(newRoom: Room): void {
     onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     onRoom(newRoom, RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
+    onRoom(newRoom, RoomEvent.TrackPublished, this._eventHandlers.handleTrackPublished);
+    onRoom(newRoom, RoomEvent.TrackUnpublished, this._eventHandlers.handleTrackUnpublished);
+    onRoom(newRoom, RoomEvent.Connected, () => this._eventHandlers.handleConnected(newRoom));
     onRoom(newRoom, RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
     onRoom(newRoom, RoomEvent.SignalReconnecting, this._eventHandlers.handleSdkReconnecting);
     onRoom(newRoom, RoomEvent.Reconnecting, this._eventHandlers.handleSdkReconnecting);

@@ -932,7 +932,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token", {
+        autoSubscribe: false,
+      });
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
@@ -945,7 +947,9 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token", {
+        autoSubscribe: false,
+      });
     });
 
     it("handles mic permission denied gracefully", async () => {
@@ -1051,8 +1055,12 @@ describe("LiveKitSession", () => {
       await firstJoin;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
-      expect(mockRoom.connect).toHaveBeenNthCalledWith(1, "ws://localhost:7881", "first-token");
-      expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token");
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(1, "ws://localhost:7881", "first-token", {
+        autoSubscribe: false,
+      });
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token", {
+        autoSubscribe: false,
+      });
       expect(mockRoom.startAudio).toHaveBeenCalledTimes(1);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
     });
@@ -4711,7 +4719,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("fresh-token", "/livekit", 1, "ws://localhost:7880", true);
 
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "fresh-token");
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "fresh-token", {
+        autoSubscribe: false,
+      });
       expect((session as any)._state.type).toBe("connected");
     });
   });

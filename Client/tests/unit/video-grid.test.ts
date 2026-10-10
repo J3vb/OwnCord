@@ -1403,6 +1403,108 @@ describe("VideoGrid", () => {
     });
   });
 
+  describe("opt-in watching (Discord-style)", () => {
+    const SCREEN = 2 + 1_000_000;
+    const screen: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };
+    const cell = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const control = (id: number, name: string) =>
+      cell(id).querySelector<HTMLButtonElement>(`[data-tile-control='${name}']`)!;
+    let setStreamWatched: ReturnType<typeof vi.fn<(tileId: number, watched: boolean) => void>>;
+
+    beforeEach(() => {
+      document.body.appendChild(container);
+      setStreamWatched = vi.fn();
+      grid.setCallbacks({ setStreamWatched });
+    });
+
+    afterEach(() => {
+      container.remove();
+    });
+
+    it("offers a published stream nobody watches as a tile with Watch stream, playing nothing", () => {
+      const before = document.activeElement;
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(true);
+      const video = cell(SCREEN).querySelector("video")!;
+      // jsdom's default is undefined, a browser's null: nothing either way.
+      expect(video.srcObject ?? null).toBeNull();
+      expect(video.hidden).toBe(true);
+      expect(control(SCREEN, "watch").textContent).toBe("Watch stream");
+      // A stream someone else started never takes your focus.
+      expect(document.activeElement).toBe(before);
+      expect(setStreamWatched).not.toHaveBeenCalled();
+      expect(grid.hasStreams()).toBe(true);
+    });
+
+    it("Watch asks for the stream, and it plays once it arrives", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      control(SCREEN, "watch").click();
+
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, true);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+      const stream = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screen);
+      expect(cell(SCREEN).querySelector("video")!.srcObject).toBe(stream);
+      expect(cell(SCREEN).querySelectorAll(".video-cell")).toHaveLength(0);
+      expect(container.querySelectorAll(".video-cell")).toHaveLength(1);
+    });
+
+    it("Stop watching stops the stream, and its unsubscribe leaves the tile on Watch", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      control(SCREEN, "stop").click();
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      expect(cell(SCREEN).querySelector("video")!.srcObject).toBeNull();
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(true);
+      expect(control(SCREEN, "watch")).not.toBeNull();
+    });
+
+    it("a stream that arrives on a tile showing Watch plays: it is subscribed only when watched", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell(SCREEN).querySelector("video")!.hidden).toBe(false);
+    });
+
+    it("a stream that ends stops its watch; your own preview is never one", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+
+      setStreamWatched.mockClear();
+      grid.addStream(1, "Me (You)", fakeStream(), {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: false,
+      });
+      control(1, "hide-preview")?.click();
+      grid.removeStream(1);
+      expect(setStreamWatched).not.toHaveBeenCalled();
+    });
+
+    it("watch() from the voice roster before the tile exists watches it once it is offered", () => {
+      grid.watch(SCREEN);
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, true);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+    });
+
+    it("watch() on an offered tile watches it; a channel change drops a pending one", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.watch(SCREEN);
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, true);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+
+      grid.watch(3);
+      grid.clearStreams();
+      grid.addStream(3, "Sam", null, { isSelf: false, audioUserId: 3, isScreenshare: false });
+      expect(cell(3).classList.contains("video-cell--stopped")).toBe(true);
+    });
+  });
+
   describe("full screen, pop-out and stream info (PR 4)", () => {
     const SCREEN = 2 + 1_000_000;
     const screenCfg: TileConfig = {
@@ -1873,6 +1975,42 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector(".video-stopped")).toBeNull();
     });
 
+    it("a stream offered with Watch pops out watching: it asks for the stream", () => {
+      const setStreamWatched = vi.fn();
+      grid.setCallbacks({ setStreamWatched });
+      grid.addStream(SCREEN, "Otto (Screen)", null, screenCfg);
+
+      control(SCREEN, "pip").click();
+
+      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, true);
+      expect(cell(SCREEN).classList.contains("video-cell--stopped")).toBe(false);
+    });
+
+    it("takes the stream's volume and mute along into the window, and brings them back", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+
+      const overlay = popup.doc.querySelector<HTMLElement>(".video-tile-overlay")!;
+      expect(overlay).not.toBeNull();
+      expect(overlay.hasAttribute("inert")).toBe(false);
+      const slider = overlay.querySelector<HTMLInputElement>(".tile-volume-slider")!;
+      expect(slider.getAttribute("aria-label")).toBe("Otto stream volume");
+      slider.value = "40";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockSetScreenshareAudioVolume).toHaveBeenLastCalledWith(2, 0.4);
+      overlay.querySelector<HTMLButtonElement>(".tile-mute-btn")!.click();
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, true);
+      // Shown in the window, where no tile hover reveals it.
+      expect(keyword(cascadedDeclaration(".video-popout .video-tile-overlay", "opacity"))).toBe(
+        "1",
+      );
+
+      popup.win.close();
+      vi.advanceTimersByTime(1000);
+      expect(cell(SCREEN).querySelector(".video-tile-overlay")).toBe(overlay);
+      expect(popup.doc.querySelector(".video-tile-overlay")).toBeNull();
+    });
+
     it("hides a muted track's stalled frame in the window too", () => {
       const { stream, track } = fakeStreamWithTrack();
       grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
@@ -1906,7 +2044,8 @@ describe("VideoGrid", () => {
       for (const name of ["select", "stop", "pip", "fullscreen"]) {
         expect(control(SCREEN, name).closest("[inert]"), name).not.toBeNull();
       }
-      expect(cell(SCREEN).querySelector(".tile-mute-btn")!.closest("[inert]")).not.toBeNull();
+      // The volume controls went into the window with the video.
+      expect(cell(SCREEN).querySelector(".tile-mute-btn")).toBeNull();
       expect(control(SCREEN, "pop-in").closest("[inert]")).toBeNull();
 
       control(SCREEN, "pop-in").click();
@@ -2090,6 +2229,7 @@ describe("VideoGrid", () => {
     function publication() {
       return {
         track: {},
+        isSubscribed: true,
         setEnabled: vi.fn(),
         setVideoQuality: vi.fn(),
         setVideoDimensions: vi.fn(),

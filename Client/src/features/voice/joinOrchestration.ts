@@ -13,7 +13,7 @@ import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import type { DeviceManager } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
-import type { SessionState } from "./sessionState";
+import { ROOM_CONNECT_OPTIONS, type SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
 import { setJoinedVoiceStatus } from "../../lib/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
@@ -310,7 +310,7 @@ export class JoinOrchestration {
         if (attempt > 1) countJoinRetry(traceId);
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
-          await localRoom.connect(resolvedUrl, token);
+          await localRoom.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
 
           // Checkpoint 2: after room.connect() — the primary race window.
           if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
