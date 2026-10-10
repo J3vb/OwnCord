@@ -25,7 +25,8 @@ window.__test = {
   markConfigChanged: typeof markConfigChanged==='function'?markConfigChanged:undefined,
   saveServerConfig: typeof saveServerConfig==='function'?saveServerConfig:undefined,
   resetConfigKey: typeof resetConfigKey==='function'?resetConfigKey:undefined,
-  restartForConfig: typeof restartForConfig==='function'?restartForConfig:undefined
+  openRestartDialog: typeof openRestartDialog==='function'?openRestartDialog:undefined,
+  confirmRestart: typeof confirmRestart==='function'?confirmRestart:undefined
 };
 </script>`;
 const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
@@ -46,7 +47,8 @@ interface Bridge {
   markConfigChanged?: () => void;
   saveServerConfig?: () => Promise<void>;
   resetConfigKey?: (key: string) => Promise<void>;
-  restartForConfig?: () => Promise<void>;
+  openRestartDialog?: () => void;
+  confirmRestart?: () => Promise<void>;
 }
 
 async function boot(
@@ -141,6 +143,10 @@ function control(doc: Document, key: string): HTMLInputElement | HTMLSelectEleme
   return el;
 }
 
+const posted = (calls: FetchCall[]) =>
+  calls.some((c) => c.method === "POST" && c.path === "/restart");
+const modal = (doc: Document) => doc.getElementById("modal")!;
+
 describe("Server/admin/static — Server configuration page", () => {
   let dom: JSDOM | undefined;
 
@@ -167,8 +173,11 @@ describe("Server/admin/static — Server configuration page", () => {
 
     expect(calls.some((c) => c.method === "GET" && c.path === "/config/settings")).toBe(true);
     expect(doc.querySelectorAll("[data-config-key]").length).toBe(CONFIG_SETTINGS.settings.length);
-    // One card per config section: logging, push, server, security.
-    expect(doc.querySelectorAll("#content section.section-card").length).toBe(4);
+    // One card per config section: logging, push, server, security — beside
+    // the Restart card, which holds no setting.
+    expect(
+      doc.querySelectorAll("#content section.section-card:has([data-config-key])").length,
+    ).toBe(4);
     // An enum renders its options; the env-pinned value cannot be edited.
     const level = control(doc, "logging.level");
     expect(level.tagName).toBe("SELECT");
@@ -302,19 +311,100 @@ describe("Server/admin/static — Server configuration page", () => {
     expect(booted.bridge.state.section).toBe("settings");
   });
 
-  it("offers Restart now once a change is pending, and it posts /restart", async () => {
-    const calls: FetchCall[] = [];
-    const pending = { ...CONFIG_SETTINGS, restart_pending: true };
+  // Both restart entry points open the same dialog; only its confirm button
+  // posts /restart.
+  async function bootRestart(
+    calls: FetchCall[],
+    settings: Record<string, unknown>,
+    restart: { status?: number; json?: unknown } = { status: 202, json: { restarting: true } },
+  ): Promise<{ doc: Document; bridge: Bridge }> {
     const booted = await boot(calls, (p, m) => {
-      if (p === "/config/settings") return { json: pending };
-      if (p === "/restart" && m === "POST") return { status: 202, json: { restarting: true } };
+      if (p === "/config/settings") return { json: settings };
+      if (p === "/restart" && m === "POST") return restart;
       return { json: {} };
     });
     dom = booted.dom;
     const doc = await renderInto(dom, booted.bridge);
+    calls.length = 0;
+    return { doc, bridge: booted.bridge };
+  }
 
-    expect(doc.querySelector('[data-action="restartForConfig"]')).toBeTruthy();
-    await fn(booted.bridge.restartForConfig, "restartForConfig")();
-    expect(calls.some((c) => c.method === "POST" && c.path === "/restart")).toBe(true);
+  it("offers Restart now once a change is pending, through the restart dialog", async () => {
+    const calls: FetchCall[] = [];
+    const { doc } = await bootRestart(calls, { ...CONFIG_SETTINGS, restart_pending: true });
+
+    const restartNow = [
+      ...doc.querySelectorAll<HTMLElement>('#content [data-action="openRestartDialog"]'),
+    ].find((b) => /restart now/i.test(b.textContent ?? ""));
+    expect(restartNow).toBeTruthy();
+    restartNow!.click();
+    expect(modal(doc).classList.contains("visible")).toBe(true);
+    expect(modal(doc).textContent).toMatch(/disconnected/i);
+    expect(posted(calls)).toBe(false);
+  });
+
+  it("has a Restart server button with nothing pending; confirming posts /restart and waits for the server", async () => {
+    const calls: FetchCall[] = [];
+    const { doc, bridge } = await bootRestart(calls, {
+      ...CONFIG_SETTINGS,
+      restart_handoff: "container",
+    });
+
+    const button = [
+      ...doc.querySelectorAll<HTMLElement>('#content [data-action="openRestartDialog"]'),
+    ].find((b) => /restart server/i.test(b.textContent ?? ""));
+    expect(button).toBeTruthy();
+    button!.click();
+    expect(modal(doc).textContent).toMatch(/everyone connected.*disconnected/i);
+    expect(posted(calls)).toBe(false);
+
+    await fn(bridge.confirmRestart, "confirmRestart")();
+    expect(posted(calls)).toBe(true);
+    expect(modal(doc).classList.contains("visible")).toBe(true);
+    expect(doc.getElementById("restartWait")?.textContent).toMatch(/waiting for the server/i);
+    expect(doc.getElementById("modalInner")!.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("restarts nothing when the dialog is cancelled", async () => {
+    const calls: FetchCall[] = [];
+    const { doc, bridge } = await bootRestart(calls, CONFIG_SETTINGS);
+
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    doc.querySelector<HTMLElement>('#modalInner [data-action="closeModal"]')!.click();
+    expect(modal(doc).classList.contains("visible")).toBe(false);
+    expect(posted(calls)).toBe(false);
+  });
+
+  it("keeps the dialog open with the reason when the server refuses the restart", async () => {
+    const calls: FetchCall[] = [];
+    const { doc, bridge } = await bootRestart(calls, CONFIG_SETTINGS, {
+      status: 409,
+      json: {
+        error: "UPDATE_IN_PROGRESS",
+        message: "another update or restore is already in progress",
+      },
+    });
+
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    await fn(bridge.confirmRestart, "confirmRestart")();
+    expect(doc.getElementById("restartErr")?.textContent).toMatch(/already in progress/);
+    expect(doc.getElementById("modalInner")!.getAttribute("aria-busy")).toBe("false");
+    expect(doc.getElementById("restartWait")).toBeNull();
+  });
+
+  it.each([
+    ["container", /restart policy/i],
+    ["supervisor", /service manager/i],
+    ["spawn", /no process supervisor.*starts its own replacement/i],
+    ["unsupervised", /no process supervisor was detected.*stays stopped/i],
+  ])("says how the server comes back when the handoff is %s", async (handoff, text) => {
+    const calls: FetchCall[] = [];
+    const { doc, bridge } = await bootRestart(calls, {
+      ...CONFIG_SETTINGS,
+      restart_handoff: handoff,
+    });
+
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    expect(modal(doc).textContent).toMatch(text);
   });
 });

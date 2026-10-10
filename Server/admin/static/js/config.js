@@ -1,7 +1,7 @@
 /* OwnCord admin panel: Server configuration — the config.yaml settings the
    owner may override from the panel. Saves go to an overrides file beside the
    database and take effect at the next restart, so the page offers Restart now
-   once a change is pending. The server sends one row per editable key and
+   once a change is pending, and a Restart server button at any time. The server sends one row per editable key and
    never includes secrets or the other excluded keys. */
 
 /* The page's save/discard bar and nav unsaved marker share core's
@@ -128,8 +128,10 @@ function configPageHTML(data){
     +'<div class="page-desc">Settings normally written in <code>config.yaml</code>. Changes apply after a server restart. The server name is on the <button class="link-btn" data-action="navigateTo" data-args="'+actArgs('settings')+'">Settings</button> page.</div>';
   if(data&&data.restart_pending){
     html+='<div class="card-note" role="status">Saved changes are waiting to apply. '
-      +'<button class="btn btn-accent" data-action="restartForConfig">Restart now</button></div>';
+      +'<button class="btn btn-accent" data-action="openRestartDialog">Restart now</button></div>';
   }
+  html+=settingsCard('Restart','<p class="setting-desc">Restart the server process, for example after editing config.yaml on the host. Everyone connected is disconnected for a moment.</p>'
+    +'<button class="btn btn-ghost" style="margin-top:8px" data-action="openRestartDialog">Restart server…</button>');
   const names=[];
   const byName={};
   settings.forEach(s=>{
@@ -334,18 +336,44 @@ function configNewAddressHTML(addr){
     +'<p><a href="'+esc(addr)+'">'+esc(addr)+'</a></p></div>';
 }
 
-async function restartForConfig(){
-  if(!confirm('Restart the server now to apply the saved configuration?'))return;
+/* How this process comes back (GET /config/settings restart_handoff), so the
+   owner knows before committing whether anything will start it again. */
+const RESTART_HANDOFF={
+  container:'The server exits and the container\'s restart policy starts it again. Without a restart policy (restart: unless-stopped) it stays stopped.',
+  supervisor:'The server exits and its service manager (systemd or NSSM) starts it again.',
+  spawn:'No process supervisor was detected, so the server starts its own replacement before it exits. If it does not come back, start it on the host.',
+  unsupervised:'No process supervisor was detected, but server.restart_mode is supervised: the server exits and stays stopped unless something outside it starts it again.'
+};
+
+/* Restart now and Restart server share this dialog; only its confirm posts. */
+function openRestartDialog(){
+  const data=state._configData||{};
+  const handoff=RESTART_HANDOFF[data.restart_handoff];
+  const lead=data.restart_pending?'The server restarts and applies the saved configuration.':'The server restarts.';
+  openModal('<div class="modal-header"><h3>Restart the server?</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
+    +'<p>'+lead+' Everyone connected, including you, is disconnected for a moment and may need to sign in again.</p>'
+    +(handoff?'<p class="setting-desc" style="margin-top:12px">'+esc(handoff)+'</p>':'')
+    +'<p class="auth-error" id="restartErr" role="alert"></p></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restartConfirmBtn" data-action="confirmRestart">Restart server</button></div>');
+}
+
+async function confirmRestart(){
+  const btn=document.getElementById('restartConfirmBtn');
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const addr=configMovedAddress();
+  lockModal(true);
   try{
     await api('POST','/restart');
-    lockModal(true);
     if(addr)setModalHTML(configNewAddressHTML(addr));
-    else{setModalHTML(restartingHTML('Restarting','The server is restarting to apply the saved configuration.'));waitForRestart('restartWait')}
-  }catch(e){showToast(e.message,'error')}
+    else{setModalHTML(restartingHTML('Restarting','The server is restarting.'));waitForRestart('restartWait')}
+  }catch(e){
+    lockModal(false);
+    const err=document.getElementById('restartErr');if(err)err.textContent=e.message;
+    if(btn instanceof HTMLButtonElement)btn.disabled=false;
+  }
 }
 
 Object.assign(ACTIONS,{
-  markConfigChanged,saveServerConfig,resetConfigKey,restartForConfig,discardConfig,
+  markConfigChanged,saveServerConfig,resetConfigKey,openRestartDialog,confirmRestart,discardConfig,
   confirmServerConfig,clearConfigSecret,clearConfigSecretValue,
   toggleConfigKey(){toggleSwitch(this);markConfigChanged()}});

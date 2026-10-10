@@ -315,6 +315,21 @@ save to it is refused (the value would lose at the next boot). An override
 takes effect at the next server start; the page offers **Restart now** once
 something is pending. The boot log names each overridden key, never its value.
 
+The page also has a **Restart server** button that works with nothing pending,
+for example after editing `config.yaml` on the host. Both open the same dialog:
+it warns that everyone connected is disconnected for a moment and says how this
+server comes back, then waits for it and reloads the panel. How it comes back
+follows `server.restart_mode`: in Docker the server exits and the container's
+restart policy starts it (the shipped `docker-compose.yml` sets
+`restart: unless-stopped`; a container run by hand needs
+`--restart unless-stopped`); under systemd or NSSM it exits for the service
+manager; with no supervisor detected it starts its own replacement. When
+`restart_mode` is `supervised` but no supervisor is detected, the dialog says
+the server may stay stopped. The restart is Owner-only, is refused while an
+update or backup restore is running, is accepted once per process (a second
+request answers `409 RESTART_PENDING`), and writes a `server_restart_requested`
+audit row naming who asked.
+
 Almost every key is on the page. Each row shows a plain-language name (the
 `config.yaml` key beside it), a one-line description, the recommended value and
 what changing it affects; this copy ships with the server
