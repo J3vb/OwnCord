@@ -47,7 +47,7 @@ What remains is specific:
 Nothing found is a leak in the lifecycle sense; the allowlists in
 `tests/unit/lifecycle-ownership.test.ts` were read entry by entry and each has a
 sound reason. The message-window growth that exists is bounded-per-channel state
-kept for the whole session, which is a product choice (section 6). The broker
+kept for the whole session, which is a product choice (section 9). The broker
 image, link-preview, missing-image and consent-admission caches (E1, E3) grow
 globally rather than per channel, and are findings in their own right.
 
@@ -142,7 +142,7 @@ pages back with `before` up to `MAX_REVISIT_PAGES` = 5 times, each request
 waiting for the previous one (`MessageController.ts:56-99`). A reader who had
 scrolled 300 rows up pays up to five serial requests on return. This is a
 correctness design (P4-01 R3 revalidates every cached row), so how much history
-a revisit restores is a product question — see section 6.
+a revisit restores is a product question — see section 9.
 
 ### B2 — the parse cache is cleared on every leave (note)
 
@@ -221,7 +221,7 @@ reserve no size. Native scroll anchoring is off (`chat-area.css:125-130`) and
 the ResizeObserver correction runs one frame later (`MessageList.ts:1313`), so
 each shift paints once before it is corrected. C1 removes most of the
 re-renders that expose this; the remaining first-render shifts need a design
-call on reserved heights (section 6).
+call on reserved heights (section 9).
 
 ### C4 — GIFs are full GIFs, and blur freezes them all synchronously (product decision)
 
@@ -273,6 +273,9 @@ titles and image heights in bounded LRUs; message parsing in a bounded LRU.
   the compile stays in the worklet, where Chromium's in-process compilation
   cache serves repeat compiles of identical bytes. The voice-join budget test
   (`phaseMedians.localTrackMs`) is the place to see it.
+  It does not move the per-join allocations off the path: `createRoom` still
+  constructs the E2EE worker and awaits `setE2EEEnabled`, and `AudioPipeline.attach`
+  still creates its `AudioContext` before publication (D3).
 
 ### D2 — the pre-connect steps run serially (product / engineering decision)
 
@@ -282,12 +285,14 @@ order: `createRoom` (spawns the E2EE worker and `setE2EEEnabled`, `:213`),
 then `room.connect` (`:311`), then the device switch and microphone publish.
 The first three do not depend on each other. For a participant who is not the
 key holder, `setupKeyExchange` waits for a full server → key holder → server
-round trip (`lib/livekitE2EE.ts:358-425`, up to 10 s) before `connect` even
+round trip (`lib/livekitE2EE.ts:358-425`; up to 10 s, then one re-announce and a
+further 5 s when the first offer times out or fails to decrypt, so about 15 s
+at worst) before `connect` even
 starts. Running the three pre-connect steps together is safe but touches the
 supersession checkpoints and the join-trace stage order; overlapping `connect`
 with the key wait would let frames arrive before the key is installed and
 touches the E2EE guards the component rules protect. Recommendation in
-section 8.
+section 9.
 
 ### D3 — per-join allocations and device enumeration (notes)
 
