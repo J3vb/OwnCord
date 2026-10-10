@@ -80,18 +80,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
-| Distinct `invoke` command names called from `Client/src/`  | 64    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 67    |
+| Distinct `invoke` command names called from `Client/src/`  | 65    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 68    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 67 distinct registrations
+The handler count covers the 68 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the twenty-seven `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build registers 66 on Linux
-and 39 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build registers 67 on Linux
+and 40 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -112,6 +112,7 @@ guard. Keep it and the table in sync when changing registrations.
 ```text
 accept_cert_fingerprint
 check_client_update
+clear_call_notification
 delete_credential
 delete_identity_key
 delete_pending_messages
@@ -199,27 +200,27 @@ under `contracts/` (a few split across two or three), with matching implementati
 `browser/`. Since B7-5 the "Files today" column names the app-side callers; the
 native surface itself lives only in `platform/desktop/`.
 
-| Contract          | Files today                                                                   | Native surface                                                                                                             | Browser outlook                                             |
-| ----------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/attachments.ts` (server files) | `plugin-http`                                                                                                              | native `fetch` — but CORS becomes a server concern          |
-| External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                  | `api/core`; 2 invokes (`external_*`)                                                                                       | ⚠ no equivalent — a page cannot classify resolved addresses |
-| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                        | ⚠ see hard cases                                            |
-| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                       | ⚠ see hard cases                                            |
-| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)                                                                               | `localStorage` / IndexedDB                                  |
-| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                                                                                      | not needed — the proxies exist to work around desktop TLS   |
-| Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge) | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
-| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                                                                                                    | in-memory ring buffer + download                            |
-| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                                                                                               | mostly unsupported; degrade                                 |
-| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`                                                                           | unsupported — the page reloads instead                      |
-| Tray status       | `main.ts`                                                                     | `api/event` (`status-change`)                                                                                              | unsupported — there is no tray                              |
-| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                                                                                            | `window.open`                                               |
-| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                                                                                               | `<a download>` / File System Access API                     |
-| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                                                                                         | ⚠ see hard cases                                            |
-| Global shortcuts  | `pages/MainPage.ts`, `settings/KeybindsTab.ts`                                | `api/core`, `api/event`; 3 invokes, 1 event listen                                                                         | unsupported — a page cannot observe keys outside itself     |
-| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                                                                                         | URL routing                                                 |
-| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                                                                                                  | build-time constant                                         |
-| Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                                               | unsupported — the browser has its own devtools already      |
-| System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                   | `api/core` (`system_idle_ms`)                                                                                              | unsupported — answers `null`; in-page activity decides      |
+| Contract          | Files today                                                                   | Native surface                                                                                                                                        | Browser outlook                                             |
+| ----------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/attachments.ts` (server files) | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
+| External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                  | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
+| WebSocket         | `lib/ws.ts`                                                                   | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
+| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
+| Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
+| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
+| Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge) | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
+| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                                                                                                                               | in-memory ring buffer + download                            |
+| Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                                                                                                                          | mostly unsupported; degrade                                 |
+| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`                                                                                                      | unsupported — the page reloads instead                      |
+| Tray status       | `main.ts`                                                                     | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
+| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                                                                                                                       | `window.open`                                               |
+| File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
+| Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
+| Global shortcuts  | `pages/MainPage.ts`, `settings/KeybindsTab.ts`                                | `api/core`, `api/event`; 3 invokes, 1 event listen                                                                                                    | unsupported — a page cannot observe keys outside itself     |
+| Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
+| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                                                                                                                             | build-time constant                                         |
+| Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
+| System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                   | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites

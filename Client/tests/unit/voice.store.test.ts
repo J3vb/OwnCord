@@ -29,7 +29,8 @@ import {
   isPttPollingLive,
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
-import { authStore } from "../../src/stores/auth.store";
+import { authStore, clearAuth } from "../../src/stores/auth.store";
+import { noteJoinFailed, joinRetryInMs } from "../../src/features/voice/joinBackoff";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,
@@ -1178,5 +1179,12 @@ describe("voice store", () => {
       expect(state.encryptionDegraded).toBe(false);
       expect(fresh.isPttPollingLive()).toBe(false);
     });
+  });
+
+  it("clears the join backoff on logout", () => {
+    noteJoinFailed();
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+    clearAuth();
+    expect(joinRetryInMs()).toBe(0);
   });
 });

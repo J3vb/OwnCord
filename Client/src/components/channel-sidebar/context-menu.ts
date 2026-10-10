@@ -172,8 +172,8 @@ export function attachChannelContextMenu(
         updateChannelPosition(self.id, theirs);
         updateChannelPosition(other.id, mine);
         onReorder([
-          { channelId: self.id, newPosition: theirs },
-          { channelId: other.id, newPosition: mine },
+          { channelId: self.id, newPosition: theirs, previousPosition: mine },
+          { channelId: other.id, newPosition: mine, previousPosition: other.position },
         ]);
       };
       addItem(

@@ -6,7 +6,7 @@ import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
  * journey and `native-updater` the installer journey, while `native-no-auth`
  * (connect page, auth), `native-authenticated` (layout, channel nav, chat,
  * DMs, settings, appearance, overlays) and `native-extra` (window state, tray
- * status, reload/DevTools keys, external links, push-to-talk) run in the same
+ * status, reload/DevTools keys, external links, push-to-talk, pop-out close) run in the same
  * CI job. Binaries are built in CI only.
  */
 export default defineConfig({

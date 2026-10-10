@@ -50,6 +50,8 @@ const SIGNAL_RESUME_BUDGET_MS = 10_000;
  *  goes quiet for most of each minute; only a gap longer than that window
  *  means the frames decrypt again. */
 const DECRYPT_QUIET_MS = 65_000;
+/** A speaker LiveKit drops stays lit this long, so a ring does not blink off between words. */
+const SPEAKER_HOLD_MS = 200;
 
 /** RT-9: the status a room that has just finished joining reports. The key
  *  can arrive over WS after the SFU dropped and livekit-client is already
@@ -65,7 +67,12 @@ export function setJoinedVoiceStatus(room: import("livekit-client").Room): void 
 
 // --- Callback types ---
 
-type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;
+/** A null stream: published but not watched, a tile with a Watch button. */
+type RemoteVideoCallback = (
+  userId: number,
+  stream: MediaStream | null,
+  isScreenshare: boolean,
+) => void;
 type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean) => void;
 
 // --- Dependencies passed from LiveKitSession ---
@@ -77,6 +84,8 @@ export interface RoomEventDeps {
   getAudioElements: () => AudioElements;
   getOnRemoteVideoCallback: () => RemoteVideoCallback | null;
   getOnRemoteVideoRemovedCallback: () => RemoteVideoRemovedCallback | null;
+  /** The viewer chose to watch this user's camera or screen share. */
+  isWatched: (userId: number, isScreenshare: boolean) => boolean;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
   isReconnecting: () => boolean;
@@ -116,6 +125,16 @@ export interface RoomEventHandlers {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ) => void;
+  readonly handleTrackPublished: (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => void;
+  readonly handleTrackUnpublished: (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => void;
+  /** The room joined: the participants already in it publish no TrackPublished. */
+  readonly handleConnected: (room: import("livekit-client").Room) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
@@ -177,6 +196,40 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   function resetEncryptionRecovery(): void {
     clearDecryptQuietTimer();
     degradedBy = null;
+    clearSpeakerHold();
+  }
+
+  let liveSpeakers = new Set<number>();
+  const speakerHoldUntil = new Map<number, number>();
+  let speakerHoldTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearSpeakerHold(): void {
+    if (speakerHoldTimer !== null) {
+      clearTimeout(speakerHoldTimer);
+      speakerHoldTimer = null;
+    }
+    speakerHoldUntil.clear();
+    liveSpeakers = new Set();
+  }
+
+  function publishSpeakers(channelId: number): void {
+    const now = Date.now();
+    for (const [userId, until] of speakerHoldUntil) {
+      if (until <= now || liveSpeakers.has(userId)) speakerHoldUntil.delete(userId);
+    }
+    const published = [...new Set([...liveSpeakers, ...speakerHoldUntil.keys()])];
+    published.sort((x, y) => x - y);
+    setSpeakers({ channel_id: channelId, speakers: published });
+    if (speakerHoldTimer !== null) clearTimeout(speakerHoldTimer);
+    speakerHoldTimer = null;
+    if (speakerHoldUntil.size === 0) return;
+    speakerHoldTimer = setTimeout(
+      () => {
+        speakerHoldTimer = null;
+        publishSpeakers(channelId);
+      },
+      Math.min(...speakerHoldUntil.values()) - now,
+    );
   }
 
   function removeAutoplayUnlock(): void {
@@ -210,12 +263,24 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
+      if (
+        publication.source === Track.Source.ScreenShareAudio &&
+        userId > 0 &&
+        !deps.isWatched(userId, true)
+      ) {
+        publication.setSubscribed(false);
+        return;
+      }
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       const cb = deps.getOnRemoteVideoCallback();
+      const isScreenshare = publication.source === Track.Source.ScreenShare;
+      if (userId > 0 && !deps.isWatched(userId, isScreenshare)) {
+        publication.setSubscribed(false);
+        return;
+      }
       if (userId > 0 && cb !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
-        const isScreenshare = publication.source === Track.Source.ScreenShare;
         cb(userId, stream, isScreenshare);
       }
       log.debug("Remote video track subscribed", { userId, trackSid: track.sid });
@@ -233,21 +298,70 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     } else if (track.kind === Track.Kind.Video) {
       track.detach();
       const isScreenshare = publication.source === Track.Source.ScreenShare;
-      if (userId > 0) deps.getOnRemoteVideoRemovedCallback()?.(userId, isScreenshare);
+      // Still published: its tile goes back to Watch (handleTrackUnpublished removes it).
+      if (userId > 0) deps.getOnRemoteVideoCallback()?.(userId, null, isScreenshare);
       log.debug("Remote video track unsubscribed", { userId, trackSid: track.sid });
+    }
+  };
+
+  /** Opt-in watching: the room connects without auto-subscribe, so this is
+   *  what subscribes. A voice plays unless deafened; a camera or a screen
+   *  share (and its audio) only once the viewer watches it, and until then
+   *  its tile offers Watch. */
+  const handleTrackPublished = (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ): void => {
+    const userId = parseUserId(participant.identity);
+    const isVideo = publication.kind === Track.Kind.Video;
+    if (!isVideo && publication.source !== Track.Source.ScreenShareAudio) {
+      publication.setSubscribed(!voiceStore.getState().localDeafened);
+      return;
+    }
+    const isScreenshare = publication.source !== Track.Source.Camera;
+    const watched = userId > 0 && deps.isWatched(userId, isScreenshare);
+    publication.setSubscribed(watched);
+    if (isVideo && !watched && userId > 0) {
+      deps.getOnRemoteVideoCallback()?.(userId, null, isScreenshare);
+    }
+  };
+
+  const handleTrackUnpublished = (
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ): void => {
+    const userId = parseUserId(participant.identity);
+    if (publication.kind !== Track.Kind.Video || userId <= 0) return;
+    deps.getOnRemoteVideoRemovedCallback()?.(
+      userId,
+      publication.source === Track.Source.ScreenShare,
+    );
+  };
+
+  const handleConnected = (room: import("livekit-client").Room): void => {
+    for (const participant of room.remoteParticipants.values()) {
+      for (const publication of participant.trackPublications.values()) {
+        handleTrackPublished(publication, participant);
+      }
     }
   };
 
   const handleActiveSpeakersChanged = (speakers: Participant[]): void => {
     const channelId = deps.getCurrentChannelId();
     if (channelId === null) return;
-    const speakerIds: number[] = [];
+    const live = new Set<number>();
     for (const speaker of speakers) {
       const userId = parseUserId(speaker.identity);
-      if (userId > 0) speakerIds.push(userId);
+      if (userId > 0) live.add(userId);
     }
-    speakerIds.sort((x, y) => x - y);
-    setSpeakers({ channel_id: channelId, speakers: speakerIds });
+    const now = Date.now();
+    for (const userId of liveSpeakers) {
+      if (!live.has(userId) && !speakerHoldUntil.has(userId)) {
+        speakerHoldUntil.set(userId, now + SPEAKER_HOLD_MS);
+      }
+    }
+    liveSpeakers = live;
+    publishSpeakers(channelId);
   };
 
   const handleAudioPlaybackChanged = (): void => {
@@ -427,6 +541,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleLocalTrackPublished,
     handleTrackSubscribed,
     handleTrackUnsubscribed,
+    handleTrackPublished,
+    handleTrackUnpublished,
+    handleConnected,
     handleActiveSpeakersChanged,
     handleAudioPlaybackChanged,
     handleDisconnected,

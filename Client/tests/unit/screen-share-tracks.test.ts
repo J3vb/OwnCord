@@ -52,6 +52,7 @@ const {
   enableScreenshare,
   getLocalCameraStream,
   getLocalScreenshareStream,
+  getLocalScreenshareFps,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
@@ -866,6 +867,23 @@ describe("enableScreenshare", () => {
     });
   });
 
+  it("publishes a high share at 120 fps as one layer", async () => {
+    loadPref.mockImplementation((key: string) =>
+      key === "screenShareQuality" ? "high" : key === "screenShareFps" ? 120 : "",
+    );
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(videoOpts).toMatchObject({
+      simulcast: false,
+      screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
+    });
+    expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
   it("keeps the source share as a single full-resolution layer", async () => {
     loadPref.mockImplementation((key: string) => (key === "screenShareQuality" ? "source" : ""));
     const rig = fakeRoom();
@@ -1327,6 +1345,30 @@ describe("stream getters", () => {
 
   it("getLocalScreenshareStream returns null when nothing is published", () => {
     expect(getLocalScreenshareStream(fakeRoom().room)).toBeNull();
+  });
+
+  it("getLocalScreenshareFps reads the top layer's sent frame rate", async () => {
+    const room = roomWithLocalPub(Track.Source.ScreenShare, {
+      mediaStreamTrack: {},
+      getSenderStats: async () => [
+        { rid: "q", framesPerSecond: 15 },
+        { rid: "h", framesPerSecond: 58 },
+        { rid: "f" },
+      ],
+    });
+    await expect(getLocalScreenshareFps(room)).resolves.toBe(58);
+  });
+
+  it("getLocalScreenshareFps is null before a layer reports a rate, or with no sender", async () => {
+    const unmeasured = roomWithLocalPub(Track.Source.ScreenShare, {
+      mediaStreamTrack: {},
+      getSenderStats: async () => [{ rid: "h" }],
+    });
+    await expect(getLocalScreenshareFps(unmeasured)).resolves.toBeNull();
+    // The Linux native track publishes in the backend: no WebRTC sender here.
+    const native = roomWithLocalPub(Track.Source.ScreenShare, { mediaStreamTrack: {} });
+    await expect(getLocalScreenshareFps(native)).resolves.toBeNull();
+    await expect(getLocalScreenshareFps(null)).resolves.toBeNull();
   });
 });
 

@@ -16,6 +16,7 @@ const {
   mockEnableScreenshare,
   mockDisableScreenshare,
   mockUiGetState,
+  mockShowToast,
 } = vi.hoisted(() => ({
   mockVoiceStoreGetState: vi.fn(),
   mockJoinVoiceChannel: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockEnableScreenshare: vi.fn(() => Promise.resolve()),
   mockDisableScreenshare: vi.fn(() => Promise.resolve()),
   mockUiGetState: vi.fn(() => ({ connectionStatus: "connected" })),
+  mockShowToast: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -45,6 +47,8 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   leaveVoiceChannel: mockLeaveVoiceChannel,
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
 }));
+
+vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
 
 vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },
@@ -69,6 +73,7 @@ import {
   createSidebarVoiceCallbacks,
 } from "../../src/pages/main-page/VoiceCallbacks";
 import type { WsClient } from "../../src/lib/ws";
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -94,6 +99,7 @@ interface VoiceStateStub {
   localServerMuted: boolean;
   localServerDeafened: boolean;
   pttGated?: boolean;
+  voiceStatus?: string;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -384,6 +390,7 @@ describe("createSidebarVoiceCallbacks", () => {
     vi.clearAllMocks();
     mockUiGetState.mockReturnValue({ connectionStatus: "connected" });
     mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
+    noteJoinSucceeded();
   });
 
   it("onVoiceJoin sends voice_join and updates store", () => {
@@ -424,6 +431,57 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
     expect(mockLeaveVoiceChannel).toHaveBeenCalled();
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+  });
+
+  it("onVoiceJoin waits out the backoff after a failed join instead of re-sending voice_join", () => {
+    // A join that keeps failing must never cycle voice_join/voice_leave
+    // several times a second, however fast the row is clicked.
+    noteJoinFailed();
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceJoin(42);
+
+    expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(mockShowToast).toHaveBeenCalledWith("Voice join failed — try again in 2 s", "error");
+  });
+
+  it("a switch away from a join still in flight backs off the next one", () => {
+    // Alternating channels while a join is joining/securing would otherwise
+    // cycle pre-SFU voice_join/voice_leave pairs at the server's join limit.
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "securing" }),
+    );
+
+    cbs.onVoiceJoin(42);
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 42 } });
+
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),
+    );
+    cbs.onVoiceJoin(10);
+    expect(ws.send).toHaveBeenCalledOnce();
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "Please wait 2 s before switching voice channels",
+      "error",
+    );
+  });
+
+  it("a switch from a connected call is not backed off", () => {
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "connected" }),
+    );
+    cbs.onVoiceJoin(42);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),
+    );
+    cbs.onVoiceJoin(10);
+    expect(ws.send).toHaveBeenCalledTimes(2);
   });
 
   it("onVoiceJoin does not send over a down socket", () => {

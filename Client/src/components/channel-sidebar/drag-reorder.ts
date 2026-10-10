@@ -214,7 +214,7 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
         }
         const ch = drag.channels.find((c) => c.id === id);
         if (ch !== undefined && ch.position !== newPosition) {
-          reorders.push({ channelId: id, newPosition });
+          reorders.push({ channelId: id, newPosition, previousPosition: ch.position });
           updateChannelPosition(id, newPosition);
         }
       }

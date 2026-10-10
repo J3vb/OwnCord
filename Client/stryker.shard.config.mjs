@@ -17,6 +17,8 @@ export const shards = {
     "src/lib/screenShare.ts",
     "src/features/voice/sessionState.ts",
     "src/features/voice/joinOrchestration.ts",
+    "src/features/voice/joinBackoff.ts",
+    "src/features/voice/joinBackoffText.ts",
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/remoteTracks.ts",
@@ -35,6 +37,7 @@ export const shards = {
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/releaseRoom.ts",
+    "src/features/voice/peerVerification.ts",
     "src/features/voice/uiSounds.ts",
     "src/features/voice/popout.ts",
   ], // 2901 mutants (before the D6 additions)

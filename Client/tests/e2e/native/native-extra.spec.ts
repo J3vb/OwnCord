@@ -3,9 +3,10 @@
  * geometry restore and its off-screen guard (lib/window-state.ts), the tray's
  * Status submenu events (main.ts → platform/desktop/trayStatus.ts), the
  * reload/DevTools keyboard handling in main.ts, external links (main.ts routes
- * them, backed by tauri-plugin-opener's injected click handler), and
+ * them, backed by tauri-plugin-opener's injected click handler),
  * push-to-talk driven by the real GetAsyncKeyState poller
- * (platform/desktop/pushToTalkService.ts).
+ * (platform/desktop/pushToTalkService.ts), and a stream pop-out window
+ * closing with its page (src-tauri/src/popout.rs).
  *
  * Keys are injected at the OS level (user32 keybd_event through PowerShell),
  * not through CDP: CDP input never reaches GetAsyncKeyState, and it bypasses
@@ -398,6 +399,20 @@ test("a message link opens in the system browser, not the webview", async ({
     // carries this test's unique URL. Best effort — it must not mask a failure.
     await launched("taskkill /pid $_.ProcessId /t /f | Out-Null").catch(() => {});
   }
+});
+
+test("a stream pop-out the app closes takes its window along", async ({ nativePage: page }) => {
+  const label = "owncord-popout-9999";
+  const labels = () => invoke<string[]>(page, "plugin:window|get_all_windows");
+  await page.evaluate((l) => {
+    (window as any).__popout = window.open(`about:blank#${l}`, l, "popup,width=320,height=180");
+  }, label);
+  await expect.poll(labels).toContain(label);
+
+  // What Bring back and an ended stream run (features/voice/popout.ts). The
+  // window must go too, not stay on screen with its page gone.
+  await page.evaluate(() => (window as any).__popout.close());
+  await expect.poll(labels).not.toContain(label);
 });
 
 test("push-to-talk binds a key through capture and gates the mic on its real key state", async ({

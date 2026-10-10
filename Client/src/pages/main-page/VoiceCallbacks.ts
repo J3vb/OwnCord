@@ -7,6 +7,9 @@ import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
+import { showToast } from "@lib/toast";
+import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,
@@ -188,7 +191,19 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       // catch-all turns into a user-facing error toast (OC-0289). Callers
       // that used to hand-check this (ChannelSidebar's item click / stream
       // watch) stay correct since the guard is idempotent with theirs.
-      if (voiceStore.getState().currentChannelId === channelId) return;
+      const { currentChannelId, voiceStatus } = voiceStore.getState();
+      if (currentChannelId === channelId) return;
+      const backoffText = joinBackoffText();
+      if (backoffText !== null) {
+        showToast(backoffText, "error");
+        return;
+      }
+      // Switching away from a join still in flight abandons it before it
+      // reached the SFU, so it backs off like a failure: alternating channels
+      // cannot cycle voice_join/voice_leave several times a second.
+      if (currentChannelId !== null && (voiceStatus === "joining" || voiceStatus === "securing")) {
+        noteJoinFailed(Date.now(), true);
+      }
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
       ws.send({ type: "voice_join", payload: { channel_id: channelId } });

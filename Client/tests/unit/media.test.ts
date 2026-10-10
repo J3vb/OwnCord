@@ -146,19 +146,6 @@ function fireImgError(parent: HTMLElement): void {
   img.dispatchEvent(new Event("error"));
 }
 
-/** Create a MouseEvent with specified client coordinates. */
-function mouseEvent(
-  type: string,
-  opts: { clientX?: number; clientY?: number; deltaY?: number } = {},
-): MouseEvent {
-  return new MouseEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: opts.clientX ?? 0,
-    clientY: opts.clientY ?? 0,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1472,6 +1459,67 @@ describe("media.ts", () => {
     it("skips URLs inside inline code", () => {
       const urls = extractUrls("See `https://hidden.com` here");
       expect(urls).toEqual([]);
+    });
+
+    it("skips a URL that is wholly inside a spoiler", () => {
+      expect(extractUrls("||https://example.com/a.png||")).toEqual([]);
+    });
+
+    it("skips a spoilered URL but keeps one outside it", () => {
+      expect(extractUrls("look ||https://example.com/a.png|| and https://example.com/b")).toEqual([
+        "https://example.com/b",
+      ]);
+    });
+
+    it("skips a URL inside a spoiler that also holds prose", () => {
+      expect(extractUrls("||see https://example.com/a.png now||")).toEqual([]);
+    });
+
+    it("skips a URL inside a spoiler that spans lines", () => {
+      expect(extractUrls("||first\nhttps://example.com/a.png||")).toEqual([]);
+    });
+
+    it("leaves other URLs alone when a spoiler holds no URL", () => {
+      expect(extractUrls("||secret|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat a single pipe as a spoiler", () => {
+      expect(extractUrls("a | https://example.com/x")).toEqual(["https://example.com/x"]);
+      expect(extractUrls("a | b | https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an empty || || pair as a spoiler", () => {
+      expect(extractUrls("|||| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("keeps a URL inside a spoiler whose body holds an escaped pipe", () => {
+      expect(extractUrls("||secret \\|| https://example.com/a.png ||")).toEqual([]);
+      expect(extractUrls("||a\\|b https://example.com/x||")).toEqual([]);
+    });
+
+    it("keeps a URL inside a spoiler that spans a blank line", () => {
+      expect(extractUrls("||secret\n\nhttps://example.com/a.png||")).toEqual([]);
+      expect(extractUrls("||secret\n  \nhttps://example.com/a.png||")).toEqual([]);
+    });
+
+    it("counts an escaped pipe right after the opener as spoiler content", () => {
+      expect(extractUrls("||\\|a https://example.com/x||")).toEqual([]);
+    });
+
+    it("lets an escaped backslash end the spoiler normally", () => {
+      expect(extractUrls("||a\\\\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an escaped pipe outside a spoiler as hiding a URL", () => {
+      expect(extractUrls("a \\| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not close a spoiler on an escaped pipe followed by a lone pipe", () => {
+      expect(extractUrls("||oops \\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not let an unclosed spoiler hide a later URL", () => {
+      expect(extractUrls("||oops https://example.com/x")).toEqual(["https://example.com/x"]);
     });
 
     it("extracts URLs outside code blocks but not inside", () => {

@@ -42,9 +42,20 @@ export interface Notifier {
   /**
    * Show an incoming- or missed-call notification that opens the DM `target`
    * names when activated. Same delivery as `showMessage`, so the click reaches
-   * `onMessageActivated`, with no `messageId`.
+   * `onMessageActivated`, with no `messageId`. `ringing` marks the incoming
+   * ring's notification, which `clearCall` withdraws when the ring ends.
    */
-  showCall(title: string, body: string, target: { host: string; channelId: number }): Promise<void>;
+  showCall(
+    title: string,
+    body: string,
+    target: { host: string; channelId: number },
+    ringing?: boolean,
+  ): Promise<void>;
+  /**
+   * Withdraw the ringing call notification for `channelId` from the
+   * notification centre (D-13). Windows only; elsewhere a no-op.
+   */
+  clearCall(channelId: number): Promise<void>;
   /**
    * Subscribe to activations of message notifications. `handler` gets the
    * target the user clicked; the return value unsubscribes. Delivered once per

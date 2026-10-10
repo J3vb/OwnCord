@@ -24,6 +24,10 @@
 //!
 //! Only message notifications go through here; the plain `show` path (a
 //! notification with no target) stays on the plugin.
+//!
+//! A ringing call's Windows toast is tagged by its channel, and
+//! `clear_call_notification` removes it from Action Center when the ring ends
+//! (D-13). Elsewhere that command is a no-op.
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
@@ -84,7 +88,8 @@ pub struct MessageTarget {
 }
 
 /// Show a notification that opens `channel_id`/`message_id` (or just the
-/// channel, when there is no message id) when clicked.
+/// channel, when there is no message id) when clicked. `ring` marks an incoming
+/// call's notification, which `clear_call_notification` withdraws later.
 /// Async so showing it never blocks the UI thread on the notification server.
 #[tauri::command(async)]
 pub fn notify_message<R: Runtime>(
@@ -94,17 +99,41 @@ pub fn notify_message<R: Runtime>(
     host: String,
     channel_id: i64,
     message_id: Option<i64>,
+    ring: Option<bool>,
 ) -> Result<(), String> {
-    show_message_notification(
-        &app,
-        &title,
-        &body,
-        MessageTarget {
-            host,
-            channel_id,
-            message_id,
-        },
-    )
+    let target = MessageTarget {
+        host,
+        channel_id,
+        message_id,
+    };
+    let tag = ring_toast_tag(&target, ring.unwrap_or(false));
+    show_message_notification(&app, &title, &body, target, tag)
+}
+
+/// Withdraw the ringing call notification for `channel_id` once the ring has
+/// ended, so Action Center does not keep offering a call that is over (D-13).
+#[tauri::command(async)]
+pub fn clear_call_notification<R: Runtime>(
+    app: AppHandle<R>,
+    channel_id: i64,
+) -> Result<(), String> {
+    clear_call_toast(&app, channel_id)
+}
+
+/// The group every ringing call toast is filed under, beside its tag.
+#[cfg_attr(not(windows), allow(dead_code))]
+const CALL_TOAST_GROUP: &str = "call";
+
+/// The tag a ringing call's toast carries: one per DM channel, so a redial
+/// replaces it and the ring's end removes it.
+fn call_toast_tag(channel_id: i64) -> String {
+    format!("call-{channel_id}")
+}
+
+/// The tag for this toast: only an incoming ring has one. A missed-call notice
+/// and a message stay until the user clears them.
+fn ring_toast_tag(target: &MessageTarget, ring: bool) -> Option<String> {
+    (ring && target.message_id.is_none()).then(|| call_toast_tag(target.channel_id))
 }
 
 /// The launch URI a Windows toast carries: the registered `owncord://` handler
@@ -197,6 +226,7 @@ fn show_message_notification<R: Runtime>(
     title: &str,
     body: &str,
     target: MessageTarget,
+    tag: Option<String>,
 ) -> Result<(), String> {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
@@ -214,6 +244,12 @@ fn show_message_notification<R: Runtime>(
         .map_err(|e| format!("load toast xml: {e}"))?;
     let toast = ToastNotification::CreateToastNotification(&document)
         .map_err(|e| format!("create toast: {e}"))?;
+    if let Some(tag) = tag {
+        toast
+            .SetTag(&HSTRING::from(tag))
+            .and_then(|()| toast.SetGroup(&HSTRING::from(CALL_TOAST_GROUP)))
+            .map_err(|e| format!("tag call toast: {e}"))?;
+    }
 
     let notifier =
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(toast_app_id(app)))
@@ -221,6 +257,32 @@ fn show_message_notification<R: Runtime>(
     notifier
         .Show(&toast)
         .map_err(|e| format!("show toast: {e}"))?;
+    Ok(())
+}
+
+/// Windows: remove the ring's toast from Action Center (and from the screen,
+/// if its banner is still up). Removing one that is already gone is not an error.
+#[cfg(windows)]
+fn clear_call_toast<R: Runtime>(app: &AppHandle<R>, channel_id: i64) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::UI::Notifications::ToastNotificationManager;
+
+    ToastNotificationManager::History()
+        .and_then(|history| {
+            history.RemoveGroupedTagWithId(
+                &HSTRING::from(call_toast_tag(channel_id)),
+                &HSTRING::from(CALL_TOAST_GROUP),
+                &HSTRING::from(toast_app_id(app)),
+            )
+        })
+        .map_err(|e| format!("remove call toast: {e}"))
+}
+
+/// shortcut: off Windows the ring's notification is left to the notification
+/// server; withdrawing it needs the `notify-rust` handle kept past its waiter
+/// thread, if a desktop is found to keep stale ring notifications too.
+#[cfg(not(windows))]
+fn clear_call_toast<R: Runtime>(_app: &AppHandle<R>, _channel_id: i64) -> Result<(), String> {
     Ok(())
 }
 
@@ -232,6 +294,7 @@ fn show_message_notification<R: Runtime>(
     title: &str,
     body: &str,
     target: MessageTarget,
+    _tag: Option<String>,
 ) -> Result<(), String> {
     // `notify-rust`'s macOS backend needs the bundle identifier set before a
     // notification can be attributed (and its click observed); mirror what the
@@ -419,6 +482,22 @@ mod tests {
             xml.contains("<text id=\"2\">Voice &quot;call&quot;</text>"),
             "{xml}"
         );
+    }
+
+    #[test]
+    fn a_ringing_call_toast_carries_a_tag_derived_from_the_channel() {
+        // D-13: the tag is what lets the toast be withdrawn from Action Center
+        // once the ring ends (`clear_call_notification` removes the same tag).
+        let call = MessageTarget {
+            host: "h".into(),
+            channel_id: 7,
+            message_id: None,
+        };
+        assert_eq!(call_toast_tag(7), "call-7");
+        assert_eq!(ring_toast_tag(&call, true).as_deref(), Some("call-7"));
+        // A missed-call notice and a message toast stay until the user clears them.
+        assert_eq!(ring_toast_tag(&call, false), None);
+        assert_eq!(ring_toast_tag(&target("h", 7, 42), true), None);
     }
 
     #[test]

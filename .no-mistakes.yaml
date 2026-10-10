@@ -20,6 +20,14 @@ test:
       --workers=1`. For a UI journey also run the shared accessibility checks
       in `tests/e2e/support/b9-accessibility.ts` against that same journey.
 
+    Screenshots: for any change with a visible UI effect (client or admin
+    panel), capture the changed UI in its new state, and the old state too when
+    practical, through the same mocked Playwright harness (a `page.screenshot`
+    step in the changed spec, or in a temporary spec you delete afterwards).
+    Take one screenshot per scenario, caption each, and attach them to the PR
+    as before. They are evidence for the PR, not committed files; write them
+    outside the worktree. Targeted specs only, never the full suites.
+
     For changes with no drivable surface, run targeted tests for the files
     touched, using the repository's own commands (CI runs the full suites):
 
