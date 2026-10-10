@@ -323,7 +323,9 @@ follows `server.restart_mode`: in Docker the server exits and the container's
 restart policy starts it (the shipped `docker-compose.yml` sets
 `restart: unless-stopped`; a container run by hand needs
 `--restart unless-stopped`); under systemd or NSSM it exits for the service
-manager; with no supervisor detected it starts its own replacement. When
+manager; with no supervisor detected (or `restart_mode: spawn`) it starts its
+own replacement. The button is disabled while the page has unsaved edits (they
+would not apply), so save or discard them first. When
 `restart_mode` is `supervised` but no supervisor is detected, the dialog says
 the server may stay stopped. The restart is Owner-only, is refused while an
 update or backup restore is running, is accepted once per process (a second
