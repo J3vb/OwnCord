@@ -665,6 +665,33 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
     badge.click();
     expect(openIdentityMismatchModal).toHaveBeenCalledWith(OTTO, "Otto", expect.any(AbortSignal));
   });
+
+  it("keeps focus in the panel when re-trusting replaces the focused shield", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    shield(root, OTTO)!.focus();
+    expect(document.activeElement).toBe(shield(root, OTTO));
+
+    setPeerVerification({
+      userId: OTTO,
+      status: "verified",
+      safetyNumber: "1234 5678",
+      sessionFingerprint: "ab:cd",
+    });
+    voiceStore.flush();
+    const badge = shield(root, OTTO)!;
+    expect(badge.tagName).toBe("SPAN");
+    expect(document.activeElement).toBe(badge);
+    root.remove();
+  });
 });
 
 describe("DmCallPanel — call timer (D-10)", () => {

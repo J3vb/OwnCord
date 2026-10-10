@@ -825,6 +825,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       v === null ? "" : `${v.status}|${v.safetyNumber ?? ""}|${v.sessionFingerprint ?? ""}`;
     if (key === ref.verifyKey) return;
     ref.verifyKey = key;
+    const hadFocus = ref.verify?.contains(document.activeElement) === true;
     ref.verify?.remove();
     ref.verify = null;
     if (v === null) return;
@@ -850,6 +851,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     }
     ref.wrap.appendChild(el);
     ref.verify = el;
+    if (hadFocus) {
+      el.tabIndex = -1;
+      el.focus();
+    }
   }
 
   /** In-place updates that never rebuild: rings, badges, controls, status. */
