@@ -60,6 +60,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- On Windows, a popped-out stream or camera no longer leaves an empty black window behind when the stream ends or you choose Bring back; the window now closes.
 - On Windows, Settings > Voice & Audio lists your microphones, speakers and cameras by name again instead of nameless entries, and a saved device that is still plugged in no longer shows as "(disconnected)".
 - DM calls had no identity shields; each person in the call now shows one, as in a server voice channel, and a red (blocked) shield opens the prompt to review their new key.
 - A DM call's timer showed each side its own time in the call; it now counts from when the other person joined, so both sides show the same length.
