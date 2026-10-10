@@ -208,6 +208,7 @@ vi.mock("@stores/auth.store", () => ({
   authStore: {
     getState: () => ({ user: { id: 1, username: "tester", avatar: null, role: mockRole.value } }),
   },
+  onAuthCleared: vi.fn(() => () => {}),
 }));
 
 const { mockUpdateChatHeaderForDm } = vi.hoisted(() => ({
