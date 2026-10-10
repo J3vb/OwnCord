@@ -152,14 +152,11 @@ export function createGifPicker(options: GifPickerOptions): {
   async function toggleCell(cell: HTMLElement): Promise<void> {
     const url = cell.dataset.fullUrl;
     if (url === undefined) return;
-    const ok = await toggleGifFavorite({
+    await toggleGifFavorite({
       url,
       preview_url: cell.dataset.previewUrl ?? url,
       title: cell.dataset.title ?? "",
     });
-    if (!ok && !signal.aborted) {
-      searchInput.setAttribute("title", gifFavoritesText("favoriteFailed"));
-    }
   }
 
   gridArea.addEventListener(

@@ -9,6 +9,8 @@
 
 import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
+import { showToast } from "@lib/toast";
+import { gifFavoritesText } from "../i18n/gifFavorites";
 import { onAuthCleared } from "./auth.store";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 import type { GifFavorite } from "@lib/types";
@@ -101,8 +103,12 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
     if (was) await api.removeGifFavorite(fav.url);
     else await api.addGifFavorite(fav);
     return true;
-  } catch {
-    if (gen === generation) apply(was);
+  } catch (err) {
+    if (gen === generation) {
+      apply(was);
+      const full = err instanceof ApiClientError && err.code === "GIF_FAVORITES_FULL";
+      showToast(gifFavoritesText(full ? "favoritesFull" : "favoriteFailed"), "error");
+    }
     return false;
   } finally {
     if (gen === generation) pending.delete(fav.url);

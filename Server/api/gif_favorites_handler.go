@@ -75,9 +75,6 @@ func handleAddGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFun
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
 			return
 		}
-		if in.PreviewURL == "" {
-			in.PreviewURL = in.URL
-		}
 		if !allowedGIFFavoriteURL(in.URL) || !allowedGIFFavoriteURL(in.PreviewURL) {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "url must be an https GIF URL from the GIF provider")
 			return

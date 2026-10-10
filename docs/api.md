@@ -1428,7 +1428,7 @@ endpoints; there is no `gif.api_key` dependency.
 ### PUT /api/v1/gif/favorites
 
 Saves a GIF. Body: `{"url", "preview_url", "title"}`. Both URLs must be `https`
-URLs on `klipy.com` or a subdomain; an empty `preview_url` defaults to `url`.
+URLs on `klipy.com` or a subdomain.
 A `title` over 200 bytes is cut on a character boundary. Saving a GIF that is
 already a favorite changes nothing. Responds `204`.
 

@@ -10,4 +10,5 @@ export const gifFavoritesText = defineCatalog("gifFavorites", {
   favorite: "Add to favorites",
   unfavorite: "Remove from favorites",
   favoriteFailed: "Couldn't update favorites",
+  favoritesFull: "You've reached the limit of saved GIFs. Remove one to add another.",
 });

@@ -83,13 +83,15 @@ func TestGIFFavorites_AddListRemove(t *testing.T) {
 	}
 }
 
-func TestGIFFavorites_PreviewDefaultsToURL(t *testing.T) {
+func TestGIFFavorites_EmptyPreviewIsRejected(t *testing.T) {
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
-	gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, `{"url":"https://media.klipy.com/a.gif"}`)
-	got := gifFavList(t, router, token)
-	if len(got) != 1 || got[0]["preview_url"] != "https://media.klipy.com/a.gif" {
+	rec := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, `{"url":"https://media.klipy.com/a.gif"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if got := gifFavList(t, router, token); len(got) != 0 {
 		t.Fatalf("list = %+v", got)
 	}
 }
@@ -99,7 +101,7 @@ func TestGIFFavorites_LongTitleIsTruncatedOnRuneBoundary(t *testing.T) {
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
 	title := strings.Repeat("猫", 70)
-	body := fmt.Sprintf(`{"url":"https://media.klipy.com/a.gif","title":%q}`, title)
+	body := fmt.Sprintf(`{"url":"https://media.klipy.com/a.gif","preview_url":"https://media.klipy.com/a.gif","title":%q}`, title)
 	if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusNoContent {
 		t.Fatalf("add status = %d (%s)", rr.Code, rr.Body.String())
 	}
@@ -125,7 +127,7 @@ func TestGIFFavorites_RejectsDisallowedURLs(t *testing.T) {
 		"javascript:alert(1)",
 		"",
 	} {
-		body := fmt.Sprintf(`{"url":%q}`, u)
+		body := fmt.Sprintf(`{"url":%q,"preview_url":"https://media.klipy.com/a.gif"}`, u)
 		if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusBadRequest {
 			t.Errorf("url %q = %d, want 400", u, rr.Code)
 		}
@@ -144,12 +146,12 @@ func TestGIFFavorites_CapReturnsConflict(t *testing.T) {
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
 	for i := range db.MaxGIFFavorites {
-		body := fmt.Sprintf(`{"url":"https://media.klipy.com/%d.gif"}`, i)
+		body := fmt.Sprintf(`{"url":"https://media.klipy.com/%d.gif","preview_url":"https://media.klipy.com/%d.gif"}`, i, i)
 		if rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, body); rr.Code != http.StatusNoContent {
 			t.Fatalf("add %d = %d", i, rr.Code)
 		}
 	}
-	rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, `{"url":"https://media.klipy.com/over.gif"}`)
+	rr := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, `{"url":"https://media.klipy.com/over.gif","preview_url":"https://media.klipy.com/over.gif"}`)
 	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "GIF_FAVORITES_FULL") {
 		t.Fatalf("over cap = %d %s, want 409 GIF_FAVORITES_FULL", rr.Code, rr.Body.String())
 	}
@@ -160,7 +162,7 @@ func TestGIFFavorites_AreIsolatedPerUser(t *testing.T) {
 	alice := profileCreateToken(t, database, "alice", 4)
 	bob := profileCreateToken(t, database, "bob", 4)
 	router := buildGIFFavoritesRouter(database)
-	gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", alice, `{"url":"https://media.klipy.com/a.gif"}`)
+	gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", alice, `{"url":"https://media.klipy.com/a.gif","preview_url":"https://media.klipy.com/a.gif"}`)
 	if got := gifFavList(t, router, bob); len(got) != 0 {
 		t.Fatalf("bob sees alice's favorites: %+v", got)
 	}

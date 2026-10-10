@@ -2,29 +2,38 @@ import { createElement } from "@lib/dom";
 import { isAllowedGifUrl } from "@lib/gifProvider";
 import {
   gifFavoritesAvailable,
+  gifFavoritesStore,
   isGifFavorite,
   toggleGifFavorite,
 } from "@stores/gifFavorites.store";
 import { gifFavoritesText } from "../../i18n/gifFavorites";
 
+function syncStar(star: HTMLButtonElement): void {
+  const on = isGifFavorite(star.dataset.url ?? "");
+  star.setAttribute("aria-pressed", String(on));
+  star.setAttribute("aria-label", gifFavoritesText(on ? "unfavorite" : "favorite"));
+  star.classList.toggle("on", on);
+  star.hidden = !gifFavoritesAvailable() && document.activeElement !== star;
+  star.textContent = on ? "\u2605" : "\u2606";
+}
+
+// One subscription for every rendered star: the saved list can change from the
+// picker or finish loading after a message rendered, and a filled star is
+// always visible.
+gifFavoritesStore.subscribe(() => {
+  for (const star of document.querySelectorAll<HTMLButtonElement>(".msg-gif-fav")) syncStar(star);
+});
+
 /** Star that saves a Klipy GIF from a message to the user's favorites. */
 function renderFavoriteStar(url: string): HTMLButtonElement {
   const star = createElement("button", { type: "button", class: "msg-gif-fav" });
-  const sync = (): void => {
-    const on = isGifFavorite(url);
-    star.setAttribute("aria-pressed", String(on));
-    star.setAttribute("aria-label", gifFavoritesText(on ? "unfavorite" : "favorite"));
-    star.classList.toggle("on", on);
-    star.hidden = !gifFavoritesAvailable() && document.activeElement !== star;
-    star.textContent = on ? "\u2605" : "\u2606";
-  };
+  star.dataset.url = url;
+  const sync = (): void => syncStar(star);
   sync();
   star.addEventListener("click", (e) => {
     e.stopPropagation();
     void toggleGifFavorite({ url, preview_url: url, title: "" }).then(sync);
   });
-  // The saved list can load after this message rendered; re-read it when the
-  // viewer reaches for the star rather than holding a store subscription.
   star.addEventListener("pointerenter", sync);
   star.addEventListener("focus", sync);
   star.addEventListener("blur", sync);

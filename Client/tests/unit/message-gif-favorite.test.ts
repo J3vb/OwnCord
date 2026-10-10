@@ -15,9 +15,17 @@ import {
   setInlineImageDecorator,
 } from "../../src/components/message-list/media";
 import { gifFavoriteStar } from "../../src/components/message-list/gifFavoriteStar";
-import { bindGifFavoritesApi, isGifFavorite, resetGifFavorites } from "@stores/gifFavorites.store";
+import {
+  bindGifFavoritesApi,
+  isGifFavorite,
+  resetGifFavorites,
+  toggleGifFavorite,
+} from "@stores/gifFavorites.store";
+import { showToast } from "@lib/toast";
 import { ApiClientError } from "@lib/api";
 import type { GifFavoritesApi } from "@lib/gifProvider";
+
+vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
 
 const URL_ = "https://media.klipy.com/full/cat.gif";
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -116,5 +124,30 @@ describe("star on GIFs in messages", () => {
     wrap.addEventListener("click", wrapClick);
     wrap.querySelector<HTMLButtonElement>(".msg-gif-fav")!.click();
     expect(wrapClick).not.toHaveBeenCalled();
+  });
+
+  it("re-syncs a rendered star when the list changes elsewhere", async () => {
+    const a = api([URL_]);
+    bindGifFavoritesApi(a);
+    await flush();
+    const wrap = renderInlineImage(URL_);
+    document.body.appendChild(wrap);
+    const star = wrap.querySelector<HTMLButtonElement>(".msg-gif-fav")!;
+    expect(star.classList.contains("on")).toBe(true);
+    await toggleGifFavorite({ url: URL_, preview_url: URL_, title: "" });
+    expect(star.classList.contains("on")).toBe(false);
+    wrap.remove();
+  });
+
+  it("toasts when saving fails, naming the cap on GIF_FAVORITES_FULL", async () => {
+    const a = api();
+    a.addGifFavorite = vi
+      .fn()
+      .mockRejectedValue(new ApiClientError(409, "GIF_FAVORITES_FULL", "full"));
+    bindGifFavoritesApi(a);
+    await flush();
+    renderInlineImage(URL_).querySelector<HTMLButtonElement>(".msg-gif-fav")!.click();
+    await flush();
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("limit"), "error");
   });
 });
