@@ -60,6 +60,17 @@ function setStarState(star: HTMLElement, on: boolean): void {
   star.textContent = on ? "\u2605" : "\u2606";
 }
 
+/** Star/unstar the GIF a grid cell shows. */
+async function toggleCell(cell: HTMLElement): Promise<void> {
+  const url = cell.dataset.fullUrl;
+  if (url === undefined) return;
+  await toggleGifFavorite({
+    url,
+    preview_url: cell.dataset.previewUrl ?? url,
+    title: cell.dataset.title ?? "",
+  });
+}
+
 export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
@@ -147,17 +158,6 @@ export function createGifPicker(options: GifPickerOptions): {
     },
     { signal },
   );
-
-  /** Star/unstar the GIF a grid cell shows. */
-  async function toggleCell(cell: HTMLElement): Promise<void> {
-    const url = cell.dataset.fullUrl;
-    if (url === undefined) return;
-    await toggleGifFavorite({
-      url,
-      preview_url: cell.dataset.previewUrl ?? url,
-      title: cell.dataset.title ?? "",
-    });
-  }
 
   gridArea.addEventListener(
     "keydown",
