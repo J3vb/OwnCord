@@ -56,6 +56,7 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
+- On Linux, GIF picker previews and linked images no longer show as broken images when the webview falls back to its slower internal message channel; the log now says when that happens.
 
 **Voice and video**
 
