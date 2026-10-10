@@ -1602,13 +1602,20 @@ describe("LiveKitSession", () => {
 
       const setSubscribed = vi.fn();
       const publication = { kind: "audio", source: "microphone", setSubscribed };
+      const setCameraSubscribed = vi.fn();
+      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
+      const onRemoteVideo = vi.fn();
+      session.setOnRemoteVideo(onRemoteVideo);
       mockRoom.remoteParticipants = new Map([
         [
           "user-7:tok",
           {
             identity: "user-7:tok",
             audioTrackPublications: new Map(),
-            trackPublications: new Map([["TR_a", publication]]),
+            trackPublications: new Map<string, unknown>([
+              ["TR_a", publication],
+              ["TR_v", camera],
+            ]),
           },
         ],
       ]);
@@ -1624,6 +1631,8 @@ describe("LiveKitSession", () => {
       await reconnectPromise;
 
       expect(setSubscribed).toHaveBeenCalledWith(true);
+      expect(setCameraSubscribed).toHaveBeenCalledWith(false);
+      expect(onRemoteVideo).toHaveBeenCalledWith(7, null, false);
     });
 
     // Pre-refactor parity: the reconnect success path re-installed both
