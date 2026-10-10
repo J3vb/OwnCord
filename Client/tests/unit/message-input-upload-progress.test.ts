@@ -11,11 +11,14 @@ vi.mock("@components/GifPicker", () => ({
 }));
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 
-const stubGifApi: GifApi = {
+const stubGifApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(async () => ({ results: [] })),
   gifTrending: vi.fn(async () => ({ results: [] })),
+  gifFavorites: vi.fn(async () => ({ favorites: [] })),
+  addGifFavorite: vi.fn(async () => undefined),
+  removeGifFavorite: vi.fn(async () => undefined),
 };
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {

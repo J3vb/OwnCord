@@ -35,13 +35,16 @@ import {
   wrapWithMarker,
   type MessageInputOptions,
 } from "@components/MessageInput";
-import type { GifApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 import { authStore } from "@stores/auth.store";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
-const stubGifApi: GifApi = {
+const stubGifApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(async () => ({ results: [] })),
   gifTrending: vi.fn(async () => ({ results: [] })),
+  gifFavorites: vi.fn(async () => ({ favorites: [] })),
+  addGifFavorite: vi.fn(async () => undefined),
+  removeGifFavorite: vi.fn(async () => undefined),
 };
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
