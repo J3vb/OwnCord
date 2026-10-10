@@ -151,7 +151,7 @@ describe("connectAndSetup", () => {
       succeeded: false,
       stage: "resolve",
     });
-    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+    expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
   });
 
   it("SRE-M2: records a failure after the room connected at stage activate", async () => {
@@ -173,7 +173,7 @@ describe("connectAndSetup", () => {
     host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => false) });
 
     await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
-    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+    expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
     expect(joinRetryInMs()).toBeGreaterThan(0);
 
     host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) });

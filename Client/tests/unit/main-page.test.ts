@@ -144,6 +144,7 @@ const {
         addStream: ReturnType<typeof vi.fn>;
         removeStream: ReturnType<typeof vi.fn>;
         clearStreams: ReturnType<typeof vi.fn>;
+        watch: ReturnType<typeof vi.fn>;
         hasStreams: ReturnType<typeof vi.fn>;
         setFocusedTile: ReturnType<typeof vi.fn>;
         getFocusedTileId: ReturnType<typeof vi.fn>;
