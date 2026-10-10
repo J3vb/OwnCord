@@ -1147,6 +1147,12 @@ describe("GifPicker", () => {
           (i) => i.dataset.fullUrl,
         );
         expect(urls).toEqual(favs.map((f) => f.url));
+        const imgs = picker.element.querySelectorAll<HTMLImageElement>(".gp-item .gp-img");
+        expect(imgs.length).toBe(favs.length);
+        imgs.forEach((img) => expect(img.src).toMatch(/^blob:/));
+        favs.forEach((f) =>
+          expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: f.preview_url }),
+        );
         expect(document.activeElement).toBe(tabs[1]);
         picker.destroy();
       } finally {
