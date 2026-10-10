@@ -135,7 +135,7 @@ describe("connectAndSetup", () => {
       latestToken: "t",
       lastUrl: "u",
       lastDirectUrl: undefined,
-    } as SessionState);
+    });
     await join.connectAndSetup("t", "u", 2);
     expect(host.leaveVoice).toHaveBeenCalledWith(false, true);
   });
