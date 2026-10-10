@@ -26,7 +26,7 @@ describe.skipIf(process.platform === "win32")(
       const answers = outputs.map((out, i) => `${i + 1}) echo '${out}' ;;`).join("\n");
       await writeFile(
         join(dir, "tasklist"),
-        `#!/bin/sh\necho "$*" >> "${dir}/calls"\ncase $(wc -l < "${dir}/calls") in\n${answers}\n*) echo '${outputs.at(-1)}' ;;\nesac\n`,
+        `#!/bin/sh\necho "$*" >> "${dir}/calls"\ncase $(( $(wc -l < "${dir}/calls") )) in\n${answers}\n*) echo '${outputs.at(-1)}' ;;\nesac\n`,
       );
       await chmod(join(dir, "tasklist"), 0o755);
     };
