@@ -1311,6 +1311,33 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s (D-14)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        recipient: { ...c.recipient, status: "offline" },
+        participants: c.participants.map((p) => ({ ...p, status: "offline" })),
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    vi.mocked(startRingback).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("unanswered");
+    expect(panel.querySelector('[data-testid="dcp-caption"]')!.textContent).toBe("bob is offline");
+    expect(startRingback).not.toHaveBeenCalled();
+    // Still rung: an invisible contact is shown offline but can still answer.
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    page.destroy?.();
+  });
+
   describe("ringing the callee (D-01, D-02, D-05)", () => {
     const rings = (ws: FakeWsClient): unknown[] =>
       vi.mocked(ws.send).mock.calls.filter(([m]) => (m as { type: string }).type === "call_ring");

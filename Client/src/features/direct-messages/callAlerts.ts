@@ -18,19 +18,25 @@ import { dmCallText } from "../../i18n/dmCall";
 
 const log = createLogger("call-alerts");
 
+/** The channel whose ring notification is up, so only a shown one is withdrawn. */
+let shownRing: number | null = null;
+
 /**
  * The OS popup for `ring`. DND promises no desktop notifications (OC-0037),
  * and while the window is focused the banner is already on screen, so neither
  * case gets one; the banner or the in-app notice still does.
  */
-function popup(title: string, ring: RingState): void {
+function popup(title: string, ring: RingState, ringing: boolean): void {
   if (loadUserStatus() === "dnd" || !loadPref<boolean>("desktopNotifications", true)) return;
   if (document.hasFocus()) return;
+  if (ringing) shownRing = ring.channelId;
   desktop.notifier
-    .showCall(title, dmCallText("voiceCall"), {
-      host: getChannelMutesHost() ?? "",
-      channelId: ring.channelId,
-    })
+    .showCall(
+      title,
+      dmCallText("voiceCall"),
+      { host: getChannelMutesHost() ?? "", channelId: ring.channelId },
+      ringing,
+    )
     .catch((err: unknown) => log.debug("Call notification not available", err));
 }
 
@@ -41,7 +47,7 @@ function popup(title: string, ring: RingState): void {
  * the ringtone (D3(b)).
  */
 export function alertIncomingCall(ring: RingState): void {
-  popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring);
+  popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring, true);
   // Flashes until the window is focused. A passive hint, so it stays under
   // DND like a message's flash: in the tray it is the only signal left
   // (OC-0204).
@@ -55,5 +61,15 @@ export function alertIncomingCall(ring: RingState): void {
 export function alertMissedCall(ring: RingState): void {
   const text = dmCallText("missed", { name: ring.fromUsername });
   showToast(text, "info");
-  popup(text, ring);
+  popup(text, ring, false);
+}
+
+/** The ring ended, however it ended: withdraw its notification, which would
+ *  otherwise sit in the notification centre offering a call that is over (D-13). */
+export function clearIncomingCall(ring: RingState): void {
+  if (shownRing !== ring.channelId) return;
+  shownRing = null;
+  desktop.notifier
+    .clearCall(ring.channelId)
+    .catch((err: unknown) => log.debug("Call notification not withdrawn", err));
 }

@@ -36,6 +36,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { formatElapsed, headerStatusText, isConnecting } from "@components/VoiceWidget";
+import { verifyPresentation, openIdentityMismatchModal } from "@components/peer-verification";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
@@ -59,7 +60,7 @@ export type DmCallView =
   | {
       readonly kind: "unanswered";
       readonly dm: DmChannel;
-      readonly reason: "declined" | "no-answer";
+      readonly reason: "declined" | "no-answer" | "offline";
     }
   | {
       readonly kind: "connected";
@@ -99,11 +100,7 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
     // Anyone else in the room means the call is up, whatever the ring said.
     if (others.length === 0 && out !== null && out.channelId === dm.channelId) {
       if (out.phase === "ringing") return { kind: "outgoing", dm, pending: out.pending };
-      return {
-        kind: "unanswered",
-        dm,
-        reason: out.phase === "declined" ? "declined" : "no-answer",
-      };
+      return { kind: "unanswered", dm, reason: out.phase };
     }
     return {
       kind: "connected",
@@ -162,6 +159,9 @@ interface Person {
 interface AvatarRef {
   readonly wrap: HTMLElement;
   readonly badge: HTMLElement;
+  /** The peer's identity shield (D-09), drawn once their announce resolves. */
+  verify: HTMLElement | null;
+  verifyKey: string;
 }
 
 interface ControlRefs {
@@ -242,7 +242,11 @@ function caption(main: string, sub: string): HTMLElement[] {
 // notice. Re-exported here so they ride in this panel's lazy chunk (the page
 // imports the panel at mount) instead of a second dynamic chunk in MainPage,
 // which would push its bundle budget over.
-export { alertIncomingCall, alertMissedCall } from "../features/direct-messages/callAlerts";
+export {
+  alertIncomingCall,
+  alertMissedCall,
+  clearIncomingCall,
+} from "../features/direct-messages/callAlerts";
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
@@ -295,17 +299,26 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   /** The call room someone else has been in since you joined, to tell "bob
    *  left" from "nobody has come yet" (D-11). */
   let peerRoom: number | null = null;
+  /** When someone else was first in that room with you: the call's start, so
+   *  both sides time the same call rather than their own time in the room
+   *  (D-10). shortcut: a later joiner of a group call still counts from their
+   *  own join; matching them needs per-member join times from the server. */
+  let answeredAt: number | null = null;
 
   function computeView(): DmCallView {
     const voice = voiceStore.getState();
     const room = voice.currentChannelId;
-    if (room !== peerRoom) peerRoom = null;
+    if (room !== peerRoom) {
+      peerRoom = null;
+      answeredAt = null;
+    }
     const roster = room === null ? undefined : voice.voiceUsers.get(room);
     if (
       room !== null &&
       roster !== undefined &&
       [...roster.keys()].some((id) => id !== currentUserId())
     ) {
+      if (peerRoom === null) answeredAt = Date.now();
       peerRoom = room;
     }
     return deriveCallView({
@@ -363,7 +376,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const badge = createElement("span", { class: "dcp-avatar-badge" });
     badge.hidden = true;
     wrap.appendChild(badge);
-    avatars.set(userId, { wrap, badge });
+    avatars.set(userId, { wrap, badge, verify: null, verifyKey: "" });
     return wrap;
   }
 
@@ -649,16 +662,24 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       ),
       textButton(d("leave"), "btn-ghost dcp-pill", "dcp-leave-call", options.onLeave),
     );
-    const declined = v.reason === "declined";
     fill(
-      topBar(declined ? d("declinedStatus", { name }) : d("noAnswerStatus"), "bad", true),
+      topBar(unansweredText(v.reason, name, true), "bad", true),
       stage,
-      ...caption(
-        declined ? d("declined", { name }) : d("noAnswer", { name }),
-        d("stillInCall", { name }),
-      ),
+      ...caption(unansweredText(v.reason, name, false), d("stillInCall", { name })),
       actions,
     );
+  }
+
+  /** Why the ring ended, as the header status or the caption. */
+  function unansweredText(
+    reason: Extract<DmCallView, { kind: "unanswered" }>["reason"],
+    name: string,
+    status: boolean,
+  ): string {
+    if (reason === "offline") return d("offline", { name });
+    if (reason === "declined")
+      return status ? d("declinedStatus", { name }) : d("declined", { name });
+    return status ? d("noAnswerStatus") : d("noAnswer", { name });
   }
 
   /** The header status: who left once alone in a live call, else the voice state. */
@@ -790,10 +811,45 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     else if (view.kind === "outgoing")
       text = d("callingName", { name: callName(view.dm, currentUserId()) });
     else if (view.kind === "unanswered") {
-      const name = callName(view.dm, currentUserId());
-      text = view.reason === "declined" ? d("declined", { name }) : d("noAnswer", { name });
+      text = unansweredText(view.reason, callName(view.dm, currentUserId()), false);
     }
     if (live.textContent !== text) setText(live, text);
+  }
+
+  /** A peer's identity shield, as in the channel roster (D-09): redrawn only
+   *  when their verification changes. A blocked peer's is a button that opens
+   *  the re-trust prompt, since nothing else says why they cannot be heard. */
+  function syncVerify(userId: number, ref: AvatarRef, voice: VoiceState, dm: DmChannel): void {
+    const v = voice.peerVerifications?.get(userId) ?? null;
+    const key =
+      v === null ? "" : `${v.status}|${v.safetyNumber ?? ""}|${v.sessionFingerprint ?? ""}`;
+    if (key === ref.verifyKey) return;
+    ref.verifyKey = key;
+    ref.verify?.remove();
+    ref.verify = null;
+    if (v === null) return;
+    const { icon, color, title } = verifyPresentation(v);
+    const cls = `dcp-verify ${v.status}`;
+    const el =
+      v.status === "mismatch"
+        ? createElement("button", { type: "button", class: cls, title, "aria-label": title })
+        : createElement("span", { class: cls, title, role: "img", "aria-label": title });
+    el.style.color = color;
+    el.appendChild(createIcon(icon, 14));
+    if (v.status === "mismatch") {
+      el.addEventListener(
+        "click",
+        (e) => {
+          // A tile in the video grid has its own click.
+          e.stopPropagation();
+          const name = resolvePerson(userId, dm, voiceStore.getState(), currentUserId()).name;
+          void openIdentityMismatchModal(userId, name, disposable.signal);
+        },
+        { signal: disposable.signal },
+      );
+    }
+    ref.wrap.appendChild(el);
+    ref.verify = el;
   }
 
   /** In-place updates that never rebuild: rings, badges, controls, status. */
@@ -822,6 +878,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       if (speaking && !isSelf && speaker === "") {
         speaker = resolvePerson(userId, view.dm, voice, me).name;
       }
+      if (!isSelf) syncVerify(userId, ref, voice, view.dm);
     }
     if (speakingEl !== null) {
       const text = speaker === "" ? "" : ` · ${d("speaking", { name: speaker })}`;
@@ -884,8 +941,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   }
 
   function tick(): void {
-    const joinedAt = voiceStore.getState().joinedAt;
-    const text = joinedAt === null ? "00:00" : formatElapsed(Date.now() - joinedAt);
+    const text = answeredAt === null ? "00:00" : formatElapsed(Date.now() - answeredAt);
     for (const el of timerEls) if (el.textContent !== text) setText(el, text);
   }
 

@@ -189,6 +189,39 @@
   width: 12px;
   height: 12px;
 }
+/* A peer's identity shield (D-09), opposite the mute badge; its colour is the
+   verification state's, set inline as in the channel roster. */
+.dcp-verify {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-circle);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+button.dcp-verify {
+  cursor: pointer;
+}
+button.dcp-verify:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.dcp-avatar--sm .dcp-verify {
+  width: 18px;
+  height: 18px;
+  right: -5px;
+  top: -5px;
+}
+.dcp-avatar--sm .dcp-verify svg {
+  width: 12px;
+  height: 12px;
+}
 
 /* Controls: 44px round buttons, named and pressed-state aware. They wrap
    rather than clip at the 940x500 minimum with 20px text. */

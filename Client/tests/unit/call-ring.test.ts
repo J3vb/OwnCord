@@ -14,6 +14,7 @@ function harness() {
   const declined: number[] = [];
   const started: RingState[] = [];
   const missed: RingState[] = [];
+  const ended: RingState[] = [];
   let pending: (() => void) | null = null;
   let pendingMs = 0;
   let cleared = 0;
@@ -25,6 +26,7 @@ function harness() {
     onDecline: (id) => declined.push(id),
     onRingStart: (s) => started.push(s),
     onMissed: (s) => missed.push(s),
+    onRingEnd: (s) => ended.push(s),
     setTimer: (fn, ms) => {
       pending = fn;
       pendingMs = ms;
@@ -44,6 +46,7 @@ function harness() {
     declined,
     started,
     missed,
+    ended,
     fireTimeout: () => pending?.(),
     timerMs: () => pendingMs,
     clearedCount: () => cleared,
@@ -239,6 +242,28 @@ describe("ring controller — ring start", () => {
   });
 });
 
+// D-13: the OS call notification is withdrawn however the ring ends.
+describe("ring controller — ring end", () => {
+  it("reports every ended ring once: accept, decline, timeout, cancel and a newer call", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.incoming(ring(5)); // a redial of the same ring is not an end
+    h.ctrl.accept();
+    h.ctrl.incoming(ring(6));
+    h.ctrl.decline();
+    h.ctrl.incoming(ring(7));
+    h.fireTimeout();
+    h.ctrl.incoming(ring(8));
+    h.ctrl.cancel(8, "ringer-left");
+    h.ctrl.incoming(ring(9));
+    h.ctrl.incoming(ring(10, 4));
+    h.ctrl.destroy();
+    h.ctrl.decline(); // nothing is ringing: no end
+
+    expect(h.ended.map((r) => r.channelId)).toEqual([5, 6, 7, 8, 9, 10]);
+  });
+});
+
 describe("ring controller — cancel (declined elsewhere / ringer left)", () => {
   it("stops ringing for the matching channel", () => {
     const h = harness();
@@ -387,6 +412,20 @@ describe("outgoing call", () => {
     h.call.start(5, [9]);
 
     expect(h.call.current()).toEqual({ channelId: 5, phase: "ringing", pending: [9] });
+    expect(h.armed()).toBe(true);
+  });
+
+  it("a call to an offline 1:1 contact is offline at once, with no window and no ringback (D-14)", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9], true);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "offline", pending: [9] });
+    expect(h.armed()).toBe(false);
+    expect(h.ringbacks).toEqual([]);
+
+    // Ring again once they are back rings as usual.
+    h.call.start(5, [9]);
+    expect(h.call.current()?.phase).toBe("ringing");
     expect(h.armed()).toBe(true);
   });
 

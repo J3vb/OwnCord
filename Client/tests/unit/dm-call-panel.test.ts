@@ -7,13 +7,24 @@ vi.mock("@lib/livekitSession", () => ({
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../../src/components/peer-verification", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/components/peer-verification")>()),
+  openIdentityMismatchModal: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   createDmCallPanel,
   deriveCallView,
   type DmCallPanelComponent,
   type DmCallPanelOptions,
 } from "../../src/components/DmCallPanel";
-import { voiceStore, type VoiceUser } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  setPeerVerification,
+  clearPeerVerifications,
+  type VoiceUser,
+} from "../../src/stores/voice.store";
+import { openIdentityMismatchModal } from "../../src/components/peer-verification";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile, updatePresence } from "../../src/stores/members.store";
@@ -103,6 +114,10 @@ function mount(opts = options()): { opts: MockedOptions; root: HTMLElement } {
 const q = (root: HTMLElement, id: string) =>
   root.querySelector<HTMLButtonElement>(`[data-testid='${id}']`);
 
+const shield = (root: HTMLElement, id: number) =>
+  root.querySelector<HTMLElement>(`.dcp-avatar[data-user-id='${id}'] .dcp-verify`);
+const timer = (root: HTMLElement) => root.querySelector(".dcp-timer")!.textContent;
+
 beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -173,6 +188,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearPeerVerifications();
+  voiceStore.flush();
   panel?.destroy?.();
   panel = null;
   host.remove();
@@ -241,6 +258,16 @@ describe("deriveCallView", () => {
         outgoing: { channelId: DM, phase: "no-answer", pending: [OTTO] },
       }),
     ).toMatchObject({ kind: "unanswered", reason: "no-answer" });
+  });
+
+  it("reports an offline callee as unanswered at once (D-14)", () => {
+    expect(
+      deriveCallView({
+        ...base,
+        voice: { currentChannelId: DM, voiceUsers: room(SELF) },
+        outgoing: { channelId: DM, phase: "offline", pending: [OTTO] },
+      }),
+    ).toMatchObject({ kind: "unanswered", reason: "offline" });
   });
 
   it("is connected as soon as anyone else is in the room, whatever the ring said", () => {
@@ -349,6 +376,21 @@ describe("DmCallPanel — caller side", () => {
     const { root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
+  });
+
+  it("says an offline callee is offline, with Ring again and Leave call (D-14)", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { opts, root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "offline", pending: [OTTO] });
+
+    expect(root.dataset.state).toBe("unanswered");
+    expect(q(root, "dcp-caption")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector(".dcp-status")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector("[data-testid='dm-call-live']")!.textContent).toBe("Otto is offline");
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+    q(root, "dcp-ring-again")!.click();
+    expect(opts.onRingAgain).toHaveBeenCalledWith(DM);
+    expect(q(root, "dcp-leave-call")).not.toBeNull();
   });
 
   it("drops the callee's tile once the call went unanswered, keeping both actions", () => {
@@ -581,6 +623,71 @@ describe("DmCallPanel — after the other person leaves (D-11)", () => {
     expect(root.textContent).toContain("Otto left the call");
     q(root, "dcp-ring-again")!.click();
     expect(opts.onRingAgain).toHaveBeenCalledWith(DM);
+  });
+});
+
+describe("DmCallPanel — peer identity verification (D-09)", () => {
+  it("shows each peer's shield in the call as it resolves, and none for you", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(shield(root, OTTO)).toBeNull();
+
+    setPeerVerification({
+      userId: OTTO,
+      status: "verified",
+      safetyNumber: "1234 5678",
+      sessionFingerprint: "ab:cd",
+    });
+    voiceStore.flush();
+    const badge = shield(root, OTTO)!;
+    expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-check");
+    expect(badge.title).toBe("Identity verified · Safety number: 1234 5678");
+    expect(badge.tagName).toBe("SPAN");
+    expect(shield(root, SELF)).toBeNull();
+  });
+
+  it("a blocked peer shows a red shield whose button opens the re-trust prompt", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+
+    const badge = shield(root, OTTO)!;
+    expect(badge.tagName).toBe("BUTTON");
+    expect(badge.classList.contains("mismatch")).toBe(true);
+    expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-alert");
+    expect(badge.getAttribute("aria-label")).toContain("Blocked");
+    badge.click();
+    expect(openIdentityMismatchModal).toHaveBeenCalledWith(OTTO, "Otto", expect.any(AbortSignal));
+  });
+});
+
+describe("DmCallPanel — call timer (D-10)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("counts from when the other person joined, so both sides show the same length", () => {
+    vi.useFakeTimers();
+    // The caller joins and rings for 5 s before the callee answers.
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+    vi.advanceTimersByTime(5000);
+    expect(timer(root)).toBe("00:00");
+
+    panel!.setOutgoing(null);
+    patchVoice({
+      voiceUsers: new Map([[DM, new Map([vu(SELF), vu(OTTO)].map((u) => [u.userId, u]))]]),
+    });
+    vi.advanceTimersByTime(3000);
+    // The callee, who joined 5 s later, sees 00:03 too.
+    expect(timer(root)).toBe("00:03");
   });
 });
 
