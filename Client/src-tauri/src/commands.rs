@@ -85,13 +85,15 @@ pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Optio
     let store = crate::json_store::open(&app, CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
-    let value = store.get(&host).and_then(|v| {
-        if let Value::String(s) = v {
-            Some(s)
-        } else {
-            None
-        }
-    });
+    let value = store
+        .get(&crate::tofu::cert_store_key(&host))
+        .and_then(|v| {
+            if let Value::String(s) = v {
+                Some(s)
+            } else {
+                None
+            }
+        });
 
     Ok(value)
 }
@@ -183,9 +185,13 @@ pub fn store_identity_pin(
 #[tauri::command]
 pub fn get_identity_pin(
     app: tauri::AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: String,
 ) -> Result<Option<String>, String> {
+    // Never pre-session, and only the active host's pins may be read
+    // (mirrors store_identity_pin).
+    session.ensure(&host, false)?;
     if host.is_empty() {
         return Err("host must not be empty".into());
     }

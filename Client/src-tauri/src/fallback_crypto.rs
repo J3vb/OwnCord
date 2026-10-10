@@ -59,6 +59,21 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
     fs::create_dir_all(dir)
         .map_err(|e| format!("failed to create app data dir for fallback key: {e}"))?;
 
+    // Write the key to a uniquely named temp file first, then publish it with
+    // hard_link, which is atomic and fails if the final path already exists.
+    // The final path therefore never holds a partial key: a crash mid-write
+    // leaves only a stray temp file, and a concurrent loser always reads the
+    // winner's complete key.
+    let mut tag = [0u8; 8];
+    SystemRandom::new()
+        .fill(&mut tag)
+        .map_err(|_| "system RNG failed generating the fallback key".to_string())?;
+    let tag_hex: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp_path = dir.join(format!(
+        "{CREDENTIAL_FALLBACK_KEY_FILE}.{}.{tag_hex}.tmp",
+        std::process::id()
+    ));
+
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -66,11 +81,20 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    match options.open(&path) {
-        Ok(mut file) => finish_new_key_file(&path, key, || {
-            file.write_all(&key).and_then(|()| file.sync_all())
-        }),
-        // Lost the create race to another thread — use the winner's key.
+    let mut file = options
+        .open(&tmp_path)
+        .map_err(|e| format!("failed to create credential fallback key: {e}"))?;
+    finish_new_key_file(&tmp_path, key, || {
+        file.write_all(&key).and_then(|()| file.sync_all())
+    })?;
+    drop(file);
+
+    let linked = fs::hard_link(&tmp_path, &path);
+    let _ = fs::remove_file(&tmp_path);
+    match linked {
+        Ok(()) => Ok(key),
+        // Lost the create race to another thread — use the winner's key,
+        // which was fully written before it was published.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let bytes = fs::read(&path)
                 .map_err(|e| format!("failed to re-read credential fallback key: {e}"))?;

@@ -136,6 +136,12 @@ pub async fn ws_connect<R: Runtime>(
 
     // Drop any existing connection and claim this attempt's generation.
     let my_generation = state.begin_connection().await;
+    // The superseded connection's teardown sees a stale generation and skips
+    // clearing the active host, so clear it here: if this attempt fails, no
+    // host may stay active without a live socket.
+    if let Some(session) = app.try_state::<crate::active_session::ActiveSession>() {
+        session.clear_active();
+    }
 
     // Only allow secure WebSocket connections
     if !url.starts_with("wss://") {
@@ -577,6 +583,9 @@ pub fn accept_cert_fingerprint<R: Runtime>(
     if !is_valid_cert_fingerprint(&fingerprint) {
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
+    // Pins are read under the normalized key (tofu::cert_store_key) by
+    // evaluate, the HTTP proxy and the LiveKit proxy; write them the same way.
+    let host = crate::tofu::cert_store_key(&host);
 
     let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to open certs store: {e}");

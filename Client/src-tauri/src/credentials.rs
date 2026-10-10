@@ -488,9 +488,13 @@ pub async fn login_with_saved_password(
         secret_store::get(&app, &account)
             .map_err(|e| format!("login_with_saved_password failed: {e}"))
     })?;
-    let password = stored
+    let cred = stored
         .ok_or_else(|| "no stored credential for this host".to_string())
-        .and_then(|blob| parse_credential_blob(&blob))?
+        .and_then(|blob| parse_credential_blob(&blob))?;
+    if cred.username != username {
+        return Err("username does not match the saved credential".to_string());
+    }
+    let password = cred
         .password
         .ok_or_else(|| "no saved password for this host".to_string())?;
 
