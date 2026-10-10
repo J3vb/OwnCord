@@ -472,7 +472,8 @@ export class JoinOrchestration {
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);
-        noteJoinSucceeded();
+        // A join the user already switched away from keeps the switch's wait.
+        if (voiceStore.getState().currentChannelId === channelId) noteJoinSucceeded();
         return true;
       }
       return false;

@@ -16,7 +16,7 @@ vi.mock("../../lib/logger", () => ({
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
-import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 function fakeRoom(state = "connected"): Room {
   return {
@@ -154,6 +154,7 @@ describe("connectAndSetup", () => {
   });
 
   it("backs off the next join after the key exchange gives up, and clears it on a success", async () => {
+    store.currentChannelId = 7;
     const { host, join } = setup();
     host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => false) });
 
@@ -197,6 +198,15 @@ describe("connectAndSetup", () => {
 
     await expect(join.connectAndSetup("t", "/livekit", 8)).resolves.toBe(false);
     expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("keeps a switch backoff when the join the user switched away from finishes", async () => {
+    store.currentChannelId = 9;
+    noteJoinFailed(Date.now(), true);
+    const { join } = setup();
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
   });
 
   it("backs off the next join after a connect failure", async () => {

@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 func TestVoiceLeaveBeforeSFU_OneRemovalPerJoinLeavePair(t *testing.T) {
@@ -39,7 +39,7 @@ func TestVoiceLeaveBeforeSFU_OneRemovalPerJoinLeavePair(t *testing.T) {
 	// Fake LiveKit with no participants: rooms list empty (the join's health
 	// probe passes) and every removal is not_found, as for a client that left
 	// before connecting.
-	var mu sync.Mutex
+	var mu syncutil.Mutex
 	var removed []string
 	lkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/RemoveParticipant") {
@@ -74,7 +74,7 @@ func TestVoiceLeaveBeforeSFU_OneRemovalPerJoinLeavePair(t *testing.T) {
 	c.user = &db.User{ID: uid, Username: "pre-sfu-leaver"}
 
 	// The removal warning is logged by a goroutine, so the capture is locked.
-	var logMu sync.Mutex
+	var logMu syncutil.Mutex
 	var logBuf strings.Builder
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(lockedWriter{&logMu, &logBuf}, nil)))
@@ -118,7 +118,7 @@ func TestVoiceLeaveBeforeSFU_OneRemovalPerJoinLeavePair(t *testing.T) {
 }
 
 type lockedWriter struct {
-	mu *sync.Mutex
+	mu *syncutil.Mutex
 	w  io.Writer
 }
 

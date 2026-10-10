@@ -35,6 +35,7 @@ import { roleHasPermission, canManageChannels, currentUserPermissions } from "@l
 import { Permission } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
+import { joinRetryInMs } from "../features/voice/joinBackoff";
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -498,7 +499,10 @@ function renderVoiceChannelItem(
             e.stopPropagation();
             // Watching a stream needs a live LiveKit room -- join first.
             if (voiceStore.getState().currentChannelId !== channel.id) {
+              // Read before the join: it refuses inside the wait, and an accepted switch arms one.
+              const refused = joinRetryInMs() > 0;
               onVoiceJoin(channel.id);
+              if (refused) return;
             }
             const tileId = user.screenshare
               ? user.userId + SCREENSHARE_TILE_ID_OFFSET

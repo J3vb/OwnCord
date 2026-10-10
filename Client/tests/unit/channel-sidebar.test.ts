@@ -47,6 +47,7 @@ import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
@@ -820,6 +821,35 @@ describe("ChannelSidebar", () => {
     // first, showVideoGrid has no cells to focus and the user is stranded on
     // an empty grid. currentChannelId defaults to null (not channel 3 here).
     expect(onVoiceJoin).toHaveBeenCalledWith(3);
+  });
+
+  it("opens no stream when the join backoff refuses the stream row's join", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+    noteJoinFailed();
+
+    try {
+      (container.querySelector(".voice-user-item") as HTMLElement).click();
+      // The join is still offered so its refusal toast shows, but no room was joined.
+      expect(onVoiceJoin).toHaveBeenCalledWith(3);
+      expect(onWatchStream).not.toHaveBeenCalled();
+    } finally {
+      noteJoinSucceeded();
+    }
   });
 
   // ── Empty state ──
