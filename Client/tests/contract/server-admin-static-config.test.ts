@@ -319,7 +319,7 @@ describe("Server/admin/static — Server configuration page", () => {
     restart: { status?: number; json?: unknown } = { status: 202, json: { restarting: true } },
   ): Promise<{ doc: Document; bridge: Bridge }> {
     const booted = await boot(calls, (p, m) => {
-      if (p === "/config/settings") return { json: settings };
+      if (p === "/config/settings") return { json: structuredClone(settings) };
       if (p === "/restart" && m === "POST") return restart;
       return { json: {} };
     });
