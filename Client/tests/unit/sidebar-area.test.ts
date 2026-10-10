@@ -2344,6 +2344,28 @@ describe("SidebarArea", () => {
         cleanup(result);
       });
 
+      it("keeps the server value of a channel confirmed by a broadcast before its write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // The server persisted channel 2's move and broadcast it, then the
+        // response was lost: the broadcast carries the same position the
+        // optimistic update set, so only the broadcast itself tells them apart.
+        seedOrder({ 2: 0 });
+        await flush();
+
+        expect(positionOf(2)).toBe(0);
+
+        cleanup(result);
+      });
+
       it("does not overwrite a newer position that arrived while the failed write was in flight", async () => {
         const opts = defaultOpts();
         (opts.api.adminUpdateChannel as MockedFn)
