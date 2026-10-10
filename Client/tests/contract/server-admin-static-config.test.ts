@@ -365,6 +365,27 @@ describe("Server/admin/static — Server configuration page", () => {
     expect(doc.getElementById("modalInner")!.getAttribute("aria-busy")).toBe("true");
   });
 
+  it("shows the new address when config.yaml moved the port after the page loaded", async () => {
+    const calls: FetchCall[] = [];
+    const port = {
+      key: "server.port",
+      type: "int",
+      value: 8443,
+      override: null,
+      env_locked: false,
+      fallback: 8443,
+    };
+    const settings = { ...CONFIG_SETTINGS, settings: [...CONFIG_SETTINGS.settings, port] };
+    const { doc, bridge } = await bootRestart(calls, settings);
+
+    fn(bridge.openRestartDialog, "openRestartDialog")();
+    port.fallback = 9443;
+    await fn(bridge.confirmRestart, "confirmRestart")();
+    expect(posted(calls)).toBe(true);
+    expect(modal(doc).textContent).toContain(":9443/admin");
+    expect(doc.getElementById("restartWait")).toBeNull();
+  });
+
   it("restarts nothing when the dialog is cancelled", async () => {
     const calls: FetchCall[] = [];
     const { doc, bridge } = await bootRestart(calls, CONFIG_SETTINGS);

@@ -354,8 +354,9 @@ function openRestartDialog(){
 async function confirmRestart(){
   const btn=document.getElementById('restartConfirmBtn');
   if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
-  const addr=configMovedAddress();
   lockModal(true);
+  try{state._configData=await api('GET','/config/settings')}catch(e){}
+  const addr=configMovedAddress();
   try{
     await api('POST','/restart');
     setConfigChanged(false);
