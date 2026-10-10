@@ -93,7 +93,7 @@ function attnCounts(signals){
   return c;
 }
 function attnWorst(c){return c.critical?'critical':c.warning?'warning':c.unknown?'unknown':'ok'}
-/* What a card says, not when it was last seen: a repeat sighting stays dismissed. */
+/* One occurrence: severity, title and first_observed (reset when a recovered warning fires again); live detail and last_observed stay out. */
 function attnSig(w){return noticeSig(w.severity,w.title,w.first_observed)}
 function attnWarningCard(w){
   const rec=!!w.recovered_at;

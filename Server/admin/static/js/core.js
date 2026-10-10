@@ -617,8 +617,8 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Dismissable notices ═══ */
 /* A dashboard notice (a warning card, the update strip) can be dismissed. The
    panel has no per-admin preferences store, so this lives in localStorage,
-   keyed by admin id, noticeId -> a hash of what the notice says; it stays hidden
-   until that text changes. Blocking banners (restart pending) never use it. */
+   keyed by admin id, noticeId -> a hash of one occurrence of the notice (a warning:
+   severity, title and first_observed); it stays hidden until that changes. Blocking banners (restart pending) never use it. */
 const DISMISS_KEY='admin_dismissed';
 function noticeSig(...parts){let h=5381;const t=parts.join('\u241f');for(let i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))|0;return String(h>>>0)}
 function dismissStore(){try{return JSON.parse(localStorage.getItem(DISMISS_KEY)||'{}')||{}}catch(e){return{}}}
