@@ -741,6 +741,19 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(unreadCount()).toBe(0);
     });
 
+    it("sends a mark_read for the first message landing in an empty channel", () => {
+      setMessages([]);
+      openChannelWithUnread(0);
+      mount();
+      vi.useFakeTimers();
+
+      arrive(1);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).toHaveBeenCalledTimes(1);
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+    });
+
     it("coalesces three messages within 500 ms into one trailing send", () => {
       mountAtBottom();
 

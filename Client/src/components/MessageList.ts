@@ -370,6 +370,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let newDividerAnchorId: number | null = null;
   /** Set while the divider waits for a revisit's refetched tail. */
   let newDividerDeferred = false;
+  /** The loaded-and-empty welcome state is what the region currently shows. */
+  let loadedEmptyShown = false;
 
   /**
    * Resolve the NEW divider's position for this rebuild. Prefers the latched
@@ -809,6 +811,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       }
+      loadedEmptyShown = loadState === null;
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -1446,12 +1449,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         () => {
           // Optimistic rows (id 0) sit at the tail; live rows land before them.
           const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
+          // The loaded-and-empty welcome state was on screen, so a first row
+          // is a live arrival and not the first page landing.
+          const firstLive = prevLast === 0 && loadedEmptyShown;
           const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();
           }
           // Only an append counts: a window swap drops the previous last row.
-          const appended = prevLast > 0 && allMessages.some((m) => m.id === prevLast);
+          const appended =
+            firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
           if (!wasBottom && appended) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {

@@ -316,6 +316,21 @@ describe("noteLiveMessageSeen", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("sends nothing when Settings opened after the timer was armed", () => {
+    setChannels([channel(1, 0)]);
+    setActiveChannel(1);
+
+    noteLiveMessageSeen(1, controller.signal);
+    openSettings();
+    try {
+      vi.advanceTimersByTime(1000);
+
+      expect(sent).toEqual([]);
+    } finally {
+      closeSettings();
+    }
+  });
+
   it("keeps sends for one channel at least a second apart and channels independent", () => {
     setChannels([channel(1, 0), channel(2, 0)]);
 
@@ -433,6 +448,22 @@ describe("markActiveChannelReadOnUnload", () => {
       expect(sent).toEqual([]);
     } finally {
       closeSettings();
+    }
+  });
+
+  it("sends nothing while a modal dialog covers the chat", () => {
+    setChannels([channel(1, 0)]);
+    setActiveChannel(1);
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    document.body.appendChild(modal);
+
+    try {
+      markActiveChannelReadOnUnload();
+
+      expect(sent).toEqual([]);
+    } finally {
+      modal.remove();
     }
   });
 

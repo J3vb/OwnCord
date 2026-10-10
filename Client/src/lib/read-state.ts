@@ -12,6 +12,7 @@ import { channelsStore, clearUnread } from "@stores/channels.store";
 import { dmStore, clearDmUnread } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
+import { dialogOpen } from "./dialogOpen";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();
@@ -41,13 +42,14 @@ export function isChannelAway(channelId: number): boolean {
 /**
  * Whether something full-screen sits over the chat although the channel is
  * still active: the Settings overlay (the list stays mounted and the window
- * stays focused behind it) or a content view. `isChannelAway` cannot see
+ * stays focused behind it), a content view, or an open modal dialog such as the
+ * Quick Switcher. `isChannelAway` cannot see
  * either, and must not change (it decides unread counting), so the paths that
  * mark a channel read for messages "seen live" ask this as well.
  */
 export function isChannelCovered(): boolean {
   const { settingsOpen, activeView } = uiStore.getState();
-  return settingsOpen || activeView !== null;
+  return settingsOpen || activeView !== null || dialogOpen();
 }
 
 /** Sends one `mark_read` over the socket. */
@@ -225,7 +227,8 @@ export function noteLiveMessageSeen(channelId: number, signal: AbortSignal): voi
   const timer = setTimeout(() => {
     signal.removeEventListener("abort", release);
     if (pendingLiveSeen.get(channelId) === timer) pendingLiveSeen.delete(channelId);
-    if (!hasUnread(channelId)) markChannelRead(channelId);
+    // Settings or a dialog may have opened since the arrival that armed this.
+    if (!hasUnread(channelId) && !isChannelCovered()) markChannelRead(channelId);
   }, LIVE_SEEN_MARK_READ_MS);
   pendingLiveSeen.set(channelId, timer);
   signal.addEventListener("abort", release, { once: true });
