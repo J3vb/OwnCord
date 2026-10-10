@@ -5,16 +5,16 @@
  * (D-09), so both draw the same states and re-pin the same way.
  */
 
-import type { IconName } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
-import type { PeerVerification } from "@stores/voice.store";
-import { rePinPeerIdentity } from "@lib/livekitSession";
-import { showToast } from "@lib/toast";
-import { createIdentityMismatchModal } from "./IdentityMismatchModal";
-import { createLogger } from "@lib/logger";
-import { membersStore } from "@stores/members.store";
-import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
-import { shellText } from "../i18n/shell";
+import type { IconName } from "../../lib/icons";
+import type { MountableComponent } from "../../lib/safe-render";
+import type { PeerVerification } from "../../stores/voice.store";
+import { rePinPeerIdentity } from "../../lib/livekitSession";
+import { showToast } from "../../lib/toast";
+import { createIdentityMismatchModal } from "../../components/IdentityMismatchModal";
+import { createLogger } from "../../lib/logger";
+import { membersStore } from "../../stores/members.store";
+import { importIdentityPublicKey, computeKeyFingerprint } from "../../lib/e2eeCrypto";
+import { shellText } from "../../i18n/shell";
 
 const log = createLogger("peer-verification");
 
@@ -93,6 +93,7 @@ export async function openIdentityMismatchModal(
   userId: number,
   username: string,
   lifetimeSignal: AbortSignal,
+  focusFallback?: () => HTMLElement | null,
 ): Promise<void> {
   closeIdentityModal();
   // Compute the newly-delivered key's fingerprint so the user can verify it
@@ -121,6 +122,7 @@ export async function openIdentityMismatchModal(
   const modal = createIdentityMismatchModal({
     username,
     fingerprint,
+    focusFallback,
     onAccept: () => {
       // Pin the EXACT key whose fingerprint we displayed and the user verified
       // out-of-band (captured above), NOT a fresh membersStore re-read — a

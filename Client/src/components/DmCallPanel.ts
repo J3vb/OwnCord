@@ -36,7 +36,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { formatElapsed, headerStatusText, isConnecting } from "@components/VoiceWidget";
-import { verifyPresentation, openIdentityMismatchModal } from "@components/peer-verification";
+import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
@@ -819,6 +819,13 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   /** A peer's identity shield, as in the channel roster (D-09): redrawn only
    *  when their verification changes. A blocked peer's is a button that opens
    *  the re-trust prompt, since nothing else says why they cannot be heard. */
+  function focusFallback(userId: number): HTMLElement | null {
+    const ref = avatars.get(userId);
+    const el = ref?.verify ?? ref?.wrap ?? null;
+    if (el !== null && el.tagName !== "BUTTON") el.tabIndex = -1;
+    return el;
+  }
+
   function syncVerify(userId: number, ref: AvatarRef, voice: VoiceState, dm: DmChannel): void {
     const v = voice.peerVerifications?.get(userId) ?? null;
     const key =
@@ -828,7 +835,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const hadFocus = ref.verify?.contains(document.activeElement) === true;
     ref.verify?.remove();
     ref.verify = null;
-    if (v === null) return;
+    if (v === null) {
+      if (hadFocus) focusFallback(userId)?.focus();
+      return;
+    }
     const { icon, color, title } = verifyPresentation(v);
     const cls = `dcp-verify ${v.status}`;
     const el =
@@ -844,17 +854,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
           // A tile in the video grid has its own click.
           e.stopPropagation();
           const name = resolvePerson(userId, dm, voiceStore.getState(), currentUserId()).name;
-          void openIdentityMismatchModal(userId, name, disposable.signal);
+          void openIdentityMismatchModal(userId, name, disposable.signal, () => focusFallback(userId));
         },
         { signal: disposable.signal },
       );
     }
     ref.wrap.appendChild(el);
     ref.verify = el;
-    if (hadFocus) {
-      el.tabIndex = -1;
-      el.focus();
-    }
+    if (hadFocus) focusFallback(userId)?.focus();
   }
 
   /** In-place updates that never rebuild: rings, badges, controls, status. */

@@ -7,8 +7,8 @@ vi.mock("@lib/livekitSession", () => ({
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../../src/components/peer-verification", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/components/peer-verification")>()),
+vi.mock("../../src/features/voice/peerVerification", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/peerVerification")>()),
   openIdentityMismatchModal: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -22,9 +22,10 @@ import {
   voiceStore,
   setPeerVerification,
   clearPeerVerifications,
+  clearPeerVerification,
   type VoiceUser,
 } from "../../src/stores/voice.store";
-import { openIdentityMismatchModal } from "../../src/components/peer-verification";
+import { openIdentityMismatchModal } from "../../src/features/voice/peerVerification";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile, updatePresence } from "../../src/stores/members.store";
@@ -666,7 +667,7 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
     expect(openIdentityMismatchModal).toHaveBeenCalledWith(OTTO, "Otto", expect.any(AbortSignal));
   });
 
-  it("keeps focus in the panel when re-trusting replaces the focused shield", () => {
+  it("hands the re-trust modal a focus fallback that lands on the replacement shield", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();
     document.body.appendChild(root);
@@ -677,9 +678,12 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
       sessionFingerprint: null,
     });
     voiceStore.flush();
-    shield(root, OTTO)!.focus();
-    expect(document.activeElement).toBe(shield(root, OTTO));
+    shield(root, OTTO)!.click();
+    const fallback = vi.mocked(openIdentityMismatchModal).mock.calls.at(-1)![3]!;
 
+    // The modal holds focus while Trust New Key lands the new verification.
+    const trust = document.body.appendChild(document.createElement("button"));
+    trust.focus();
     setPeerVerification({
       userId: OTTO,
       status: "verified",
@@ -687,9 +691,14 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
       sessionFingerprint: "ab:cd",
     });
     voiceStore.flush();
-    const badge = shield(root, OTTO)!;
-    expect(badge.tagName).toBe("SPAN");
-    expect(document.activeElement).toBe(badge);
+    trust.remove();
+    fallback()!.focus();
+    expect(document.activeElement).toBe(shield(root, OTTO));
+
+    clearPeerVerification(OTTO);
+    voiceStore.flush();
+    fallback()!.focus();
+    expect(document.activeElement).not.toBe(document.body);
     root.remove();
   });
 });

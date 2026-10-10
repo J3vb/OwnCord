@@ -29,7 +29,7 @@ import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
-import { verifyPresentation, openIdentityMismatchModal } from "./peer-verification";
+import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
