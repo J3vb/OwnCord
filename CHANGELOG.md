@@ -52,6 +52,9 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - The admin panel's Server configuration page has a **Restart server** button. It and Restart now open one dialog that warns that everyone is briefly disconnected, says how the server comes back (container restart policy, service manager, or its own replacement), then waits and reloads the panel.
+**Messaging**
+
+- You can now save GIFs as favorites, as in Discord. Star a GIF in the GIF picker or on a GIF in a message, then open the picker's new Favorites tab to send it again (newest first). Favorites are stored on your server, follow you across devices, and are capped at 250. The server needs a restart to apply the update (new database table).
 
 **Voice**
 

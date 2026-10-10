@@ -141,6 +141,15 @@ type Event struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type GifFavorite struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"userId"`
+	Url        string `json:"url"`
+	PreviewUrl string `json:"previewUrl"`
+	Title      string `json:"title"`
+	CreatedAt  string `json:"createdAt"`
+}
+
 type Invite struct {
 	ID         int64   `json:"id"`
 	Code       string  `json:"code"`

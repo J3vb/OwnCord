@@ -340,6 +340,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
     } as unknown as ChannelControllerOptions["ws"],
     api: {
       uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }),
+      gifFavorites: vi.fn().mockResolvedValue({ favorites: [] }),
     } as unknown as ChannelControllerOptions["api"],
     msgCtrl: {
       loadMessages: vi.fn(),
@@ -2368,6 +2369,7 @@ describe("createChannelController", () => {
       return makeOpts({
         api: {
           uploadFile: vi.fn(),
+          gifFavorites: vi.fn().mockResolvedValue({ favorites: [] }),
           acknowledgeNsfw: vi.fn().mockResolvedValue(undefined),
           revokeNsfw: vi.fn().mockResolvedValue(undefined),
           ...api,

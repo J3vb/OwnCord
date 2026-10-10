@@ -400,6 +400,7 @@ var erasureStatements = []struct {
 	// its own explicit statement the inventory's zero is proved against —
 	// the channel half needs none (ON DELETE CASCADE on channel_id).
 	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
+	{"gif_favorites", `DELETE FROM gif_favorites WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},

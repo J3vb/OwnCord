@@ -3,7 +3,8 @@ import { createGifPicker } from "@components/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { GifApi, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
+import { resetGifFavorites, isGifFavorite } from "@stores/gifFavorites.store";
 
 // ---------------------------------------------------------------------------
 // Module mock — must be hoisted before imports in vitest
@@ -941,6 +942,138 @@ describe("GifPicker", () => {
       await Promise.resolve();
 
       expect(vi.mocked(searchGifs)).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  describe("favorites", () => {
+    const favs = [
+      {
+        url: "https://media.klipy.com/full/f1.gif",
+        preview_url: "https://media.klipy.com/preview/f1.gif",
+        title: "Fav 1",
+      },
+      {
+        url: "https://media.klipy.com/full/f2.gif",
+        preview_url: "https://media.klipy.com/preview/f2.gif",
+        title: "Fav 2",
+      },
+    ];
+
+    function favApi(initial = favs): GifApi & GifFavoritesApi {
+      return {
+        ...stubApi,
+        gifFavorites: vi.fn().mockResolvedValue({ favorites: initial }),
+        addGifFavorite: vi.fn().mockResolvedValue(undefined),
+        removeGifFavorite: vi.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    };
+
+    beforeEach(() => resetGifFavorites());
+
+    it("shows no tabs or stars when the API cannot save favorites", async () => {
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await settle();
+      expect(picker.element.querySelector(".gp-tab")).toBeNull();
+      expect(picker.element.querySelector(".gp-star")).toBeNull();
+      picker.destroy();
+    });
+
+    it("puts a star on every result, pressed only for saved GIFs", async () => {
+      const api = favApi([
+        { url: TRENDING_GIFS[1]!.fullUrl, preview_url: TRENDING_GIFS[1]!.url, title: "x" },
+      ]);
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const stars = picker.element.querySelectorAll<HTMLButtonElement>(".gp-item .gp-star");
+      expect(stars.length).toBe(TRENDING_GIFS.length);
+      expect(stars[0]!.getAttribute("aria-pressed")).toBe("false");
+      expect(stars[1]!.getAttribute("aria-pressed")).toBe("true");
+      picker.destroy();
+    });
+
+    it("clicking a star saves the GIF without sending it", async () => {
+      const api = favApi([]);
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ api, onSelect });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelector<HTMLButtonElement>(".gp-item .gp-star")!.click();
+      await settle();
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(api.addGifFavorite).toHaveBeenCalledWith({
+        url: TRENDING_GIFS[0]!.fullUrl,
+        preview_url: TRENDING_GIFS[0]!.url,
+        title: TRENDING_GIFS[0]!.title,
+      });
+      expect(isGifFavorite(TRENDING_GIFS[0]!.fullUrl)).toBe(true);
+      expect(picker.element.querySelector(".gp-item .gp-star")!.getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      picker.destroy();
+    });
+
+    it("the F key on a focused GIF toggles its favorite", async () => {
+      const api = favApi([]);
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      const item = picker.element.querySelector<HTMLElement>(".gp-item")!;
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await settle();
+      expect(api.addGifFavorite).toHaveBeenCalledTimes(1);
+      picker.destroy();
+    });
+
+    it("the Favorites tab lists saved GIFs newest first and sends one on click", async () => {
+      const api = favApi();
+      const onSelect = vi.fn();
+      const { picker } = makePicker({ api, onSelect });
+      container.appendChild(picker.element);
+      await settle();
+      const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
+      expect(tabs.length).toBe(2);
+      tabs[1]!.click();
+      await settle();
+      expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
+      const items = picker.element.querySelectorAll<HTMLElement>(".gp-item");
+      expect(Array.from(items).map((i) => i.dataset.fullUrl)).toEqual(favs.map((f) => f.url));
+      items[1]!.click();
+      expect(onSelect).toHaveBeenCalledWith(favs[1]!.url);
+      picker.destroy();
+    });
+
+    it("unstarring in the Favorites tab removes the GIF from the list", async () => {
+      const api = favApi();
+      const { picker } = makePicker({ api });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+      await settle();
+      picker.element.querySelector<HTMLButtonElement>(".gp-item .gp-star")!.click();
+      await settle();
+      expect(api.removeGifFavorite).toHaveBeenCalledWith(favs[0]!.url);
+      expect(picker.element.querySelectorAll(".gp-item").length).toBe(1);
+      picker.destroy();
+    });
+
+    it("shows an empty state when nothing is saved", async () => {
+      const { picker } = makePicker({ api: favApi([]) });
+      container.appendChild(picker.element);
+      await settle();
+      picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
+      await settle();
+      expect(picker.element.querySelector(".gp-empty")!.textContent).toBe(
+        messagingText("gif.favoritesEmpty"),
+      );
+      picker.destroy();
     });
   });
 });

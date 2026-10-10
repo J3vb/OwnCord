@@ -37,6 +37,8 @@ import type {
   BlockedUsersResponse,
   DmRequestListResponse,
   GifSearchResponse,
+  GifFavorite,
+  GifFavoritesResponse,
   PartialSuccessResponse,
 } from "./types";
 
@@ -1278,6 +1280,19 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         undefined,
         signal,
       );
+    },
+
+    gifFavorites(signal?: AbortSignal): Promise<GifFavoritesResponse> {
+      return request<GifFavoritesResponse>("GET", "/gif/favorites", undefined, signal);
+    },
+
+    addGifFavorite(fav: GifFavorite, signal?: AbortSignal): Promise<void> {
+      return request<void>("PUT", "/gif/favorites", fav, signal);
+    },
+
+    removeGifFavorite(url: string, signal?: AbortSignal): Promise<void> {
+      const params = new URLSearchParams({ url });
+      return request<void>("DELETE", `/gif/favorites?${params.toString()}`, undefined, signal);
     },
 
     // ── File Uploads ──────────────────────────────────────
