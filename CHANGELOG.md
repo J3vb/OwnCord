@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
 
+**Desktop UI**
+
+- A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
+
 ### Changed
 
 **Messages & files**

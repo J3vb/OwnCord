@@ -460,19 +460,16 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
         // above. A rejected PATCH is rolled back to its previous position only
-        // if no channel_update broadcast touched that channel since the request
-        // started (the server broadcasts before it answers, so a broadcast means
-        // the write landed) and it still shows the optimistic value. A request
-        // that failed only because its response was lost is covered by the
-        // reconnect resync, so it needs no reconciliation here.
-        const seen = new Map(
-          reorders.map((r) => [r.channelId, channelsStore.getState().channels.get(r.channelId)]),
-        );
+        // if no channel_update broadcast arrived for that channel since the
+        // request started (the server broadcasts before it answers, so a
+        // broadcast means the write landed) and it still shows the optimistic
+        // value. Only the broadcast counts: unread/mention badge mutations also
+        // replace the channel object but confirm nothing. A request that failed
+        // only because its response was lost is covered by the reconnect
+        // resync, so it needs no reconciliation here.
         const touched = new Set<number>();
-        const unsubscribe = channelsStore.subscribe(() => {
-          for (const [id, before] of seen) {
-            if (channelsStore.getState().channels.get(id) !== before) touched.add(id);
-          }
+        const unsubscribe = ws.on("channel_update", (payload) => {
+          touched.add(payload.id);
         });
         void Promise.allSettled(
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),

@@ -302,7 +302,7 @@ function defaultOpts(): SidebarAreaOptions {
     ws: {
       send: vi.fn(),
       close: vi.fn(),
-      on: vi.fn(),
+      on: vi.fn(() => vi.fn()),
       off: vi.fn(),
     } as unknown as SidebarAreaOptions["ws"],
     api: {
@@ -2358,10 +2358,39 @@ describe("SidebarArea", () => {
         // The server persisted channel 2's move and broadcast it, then the
         // response was lost: the broadcast carries the same position the
         // optimistic update set, so only the broadcast itself tells them apart.
-        seedOrder({ 2: 0 });
+        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+          (c: unknown[]) => c[0] === "channel_update",
+        )![1] as (payload: { id: number }) => void;
+        onUpdate({ id: 2 });
         await flush();
 
         expect(positionOf(2)).toBe(0);
+
+        cleanup(result);
+      });
+
+      it("still rolls back when only an unread badge touched the channel while the write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // An ordinary badge mutation replaces the channel object but is not a
+        // channel_update, so it must not count as a server confirmation.
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          const ch = channels.get(2)!;
+          channels.set(2, { ...ch, unreadCount: ch.unreadCount + 1 });
+          return { ...prev, channels };
+        });
+        await flush();
+
+        expect(positionOf(2)).toBe(1);
 
         cleanup(result);
       });
