@@ -266,6 +266,7 @@ endpoints return plain-text errors — see their section):
 | `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
 | `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
+| `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
@@ -1417,6 +1418,30 @@ Same auth, rate limit, response shape, and error codes as
 | Param   | Type | Default | Range | Description               |
 | ------- | ---- | ------- | ----- | ------------------------- |
 | `limit` | int  | 20      | 1-50  | Maximum results to return |
+
+### GET /api/v1/gif/favorites
+
+Returns the caller's saved GIFs, newest first: `{"favorites": [{"url", "preview_url", "title"}]}`.
+Requires a session, and is limited to 300 requests/minute like the other two favorites
+endpoints; there is no `gif.api_key` dependency.
+
+### PUT /api/v1/gif/favorites
+
+Saves a GIF. Body: `{"url", "preview_url", "title"}`. Both URLs must be `https`
+URLs on `klipy.com` or a subdomain; an empty `preview_url` defaults to `url`.
+A `title` over 200 bytes is cut on a character boundary. Saving a GIF that is
+already a favorite changes nothing. Responds `204`.
+
+| Status | Code                 | When                                  |
+| ------ | -------------------- | ------------------------------------- |
+| 400    | `INVALID_INPUT`      | Malformed body or a disallowed URL    |
+| 401    | `UNAUTHORIZED`       | No valid session                      |
+| 409    | `GIF_FAVORITES_FULL` | The caller already has 250 favorites |
+
+### DELETE /api/v1/gif/favorites
+
+Removes a favorite. The GIF is named by the `url` query parameter. Responds
+`204`, including when it was not a favorite.
 
 ---
 

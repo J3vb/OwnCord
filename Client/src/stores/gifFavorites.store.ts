@@ -70,13 +70,15 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   const gen = generation;
   pending.add(fav.url);
   const index = gifFavoritesStore.getState().favorites.findIndex((f) => f.url === fav.url);
-  const was = index >= 0;
+  const stored = gifFavoritesStore.getState().favorites[index];
+  const was = stored !== undefined;
   const apply = (on: boolean): void =>
     gifFavoritesStore.setState((prev) => {
       const rest = prev.favorites.filter((f) => f.url !== fav.url);
       if (!on) return { favorites: rest };
       const at = was ? Math.min(index, rest.length) : 0;
-      return { favorites: [...rest.slice(0, at), fav, ...rest.slice(at)] };
+      const entry = was ? stored : fav;
+      return { favorites: [...rest.slice(0, at), entry, ...rest.slice(at)] };
     });
   apply(!was);
   try {

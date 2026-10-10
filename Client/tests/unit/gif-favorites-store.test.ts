@@ -63,6 +63,15 @@ describe("gifFavorites store", () => {
     expect(gifFavoritesStore.getState().favorites.map((f) => f.title)).toEqual(["c", "b", "a"]);
   });
 
+  it("a failed removal restores the stored entry, not the caller's copy", async () => {
+    const api = makeApi([fav("a")]);
+    api.removeGifFavorite = vi.fn().mockRejectedValue(new Error("boom"));
+    bindGifFavoritesApi(api);
+    await flush();
+    await toggleGifFavorite({ url: fav("a").url, preview_url: fav("a").url, title: "" });
+    expect(gifFavoritesStore.getState().favorites).toEqual([fav("a")]);
+  });
+
   it("rolls back and reports failure when the server refuses", async () => {
     const api = makeApi();
     vi.mocked(api.addGifFavorite).mockRejectedValue(new Error("full"));
