@@ -359,6 +359,7 @@ describe("handleTrackSubscribed", () => {
 
   it("skips video when no callback is registered", () => {
     const h = build({ getOnRemoteVideoCallback: () => null });
+    h.spies.isWatched.mockReturnValue(true);
 
     expect(() => {
       h.handlers.handleTrackSubscribed(

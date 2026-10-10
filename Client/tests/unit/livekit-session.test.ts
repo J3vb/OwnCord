@@ -1855,7 +1855,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => []),
         attach: vi.fn(() => audioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       expect(() =>
@@ -1879,7 +1880,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => [secondAudioEl]),
         attach: vi.fn(() => secondAudioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
@@ -1909,7 +1911,8 @@ describe("LiveKitSession", () => {
         detach: vi.fn(() => [secondAudioEl]),
         attach: vi.fn(() => secondAudioEl),
       };
-      const publication = { source: "screenShareAudio" };
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      (session as any)._remoteTracks.watch(42, "screenshare", true);
       const participant = { identity: "user-42" };
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
@@ -2959,7 +2962,7 @@ describe("LiveKitSession", () => {
       // sweep and, once elected key holder, wedges the channel's E2EE for all
       // subsequent joiners. Mirror the reconnect-exhausted give-up path.
       expect(mockRoom.connect).not.toHaveBeenCalled();
-      expect(leaveSpy).toHaveBeenCalledWith(true);
+      expect(leaveSpy).toHaveBeenCalledWith(true, false);
       expect(leaveVoiceChannel).toHaveBeenCalled();
 
       keyExchangeSpy.mockRestore();
@@ -3059,7 +3062,8 @@ describe("LiveKitSession", () => {
       const leaveSpy = vi.spyOn(session, "leaveVoice");
       await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880", true);
 
-      expect(leaveSpy).toHaveBeenCalledWith(false);
+      // Channel switch is an internal teardown: it keeps the viewer's watches.
+      expect(leaveSpy).toHaveBeenCalledWith(false, true);
       leaveSpy.mockRestore();
     });
   });

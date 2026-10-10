@@ -647,9 +647,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const grid = capturedChatAreaRef.current!.videoGrid;
     grid.clearStreams.mockClear();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    container
-      .querySelector<HTMLElement>('.voice-user-item[data-voice-uid="200"]')!
-      .click();
+    // The roster click (ChannelSidebar) joins first, then asks the page to watch.
+    (
+      mockCreateSidebarArea.mock.calls.at(-1)![0] as { onWatchStream: (userId: number) => void }
+    ).onWatchStream(200);
 
     expect(grid.watch).toHaveBeenCalledOnce();
     expect(grid.clearStreams).toHaveBeenCalled();
