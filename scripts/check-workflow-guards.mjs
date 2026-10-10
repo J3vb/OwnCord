@@ -34,6 +34,14 @@ const METERED = [".github/workflows/claude.yml"];
 
 // Each check is (name, test, why). `why` is the failure message: it states the
 // invariant a contributor has to restore, not the history behind it.
+// The text of each job under `jobs:` that tests github.actor. Concurrency must
+// live in that block: a workflow-level group, or one on another job, is joined
+// by runs the actor condition skips and can cancel a live run.
+const gatedJobs = (src) =>
+  (src.split(/^jobs:\s*$/m)[1] ?? "")
+    .split(/^(?=  [\w-]+:\s*$)/m)
+    .filter((job) => /github\.actor/.test(job));
+
 export const CHECKS = [
   {
     name: "timeout-minutes",
@@ -42,12 +50,15 @@ export const CHECKS = [
   },
   {
     name: "concurrency group",
-    test: (src) => /^concurrency:\s*$/m.test(src) && /^\s*group:\s*\S/m.test(src),
+    test: (src) =>
+      gatedJobs(src).some(
+        (job) => /^\s*concurrency:\s*$/m.test(job) && /^\s*group:\s*\S/m.test(job),
+      ),
     why: "a workflow consuming a metered credential must declare a concurrency group so repeated triggers collapse instead of running in parallel",
   },
   {
     name: "cancel-in-progress",
-    test: (src) => /^\s*cancel-in-progress:\s*true\s*$/m.test(src),
+    test: (src) => gatedJobs(src).some((job) => /^\s*cancel-in-progress:\s*true\s*$/m.test(job)),
     why: "the concurrency group must set cancel-in-progress: true, or superseded runs keep spending",
   },
   {
