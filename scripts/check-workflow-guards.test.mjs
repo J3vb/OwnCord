@@ -47,6 +47,21 @@ test("concurrency on a different job or at workflow level does not count", () =>
   );
 });
 
+test("concurrency keys outside the gated job's own concurrency block do not count", () => {
+  const bare = good.replace(/    concurrency:\n.*\n.*\n/, "");
+  const other = "\n  other:\n    concurrency:\n      group: g\n      cancel-in-progress: true\n";
+  // concurrency only on an unrelated job, which sits after the gated one
+  assert.ok(missing(bare + other).includes("concurrency group"));
+  assert.ok(missing(bare + other).includes("cancel-in-progress"));
+  // keys elsewhere in the gated job, with a concurrency block that lacks them
+  const stray = bare.replace(
+    "    runs-on",
+    "    concurrency:\n      queue: x\n    env:\n      group: g\n      cancel-in-progress: true\n    runs-on",
+  );
+  assert.ok(missing(stray).includes("concurrency group"));
+  assert.ok(missing(stray).includes("cancel-in-progress"));
+});
+
 test("cancel-in-progress: false is caught", () => {
   assert.ok(
     missing(good.replace("  cancel-in-progress: true", "  cancel-in-progress: false")).includes(
