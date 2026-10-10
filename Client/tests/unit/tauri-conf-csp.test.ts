@@ -45,6 +45,11 @@ describe("tauri.conf.json — CSP", () => {
     expect(directive("connect-src").sort()).toEqual(
       [
         "'self'",
+        // Windows reaches IPC at http://ipc.localhost; Linux and macOS at
+        // ipc://localhost. Without `ipc:` the Linux webview blocks the custom
+        // protocol and Tauri falls back to postMessage, which hands raw-byte
+        // commands (external_image) back as number[], so broker images fail.
+        "ipc:",
         "http://ipc.localhost",
         "http://localhost:*",
         "ws://localhost:*",

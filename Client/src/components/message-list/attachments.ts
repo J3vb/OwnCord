@@ -221,6 +221,9 @@ const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES);
  *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
  *  clear ask again. */
 const missingImages = new Set<string>();
+/** Bounds the set above: one entry per refused URL would otherwise grow for
+ *  the whole session. Oldest dropped first. */
+const MISSING_IMAGES_MAX = 1000;
 const DEFINITE_FAILURES = new Set([403, 404, 410]);
 let attachmentCacheGeneration = 0;
 
@@ -380,43 +383,109 @@ const inFlight = new Map<string, Promise<string | null>>();
 /** IndexedDB database name and store. */
 const IDB_NAME = "owncord-image-cache";
 const IDB_STORE = "images";
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
+/** Index on an entry's last-read time, so eviction walks oldest first. */
+const IDB_USED_INDEX = "used";
 
-/** Open (or create) the IndexedDB database. */
+/** The one shared connection. It is dropped, and the next call reopens, when
+ *  the browser closes it or another tab upgrades the database. */
+let cacheDbOpen: Promise<IDBDatabase | null> | null = null;
+let cacheDbHandle: IDBDatabase | null = null;
+/** Bytes held by the store, counted once per connection by `seedCacheTotal`
+ *  and kept by each write. A prune or a failed transaction drops the seed so
+ *  the next write counts again. */
+let cacheTotal = 0;
+let cacheSeed: Promise<boolean> | null = null;
+
+function dropCacheDb(db: IDBDatabase): void {
+  db.close();
+  if (cacheDbHandle !== db) return;
+  cacheDbOpen = null;
+  cacheDbHandle = null;
+  cacheSeed = null;
+}
+
+/** Open (or create) the IndexedDB database, once; later calls share it. */
 export function openCacheDb(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
+  if (cacheDbOpen !== null) return cacheDbOpen;
+  const opening = new Promise<IDBDatabase | null>((resolve) => {
     try {
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        if (!db.objectStoreNames.contains(IDB_STORE)) {
-          db.createObjectStore(IDB_STORE);
+        const store = db.objectStoreNames.contains(IDB_STORE)
+          ? req.transaction!.objectStore(IDB_STORE)
+          : db.createObjectStore(IDB_STORE);
+        if (!store.indexNames.contains(IDB_USED_INDEX)) {
+          store.createIndex(IDB_USED_INDEX, "used");
         }
       };
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        cacheDbHandle = db;
+        // oxlint-disable-next-line prefer-add-event-listener -- IDBDatabase does not support addEventListener
+        db.onversionchange = () => dropCacheDb(db);
+        // oxlint-disable-next-line prefer-add-event-listener -- IDBDatabase does not support addEventListener
+        db.onclose = () => dropCacheDb(db);
+        resolve(db);
+      };
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
       resolve(null);
     }
   });
+  cacheDbOpen = opening;
+  void opening.then((db) => {
+    if (db === null && cacheDbOpen === opening) cacheDbOpen = null;
+  });
+  return opening;
 }
 
-/** Closes `db` once `tx` ends; the promise resolves then, and never rejects. */
-function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): Promise<void> {
+/** Resolves when `tx` ends: true if it completed, false if it aborted. Never rejects. */
+function transactionEnded(tx: IDBTransaction): Promise<boolean> {
   return new Promise((resolve) => {
-    const close = (): void => {
-      db.close();
-      resolve();
-    };
     // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-    tx.oncomplete = close;
+    tx.oncomplete = () => resolve(true);
     // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-    tx.onabort = close;
+    tx.onabort = () => resolve(false);
     // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-    tx.onerror = close;
+    tx.onerror = () => resolve(false);
   });
+}
+
+/** Count the stored bytes with one cursor pass, dropping any pre-Blob entry on
+ *  the way. Resolves false when the pass failed; the next write counts again. */
+function seedCacheTotal(db: IDBDatabase): Promise<boolean> {
+  const seed = new Promise<boolean>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const req = tx.objectStore(IDB_STORE).openCursor();
+      let sum = 0;
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (cursor === null) return;
+        const value: unknown = cursor.value;
+        if (isStoredImage(value)) sum += value.bytes;
+        else cursor.delete();
+        cursor.continue();
+      };
+      void transactionEnded(tx).then((ok) => {
+        if (cacheSeed === seed) {
+          if (ok) cacheTotal = sum;
+          else cacheSeed = null;
+        }
+        resolve(ok);
+      });
+    } catch {
+      dropCacheDb(db);
+      resolve(false);
+    }
+  });
+  if (cacheDbHandle === db) cacheSeed = seed;
+  return seed;
 }
 
 /** Delete every durable entry outside `scope` (including pre-B7-13 keys) when
@@ -424,9 +493,10 @@ function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): Promise<v
 async function idbPrune(scope: string, keep: boolean): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
+  cacheSeed = null;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
-    const ended = closeDbAfterTransaction(tx, db);
+    const ended = transactionEnded(tx);
     const store = tx.objectStore(IDB_STORE);
     const req = store.getAllKeys();
     const prefix = idbKey(scope, "");
@@ -439,7 +509,7 @@ async function idbPrune(scope: string, keep: boolean): Promise<void> {
     };
     await ended;
   } catch {
-    db.close();
+    dropCacheDb(db);
   }
 }
 
@@ -486,7 +556,6 @@ async function idbGet(key: string): Promise<Blob | null> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(IDB_STORE, "readonly");
-      void closeDbAfterTransaction(tx, db);
       const req = tx.objectStore(IDB_STORE).get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => {
@@ -507,52 +576,52 @@ async function idbGet(key: string): Promise<Blob | null> {
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
-      db.close();
+      dropCacheDb(db);
       resolve(null);
     }
   });
 }
 
+/** Walk the entries oldest-read first, deleting until the store fits
+ *  IMAGE_DB_MAX_BYTES again. Stops if the count was dropped meanwhile. */
+function evictOldest(store: IDBObjectStore, seed: Promise<boolean>): void {
+  if (cacheTotal <= IMAGE_DB_MAX_BYTES) return;
+  const req = store.index(IDB_USED_INDEX).openCursor();
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+  req.onsuccess = () => {
+    const cursor = req.result;
+    if (cursor === null || cacheSeed !== seed || cacheTotal <= IMAGE_DB_MAX_BYTES) return;
+    const value: unknown = cursor.value;
+    cursor.delete();
+    if (isStoredImage(value)) cacheTotal -= value.bytes;
+    cursor.continue();
+  };
+}
+
 /** Write an image to IndexedDB under `scope`, unless the scope moved on
  *  while the database opened — a late write would outlive the prune. The
  *  same transaction then drops the least recently read entries until the
- *  store fits IMAGE_DB_MAX_BYTES, and any pre-Blob entry outright. */
+ *  store fits IMAGE_DB_MAX_BYTES. */
 async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
-  if (scope !== cacheScope) {
-    db.close();
-    return;
-  }
+  const seed = cacheSeed ?? seedCacheTotal(db);
+  if (!(await seed)) return;
+  if (scope !== cacheScope) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
-    void closeDbAfterTransaction(tx, db);
     const store = tx.objectStore(IDB_STORE);
     const entry: StoredImage = { blob, bytes: blob.size, used: Date.now() };
     store.put(entry, idbKey(scope, url));
-    const keys = store.getAllKeys();
-    const values = store.getAll();
-    // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
-    values.onsuccess = () => {
-      const stored: { key: IDBValidKey; entry: StoredImage }[] = [];
-      let total = 0;
-      keys.result.forEach((key, i) => {
-        const value: unknown = values.result[i];
-        if (isStoredImage(value)) {
-          stored.push({ key, entry: value });
-          total += value.bytes;
-        } else {
-          store.delete(key);
-        }
-      });
-      for (const { key, entry: old } of stored.toSorted((a, b) => a.entry.used - b.entry.used)) {
-        if (total <= IMAGE_DB_MAX_BYTES) break;
-        store.delete(key);
-        total -= old.bytes;
-      }
-    };
+    if (cacheSeed === seed) {
+      cacheTotal += entry.bytes;
+      evictOldest(store, seed);
+    }
+    void transactionEnded(tx).then((ok) => {
+      if (!ok && cacheSeed === seed) cacheSeed = null;
+    });
   } catch {
-    db.close();
+    dropCacheDb(db);
     // IndexedDB full or unavailable — ignore
   }
 }
@@ -606,6 +675,10 @@ async function fetchImageBlob(url: string, generation: number): Promise<Blob | n
     if (!res.ok) {
       if (DEFINITE_FAILURES.has(res.status) && generation === attachmentCacheGeneration) {
         missingImages.add(url);
+        if (missingImages.size > MISSING_IMAGES_MAX) {
+          const oldest = missingImages.values().next().value;
+          if (oldest !== undefined) missingImages.delete(oldest);
+        }
       }
       return null;
     }
@@ -698,7 +771,8 @@ export function externalPartition(): string {
 }
 
 /** blob: URLs for broker-fetched images, keyed by handle or URL. */
-const externalObjectUrls = new Map<string, string>();
+const externalObjectUrls = new Map<string, { url: string; bytes: number }>();
+let externalBytes = 0;
 /** The subset of those URLs whose bytes are a GIF — the ones that get the
  *  freeze/play control. */
 const externalGifUrls = new Set<string>();
@@ -707,6 +781,10 @@ const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>
  *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
  *  because an image is far smaller than a clip. */
 export const EXTERNAL_IMAGE_CACHE_MAX = 100;
+/** What those copies may pin in total: a broker image can be 16 MB, so the
+ *  count cap alone allows ~1.6 GB of blob memory. Mirrors the server-image
+ *  cache's budget. */
+export const EXTERNAL_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Drop every broker-fetched image and move to a fresh broker partition.
  *  Called on page teardown and from the manual "clear cache" action. */
@@ -716,10 +794,11 @@ export function clearExternalImageCache(): void {
   // drops a partition's cache the moment another one is named, and an empty
   // URL is refused before any network work, so this costs one IPC call.
   void desktop.externalContent?.preview(externalPartition(), "");
-  for (const objectUrl of externalObjectUrls.values()) {
-    revokeObjectUrl(objectUrl);
+  for (const entry of externalObjectUrls.values()) {
+    revokeObjectUrl(entry.url);
   }
   externalObjectUrls.clear();
+  externalBytes = 0;
   externalGifUrls.clear();
   externalInFlight.clear();
 }
@@ -745,7 +824,10 @@ export function isExternalGif(objectUrl: string): boolean {
 
 /** Whether a blob: URL is one an image cache still holds (not revoked). */
 function isLiveImageUrl(objectUrl: string): boolean {
-  return imageCache.holds(objectUrl) || [...externalObjectUrls.values()].includes(objectUrl);
+  return (
+    imageCache.holds(objectUrl) ||
+    [...externalObjectUrls.values()].some((entry) => entry.url === objectUrl)
+  );
 }
 
 /** Load `source` again the way it first came: a server image through its own
@@ -800,7 +882,7 @@ export function loadExternalImage(
   // B9-8: nothing is fetched for an item the viewer has not consented to.
   if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
-  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached });
+  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached.url });
   const existing = externalInFlight.get(key);
   if (existing !== undefined) return existing;
 
@@ -817,18 +899,20 @@ export function loadExternalImage(
       revokeObjectUrl(objectUrl);
       return { ok: false, failure: "unavailable" };
     }
-    if (externalObjectUrls.size >= EXTERNAL_IMAGE_CACHE_MAX) {
-      const firstKey = externalObjectUrls.keys().next().value;
-      if (firstKey !== undefined) {
-        const evicted = externalObjectUrls.get(firstKey);
-        externalObjectUrls.delete(firstKey);
-        if (evicted !== undefined) {
-          externalGifUrls.delete(evicted);
-          revokeObjectUrl(evicted);
-        }
-      }
+    externalObjectUrls.set(key, { url: objectUrl, bytes: result.value.size });
+    externalBytes += result.value.size;
+    // Oldest first; the entry just added stays even when it alone is over.
+    while (
+      externalObjectUrls.size > 1 &&
+      (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
+        externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
+    ) {
+      const [oldKey, evicted] = externalObjectUrls.entries().next().value!;
+      externalObjectUrls.delete(oldKey);
+      externalBytes -= evicted.bytes;
+      externalGifUrls.delete(evicted.url);
+      revokeObjectUrl(evicted.url);
     }
-    externalObjectUrls.set(key, objectUrl);
     if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
     return { ok: true, value: objectUrl };
   })();
