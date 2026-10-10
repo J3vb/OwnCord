@@ -141,7 +141,7 @@ rtc:
 audio:
   active_level: 45
   min_percentile: 30
-  update_interval: 200
+  update_interval: 100
   smooth_intervals: 1
 
 keys:

@@ -129,12 +129,6 @@ export interface VoiceState {
    *  When set it, not LiveKit, drives the local speaking ring, so the ring,
    *  the slider and what transmits agree. Optional for the fixture reason above. */
   readonly localGateSpeaking?: boolean | null;
-  /** LiveKit's latest active-speaker list for the current channel. */
-  readonly serverSpeakers?: ReadonlySet<number>;
-  /** Remote users whose received audio carries speech right now
-   *  (features/voice/remoteSpeaking.ts). A ring lights while either list has
-   *  the user. Optional for the fixture reason above. */
-  readonly levelSpeakers?: ReadonlySet<number>;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -194,8 +188,6 @@ export function resetVoiceStore(): void {
     moderatorDeafened: false,
     pttGated: false,
     localGateSpeaking: null,
-    serverSpeakers: new Set(),
-    levelSpeakers: new Set(),
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -371,8 +363,6 @@ export function joinVoiceChannel(channelId: number): void {
       // A fresh join starts clean — any degraded flag belongs to the
       // previous session's worker, not this one.
       encryptionDegraded: false,
-      serverSpeakers: new Set<number>(),
-      levelSpeakers: new Set<number>(),
     };
   });
 }
@@ -389,8 +379,6 @@ export function leaveVoiceChannel(): void {
       localServerMuted: false,
       localServerDeafened: false,
       encryptionDegraded: false,
-      serverSpeakers: new Set<number>(),
-      levelSpeakers: new Set<number>(),
     };
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
@@ -571,39 +559,30 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
   );
 }
 
-/** Recompute a channel's speaking flags from both speaker lists. */
-function withSpeakers(state: VoiceState, channelId: number | null): VoiceState {
-  const channel = channelId === null ? undefined : state.voiceUsers.get(channelId);
-  if (channelId === null || channel === undefined) return withLocalRing(state);
-  let nextUsers: Map<number, VoiceUser> | null = null;
-  for (const [userId, user] of channel) {
-    const speaking =
-      state.serverSpeakers?.has(userId) === true || state.levelSpeakers?.has(userId) === true;
-    if (user.speaking === speaking) continue;
-    nextUsers ??= new Map(channel);
-    nextUsers.set(userId, { ...user, speaking });
-  }
-  if (nextUsers === null) return withLocalRing(state);
-  const voiceUsers = new Map(state.voiceUsers).set(channelId, nextUsers);
-  return withLocalRing({ ...state, voiceUsers });
-}
-
 /** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
  *  Updates every remote user. The local user too, unless the input-sensitivity
  *  gate runs: then the gate decides (see setLocalGateSpeaking). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
-  voiceStore.setState((prev) =>
-    withSpeakers({ ...prev, serverSpeakers: new Set(payload.speakers) }, payload.channel_id),
-  );
-}
+  voiceStore.setState((prev) => {
+    const existingChannel = prev.voiceUsers.get(payload.channel_id);
+    if (!existingChannel) return prev;
 
-/** Record which remote users the client hears speaking (see levelSpeakers).
- *  LiveKit's list lags speech by 100-300 ms; this lights the ring as the
- *  audio arrives. */
-export function setLevelSpeakers(userIds: ReadonlySet<number>): void {
-  voiceStore.setState((prev) =>
-    withSpeakers({ ...prev, levelSpeakers: userIds }, prev.currentChannelId),
-  );
+    const speakerSet = new Set(payload.speakers);
+    const nextUsers = new Map<number, VoiceUser>();
+
+    for (const [userId, user] of existingChannel) {
+      const isSpeaking = speakerSet.has(userId);
+      if (user.speaking !== isSpeaking) {
+        nextUsers.set(userId, { ...user, speaking: isSpeaking });
+      } else {
+        nextUsers.set(userId, user);
+      }
+    }
+
+    const nextChannels = new Map(prev.voiceUsers);
+    nextChannels.set(payload.channel_id, nextUsers);
+    return withLocalRing({ ...prev, voiceUsers: nextChannels });
+  });
 }
 
 /** Record a peer's E2EE identity verification result (F3 TOFU). Written from

@@ -14,8 +14,7 @@ import { loadPref, savePref, STORAGE_PREFIX } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "../features/voice/sessionState";
-import { setLevelSpeakers, voiceStore } from "@stores/voice.store";
-import { RemoteSpeaking } from "../features/voice/remoteSpeaking";
+import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");
 
@@ -120,12 +119,8 @@ export class AudioElements {
     this.outputVolumeMultiplier = clampPercent(loadPref<number>("outputVolume", 100)) / 100;
   }
 
-  /** Lights remote speaking rings from the audio played here. */
-  private remoteSpeaking = new RemoteSpeaking(setLevelSpeakers);
-
   setRoom(room: Room | null): void {
     this.room = room;
-    this.remoteSpeaking.setRoom(room);
   }
 
   /** Get the current output volume multiplier. */

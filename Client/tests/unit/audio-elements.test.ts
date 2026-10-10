@@ -40,7 +40,6 @@ vi.mock("@stores/voice.store", () => ({
   voiceStore: {
     getState: () => mockVoiceStoreState,
   },
-  setLevelSpeakers: vi.fn(),
 }));
 
 vi.mock("@lib/livekitSession", () => ({
@@ -74,11 +73,6 @@ describe("AudioElements", () => {
     mockVoiceStoreState.localDeafened = false;
     mockVoiceStoreState.currentChannelId = null;
     elements = new AudioElements();
-  });
-
-  afterEach(() => {
-    // Stops the remote speaking-level poll a room starts.
-    elements.setRoom(null);
   });
 
   describe("initial state", () => {
