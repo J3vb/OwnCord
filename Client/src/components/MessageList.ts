@@ -1139,6 +1139,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return item?.kind === "message" && item.message.id !== 0 ? idx : -1;
   }
 
+  function renderedRowAt(idx: number): Element | undefined {
+    if (renderedStart < 0 || idx < renderedStart || idx >= renderedEnd) return undefined;
+    return contentContainer?.children[idx - renderedStart];
+  }
+
   function renderAll(): void {
     if (root === null) return;
     if (renderAllRunning) return; // prevent re-entrancy
@@ -1185,7 +1190,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (anchorIdx !== -1) {
           anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
           anchorOffsetInItem = root.scrollTop - offsetBefore(anchorIdx);
-          const el = contentContainer?.children[anchorIdx - renderedStart];
+          const el = renderedRowAt(anchorIdx);
           if (el !== undefined) anchorEdge = edgeOf(el);
         }
       }
@@ -1248,7 +1253,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
             if (!placeIndex(idx, anchorOffsetInItem)) break;
           }
           // Then by its real edge: the rebuilt row is on screen now.
-          const el = contentContainer?.children[idx - renderedStart];
+          const el = renderedRowAt(idx);
           if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
         }
       }
