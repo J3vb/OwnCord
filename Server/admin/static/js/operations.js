@@ -93,6 +93,8 @@ function attnCounts(signals){
   return c;
 }
 function attnWorst(c){return c.critical?'critical':c.warning?'warning':c.unknown?'unknown':'ok'}
+/* What a card says, not when it was last seen: a repeat sighting stays dismissed. */
+function attnSig(w){return noticeSig(w.severity,w.title,w.detail,w.action)}
 function attnWarningCard(w){
   const rec=!!w.recovered_at;
   return'<div class="attn-card attn-warning '+(rec?'ok':w.severity==='critical'?'crit':'warn')+'" data-id="'+esc(w.id)+'">'+statusIcon(rec?'ok':w.severity)+'<div class="attn-body">'
@@ -100,7 +102,8 @@ function attnWarningCard(w){
     +(w.action?'<p class="attn-next"><b>What to do:</b> <span class="attn-action">'+esc(w.action)+'</span></p>':'')
     +'<div class="attn-meta"><span>First seen '+fmtLocal(w.first_observed)+' · last seen '+fmtLocal(w.last_observed)
     +(w.occurrences>1?' · '+w.occurrences+' occurrences':'')+(rec?' · recovered '+fmtLocal(w.recovered_at):'')+'</span>'
-    +(w.detail?disclosure('Technical detail','<div class="attn-tech">'+esc(w.detail)+'</div>'):'')+'</div></div></div>';
+    +(w.detail?disclosure('Technical detail','<div class="attn-tech">'+esc(w.detail)+'</div>'):'')+'</div></div>'
+    +(rec?'':dismissButton('attn:'+w.id,attnSig(w),w.title))+'</div>';
 }
 /* One signal's plain value; the threshold and learning-period text stay in
    the tooltip, and a non-healthy signal also shows its detail. */
@@ -144,17 +147,18 @@ function renderAttention(rep){
   const warnings=(rep&&rep.warnings)||[],signals=(rep&&rep.signals)||[];
   const active=warnings.filter(w=>!w.recovered_at),recovered=warnings.filter(w=>w.recovered_at);
   const counts=attnCounts(signals);
+  const shown=active.filter(w=>!isDismissed('attn:'+w.id,attnSig(w))),hidden=active.length-shown.length;
   let tone,title,cls;
   if(!rep||!rep.evaluated_at){tone='unknown';cls='attn-pending';title='Waiting for the first health check'}
   else if(active.length){tone=active.some(w=>w.severity==='critical')?'critical':'warning';cls='attn-problems';title=active.length===1?'1 problem needs your attention':active.length+' problems need your attention'}
   else{tone='ok';cls='attn-none';title='Everything is running normally'}
-  const sub=rep&&rep.evaluated_at?'Checked '+fmtLocal(rep.evaluated_at,ATTN_TIME)+' · the server checks every minute':'The server checks its health once a minute after it starts.';
+  const sub=rep&&rep.evaluated_at?'Checked '+fmtLocal(rep.evaluated_at,ATTN_TIME)+' · the server checks every minute'+(hidden?' · <button class="link-btn" data-action="restoreDismissed">'+hidden+' dismissed, show</button>':''):'The server checks its health once a minute after it starts.';
   const chips=[['critical','critical','critical'],['warning','warning','warnings'],['ok','healthy','healthy'],['unknown','not measured','not measured']]
     .filter(k=>counts[k[0]]).map(k=>'<span class="count-chip">'+statusIcon(k[0])+plural(counts[k[0]],k[1],k[2])+'</span>').join('');
   let head='<section id="attentionPanel" aria-labelledby="attnTitle"><div class="health-hero '+({ok:'ok',warning:'warn',critical:'crit',unknown:'pending'})[tone]+'">'
     +'<div class="health-hero-icon">'+statusIcon(tone)+'</div><div class="health-hero-text"><h2 class="health-hero-title '+cls+'" id="attnTitle">'+title+'</h2><div class="health-hero-sub">'+sub+'</div></div>'
     +'<div class="health-hero-counts">'+(chips?'<span class="sr-only">Health checks: </span>'+chips:'')+'<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+'Refresh</button></div></div>';
-  active.forEach(w=>{head+=attnWarningCard(w)});
+  shown.forEach(w=>{head+=attnWarningCard(w)});
   if(recovered.length)head+=disclosure('Recently recovered ('+recovered.length+')',recovered.map(attnWarningCard).join(''),false,'attn-recovered');
   head+='</section>';
   return{head,checks:signals.length?renderChecks(signals,counts,active):''};
@@ -174,7 +178,8 @@ async function renderDashboard(){
     try{const a=renderAttention(await api('GET','/attention'));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }
-  if(u&&u.update_available)html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button></div>';
+  const updSig=u&&noticeSig(u.latest);
+  if(u&&u.update_available&&!isDismissed('update',updSig))html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button>'+dismissButton('update',updSig,'update notice')+'</div>';
   const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;

@@ -52,6 +52,9 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - The admin panel's Server configuration page has a **Restart server** button. It and Restart now open one dialog that warns that everyone is briefly disconnected, says how the server comes back (container restart policy, service manager, or its own replacement), then waits and reloads the panel.
+**Admin panel**
+
+- Dashboard warning cards and the update notice now have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until its text changes, and a "dismissed, show" link brings them back. The pending-restart banner on the Server config page stays until you restart.
 
 **Voice**
 

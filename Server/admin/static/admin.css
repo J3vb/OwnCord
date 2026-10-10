@@ -615,3 +615,7 @@ code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;wor
 }
 @media(max-width:600px){.user-menu-who{display:none}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
+.notice-dismiss{flex-shrink:0;align-self:flex-start;width:28px;height:28px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);font-size:20px;line-height:1;cursor:pointer}
+.notice-dismiss:hover{color:var(--header-primary);background:var(--bg-card-hover,rgba(255,255,255,.06))}
+.notice-dismiss:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.update-strip .notice-dismiss{align-self:center}
