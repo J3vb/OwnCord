@@ -251,7 +251,7 @@ describe("Server/admin/static — dismissable notices", () => {
     dom = booted.dom;
     booted.bridge.state.section = "config";
     const content = await paint(dom, booted.bridge);
-    expect(content.querySelector('[data-action="restartForConfig"]')).toBeTruthy();
+    expect(content.querySelector('[data-action="openRestartDialog"]')).toBeTruthy();
     expect(content.querySelector(".notice-dismiss")).toBeNull();
   });
 });
