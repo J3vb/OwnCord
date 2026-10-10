@@ -70,6 +70,9 @@ and only when it changes something a contributor or fork holder must do
 - A DM call's timer showed each side its own time in the call; it now counts from when the other person joined, so both sides show the same length.
 - Calling a 1:1 contact who is offline showed "Calling…" for 30 seconds; it now says they are offline at once.
 - On Windows, the "is calling you" notification stayed in Action Center after the ring ended; it is now removed once the ring is answered, declined or over.
+- Clicking a voice channel again while it was still connecting or securing left it at once, so repeated clicks cycled join/leave on the server several times a second — a repeat click now leaves the join running (Disconnect still ends it).
+- After a failed or refused voice join, or a switch to another channel while a join is still connecting, the next join waits 2 s, doubling up to 30 s, and says so.
+- A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 
 ### Changed
 

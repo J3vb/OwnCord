@@ -1181,7 +1181,9 @@ describe("LiveKitSession", () => {
       );
 
       expect(result).toBe("superseded");
-      expect(errorCb).not.toHaveBeenCalledWith("e2ee_timeout");
+      expect(errorCb).not.toHaveBeenCalledWith(
+        "Couldn't secure the voice call — no encryption key arrived. Try joining again.",
+      );
       expect(ws.send).not.toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
       expect(leaveVoiceChannel).not.toHaveBeenCalled();
 
@@ -2940,7 +2942,9 @@ describe("LiveKitSession", () => {
       );
 
       expect(result).toBe(false);
-      expect(errorCb).toHaveBeenCalledWith("e2ee_timeout");
+      expect(errorCb).toHaveBeenCalledWith(
+        "Couldn't secure the voice call — no encryption key arrived. Try joining again.",
+      );
       // The exchange times out BEFORE room.connect(), so no SFU participant
       // exists and no LiveKit webhook can clean up. Without voice_leave the
       // server keeps the voice_states row forever; the ghost survives every

@@ -9,6 +9,7 @@
  * mocked out here and only the wiring under test (the store subscription) is
  * exercised for real.
  */
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
@@ -858,6 +859,33 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // banner clearing means ringCtrl.accept() ran and nothing rejoins) — the
     // ring has to survive so the user can accept again once reconnected.
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("keeps an incoming ring alive when Accept is clicked during the join backoff", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    noteJoinFailed();
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const acceptBtn = document.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement;
+    acceptBtn.click();
+
+    expect(banner.style.display).not.toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(document.body.textContent).toContain("Voice join failed — try again in 2 s");
+
+    noteJoinFailed(Date.now(), true);
+    acceptBtn.click();
+    expect(document.body.textContent).toContain("Please wait 4 s before switching voice channels");
+
+    noteJoinSucceeded();
+    acceptBtn.click();
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
   });
 
   function openOneToOneDm(id: number): void {

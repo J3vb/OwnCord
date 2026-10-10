@@ -1319,6 +1319,37 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
+  it("stays at securing for the full 10 s + 5 s when the key holder's announce is refused, dropping its offer", async () => {
+    // One way a joiner sits at "securing" and then leaves on its own with the
+    // key holder online and answering: a fail-closed TOFU check (here an
+    // unreadable pin store, DC-08) refuses the holder's announce, so the
+    // holder's offer finds no sender key and is dropped. The re-announce only
+    // earns the same offer again, and the exchange gives up after 15 s.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "unavailable" });
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      let result: boolean | undefined;
+      void mgr.setupKeyExchange(false, 1).then((ok) => (result = ok));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
+
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      await mgr.handleOffer(PEER_ID, "enc", "iv");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(unwrapRoomKey).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(2);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(result).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("[OC-0020] retires a departed peer's key on leave, so a replay of it after they rejoin with a fresh key cannot resurrect it", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
