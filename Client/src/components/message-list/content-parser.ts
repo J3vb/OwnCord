@@ -120,6 +120,13 @@ function buildSpoiler(
 }
 
 /** A `[text](url)` anchor, or null when the URL is not a safe http(s) one. */
+/** Make a mention chip plain link content: no role, tab stop or profile target. */
+function stripMentionControl(chip: HTMLElement): void {
+  chip.removeAttribute("role");
+  chip.removeAttribute("tabindex");
+  chip.removeAttribute("data-user-id");
+}
+
 function buildMaskedLink(
   node: { readonly url: string; readonly children: readonly InlineNode[] },
   info?: MentionInfo,
@@ -139,9 +146,7 @@ function buildMaskedLink(
   // give Tab and screen readers two controls with one label, one opening the
   // URL and one a profile.
   for (const chip of link.querySelectorAll<HTMLElement>(".mention[data-user-id]")) {
-    chip.removeAttribute("role");
-    chip.removeAttribute("tabindex");
-    chip.removeAttribute("data-user-id");
+    stripMentionControl(chip);
   }
   return link;
 }
@@ -455,6 +460,11 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       const raw = span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
       const replacement = buildMentionNode(raw, token, info);
+      // A mention that labels a masked link stays plain link content when it is
+      // rebuilt, as at first render (buildMaskedLink).
+      if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
+        stripMentionControl(replacement);
+      }
       if (replacement !== null && sameMention(span, replacement)) continue;
       span.replaceWith(replacement ?? document.createTextNode(raw));
     }

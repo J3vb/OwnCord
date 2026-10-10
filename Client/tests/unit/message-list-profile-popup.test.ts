@@ -32,7 +32,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
+import { membersStore, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 
 function member(id: number, username: string): Member {
@@ -179,6 +179,43 @@ describe("MessageList profile popup", () => {
     chip?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await flush();
     expect(createPopupMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a masked-link mention non-interactive after a member change re-resolves mentions", async () => {
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([
+        [1, [makeMessage({ id: 2, content: "[@nine](https://example.com/x)", mentions: [9] })]],
+      ]),
+    }));
+    list.destroy?.();
+    container.replaceChildren();
+    list = createMessageList({
+      channelId: 1,
+      channelName: "general",
+      currentUserId: 1,
+      onScrollTop: vi.fn(),
+      onReplyClick: vi.fn(),
+      onEditClick: vi.fn(),
+      onDeleteClick: vi.fn(),
+      onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
+    });
+    list.mount(container);
+    const chipOf = (): HTMLElement | null =>
+      container.querySelector<HTMLElement>('a[target="_blank"] .mention');
+    expect(chipOf()?.hasAttribute("role")).toBe(false);
+
+    // A role change bumps roleRevision, which re-resolves every rendered mention.
+    updateMemberRole(9, "admin");
+    membersStore.flush();
+    await flush();
+
+    const chip = chipOf();
+    expect(chip).not.toBeNull();
+    expect(chip?.hasAttribute("role")).toBe(false);
+    expect(chip?.hasAttribute("tabindex")).toBe(false);
+    expect(chip?.hasAttribute("data-user-id")).toBe(false);
   });
 
   it("ignores @everyone chips, which name no user", async () => {
