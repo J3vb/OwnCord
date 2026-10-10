@@ -152,6 +152,34 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
 
+  // When the last accepted send happened (epoch ms) per channel, so the Send
+  // gate's countdown survives a channel switch instead of restarting from zero
+  // on the remount. The deadline is derived from the channel's CURRENT
+  // slow_mode, so an admin changing it while the user is away is followed.
+  // `window` is the largest slow_mode (seconds) observed since the send: the
+  // server keeps enforcing its largest window, so a temporary reduction must
+  // not forget the send time. Controller-scoped like the drafts above, so it
+  // dies with the session; an entry is dropped once its largest window passed.
+  const slowModeSentAtByChannel = new Map<number, { sentAt: number; window: number }>();
+  const recordSlowModeSend = (id: number, seconds: number, sentAt = Date.now()): void => {
+    slowModeSentAtByChannel.set(id, { sentAt, window: seconds });
+  };
+  // The server prunes its rate-limit timestamps only every few minutes and
+  // evaluates the retained ones against the current window, so a raised
+  // setting can still reject a send whose largest-observed window has passed.
+  const SLOW_MODE_RETENTION_MS = 5 * 60 * 1000;
+  const slowModeRetained = (id: number): boolean => {
+    const entry = slowModeSentAtByChannel.get(id);
+    return (
+      entry !== undefined &&
+      Date.now() < entry.sentAt + Math.max(entry.window * 1000, SLOW_MODE_RETENTION_MS)
+    );
+  };
+  const slowModeWindowOver = (id: number): boolean => {
+    const entry = slowModeSentAtByChannel.get(id);
+    return entry === undefined || Date.now() >= entry.sentAt + entry.window * 1000;
+  };
+
   // Optimistic send: keep the raw payload per correlation id so a failed send
   // can be retried (including its attachments). Controller-scoped rather than
   // per-mount: correlation ids are globally unique (crypto.randomUUID), and a
@@ -173,6 +201,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // mounted when it arrives.
       channelId: number;
       clientMessageId?: string;
+      // When the client handed this message to the socket (epoch ms): a late
+      // ack's cooldown starts here, not when the ack is finally received.
+      sentAt: number;
     }
   >();
   // OC-0433: performSend has two dispatch paths — a plain text send with a
@@ -472,7 +503,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           timestamp,
         });
-        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
+        draftByCorrelation.set(cid, {
+          content,
+          replyTo,
+          attachments,
+          channelId,
+          clientMessageId,
+          sentAt: Date.now(),
+        });
         markSendFailed(cid, "OFFLINE");
         if (persistId !== undefined) {
           // Nothing will deliver this text: it was never handed to a socket, so
@@ -505,7 +543,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           timestamp,
         });
-        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId, clientMessageId });
+        draftByCorrelation.set(cid, {
+          content,
+          replyTo,
+          attachments,
+          channelId,
+          clientMessageId,
+          sentAt: Date.now(),
+        });
         // A live socket can lose an ACK without disconnecting. End the spinner
         // honestly; only a server ACK/echo ever calls a message delivered.
         const timer = window.setTimeout(() => {
@@ -992,7 +1037,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // itself for the channel's cooldown with a live countdown, instead of
     // taking a message the server will bounce with SLOW_MODE (UX spec §5,
     // "do not drop the drafted message" — the draft stays in the textarea).
-    let slowModeUntil = 0;
     let slowModeTicker: ReturnType<typeof setInterval> | null = null;
 
     const stopSlowModeTicker = (): void => {
@@ -1002,8 +1046,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       }
     };
 
-    const slowModeRemaining = (): number =>
-      slowModeUntil === 0 ? 0 : Math.max(0, Math.ceil((slowModeUntil - Date.now()) / 1000));
+    const slowModeRemaining = (): number => {
+      const entry = slowModeSentAtByChannel.get(channelId);
+      if (entry === undefined) return 0;
+      const seconds = channelsStore.getState().channels.get(channelId)?.slowMode ?? 0;
+      entry.window = Math.max(entry.window, seconds);
+      return Math.max(0, Math.ceil((entry.sentAt + seconds * 1000 - Date.now()) / 1000));
+    };
 
     const computeComposerReason = (): string | null => {
       const status = uiStore.getState().connectionStatus;
@@ -1039,18 +1088,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      * Begin (or restart) the slow-mode cooldown for this channel. Moderators
      * bypass slow mode server-side, so they never get gated here either.
      */
-    const startSlowMode = (seconds: number): void => {
-      if (seconds <= 0 || canManageMessages()) return;
-      slowModeUntil = Date.now() + seconds * 1000;
+    const armSlowModeTicker = (): void => {
       refreshComposerState();
       stopSlowModeTicker();
       slowModeTicker = setInterval(() => {
-        if (slowModeRemaining() <= 0) {
-          slowModeUntil = 0;
-          stopSlowModeTicker();
-        }
+        // Keep ticking past a zero gate until the largest observed window is
+        // over, so a setting raised again meanwhile re-gates the composer.
         refreshComposerState();
+        if (slowModeWindowOver(channelId)) stopSlowModeTicker();
       }, 1000);
+    };
+    const startSlowMode = (seconds: number): void => {
+      if (seconds <= 0 || canManageMessages()) return;
+      recordSlowModeSend(channelId, seconds);
+      armSlowModeTicker();
     };
     composerGatingUnsubs.push(stopSlowModeTicker);
 
@@ -1072,6 +1123,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       ws.on("chat_send_ok", (payload, correlationId) => {
         if (!ownsSession()) return;
         const sameChannel = sentToMountedChannel(correlationId);
+        const sentDraft =
+          correlationId === undefined ? undefined : draftByCorrelation.get(correlationId);
+        const sentTo = sentDraft?.channelId;
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
         // switch, so its draft must too), which means nothing else would ever
@@ -1096,6 +1150,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           !payload.deduplicated
         ) {
           startSlowMode(ch.slowMode);
+        } else if (sentTo !== undefined && !sameChannel && !payload.deduplicated) {
+          // A late ack for a channel the user has left: charge that channel's
+          // cooldown now, without arming this mounted channel's ticker.
+          const seconds = channelsStore.getState().channels.get(sentTo)?.slowMode ?? 0;
+          if (seconds > 0 && !canManageMessages()) {
+            recordSlowModeSend(sentTo, seconds, sentDraft?.sentAt);
+          }
         }
       }),
     );
@@ -1189,6 +1250,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
 
     refreshComposerState();
+    // Returning to a channel still inside its cooldown: re-arm the countdown.
+    if (canManageMessages()) slowModeSentAtByChannel.delete(channelId);
+    else if (!slowModeWindowOver(channelId) || slowModeRemaining() > 0) armSlowModeTicker();
+    else if (!slowModeRetained(channelId)) slowModeSentAtByChannel.delete(channelId);
     composerGatingUnsubs.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,

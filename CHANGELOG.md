@@ -99,6 +99,10 @@ and only when it changes something a contributor or fork holder must do
 - Your own screen share tile showed the frame rate you picked, not the one being sent; it now shows the rate actually going out.
 - On Linux Wayland, the screen-share picker offered 120 fps, but the capture stops at 60; 120 is now disabled there, with the reason.
 
+**Messages**
+
+- Switching channels no longer resets the slow-mode countdown on the Send button; it keeps counting from when you sent, including for a send acknowledged after you left.
+
 ### Changed
 
 **Voice and video**
