@@ -469,7 +469,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           if (results.some((r) => r.status === "rejected")) {
             results.forEach((result, i) => {
               const entry = reorders[i];
-              if (result.status === "rejected" && entry !== undefined) {
+              // Only undo our own optimistic position: a newer reorder or
+              // broadcast for the same channel must not be clobbered.
+              if (
+                result.status === "rejected" &&
+                entry !== undefined &&
+                channelsStore.getState().channels.get(entry.channelId)?.position ===
+                  entry.newPosition
+              ) {
                 updateChannelPosition(entry.channelId, entry.previousPosition);
               }
             });

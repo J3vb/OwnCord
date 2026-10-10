@@ -2343,6 +2343,27 @@ describe("SidebarArea", () => {
 
         cleanup(result);
       });
+
+      it("does not overwrite a newer position that arrived while the failed write was in flight", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // A newer reorder (or broadcast) moved channel 2 elsewhere before the
+        // failure surfaced; the stale rollback must not clobber it.
+        seedOrder({ 2: 5 });
+        await flush();
+
+        expect(positionOf(2)).toBe(5);
+
+        cleanup(result);
+      });
     });
   });
 
