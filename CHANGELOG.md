@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Voice**
+
+- A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
+
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
@@ -57,13 +61,25 @@ and only when it changes something a contributor or fork holder must do
 
 - A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
 
+**Voice and video**
+
+- On Windows, Settings > Voice & Audio lists your microphones, speakers and cameras by name again instead of nameless entries, and a saved device that is still plugged in no longer shows as "(disconnected)".
+
 ### Changed
+
+**Voice**
+
+- With enhanced noise suppression on, joining voice no longer downloads the noise model every time; it is fetched once and reused for later joins.
 
 **Messages & files**
 
 - Opening a channel full of new avatars and images no longer re-reads the whole on-disk image cache for each one; the cache is opened once and trimmed only when it is over its limit.
 - Scrolling a long channel no longer redraws every message on screen each time the view moves; only the rows that come into view are built.
 - Switching channels or scrolling past paused GIFs no longer re-downloads each GIF as it leaves the screen.
+
+**Linux desktop**
+
+- The Linux .deb now recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
 
 ## v2.2.0-beta.2
 
