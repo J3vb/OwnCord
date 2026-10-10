@@ -41,6 +41,7 @@ import {
   clearAttachmentCaches,
   fetchMediaAsObjectUrl,
   isAudioMime,
+  isVideoAttachment,
   isVideoMime,
   renderAttachment,
   setServerHost,
@@ -98,9 +99,15 @@ describe("isVideoMime / isAudioMime", () => {
     expect(isAudioMime("Audio/Mpeg")).toBe(true);
   });
 
+  it("accepts QuickTime, M4V and Matroska, which Chromium's demuxers read", () => {
+    expect(isVideoMime("video/quicktime")).toBe(true);
+    expect(isVideoMime("video/x-m4v")).toBe(true);
+    expect(isVideoMime("video/x-matroska")).toBe(true);
+  });
+
   it("rejects unknown containers rather than handing them to a player", () => {
-    expect(isVideoMime("video/x-matroska")).toBe(false);
-    expect(isVideoMime("video/quicktime")).toBe(false);
+    expect(isVideoMime("video/x-msvideo")).toBe(false);
+    expect(isVideoMime("video/x-flv")).toBe(false);
     expect(isAudioMime("audio/flac")).toBe(false);
   });
 
@@ -111,7 +118,92 @@ describe("isVideoMime / isAudioMime", () => {
   });
 });
 
+describe("isVideoAttachment", () => {
+  it("trusts a video MIME whatever the filename", () => {
+    expect(isVideoAttachment({ mime: "video/mp4", filename: "clip" })).toBe(true);
+  });
+
+  // A .mov uploaded before the server learned QuickTime was stored as
+  // application/octet-stream; its extension is all that says it is a video.
+  it.each(["clip.mov", "clip.MP4", "clip.m4v", "clip.webm", "clip.mkv"])(
+    "treats an untyped %s as a video",
+    (filename) => {
+      expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(true);
+      expect(isVideoAttachment({ mime: "", filename })).toBe(true);
+    },
+  );
+
+  it("does not let an extension override a real non-video type", () => {
+    expect(isVideoAttachment({ mime: "text/plain", filename: "clip.mov" })).toBe(false);
+    expect(isVideoAttachment({ mime: "image/svg+xml", filename: "clip.mp4" })).toBe(false);
+  });
+
+  it("leaves an untyped file with another extension on the chip", () => {
+    expect(isVideoAttachment({ mime: "application/octet-stream", filename: "clip.avi" })).toBe(
+      false,
+    );
+    expect(isVideoAttachment({ mime: "application/octet-stream", filename: "mov" })).toBe(false);
+  });
+});
+
 describe("renderAttachment — video", () => {
+  it.each([
+    ["video/quicktime", "clip.mov"],
+    ["application/octet-stream", "clip.mov"],
+    ["video/webm", "clip.mkv"],
+  ])("renders %s %s as a player", (mime, filename) => {
+    const el = renderAttachment(att({ mime, filename }));
+    expect(el.classList.contains("msg-video")).toBe(true);
+    expect(el.querySelector("video")).not.toBeNull();
+  });
+
+  /** Render a video, press play and wait for its source to arrive. */
+  async function playedVideo(): Promise<HTMLVideoElement> {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: { get: () => "video/quicktime" },
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+    });
+    const el = document.body.appendChild(
+      renderAttachment(att({ mime: "video/quicktime", filename: "clip.mov", size: 2048 })),
+    );
+    const video = el.querySelector("video") as HTMLVideoElement;
+    pressPlay(el);
+    await vi.waitFor(() => expect(video.src).toContain("blob:mock-1"));
+    return video;
+  }
+
+  function expectUnplayableChip(): void {
+    expect(document.querySelector("video")).toBeNull();
+    const chip = document.querySelector(".msg-file") as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.querySelector(".msg-file-name")?.textContent).toBe("clip.mov");
+    expect(chip.querySelector(".msg-file-download")).not.toBeNull();
+    expect(chip.querySelector(".msg-file-note")?.textContent).toBe("Can't play this format");
+  }
+
+  it("swaps a player the engine cannot decode for the download chip", async () => {
+    const video = await playedVideo();
+    video.dispatchEvent(new Event("error"));
+    expectUnplayableChip();
+  });
+
+  // A codec the engine lacks (HEVC, ProRes) can leave only the audio track
+  // playing: metadata loads but there is no picture.
+  it("swaps a player whose video track has no picture for the download chip", async () => {
+    const video = await playedVideo();
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expectUnplayableChip();
+  });
+
+  it("keeps a player whose video decodes", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 1280 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(document.querySelector("video")).toBe(video);
+    expect(document.querySelector(".msg-file")).toBeNull();
+  });
+
   it("renders an inline <video> behind a labelled play button", () => {
     const el = renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" }));
 
@@ -339,7 +431,7 @@ describe("renderAttachment — unhandled types still get a chip", () => {
   it.each([
     ["application/zip", "archive.zip"],
     ["image/svg+xml", "diagram.svg"],
-    ["video/x-matroska", "movie.mkv"],
+    ["video/x-msvideo", "movie.avi"],
     ["audio/flac", "track.flac"],
     ["text/plain", "notes.txt"],
   ])("%s renders the download chip, not a player", (mime, filename) => {

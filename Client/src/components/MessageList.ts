@@ -50,7 +50,7 @@ import {
   resolveAuthor,
   roleColorVar,
 } from "@lib/formatting";
-import { isAudioMime, isVideoMime } from "./message-list/attachments";
+import { isAudioMime, isVideoAttachment } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -158,7 +158,7 @@ function estimateItemHeight(item: VirtualItem): number {
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
   for (const att of item.message.attachments) {
-    if (isVideoMime(att.mime)) {
+    if (isVideoAttachment(att)) {
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;

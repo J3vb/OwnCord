@@ -103,7 +103,19 @@ export function isImageMime(mime: string): boolean {
 /** Container MIME types we are willing to hand to a <video> element.
  *  An allowlist, not a `video/` prefix test: an unknown container gets the
  *  download chip rather than a player that silently fails to decode. */
-const INLINE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/ogg"]);
+const INLINE_VIDEO_MIMES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/x-m4v",
+  "video/x-matroska",
+]);
+
+/** Video extensions trusted only when the server could not type the file
+ *  (a .mov stored before it learned QuickTime). A player that cannot decode
+ *  one falls back to the download chip. */
+const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "webm", "mkv"]);
 
 /** Container MIME types we are willing to hand to an <audio> element.
  *  Includes the common aliases servers emit for MP3 and WAV. */
@@ -123,6 +135,16 @@ const INLINE_AUDIO_MIMES = new Set([
  *  path because it can carry script. */
 export function isVideoMime(mime: string): boolean {
   return INLINE_VIDEO_MIMES.has(baseMime(mime));
+}
+
+/** Whether the attachment should render as an inline <video> player: by its
+ *  MIME type, or by its extension when that type is the generic one. */
+export function isVideoAttachment(att: Pick<Attachment, "mime" | "filename">): boolean {
+  if (isVideoMime(att.mime)) return true;
+  const base = baseMime(att.mime);
+  if (base !== "" && base !== "application/octet-stream") return false;
+  const dot = att.filename.lastIndexOf(".");
+  return dot > 0 && VIDEO_EXTENSIONS.has(att.filename.slice(dot + 1).toLowerCase());
 }
 
 /** Whether the attachment should render as an inline <audio> player. */
@@ -281,6 +303,9 @@ const SAFE_MIME_TYPES = new Set([
   "image/bmp",
   "video/mp4",
   "video/webm",
+  "video/quicktime",
+  "video/x-m4v",
+  "video/x-matroska",
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
@@ -1021,12 +1046,25 @@ function buildPlayButton(
 
 /** Inline <video> player. Sized by the same .msg-image box as images so a
  *  video never blows the message column out; the source arrives on play
- *  because it needs the session token attached. */
+ *  because it needs the session token attached. A clip the engine cannot
+ *  decode becomes the download chip, never a broken player. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
   const video = createElement("video", { preload: "metadata" });
   video.setAttribute("aria-label", att.filename);
+  const unplayable = (): void => {
+    const chip = renderFileChip(att, resolvedUrl);
+    const note = createElement("div", { class: "msg-file-note", role: "status" });
+    setText(note, messageStatusText("file.cannotPlay"));
+    chip.querySelector(".msg-file-meta")?.appendChild(note);
+    wrap.replaceWith(chip);
+  };
+  video.addEventListener("error", unplayable, { once: true });
+  // A codec the engine lacks (HEVC, ProRes) can load with no picture at all.
+  video.addEventListener("loadedmetadata", () => {
+    if (video.videoWidth === 0) unplayable();
+  });
   appendChildren(wrap, video, buildPlayButton(att, resolvedUrl, wrap, video));
 
   const overlay = createElement("div", { class: "msg-media-overlay" });
@@ -1054,10 +1092,26 @@ function renderAudioAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
   return wrap;
 }
 
+/** The generic download chip: icon, filename, size and download button. */
+function renderFileChip(att: Attachment, resolvedUrl: string): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-file" });
+  const inner = createElement("div", { class: "msg-file-inner" });
+  const icon = createElement("div", { class: "msg-file-icon" });
+  icon.appendChild(createIcon("file-text", 20));
+  appendChildren(
+    inner,
+    icon,
+    buildFileMeta(att, resolvedUrl),
+    buildDownloadButton(att, resolvedUrl),
+  );
+  wrap.appendChild(inner);
+  return wrap;
+}
+
 export function renderAttachment(att: Attachment): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
-  if (inlineable && isVideoMime(att.mime)) {
+  if (inlineable && isVideoAttachment(att)) {
     return renderVideoAttachment(att, resolvedUrl);
   }
   if (inlineable && isAudioMime(att.mime)) {
@@ -1160,18 +1214,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     return wrap;
   }
-  const wrap = createElement("div", { class: "msg-file" });
-  const inner = createElement("div", { class: "msg-file-inner" });
-  const icon = createElement("div", { class: "msg-file-icon" });
-  icon.appendChild(createIcon("file-text", 20));
-  appendChildren(
-    inner,
-    icon,
-    buildFileMeta(att, resolvedUrl),
-    buildDownloadButton(att, resolvedUrl),
-  );
-  wrap.appendChild(inner);
-  return wrap;
+  return renderFileChip(att, resolvedUrl);
 }
 
 /** Download a file via Tauri HTTP plugin and save to disk with native dialog.

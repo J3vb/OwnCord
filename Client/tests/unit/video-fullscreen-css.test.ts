@@ -29,3 +29,21 @@ describe("video full-screen CSS", () => {
     expect(zIndex(".context-menu.video-tile-menu")).toBeGreaterThan(zIndex(".video-cell--theatre"));
   });
 });
+
+// An inline video attachment's box is fixed before the clip loads, so the
+// message list does not jump when the picture arrives; the clip letterboxes
+// inside it.
+describe("inline video attachment CSS", () => {
+  it("reserves a 16:9 box", () => {
+    expect(cascadedDeclaration(".msg-video", "aspect-ratio")?.value.value).toEqual({
+      auto: false,
+      ratio: [16, 9],
+    });
+  });
+
+  it("letterboxes the clip inside the box", () => {
+    expect(cascadedDeclaration(".msg-video video", "object-fit")?.value.value).toMatchObject({
+      value: [{ value: { type: "ident", value: "contain" } }],
+    });
+  });
+});

@@ -26,6 +26,7 @@ export const messageStatusText = defineCatalog("messageStatus", {
   "file.downloadHttpFailed": "Download failed: server returned {status}",
   "file.downloadFailed": "Download failed for {filename} — check logs for details",
   "file.imageFailed": "Couldn't load this image",
+  "file.cannotPlay": "Can't play this format",
   "file.retry": "Retry",
 
   "reaction.reactedWith": "reacted with {emoji}",

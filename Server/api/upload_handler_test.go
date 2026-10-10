@@ -2012,3 +2012,66 @@ func TestUpload_MalformedTailIs400(t *testing.T) {
 		t.Fatal("a refused upload left a file on disk")
 	}
 }
+
+// quickTimeHeader is the start of an iPhone-style .mov: an ftyp box whose only
+// brand is "qt  ". http.DetectContentType knows no QuickTime signature, so
+// without the upload handler's own check it lands as application/octet-stream
+// and the client shows a download chip instead of a player.
+func quickTimeHeader() []byte {
+	data := make([]byte, 64)
+	copy(data, "\x00\x00\x00\x14ftypqt  \x00\x00\x02\x00qt  ")
+	copy(data[20:], "\x00\x00\x00\x08wide")
+	return data
+}
+
+func TestUpload_SniffsQuickTimeAsVideo(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "movuser", 1)
+
+	rr := doUpload(t, router, token, "file", "clip.mov", quickTimeHeader())
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["mime"] != "video/quicktime" {
+		t.Errorf("mime = %v, want video/quicktime", resp["mime"])
+	}
+}
+
+// A <video> element seeks with Range requests; the served video must answer
+// one with 206, the requested slice and its real Content-Type.
+func TestServeFile_VideoHonoursRangeWithItsContentType(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "rangeuser", 1)
+
+	content := quickTimeHeader()
+	rr := doUpload(t, router, token, "file", "clip.mov", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+	var uploadResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	fileID := uploadResp["id"].(string)
+
+	rr2 := doServeFile(t, router, fileID, token, map[string]string{"Range": "bytes=4-11"})
+	if rr2.Code != http.StatusPartialContent {
+		t.Fatalf("serve status = %d, want 206", rr2.Code)
+	}
+	if ct := rr2.Header().Get("Content-Type"); ct != "video/quicktime" {
+		t.Errorf("Content-Type = %q, want video/quicktime", ct)
+	}
+	if cr := rr2.Header().Get("Content-Range"); cr != fmt.Sprintf("bytes 4-11/%d", len(content)) {
+		t.Errorf("Content-Range = %q", cr)
+	}
+	if got := rr2.Body.String(); got != "ftypqt  " {
+		t.Errorf("body = %q, want the requested slice", got)
+	}
+	if ar := rr2.Header().Get("Accept-Ranges"); ar != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want bytes", ar)
+	}
+}
