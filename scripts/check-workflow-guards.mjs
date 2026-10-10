@@ -127,6 +127,26 @@ export function gstreamerBuildDepsMissing(workflows) {
     .map(({ name }) => name);
 }
 
+// `playwright install --with-deps` and the standalone `playwright install-deps`
+// both run `apt-get update && apt-get install` internally with no bound, so a hung
+// runner mirror holds the step until the job's own timeout cancels it and the
+// failure is attributed to the job, not the step. Every workflow installs the
+// browser through scripts/ci/playwright-install.sh, which splits the apt phase
+// from the download and bounds apt itself; that script is the one allowed caller.
+export function unboundedPlaywrightInstalls(workflows) {
+  return workflows.flatMap(({ name, src }) =>
+    src
+      .split("\n")
+      .map((text, i) => ({ name, line: i + 1, text }))
+      .filter(
+        ({ text }) =>
+          !/^\s*#/.test(text) &&
+          /\bplaywright\s+(?:install\b.*--with-deps\b|install-deps\b)/.test(text),
+      )
+      .map(({ name, line }) => ({ name, line })),
+  );
+}
+
 function main() {
   const failures = [];
 
@@ -162,6 +182,11 @@ function main() {
   for (const name of gstreamerBuildDepsMissing(workflows)) {
     failures.push(
       `.github/workflows/${name}: installs Tauri's Linux build deps without ${GSTREAMER_BUILD_DEPS.join(" and ")} — the client's gstreamer-sys build needs them`,
+    );
+  }
+  for (const { name, line } of unboundedPlaywrightInstalls(workflows)) {
+    failures.push(
+      `.github/workflows/${name}:${line}: runs \`playwright install --with-deps\` or \`playwright install-deps\` directly — use \`bash ../scripts/ci/playwright-install.sh\` so the apt phase is bounded and attributed to its own step`,
     );
   }
   const cargo = "Client/src-tauri/Cargo.toml";
