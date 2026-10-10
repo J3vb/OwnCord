@@ -628,12 +628,15 @@ function dismissNotice(id,sig){
   const all=dismissStore(),uid=state.me&&state.me.id;if(uid===undefined||uid===null)return;
   all[uid]=Object.assign(dismissedFor(),{[id]:sig});
   try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* storage unavailable: the dismiss does not stick */}
-  renderContent();
+  return rerenderDismissed();
 }
 function restoreDismissed(){
   const all=dismissStore();delete all[state.me&&state.me.id];
   try{localStorage.setItem(DISMISS_KEY,JSON.stringify(all))}catch(e){/* nothing was stored */}
-  renderContent();
+  return rerenderDismissed();
+}
+function rerenderDismissed(){
+  return Promise.resolve(renderContent()).then(()=>{const h=document.getElementById('attnTitle');if(h)h.focus()});
 }
 function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-label="Dismiss '+esc(what)+'" title="Dismiss" data-action="dismissNotice" data-args="'+actArgs(id,sig)+'">&times;</button>'}
 
@@ -648,7 +651,7 @@ function renderContent(){
     const result=fn();
     if(result instanceof Promise){
       const renderSection=state.section;
-      result.then(function(html){if(state.section===renderSection)c.innerHTML=html}).catch(function(e){
+      return result.then(function(html){if(state.section===renderSection)c.innerHTML=html}).catch(function(e){
         console.error('[Admin] Render error in "'+renderSection+'":', e);
         if(state.section===renderSection)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" data-action="renderContent">Retry</button>';
       });

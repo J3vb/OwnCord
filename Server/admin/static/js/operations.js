@@ -156,7 +156,7 @@ function renderAttention(rep,updateDismissed){
   const chips=[['critical','critical','critical'],['warning','warning','warnings'],['ok','healthy','healthy'],['unknown','not measured','not measured']]
     .filter(k=>counts[k[0]]).map(k=>'<span class="count-chip">'+statusIcon(k[0])+plural(counts[k[0]],k[1],k[2])+'</span>').join('');
   let head='<section id="attentionPanel" aria-labelledby="attnTitle"><div class="health-hero '+({ok:'ok',warning:'warn',critical:'crit',unknown:'pending'})[tone]+'">'
-    +'<div class="health-hero-icon">'+statusIcon(tone)+'</div><div class="health-hero-text"><h2 class="health-hero-title '+cls+'" id="attnTitle">'+title+'</h2><div class="health-hero-sub">'+sub+'</div></div>'
+    +'<div class="health-hero-icon">'+statusIcon(tone)+'</div><div class="health-hero-text"><h2 class="health-hero-title '+cls+'" id="attnTitle" tabindex="-1">'+title+'</h2><div class="health-hero-sub">'+sub+'</div></div>'
     +'<div class="health-hero-counts">'+(chips?'<span class="sr-only">Health checks: </span>'+chips:'')+'<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+'Refresh</button></div></div>';
   shown.forEach(w=>{head+=attnWarningCard(w)});
   if(recovered.length)head+=disclosure('Recently recovered ('+recovered.length+')',recovered.map(attnWarningCard).join(''),false,'attn-recovered');

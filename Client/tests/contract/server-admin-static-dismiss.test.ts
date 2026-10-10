@@ -152,8 +152,9 @@ describe("Server/admin/static — dismissable notices", () => {
     const title = () => content.querySelector("#attnTitle");
     expect(title()?.textContent).toContain("1 problem needs your attention");
     click(dom, content.querySelector(".attn-warning .notice-dismiss"));
-    content = await paint(dom, booted.bridge);
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 20));
     expect(title()?.textContent).toBe("Everything is running normally");
+    expect(dom.window.document.activeElement).toBe(title());
     expect(content.querySelector(".health-hero.ok")).toBeTruthy();
     expect(content.querySelector('[data-action="restoreDismissed"]')?.textContent).toContain(
       "1 dismissed",
