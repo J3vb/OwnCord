@@ -59,7 +59,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Accounts & admin**
 
-- The member list no longer offers Change Role, Force Logout or Ban on members who outrank you, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
+- The member list no longer offers Change Role, Force Logout or Ban on members at or above your rank, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
 - When something in front of the server (such as a reverse proxy) answers a request with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
 
 **Messages & files**
