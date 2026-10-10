@@ -108,6 +108,7 @@ vi.stubGlobal("indexedDB", {
 import {
   clearAttachmentCaches,
   EXTERNAL_IMAGE_CACHE_MAX,
+  EXTERNAL_IMAGE_CACHE_MAX_BYTES,
   clearExternalImageCache,
   fetchExternalImage,
   fetchImageAsObjectUrl,
@@ -372,6 +373,68 @@ describe("attachment cache clearing", () => {
     img.dispatchEvent(new Event("error"));
     await vi.waitFor(() => expect(img.src).toBe(`blob:avatar-${EXTERNAL_IMAGE_CACHE_MAX + 2}`));
   });
+
+  /** A broker blob that reports `bytes` without allocating them. */
+  function bigBlob(bytes: number): Blob {
+    const blob = new Blob(["x"]);
+    Object.defineProperty(blob, "size", { value: bytes });
+    return blob;
+  }
+
+  it("bounds broker-fetched blob: URLs by bytes", async () => {
+    // A broker image may be 16 MB, so a count cap alone can pin ~1.6 GB of
+    // blob memory outside the JS heap.
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({
+      ok: true,
+      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+    });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:bytes-${++next}`);
+    const revoke = vi.fn();
+    URL.revokeObjectURL = revoke;
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const first = (await fetchExternalImage({ url: url(1) }))!;
+    await fetchExternalImage({ url: url(2) });
+    expect(revoke).not.toHaveBeenCalled(); // 0.8 of the cap: nothing evicted
+
+    const third = (await fetchExternalImage({ url: url(3) }))!;
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith(first); // the oldest goes first
+
+    const calls = brokerImageMock.mock.calls.length;
+    expect(await fetchExternalImage({ url: url(3) })).toBe(third); // still cached
+    expect(brokerImageMock.mock.calls.length).toBe(calls);
+  });
+
+  it("an evicted-by-bytes external image is re-requested when shown again", async () => {
+    clearExternalImageCache();
+    brokerImageMock.mockReset();
+    brokerImageMock.mockResolvedValue({
+      ok: true,
+      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+    });
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:bytes-live-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
+
+    const img = document.createElement("img");
+    recoverEvictedImage(img, { url: url(1) });
+    img.src = (await fetchExternalImage({ url: url(1) }))!;
+    expect(img.src).toBe("blob:bytes-live-1");
+
+    await fetchExternalImage({ url: url(2) });
+    await fetchExternalImage({ url: url(3) });
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:bytes-live-1");
+
+    const calls = brokerImageMock.mock.calls.length;
+    img.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(img.src).toBe("blob:bytes-live-4"));
+    expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
+  });
 });
 
 // B7-13: the server-content caches belong to one signed-in account. Every key
@@ -556,6 +619,21 @@ describe("one download per attachment (DP-56)", () => {
       expect(row.querySelector("img")).not.toBeNull();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("the missing-image set is bounded", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+    const missing = (i: number): string => `https://example.com/api/v1/files/gone-${i}`;
+
+    for (let i = 1; i <= 1001; i++) {
+      await fetchImageAsObjectUrl(missing(i));
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+
+    await fetchImageAsObjectUrl(missing(1001)); // recent: still remembered
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+    await fetchImageAsObjectUrl(missing(1)); // oldest: dropped, asked for again
+    expect(fetchMock).toHaveBeenCalledTimes(1002);
   });
 });
 

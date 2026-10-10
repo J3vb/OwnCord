@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+**Messages & files**
+
+- A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
+
 ### Changed
 
 **Messages & files**
