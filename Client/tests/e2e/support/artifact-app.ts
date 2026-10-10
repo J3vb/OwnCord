@@ -357,6 +357,31 @@ export async function killInstalled(binary: string) {
   }
 }
 
+/**
+ * Waits for the update installer's own restart of the app (Windows). The
+ * updater runs the NSIS installer passive with /R, so the installer starts the
+ * updated binary when it finishes. A launch made before that restart loses the
+ * single-instance lock to it and exits 0 with no output (seen on
+ * windows-11-arm). The old process is gone once the installer can overwrite
+ * the exe, so after the digest changes any running owncord-client.exe is the
+ * restart. Linux replaces the AppImage in place and has nothing to wait for.
+ */
+export async function waitForUpdaterRestart(timeout = 60_000) {
+  if (process.platform !== "win32") return;
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const { stdout } = await exec(
+      "tasklist",
+      ["/fo", "csv", "/nh", "/fi", `imagename eq ${WINDOWS_EXE}`],
+      { timeout: 30_000 },
+    );
+    if (stdout.includes(`"${WINDOWS_EXE}"`)) return;
+    if (Date.now() > deadline)
+      throw new Error(`the update installer never restarted ${WINDOWS_EXE} within ${timeout}ms`);
+    await new Promise((done) => setTimeout(done, 1_000));
+  }
+}
+
 /** Waits until `css` (optionally containing `text`) is rendered. */
 export async function waitFor(app: ArtifactDriver, css: string, text = "", timeout = 30_000) {
   await expect
