@@ -48,7 +48,7 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -459,13 +459,35 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above — instead of a bare `void` per call, which left a rejected or
-        // failed write unreported and the sidebar showing an order the
-        // server never accepted.
+        // above. A rejected PATCH is rolled back to its previous position only
+        // if no channel_update broadcast arrived for that channel since the
+        // request started (the server broadcasts before it answers, so a
+        // broadcast means the write landed) and it still shows the optimistic
+        // value. Only the broadcast counts: unread/mention badge mutations also
+        // replace the channel object but confirm nothing. A request that failed
+        // only because its response was lost is covered by the reconnect
+        // resync, so it needs no reconciliation here.
+        const touched = new Set<number>();
+        const unsubscribe = ws.on("channel_update", (payload) => {
+          touched.add(payload.id);
+        });
         void Promise.allSettled(
           reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
         ).then((results) => {
+          unsubscribe();
           if (results.some((r) => r.status === "rejected")) {
+            results.forEach((result, i) => {
+              const entry = reorders[i];
+              if (
+                result.status === "rejected" &&
+                entry !== undefined &&
+                !touched.has(entry.channelId) &&
+                channelsStore.getState().channels.get(entry.channelId)?.position ===
+                  entry.newPosition
+              ) {
+                updateChannelPosition(entry.channelId, entry.previousPosition);
+              }
+            });
             getToast()?.show(shellText("channel.reorderFailed"), "error");
           }
         });

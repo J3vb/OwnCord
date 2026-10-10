@@ -302,7 +302,7 @@ function defaultOpts(): SidebarAreaOptions {
     ws: {
       send: vi.fn(),
       close: vi.fn(),
-      on: vi.fn(),
+      on: vi.fn(() => vi.fn()),
       off: vi.fn(),
     } as unknown as SidebarAreaOptions["ws"],
     api: {
@@ -2239,6 +2239,182 @@ describe("SidebarArea", () => {
       expect(toast.show).not.toHaveBeenCalled();
 
       cleanup(result);
+    });
+
+    describe("onReorderChannel rollback", () => {
+      function seedOrder(positions: Record<number, number>): void {
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          for (const [id, position] of Object.entries(positions)) {
+            channels.set(Number(id), {
+              id: Number(id),
+              name: `ch-${id}`,
+              type: "text",
+              category: null,
+              position,
+              unreadCount: 0,
+              mentionCount: 0,
+              lastMessageId: null,
+              canSend: true,
+              topic: "",
+              slowMode: 0,
+              nsfw: false,
+              voiceMaxUsers: 0,
+              voiceMaxVideo: 0,
+            });
+          }
+          return { ...prev, channels };
+        });
+      }
+      const positionOf = (id: number): number | undefined =>
+        channelsStore.getState().channels.get(id)?.position;
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      };
+
+      // The sidebar has already applied the optimistic order (channels 1 and
+      // 2 swapped) by the time onReorderChannel runs.
+      const swap = [
+        { channelId: 1, newPosition: 1, previousPosition: 0 },
+        { channelId: 2, newPosition: 0, previousPosition: 1 },
+      ];
+
+      it("restores only the entry whose own write failed", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        await flush();
+
+        // Channel 1's PATCH was accepted, so it stays at its new position;
+        // channel 2's was rejected, so it goes back.
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(1);
+        expect(toast.show).toHaveBeenCalledWith("Failed to save channel order", "error");
+
+        cleanup(result);
+      });
+
+      it("leaves the new positions in place when every write succeeds", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        await flush();
+
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(0);
+        expect(toast.show).not.toHaveBeenCalled();
+
+        cleanup(result);
+      });
+
+      it("leaves a confirmed entry alone when its broadcast lands before the batch settles", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // The server broadcasts channel_update before it answers the PATCH, so
+        // channel 1's confirmed position can arrive before the batch settles.
+        seedOrder({ 1: 1 });
+        await flush();
+
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(1);
+
+        cleanup(result);
+      });
+
+      it("keeps the server value of a channel confirmed by a broadcast before its write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // The server persisted channel 2's move and broadcast it, then the
+        // response was lost: the broadcast carries the same position the
+        // optimistic update set, so only the broadcast itself tells them apart.
+        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+          (c: unknown[]) => c[0] === "channel_update",
+        )![1] as (payload: { id: number }) => void;
+        onUpdate({ id: 2 });
+        await flush();
+
+        expect(positionOf(2)).toBe(0);
+
+        cleanup(result);
+      });
+
+      it("still rolls back when only an unread badge touched the channel while the write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // An ordinary badge mutation replaces the channel object but is not a
+        // channel_update, so it must not count as a server confirmation.
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          const ch = channels.get(2)!;
+          channels.set(2, { ...ch, unreadCount: ch.unreadCount + 1 });
+          return { ...prev, channels };
+        });
+        await flush();
+
+        expect(positionOf(2)).toBe(1);
+
+        cleanup(result);
+      });
+
+      it("does not overwrite a newer position that arrived while the failed write was in flight", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // A newer reorder (or broadcast) moved channel 2 elsewhere before the
+        // failure surfaced; the stale rollback must not clobber it.
+        seedOrder({ 2: 5 });
+        await flush();
+
+        expect(positionOf(2)).toBe(5);
+
+        cleanup(result);
+      });
     });
   });
 
