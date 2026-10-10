@@ -921,6 +921,35 @@ describe("DmCallPanel — video in the call", () => {
     expect(shield(root, OTTO)).toBe(badge);
   });
 
+  it("keeps focus on a focused shield when its camera tile is swapped away", async () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    document.body.appendChild(root);
+    panel!.setVideoActive(true);
+    setPeerVerification({
+      userId: OTTO,
+      status: "mismatch",
+      safetyNumber: null,
+      sessionFingerprint: null,
+    });
+    voiceStore.flush();
+    const cell = document.createElement("div");
+    cell.className = "video-cell";
+    cell.dataset.userId = String(OTTO);
+    cell.dataset.streamType = "camera";
+    panel!.videoElement()!.appendChild(cell);
+    await Promise.resolve();
+
+    const badge = shield(root, OTTO)!;
+    badge.focus();
+    expect(document.activeElement).toBe(badge);
+    cell.remove();
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(shield(root, OTTO));
+    root.remove();
+  });
+
   it("leaves one shield on a camera tile across a panel rebuild", async () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();

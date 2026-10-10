@@ -853,6 +853,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (ref.verify.parentElement !== host) host.appendChild(ref.verify);
   }
 
+  let shieldFocusedFor: number | null = null;
+
   function buildShield(userId: number, v: PeerVerification, dm: DmChannel): HTMLElement {
     const { icon, color, title } = verifyPresentation(v);
     const cls = `dcp-verify ${v.status}`;
@@ -862,6 +864,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         : createElement("span", { class: cls, title, role: "img", "aria-label": title });
     el.style.color = color;
     el.appendChild(createIcon(icon, 14));
+    el.addEventListener("focus", () => (shieldFocusedFor = userId), { signal: disposable.signal });
+    el.addEventListener(
+      "blur",
+      (e) => {
+        if (e.relatedTarget instanceof Element) shieldFocusedFor = null;
+      },
+      { signal: disposable.signal },
+    );
     if (v.status === "mismatch") {
       el.addEventListener(
         "click",
@@ -1025,9 +1035,11 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       container.appendChild(root);
       const tiles = new MutationObserver(() => {
         for (const [userId, ref] of avatars) {
-          const hadFocus = ref.verify?.contains(document.activeElement) === true;
           placeShield(userId, ref);
-          if (hadFocus) focusFallback(userId)?.focus();
+          const active = document.activeElement;
+          if (shieldFocusedFor === userId && (active === null || active === document.body)) {
+            focusFallback(userId)?.focus();
+          }
         }
       });
       tiles.observe(videoEl, { childList: true, subtree: true });
