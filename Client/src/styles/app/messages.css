@@ -1051,20 +1051,15 @@ ul.md-list-nested {
 
 /* Inline video attachment — shares the .msg-image box so a video is capped to
    the same max width/height as an image and never widens the message column. */
-/* A fixed 16:9 box (the server sends no video dimensions), so the row keeps
-   its height while the clip loads; the clip letterboxes inside it. */
 .msg-video {
   cursor: default;
   background: #000; /* letterbox bars: true black in every theme */
-  width: 400px;
-  max-width: 100%;
-  aspect-ratio: 16 / 9;
 }
 .msg-video video {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  max-width: 100%;
+  max-height: 300px;
+  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {

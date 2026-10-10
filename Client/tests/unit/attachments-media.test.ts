@@ -99,10 +99,10 @@ describe("isVideoMime / isAudioMime", () => {
     expect(isAudioMime("Audio/Mpeg")).toBe(true);
   });
 
-  it("accepts QuickTime, M4V and Matroska, which Chromium's demuxers read", () => {
+  it("accepts QuickTime, which Chromium's demuxers read", () => {
     expect(isVideoMime("video/quicktime")).toBe(true);
-    expect(isVideoMime("video/x-m4v")).toBe(true);
-    expect(isVideoMime("video/x-matroska")).toBe(true);
+    expect(isVideoMime("video/x-m4v")).toBe(false);
+    expect(isVideoMime("video/x-matroska")).toBe(false);
   });
 
   it("rejects unknown containers rather than handing them to a player", () => {
@@ -125,11 +125,15 @@ describe("isVideoAttachment", () => {
 
   // A .mov uploaded before the server learned QuickTime was stored as
   // application/octet-stream; its extension is all that says it is a video.
-  it.each(["clip.mov", "clip.MP4", "clip.m4v", "clip.webm", "clip.mkv"])(
-    "treats an untyped %s as a video",
+  it.each(["clip.mov", "clip.MOV"])("treats an untyped %s as a video", (filename) => {
+    expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(true);
+    expect(isVideoAttachment({ mime: "", filename })).toBe(true);
+  });
+
+  it.each(["clip.mp4", "clip.m4v", "clip.webm", "clip.mkv"])(
+    "leaves an untyped %s on the chip",
     (filename) => {
-      expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(true);
-      expect(isVideoAttachment({ mime: "", filename })).toBe(true);
+      expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(false);
     },
   );
 
@@ -150,7 +154,7 @@ describe("renderAttachment — video", () => {
   it.each([
     ["video/quicktime", "clip.mov"],
     ["application/octet-stream", "clip.mov"],
-    ["video/webm", "clip.mkv"],
+    ["video/webm", "clip.webm"],
   ])("renders %s %s as a player", (mime, filename) => {
     const el = renderAttachment(att({ mime, filename }));
     expect(el.classList.contains("msg-video")).toBe(true);
@@ -188,17 +192,38 @@ describe("renderAttachment — video", () => {
     expectUnplayableChip();
   });
 
-  // A codec the engine lacks (HEVC, ProRes) can leave only the audio track
-  // playing: metadata loads but there is no picture.
-  it("swaps a player whose video track has no picture for the download chip", async () => {
+  // A codec the engine lacks (HEVC, ProRes) or an audio-only file typed as
+  // video loads metadata with no picture: it keeps playing as audio.
+  it("switches a player with no picture to the audio player and keeps playing", async () => {
     const video = await playedVideo();
     video.dispatchEvent(new Event("loadedmetadata"));
-    expectUnplayableChip();
+    expect(document.querySelector("video")).toBeNull();
+    const row = document.querySelector(".msg-audio") as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.querySelector(".msg-file-name")?.textContent).toBe("clip.mov");
+    expect(row.querySelector(".msg-file-download")).not.toBeNull();
+    expect(row.querySelector(".msg-file-note")?.textContent).toBe(
+      "Video picture cannot be shown on this device",
+    );
+    const audio = row.querySelector("audio") as HTMLAudioElement;
+    expect(audio.hidden).toBe(false);
+    expect(audio.controls).toBe(true);
+    expect(audio.src).toContain("blob:mock-1");
+    expect(row.querySelector(".msg-media-play")).toBeNull();
+  });
+
+  it("sizes a player to the clip's real ratio once metadata loads", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 1080 });
+    Object.defineProperty(video, "videoHeight", { value: 1920 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("1080/1920");
   });
 
   it("keeps a player whose video decodes", async () => {
     const video = await playedVideo();
     Object.defineProperty(video, "videoWidth", { value: 1280 });
+    Object.defineProperty(video, "videoHeight", { value: 720 });
     video.dispatchEvent(new Event("loadedmetadata"));
     expect(document.querySelector("video")).toBe(video);
     expect(document.querySelector(".msg-file")).toBeNull();

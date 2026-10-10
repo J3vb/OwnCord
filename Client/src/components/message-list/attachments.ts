@@ -103,19 +103,12 @@ export function isImageMime(mime: string): boolean {
 /** Container MIME types we are willing to hand to a <video> element.
  *  An allowlist, not a `video/` prefix test: an unknown container gets the
  *  download chip rather than a player that silently fails to decode. */
-const INLINE_VIDEO_MIMES = new Set([
-  "video/mp4",
-  "video/webm",
-  "video/ogg",
-  "video/quicktime",
-  "video/x-m4v",
-  "video/x-matroska",
-]);
+const INLINE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/ogg", "video/quicktime"]);
 
 /** Video extensions trusted only when the server could not type the file
  *  (a .mov stored before it learned QuickTime). A player that cannot decode
  *  one falls back to the download chip. */
-const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "webm", "mkv"]);
+const VIDEO_EXTENSIONS = new Set(["mov"]);
 
 /** Container MIME types we are willing to hand to an <audio> element.
  *  Includes the common aliases servers emit for MP3 and WAV. */
@@ -304,8 +297,6 @@ const SAFE_MIME_TYPES = new Set([
   "video/mp4",
   "video/webm",
   "video/quicktime",
-  "video/x-m4v",
-  "video/x-matroska",
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
@@ -1061,9 +1052,32 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     wrap.replaceWith(chip);
   };
   video.addEventListener("error", unplayable, { once: true });
-  // A codec the engine lacks (HEVC, ProRes) can load with no picture at all.
   video.addEventListener("loadedmetadata", () => {
-    if (video.videoWidth === 0) unplayable();
+    if (video.videoWidth > 0) {
+      video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      return;
+    }
+    // No picture (audio-only, or a codec the engine lacks): keep playing as audio.
+    const src = video.src;
+    const wasPlaying = !video.paused;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    const row = renderAudioAttachment(att, resolvedUrl);
+    const audio = row.querySelector("audio") as HTMLAudioElement;
+    row.querySelector(".msg-media-play")?.remove();
+    audio.hidden = false;
+    audio.controls = true;
+    audio.src = src;
+    const note = createElement("div", { class: "msg-file-note", role: "status" });
+    setText(note, messageStatusText("file.noPicture"));
+    row.querySelector(".msg-file-meta")?.appendChild(note);
+    wrap.replaceWith(row);
+    if (wasPlaying && row.isConnected) {
+      void audio.play().catch((err: unknown) => {
+        log.debug("Media playback refused", { error: String(err) });
+      });
+    }
   });
   appendChildren(wrap, video, buildPlayButton(att, resolvedUrl, wrap, video));
 

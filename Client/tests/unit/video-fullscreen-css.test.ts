@@ -30,20 +30,25 @@ describe("video full-screen CSS", () => {
   });
 });
 
-// An inline video attachment's box is fixed before the clip loads, so the
-// message list does not jump when the picture arrives; the clip letterboxes
-// inside it.
+// An inline video is capped like an image (max 300px tall, never wider than the
+// column); a 16:9 placeholder ratio limits the jump until metadata sets the real one.
 describe("inline video attachment CSS", () => {
-  it("reserves a 16:9 box", () => {
-    expect(cascadedDeclaration(".msg-video", "aspect-ratio")?.value.value).toEqual({
-      auto: false,
-      ratio: [16, 9],
-    });
+  it("has no fixed-size box", () => {
+    expect(cascadedDeclaration(".msg-video", "width")).toBeUndefined();
+    expect(cascadedDeclaration(".msg-video", "aspect-ratio")).toBeUndefined();
   });
 
-  it("letterboxes the clip inside the box", () => {
-    expect(cascadedDeclaration(".msg-video video", "object-fit")?.value.value).toMatchObject({
-      value: [{ value: { type: "ident", value: "contain" } }],
+  it("caps the video at the column width and 300px tall", () => {
+    expect(cascadedDeclaration(".msg-video video", "max-height")?.value.value).toMatchObject({
+      value: { type: "dimension", value: { unit: "px", value: 300 } },
+    });
+    expect(cascadedDeclaration(".msg-video video", "max-width")).toBeDefined();
+  });
+
+  it("starts with a 16:9 placeholder ratio", () => {
+    expect(cascadedDeclaration(".msg-video video", "aspect-ratio")?.value.value).toEqual({
+      auto: false,
+      ratio: [16, 9],
     });
   });
 });

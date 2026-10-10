@@ -102,12 +102,6 @@ test.describe("Video attachments", () => {
       await boot(page);
       const box = row(page, clip.id).locator(".msg-video");
       await expect(box).toBeVisible();
-      const size = async () => {
-        const b = await box.boundingBox();
-        return { width: b?.width, height: b?.height };
-      };
-      const before = await size();
-
       await box.getByRole("button", { name: `Play ${clip.filename}` }).click();
 
       const video = box.locator("video");
@@ -120,8 +114,8 @@ test.describe("Video attachments", () => {
           })),
         )
         .toEqual({ error: null, picture: true });
-      // The box was reserved before the clip loaded: the row keeps its height.
-      expect(await size()).toEqual(before);
+      const rect = await video.boundingBox();
+      expect(rect?.height ?? Infinity).toBeLessThanOrEqual(300);
     });
   }
 
