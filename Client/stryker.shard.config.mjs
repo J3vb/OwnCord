@@ -181,6 +181,7 @@ export const shards = {
     "src/features/moderation/wsHandlers.ts",
     "src/features/navigation/contentView.ts",
     "src/features/navigation/destinations.ts",
+    "src/features/profiles/openUserProfilePopup.ts",
     "src/features/reports/myReports.ts",
     "src/features/reports/openers.ts",
     "src/features/reports/reportDialog.ts",

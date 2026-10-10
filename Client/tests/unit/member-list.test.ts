@@ -7,6 +7,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { applyThemeByName } from "@lib/themes";
+import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
 /**
  * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
@@ -971,6 +972,41 @@ describe("MemberList profile fields", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.activeElement).toBe(after);
+  });
+
+  it("leaves a profile popup another component opened open when it is destroyed", async () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    // A message author card, opened by MessageList through the shared opener.
+    const closeOther = openUserProfilePopup({ userId: 1, anchorX: 0, anchorY: 0 });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+
+    list.destroy?.();
+    list = undefined as never;
+
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull();
+    closeOther();
+  });
+
+  it("closes the profile popup it opened itself when it is destroyed", async () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+    container
+      .querySelector<HTMLElement>('[data-testid="member-1"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+
+    list.destroy?.();
+    list = undefined as never;
+
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
   });
 
   it("describes each row by its custom status and presence, kept current (B9-10)", () => {
