@@ -46,8 +46,10 @@ What remains is specific:
 
 Nothing found is a leak in the lifecycle sense; the allowlists in
 `tests/unit/lifecycle-ownership.test.ts` were read entry by entry and each has a
-sound reason. The growth that exists is bounded-per-channel state kept for the
-whole session, which is a product choice (section 6).
+sound reason. The message-window growth that exists is bounded-per-channel state
+kept for the whole session, which is a product choice (section 6). The broker
+image, link-preview, missing-image and consent-admission caches (E1, E3) grow
+globally rather than per channel, and are findings in their own right.
 
 ## 2. Method and measurements
 
@@ -85,8 +87,9 @@ row rebuilt — and that ratio does not depend on the measured heights.
   index on `used` so eviction walks the oldest entries with a cursor only when
   the total is over the cap. Schema version 2.
 - **Expected gain.** First open of a channel with N uncached avatars and
-  attachments goes from N opens + N full-store reads to one open and no reads
-  unless the cap is hit. On a cache near its 256 MB cap this is the difference
+  attachments goes from N opens + N full-store reads to one open and one
+  cursor scan to seed the total (a cache already near its cap still pays that
+  scan once per connection), with no further reads unless the cap is hit. On a cache near its 256 MB cap this is the difference
   between a smooth first paint and a stall per image.
 
 ### A2 — the main page statically imports LiveKit (note, follow-up)
@@ -201,11 +204,11 @@ Each restore starts a GIF load the user never sees. Measured: 10 frozen GIFs,
   rebuild.
 - The inline-image `load` listener is not `once` (`media.ts:385-396`), so every
   `src` change from a freeze or unfreeze re-runs it: a style write followed by
-  an `offsetHeight` read, one forced layout per GIF per toggle.
-  `attachments.ts:1012-1019` has the same shape.
+  an `offsetHeight` read, one forced layout per GIF per toggle. The listener in
+  `attachments.ts` already passes `{ once: true }` and needs no change.
 - **Fix.** A discard path that stops observing without restoring `src`, a
-  per-entry reference so release is O(1), and `once: true` on the load
-  listeners. The existing `unobserveMedia` contract (restore the `src`) is kept
+  per-entry reference so release is O(1), and `once: true` on the
+  `media.ts` load listener. The existing `unobserveMedia` contract (restore the `src`) is kept
   for any caller that keeps the image.
 
 ### C3 — layout shift on re-render (product decision)
@@ -330,9 +333,11 @@ opened; nothing trims by channel count, and the store resets only at logout
 (`stores/auth.store.ts:159`). Each store update also copies the whole channel
 map (`liveMessages.ts:81`, `historyWindows.ts:135,220,322`), which is O(channels)
 per message. A user who visits 60 channels in a day holds 60 × 500 rows. A
-revisit already refetches (B1), so evicting the windows of channels not among
-the last N visited costs nothing visible; it is a product call because the
-unread divider and "jump to present" read the cached window.
+revisit already refetches (B1), but today it keeps the cached rows on screen
+while it does, whereas an evicted window shows the loading placeholder and takes
+the first-visit 50-row path. So eviction is not free: it needs either that
+visible cost accepted or a separate render snapshot. It is a product call, also
+because the unread divider and "jump to present" read the cached window.
 
 ### E3 — soak blind spots (noted)
 
