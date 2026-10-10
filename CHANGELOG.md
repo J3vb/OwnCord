@@ -68,6 +68,12 @@ and only when it changes something a contributor or fork holder must do
 - Voice participants in the sidebar now show their profile picture left of their name instead of a solid coloured circle; the initial only appears when they have no picture or it fails to load.
 - A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
 
+**Accounts & admin**
+
+- Changing a member's role, banning, unbanning and force-logging-out from the member list no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. The server enforces the same permission and rank checks on both routes. The new routes are not limited to `server.admin_allowed_cidrs`; they accept only this server's own sessions and API tokens, with the permission and rank checks.
+- The member list no longer offers Change Role, Force Logout or Ban on members at or above your rank, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
+- When something in front of the server (such as a reverse proxy) answers a request with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
+
 **Messages & files**
 
 - A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.

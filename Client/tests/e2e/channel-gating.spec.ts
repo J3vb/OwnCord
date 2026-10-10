@@ -252,7 +252,7 @@ async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
         { pattern: "/api/v1/blocks/2", method: "DELETE", status: 200, body: {} },
         { pattern: "/api/v1/blocks", status: 200, body: { blocked_user_ids: [] } },
         // The member list's banned-list walk on every roster change.
-        { pattern: "/admin/api/users", status: 200, body: [] },
+        { pattern: "/api/v1/moderation/members", status: 200, body: [] },
       ],
       simulateWsFlow: true,
       wsHandlers: opts.wsHandlers,

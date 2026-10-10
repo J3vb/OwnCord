@@ -1217,7 +1217,7 @@ export interface MemberResponse {
 }
 
 /**
- * One user row from the admin API (`GET /admin/api/users`), the shape
+ * One user row from the admin API (`GET /api/v1/moderation/members`), the shape
  * `toAdminUserResponse` writes (Server/admin/types.go). Distinct from
  * `MemberResponse`: this one carries the ban state the moderation surface
  * needs, and the list is paged server-side.

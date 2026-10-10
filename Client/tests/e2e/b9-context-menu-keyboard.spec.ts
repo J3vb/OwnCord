@@ -84,8 +84,8 @@ async function mockSession(page: Page): Promise<void> {
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        { pattern: "/admin/api/users", status: 200, body: [] },
-        { pattern: "/admin/api/users/", method: "PATCH", status: 200, body: {} },
+        { pattern: "/api/v1/moderation/members", status: 200, body: [] },
+        { pattern: "/api/v1/moderation/members/", method: "PATCH", status: 200, body: {} },
         { pattern: "/admin/api/channels/", method: "PATCH", status: 200, body: {} },
       ],
       simulateWsFlow: true,
@@ -230,7 +230,7 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
 
     await expect(async () => {
       const call = (await capturedCalls(page)).find(
-        (c) => (c.url ?? "").includes("/admin/api/users/2") && c.method === "PATCH",
+        (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
       );
       expect(call).toBeDefined();
     }).toPass({ timeout: 5_000 });

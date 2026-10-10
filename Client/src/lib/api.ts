@@ -281,6 +281,14 @@ export function errorText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+/** The webview's JSON/stream failure for a body that is not JSON. */
+function isNotJsonError(err: unknown): boolean {
+  return (
+    err instanceof SyntaxError ||
+    (err instanceof Error && /JSON|Unexpected token/.test(err.message))
+  );
+}
+
 export type OnUnauthorized = () => void;
 
 /**
@@ -675,7 +683,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         releaseTransport();
         return undefined as T;
       }
-      const data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+      let data: T;
+      try {
+        data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+      } catch (jsonErr) {
+        owner.assertCurrent();
+        // A 2xx that is not JSON (a proxy's web page in front of the API): the
+        // webview's parse error says nothing a user can act on.
+        if (!isNotJsonError(jsonErr)) throw jsonErr;
+        log.warn(`${label} response is not JSON`, {
+          method,
+          path,
+          status: res.status,
+          contentType: res.headers.get("content-type") ?? undefined,
+        });
+        throw new ApiClientError(res.status, "NOT_JSON", connectText("error.notJson"));
+      }
       owner.assertCurrent();
       return data;
     } finally {
@@ -702,6 +725,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
   ): Promise<T> {
     // i18n-exempt: log label for admin requests, never rendered
     return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
+  }
+
+  function memberRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return request<T>(method, `/moderation/members${path}`, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
@@ -1555,10 +1587,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
     },
 
-    // ── Admin: Members ──────────────────────────────────────
+    // ── Members (moderation) ────────────────────────────────
+    // These ride /api/v1/moderation/members, not /admin/api: a reverse proxy in
+    // front of a server may answer /admin with a web page. The server runs the
+    // same handlers and rank checks on both (admin.NewMemberAPI).
 
     adminKickMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>("DELETE", `/users/${userId}/sessions`, undefined, signal);
+      return memberRequest<void>("DELETE", `/${userId}/sessions`, undefined, signal);
     },
 
     adminBanMember(
@@ -1567,9 +1602,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       durationHours?: number,
       signal?: AbortSignal,
     ): Promise<void> {
-      return adminRequest<void>(
+      return memberRequest<void>(
         "PATCH",
-        `/users/${userId}`,
+        `/${userId}`,
         {
           banned: true,
           ban_reason: reason ?? "",
@@ -1583,9 +1618,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     adminChangeRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>(
+      return memberRequest<void>(
         "PATCH",
-        `/users/${userId}`,
+        `/${userId}`,
         {
           role_id: roleId,
         },
@@ -1599,7 +1634,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      * roster entry, so the roster needs no refreshing locally.
      */
     adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>("PATCH", `/users/${userId}`, { banned: false }, signal);
+      return memberRequest<void>("PATCH", `/${userId}`, { banned: false }, signal);
     },
 
     /**
@@ -1621,9 +1656,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           offset: String(pageIndex * pageSize),
         });
         // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
-        const page = await adminRequest<AdminUser[]>(
+        const page = await memberRequest<AdminUser[]>(
           "GET",
-          `/users?${params.toString()}`,
+          `?${params.toString()}`,
           undefined,
           signal,
         );

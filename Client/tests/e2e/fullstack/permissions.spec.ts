@@ -2,12 +2,10 @@
  * Fullstack: rank enforcement on the real server (batch N3 counterpart).
  *
  * The mocked `admin-moderation.spec.ts` proves the client sends the right
- * moderation request. This spec proves the SERVER is the authority on the rank
- * rule the client cannot evaluate: a moderator may moderate a lower-ranked
- * member, and is refused on a peer or higher rank even though the client shows
- * them the menu item. Both directions run through the real member context menu
- * against a real Go server, and every assertion is checked back against the
- * server's own user list.
+ * moderation request. This spec proves, against a real Go server, that a
+ * moderator can moderate a lower-ranked member and is not offered the action on
+ * a higher rank. Both directions run through the real member context menu and
+ * are checked back against the server's own user list.
  */
 
 import { test, expect, login } from "./fixtures";
@@ -57,7 +55,7 @@ async function listUsers(server: TestServer, token: string): Promise<AdminUser[]
 }
 
 test.describe("Moderation rank enforcement (real server)", () => {
-  test("a moderator can ban a lower-ranked member but is refused on the owner", async ({
+  test("a moderator can ban a lower-ranked member but is not offered Ban on the owner", async ({
     alice,
     bob,
     server,
@@ -104,24 +102,16 @@ test.describe("Moderation rank enforcement (real server)", () => {
     expect(carolAfter.ban_reason).toBe("e2e lower-rank ban");
 
     // Negative: the same moderator targets the Owner (higher rank). The client
-    // shows the item — it cannot evaluate rank — and the server refuses.
+    // knows the rank rule and does not offer the action at all.
     const ownerUser = afterBan.find((u) => u.username === "alice")!;
     const ownerMenu = await openMemberMenu(bob, ownerUser.id);
-    await ownerMenu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
-    await ownerMenu.locator("[data-testid='ban-confirm']").click();
-    await expect(
-      bob.locator("[data-testid='toast']", { hasText: "equal or higher rank" }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(ownerMenu.locator(".context-menu__item", { hasText: /^Ban$/ })).toHaveCount(0);
 
     const afterRefusal = await listUsers(server, owner);
     expect(afterRefusal.find((u) => u.username === "alice")!.banned).toBe(false);
   });
 
-  test("force logout of a higher-ranked peer is refused by the server", async ({
-    alice,
-    bob,
-    server,
-  }) => {
+  test("force logout is not offered on a higher-ranked peer", async ({ alice, bob, server }) => {
     void alice;
     const owner = server.owner!.token;
     const users = await listUsers(server, owner);
@@ -136,15 +126,7 @@ test.describe("Moderation rank enforcement (real server)", () => {
     await login(bob, server, "bob");
 
     const menu = await openMemberMenu(bob, aliceUser.id);
-    const logout = menu.locator("[data-testid='force-logout']");
-    await expect(logout).toBeVisible();
-    await logout.click();
-    await expect(logout).toHaveText("Log them out?");
-    await logout.click();
-
-    await expect(
-      bob.locator("[data-testid='toast']", { hasText: "equal or higher rank" }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(menu.locator("[data-testid='force-logout']")).toHaveCount(0);
 
     // The owner token is one of alice's sessions; a landed force-logout would
     // have revoked it, so an authenticated call proves it never did.
