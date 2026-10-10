@@ -158,6 +158,10 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
 ] }
+# WebView2 profile permission state (windows_media.rs). Both match the
+# versions tauri/wry already build, so no new crate enters the tree.
+webview2-com = "0.39"
+windows-core = "0.62"
 # Scrubs the plaintext secret copies that the DPAPI fallback (dpapi.rs, itself
 # `#[cfg(windows)]`) has to materialize as `Vec<u8>` for the Win32 call.
 zeroize = "1"
