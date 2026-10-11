@@ -210,7 +210,7 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 			// (a no-op on an open module) drops it.
 			_ = module.Close(ctx)
 			r.releaseClosedModule(inst, module)
-			return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %v", inst.Manifest.Name, err)
+			return listCommandsError(inst.Manifest.Name, err)
 		}
 		for _, cmd := range cmds {
 			if err := r.RegisterCommand(cmd, inst); err != nil {
@@ -220,6 +220,15 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		}
 	}
 	return nil
+}
+
+// listCommandsError reports a failed list_commands call. err is nil when the
+// call itself returned cleanly but the module was found closed afterwards.
+func listCommandsError(plugin string, err error) error {
+	if err == nil {
+		return fmt.Errorf("plugin %q: list_commands left the module closed", plugin)
+	}
+	return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %w", plugin, err)
 }
 
 // platformDeactivate closes the wazero module held by inst without touching

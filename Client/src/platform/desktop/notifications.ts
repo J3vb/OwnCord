@@ -7,7 +7,10 @@
 // API is a static import — `platform/desktop/trayStatus.ts` already brings it
 // into the startup closure, so the subscription below costs no new chunk.
 import { listen } from "@tauri-apps/api/event";
+import { createLogger } from "@lib/logger";
 import type { Notifier, NotifierShowOptions, NotificationTarget } from "../contracts/notifications";
+
+const log = createLogger("notifications");
 
 export const notifier: Notifier = {
   // tauri-plugin-notification's desktop backend hard-codes both the
@@ -66,10 +69,12 @@ export const notifier: Notifier = {
     let unlisten: (() => void) | null = null;
     void listen<NotificationTarget>("notification-click", (e) => {
       if (active) handler(e.payload);
-    }).then((stop) => {
-      if (active) unlisten = stop;
-      else stop();
-    });
+    })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((err: unknown) => log.warn("notification-click listen failed", err));
     return () => {
       active = false;
       unlisten?.();

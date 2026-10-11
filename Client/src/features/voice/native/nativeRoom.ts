@@ -817,8 +817,11 @@ export class NativeRoom {
         );
         break;
       case "trackMuted": {
-        const pub = this.remoteParticipants.get(event.identity)?.trackPublications.get(event.sid);
-        if (pub !== undefined) pub.isMuted = event.muted;
+        const p = this.remoteParticipants.get(event.identity);
+        const pub = p?.trackPublications.get(event.sid);
+        if (pub === undefined) break;
+        pub.isMuted = event.muted;
+        if (event.muted) this.emit(RoomEvent.TrackMuted, pub, p);
         break;
       }
       case "microphonePermission":

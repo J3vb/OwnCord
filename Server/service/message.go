@@ -272,6 +272,12 @@ func (s *MessageService) SetPushNotifier(n PushNotifier) {
 	s.pushNotifier = n
 }
 
+// backgroundJobTimeout bounds each job SendMessage hands to bg (the
+// no-worker mention write and Web Push dispatch), so a wedged store or push
+// service cannot hold its goroutine forever. It matches Notify's own cap. A
+// var so tests can shorten it.
+var backgroundJobTimeout = pushDispatchTimeout
+
 // NewMessageService creates a MessageService.
 func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
 	return &MessageService{

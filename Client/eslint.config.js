@@ -128,6 +128,15 @@ export default tseslint.config(
       "local/no-store-write-in-ws-on": "error",
     },
   },
+  {
+    // Warn, not error: the 46 bare invokes that predate the rule are wrapped as
+    // their files are touched (CODE_STYLE.md, "Custom ESLint rules").
+    files: ["src/platform/desktop/**/*.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/invoke-needs-try-catch": "warn",
+    },
+  },
   // --- Native imports stay behind the desktop seam (B7-1) ---
   // B7-5 moved the last call site behind src/platform/, so the seam is the only
   // exemption. no-restricted-imports covers static imports and

@@ -75,19 +75,45 @@ func (h *Hub) kickClientTerminal(c *Client) {
 	h.kickClient(c)
 }
 
+// sweepTimeout bounds one background sweep, so a wedged DB or LiveKit call
+// cannot hold a sweep (and its in-flight guard) forever; the next tick
+// retries. A var so tests can shorten it.
+var sweepTimeout = 30 * time.Second
+
+// sweepTailTimeout bounds the follow-up steps of a sweep action that already
+// committed (broadcast, key-holder re-election, SFU removal). They run
+// detached from the sweep's own timeout so a committed delete is still
+// announced, but end when the hub stops so they never outlast the shutdown
+// step. 15s keeps it above the DB busy_timeout (5s), so a delete that waits
+// out the lock still leaves budget to broadcast. A var so tests can shorten it.
+var sweepTailTimeout = 15 * time.Second
+
+func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	tail, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
+	stop := context.AfterFunc(h.life, cancel)
+	return tail, func() {
+		stop()
+		cancel()
+	}
+}
+
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
 // blocks on the DB-heavy periodic sweeps (they already lock correctly for
 // concurrent execution with the hub). inFlight guarantees a sweep never runs
 // concurrently with itself: a tick arriving while the previous run is still
-// going is dropped, and the next tick retries.
-func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func()) {
+// going is dropped, and the next tick retries. The sweep's ctx ends at
+// sweepTimeout or when the hub stops, and Run waits for it before Done closes.
+// Only Run calls this, so no Add can race the Wait in Run's exit.
+func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
 	if !inFlight.CompareAndSwap(false, true) {
 		return
 	}
-	go func() {
+	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
+	h.sweeps.Go(func() {
 		defer inFlight.Store(false)
-		sweep()
-	}()
+		defer cancel()
+		sweep(ctx)
+	})
 }
 
 // sweepStaleClients iterates over all connected clients and kicks any that
@@ -114,10 +140,7 @@ func (h *Hub) sweepStaleClients() {
 // session has been deleted, expired, or whose user has been banned. This
 // provides time-based session enforcement for idle WebSocket connections
 // that never trigger the message-count-based check (BUG-109).
-func (h *Hub) sweepRevokedSessions() {
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
+func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
@@ -190,78 +213,11 @@ func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
 	h.applySessionVerdict(c, verdicts[c.tokenHash])
 }
 
-// sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-runs the voice join gate (permissions.CanJoinVoice) for every client
-// currently in voice, evicts the ones it now refuses, and reconciles active
-// media source permissions.
-func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
-	// The whole SFU reconciliation pass shares a budget. An unavailable
-	// companion cannot hold the hub loop for one network timeout per user.
-	mediaCtx, cancelMedia := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelMedia()
-	// Revocation must evict a live session, not merely block the next join.
-	// Nothing else in ws re-validates voice permissions for a connection that
-	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
-	// until they disconnected. Checked once a minute, and only for the handful
-	// of clients actually in voice.
-	h.mu.RLock()
-	inVoice := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
-			inVoice = append(inVoice, c)
-		}
-	}
-	h.mu.RUnlock()
-	for _, c := range inVoice {
-		chID := c.getVoiceChID()
-		if chID == 0 {
-			continue
-		}
-		allowed, err := h.voiceStillAllowed(ctx, c.userID, chID)
-		if err != nil {
-			// A transient read failure (I/O error, lock contention, a
-			// maintenance window) is not a revocation — hasChannelAccess and
-			// permissions.Checker.HasChannelPerm both collapse any DB error
-			// to "denied", which would otherwise evict every in-voice
-			// participant on one bad read. Skip this client this tick; the
-			// next tick retries. Mirrors sweepRevokedSessions' guard on its
-			// own batch lookup below.
-			slog.Warn("sweepStaleVoiceStates: permission check failed, skipping this tick",
-				"user_id", c.userID, "channel_id", chID, "err", err)
-			continue
-		}
-		if allowed {
-			if h.livekit != nil && mediaCtx.Err() == nil {
-				curChID, joinToken := c.getVoiceState()
-				if curChID == chID && joinToken != "" {
-					if syncErr := h.trySyncVoiceParticipantPermissions(mediaCtx, c.userID, chID, joinToken); syncErr != nil && !liveKitParticipantMissing(syncErr) {
-						slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", chID, "err", syncErr)
-					}
-				}
-			}
-			continue
-		}
-		// The permission check is a DB round-trip; a voice_join to a
-		// still-permitted channel may have committed while it ran. The
-		// eviction is conditional on the client still being in the checked
-		// channel — never on whatever channel it is in by now.
-		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
-			continue
-		}
-		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
-			"user_id", c.userID, "channel_id", chID)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to join this voice channel"))
-	}
-}
-
 // sweepStaleVoiceStates queries all voice_states rows and removes any that
 // don't match a connected client's voiceChID. This catches ghost users that
 // slip through the primary cleanup paths (registerNow, readPump defer,
 // LiveKit webhook).
-func (h *Hub) sweepStaleVoiceStates() {
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
+func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	h.sweepStaleVoiceEvictRevoked(ctx)
 
 	allStates, err := h.voice.AllStates(ctx)
@@ -299,6 +255,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 	parked := h.voiceGrace.snapshot()
 
 	for _, s := range stale {
+		if ctx.Err() != nil {
+			return
+		}
 		if parked[s.userID] == s.channelID {
 			continue
 		}
@@ -338,7 +297,8 @@ func (h *Hub) sweepStaleVoiceStates() {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		h.broadcastVoiceEvent(ctx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
+		h.broadcastVoiceEvent(tailCtx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this
 		// (finishVoiceLeave, the LiveKit webhook, registerNow,
@@ -350,8 +310,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 		// the webhook call site.
 		h.updateKeyHolder(s.channelID)
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
+			_ = h.livekit.RemoveParticipant(tailCtx, s.channelID, s.userID, s.joinedAt)
 		}
+		cancelTail()
 	}
 }
 

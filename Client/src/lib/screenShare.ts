@@ -34,6 +34,7 @@ import {
 import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
+import { resolveVideoCodec } from "../features/voice/videoCodec";
 
 const log = createLogger("screenShare");
 
@@ -421,14 +422,29 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     const simulcastLayers = cameraSimulcastLayers(quality);
+    const maxFramerate = quality === "low" ? 15 : 30;
+    const videoCodec = await resolveVideoCodec(
+      videoTrack.mediaStreamTrack,
+      maxFramerate,
+      CAMERA_PUBLISH_BITRATES[quality],
+    );
+    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+      // A disableCamera (or the track unplugging) ran to completion while
+      // Auto's probe was pending: it already stopped this track and sent
+      // voice_camera(false). Nothing is published yet, so just let go.
+      removeEndedListener();
+      videoTrack.stop();
+      return;
+    }
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
       ...(simulcastLayers ? { videoSimulcastLayers: simulcastLayers } : {}),
       videoEncoding: {
         maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
-        maxFramerate: quality === "low" ? 15 : 30,
+        maxFramerate,
       },
+      videoCodec,
     });
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
@@ -446,7 +462,11 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "camera");
     deps.reapplyAudioPipeline();
-    log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
+    log.info("Camera enabled", {
+      quality,
+      maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
+      codec: videoCodec,
+    });
   } catch (err) {
     cameraEndedCleanup?.();
     if ((state.generation ?? 0) !== generation) {
@@ -584,6 +604,18 @@ export async function enableScreenshare(
         return;
       }
     }
+    const videoCodec =
+      videoTrack === undefined
+        ? "vp8"
+        : await resolveVideoCodec(videoTrack.mediaStreamTrack, effectiveFps, maxBitrate);
+    if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
+      // A disableScreenshare (or the OS stop-sharing button) ran to
+      // completion while Auto's probe was pending: it already stopped these
+      // tracks and sent voice_screenshare(false). Nothing is published yet.
+      removeEndedListener?.();
+      for (const t of screenTracks) t.stop();
+      return;
+    }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
       const simulcast = isVideo && isScreenShareSimulcast(quality, fps);
@@ -599,6 +631,7 @@ export async function enableScreenshare(
                 maxBitrate,
                 maxFramerate: effectiveFps,
               },
+              videoCodec,
             }
           : {}),
         ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
@@ -633,8 +666,8 @@ export async function enableScreenshare(
     log.info(
       "Screenshare enabled",
       picked !== undefined
-        ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate }
-        : { quality, fps: effectiveFps, maxBitrate },
+        ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate, codec: videoCodec }
+        : { quality, fps: effectiveFps, maxBitrate, codec: videoCodec },
     );
   } catch (err) {
     removeEndedListener?.();

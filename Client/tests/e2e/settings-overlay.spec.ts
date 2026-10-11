@@ -246,6 +246,17 @@ test.describe("Settings — Voice & Audio Tab", () => {
     expect(failures).toEqual([]);
   });
 
+  test("offers the video codec choice with VP8 as the default", async ({ page }) => {
+    const codec = page.getByRole("combobox", { name: "Video Codec" });
+    await expect(codec).toBeVisible();
+    await expect(codec).toHaveValue("vp8");
+    await expect(codec.locator("option")).toHaveText([
+      "VP8 (default, most compatible)",
+      "H.264 (uses your graphics card when it can)",
+      "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
+    ]);
+  });
+
   test("shows voice sensitivity slider", async ({ page }) => {
     const slider = page.locator(".settings-slider");
     await expect(slider.first()).toBeVisible();

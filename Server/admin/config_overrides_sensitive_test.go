@@ -836,3 +836,43 @@ func TestConfigOverridesSensitive_StorageDirMustNotOverlapPluginsDir(t *testing.
 		}
 	}
 }
+
+// Two PATCHes that are each valid against the saved file but forbidden
+// together must not both land (ARCH-023): preview, guards and save run as one
+// step. The caller reaches the panel through a trusted proxy at 192.0.2.1 as
+// 203.0.113.9; shrinking the allowlist to 203.0.113.0/24 is fine while the
+// proxy is trusted, and un-trusting the proxy is fine while the default
+// allowlist admits 192.0.2.1, but both together lock the caller out.
+func TestConfigOverridesSensitive_ConcurrentPatchesCannotMergeIntoLockout(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24", "203.0.113.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	overridesPath := config.OverridesPath(f.dataDir)
+	seed := `{"server.trusted_proxies": ["192.0.2.1/32"]}`
+
+	for i := range 100 {
+		if err := os.WriteFile(overridesPath, []byte(seed), 0o600); err != nil {
+			t.Fatalf("seed overrides: %v", err)
+		}
+		start := make(chan struct{})
+		codes := make(chan int, 2)
+		go func() {
+			<-start
+			w := patchConfig(t, f.handler, token, map[string]any{"server.admin_allowed_cidrs": []string{"203.0.113.0/24"}}, []string{"server.admin_allowed_cidrs"}, "203.0.113.9")
+			codes <- w.Code
+		}()
+		go func() {
+			<-start
+			w := patchConfig(t, f.handler, token, map[string]any{"server.trusted_proxies": []string{}}, []string{"server.trusted_proxies"}, "203.0.113.9")
+			codes <- w.Code
+		}()
+		close(start)
+		a, b := <-codes, <-codes
+
+		if a == http.StatusOK && b == http.StatusOK {
+			t.Fatalf("iteration %d: both PATCHes landed, leaving the caller locked out: %v", i, savedOverrides(t, f.dataDir))
+		}
+		if a != http.StatusOK && b != http.StatusOK {
+			t.Fatalf("iteration %d: both PATCHes refused (%d, %d), want exactly one to land", i, a, b)
+		}
+	}
+}

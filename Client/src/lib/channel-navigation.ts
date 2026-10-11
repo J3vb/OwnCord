@@ -14,6 +14,19 @@ import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@st
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
 import { hasUnread } from "./read-state";
 
+const reselectListeners = new Set<(channelId: number) => void>();
+
+/**
+ * Run `cb` when navigation lands on the channel already open, which changes
+ * no store (so no subscriber sees it): the user asked to see that channel, so
+ * whatever covers it (the stream view) gets out of the way. Returns the
+ * unsubscribe.
+ */
+export function onChannelReselect(cb: (channelId: number) => void): () => void {
+  reselectListeners.add(cb);
+  return () => reselectListeners.delete(cb);
+}
+
 /**
  * Activate `channelId`, clearing its unread and mention badges.
  *
@@ -28,6 +41,7 @@ import { hasUnread } from "./read-state";
  * channel would be worse than staying put.
  */
 export function navigateToChannel(channelId: number): void {
+  const reselect = channelsStore.getState().activeChannelId === channelId;
   if (!channelsStore.getState().channels.has(channelId)) {
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     if (dm === undefined) return;
@@ -42,6 +56,7 @@ export function navigateToChannel(channelId: number): void {
   // (dmStore has no matching channel), mirroring markChannelRead's dual
   // clear (read-state.ts).
   clearDmUnread(channelId);
+  if (reselect) for (const cb of reselectListeners) cb(channelId);
 }
 
 /**

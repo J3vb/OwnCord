@@ -47,6 +47,55 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+**Accounts & admin**
+
+- The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
+- The settings API now refuses `max_upload_bytes` and `voice_quality` with a 400: they never had an effect. Set `upload.max_size_mb` and `voice.quality` in config.yaml.
+- Two simultaneous config changes in the admin page can no longer combine into a setting the safety checks would have refused.
+
+**Updates**
+
+- A server update shows one restart countdown instead of two.
+
+### Added
+
+**Desktop UI**
+
+- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
+- Settings → Logs has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
+
+**Voice**
+
+- While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
+- Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
+
+### Fixed
+
+**Accounts & admin**
+
+- Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
+- Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
+- When sign-in, registration, sign-out, two-factor or account recovery fails on a server-side fault (database, session or password hashing), the cause is now written to the server log. What the client sees is unchanged.
+
+**Voice**
+
+- After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute ("You were removed from this voice channel"). You can now rejoin it straight away; channel permissions and bans still apply. Update the server and the desktop app together.
+- Someone's green speaking ring could stay lit after they stopped talking: in a channel you had left or switched away from, after they left or rejoined, or after your connection dropped. Rings now clear in those cases, and go dark as soon as the speaker mutes.
+- A voice reconnect you already left or replaced no longer asks for a new voice token, which could delay the live call's own refresh.
+
+**Server**
+
+- A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+- The periodic maintenance sweeps (signed-out session checks, stale voice cleanup, voice reconcile) could keep running into the database after the server began shutting down or restarting, and a stalled database could hold one forever — a sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it to finish. A delete that already went through is still announced, within its own short timeout.
+
+**Login & connection**
+
+- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
+- Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
+- A failed link open or native event registration is logged instead of raising an unhandled error.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
@@ -748,7 +797,7 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  administrator, including one holding `MANAGE_SERVER` or `ADMINISTRATOR`, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7

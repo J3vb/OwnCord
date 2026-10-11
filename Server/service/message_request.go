@@ -39,7 +39,7 @@ func NewMessageRequestService(st Store, blocks *BlockService) *MessageRequestSer
 func (s *MessageRequestService) ListPending(ctx context.Context, userID int64) ([]db.MessageRequestView, error) {
 	views, err := s.st.ListPendingMessageRequests(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list message requests", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to list message requests: %w", ErrInternal, err)
 	}
 	if views == nil {
 		views = []db.MessageRequestView{}
@@ -61,7 +61,7 @@ func (s *MessageRequestService) Accept(ctx context.Context, userID, id int64) (*
 		case errors.Is(err, db.ErrConflict):
 			return nil, fmt.Errorf("%w: message request is not pending", ErrConflict)
 		default:
-			return nil, fmt.Errorf("%w: failed to accept message request", ErrInternal)
+			return nil, fmt.Errorf("%w: failed to accept message request: %w", ErrInternal, err)
 		}
 	}
 	return req, nil
@@ -115,14 +115,14 @@ func (s *MessageRequestService) Block(ctx context.Context, userID, id int64) (re
 func (s *MessageRequestService) transition(ctx context.Context, userID, id int64, newState string) (*db.MessageRequest, error) {
 	ok, err := s.st.TransitionMessageRequest(ctx, id, userID, newState)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to update message request", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to update message request: %w", ErrInternal, err)
 	}
 	if !ok {
 		return nil, s.raceOrNotFound(ctx, userID, id)
 	}
 	req, err := s.st.GetMessageRequest(ctx, id, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to reload message request", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to reload message request: %w", ErrInternal, err)
 	}
 	return req, nil
 }

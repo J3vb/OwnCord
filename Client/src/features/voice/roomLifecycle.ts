@@ -291,6 +291,12 @@ export class RoomLifecycle {
     );
     onRoom(
       newRoom,
+      RoomEvent.ParticipantDisconnected,
+      this._eventHandlers.handleParticipantDisconnected,
+    );
+    onRoom(newRoom, RoomEvent.TrackMuted, this._eventHandlers.handleTrackMuted);
+    onRoom(
+      newRoom,
       RoomEvent.AudioPlaybackStatusChanged,
       this._eventHandlers.handleAudioPlaybackChanged,
     );

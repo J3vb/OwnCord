@@ -34,12 +34,12 @@ func (h *Hub) SweepStaleClientsForTest() {
 
 // SweepStaleVoiceStatesForTest exposes sweepStaleVoiceStates for external tests.
 func (h *Hub) SweepStaleVoiceStatesForTest() {
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 }
 
 // SweepRevokedSessionsForTest exposes sweepRevokedSessions for external tests.
 func (h *Hub) SweepRevokedSessionsForTest() {
-	h.sweepRevokedSessions()
+	h.sweepRevokedSessions(context.Background())
 }
 
 // SetClientLastActivityForTest overwrites a client's lastActivity timestamp.

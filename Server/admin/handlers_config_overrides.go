@@ -14,6 +14,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
@@ -252,6 +253,10 @@ func fallbackConfig(cfgPath, overridesPath string, overrides map[string]any) *co
 }
 
 func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *atomic.Bool) http.HandlerFunc {
+	// patchMu makes Preview, the guards and the save one step: two PATCHes
+	// that are each valid against the saved file must not merge into a config
+	// the guards would refuse.
+	var patchMu syncutil.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := opts.RunningCfg
 		if cfg == nil {
@@ -283,6 +288,8 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 		}
 
 		path := config.OverridesPath(cfg.Server.DataDir)
+		patchMu.Lock()
+		defer patchMu.Unlock()
 		next, err := config.Preview(opts.ConfigPath, path, changes)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())

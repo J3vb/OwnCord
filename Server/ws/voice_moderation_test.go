@@ -1129,3 +1129,122 @@ func TestVoiceMod_Move_RefusesRejoinOfTheSourceChannel(t *testing.T) {
 		return err == nil && state != nil && state.ChannelID == toID
 	}, "target to join the destination")
 }
+
+// userJoinMsg is voice_join as the client sends it for the user's own click
+// (VoiceCallbacks.onVoiceJoin), which a moderator's rejoin block does not refuse.
+func userJoinMsg(channelID int64) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": channelID, "user_initiated": true},
+	})
+	return raw
+}
+
+// moveAndAnswer has a moderator move target out of fromID into toID and the
+// target's client answer voice_moved by joining toID.
+func moveAndAnswer(t *testing.T, hub *ws.Hub, database *db.DB, targetClient *ws.Client, targetSend chan []byte, target *db.User, fromID, toID int64) {
+	t.Helper()
+	actor := seedVoiceUserWithRole(t, database, "admin-"+target.Username, 2)
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
+		t.Fatal("target did not receive voice_moved")
+	}
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(toID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == toID
+	}, "target to join the destination")
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+}
+
+// A moved user can click their way straight back to the channel they were
+// moved out of: the rejoin block only stops an automatic reconnect rejoin.
+func TestVoiceMod_Move_UserCanRejoinTheSourceChannel(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-back-from")
+	toID := seedVoiceChan(t, database, "vc-back-to")
+	target := seedVoiceUserWithRole(t, database, "member-back", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+	moveAndAnswer(t, hub, database, targetClient, targetSend, target, fromID, toID)
+
+	hub.HandleMessageForTest(targetClient, userJoinMsg(fromID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == fromID
+	}, "target to rejoin the source channel themselves")
+}
+
+// The same holds after a moderator disconnect from voice.
+func TestVoiceMod_Kick_UserCanRejoinThatChannel(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-kick-back")
+	target := seedVoiceUserWithRole(t, database, "member-kick-back", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, chanID)
+	kickFromVoice(t, hub, database, chanID, target)
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(targetClient, userJoinMsg(chanID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == chanID
+	}, "target to rejoin the channel themselves")
+}
+
+// The user's own rejoin skips only the moderator's rejoin block: a channel
+// deny of CONNECT_VOICE still refuses it.
+func TestVoiceMod_Move_UserRejoinStillHonoursAChannelDeny(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-deny-from")
+	toID := seedVoiceChan(t, database, "vc-deny-to")
+	target := seedVoiceUserWithRole(t, database, "member-deny", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+	moveAndAnswer(t, hub, database, targetClient, targetSend, target, fromID, toID)
+	if err := database.UpsertChannelOverride(context.Background(), fromID, 4, 0, permissions.ConnectVoice); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	hub.HandleMessageForTest(targetClient, userJoinMsg(fromID))
+	frame, ok := receiveErrorFrame(targetSend, waitTimeout)
+	want := voiceModErrorFrame{Code: "FORBIDDEN", Message: "missing permission to join this voice channel"}
+	if !ok || frame != want {
+		t.Fatalf("rejoin of a denied channel = %+v (ok=%v), want %+v", frame, ok, want)
+	}
+	if state, err := database.GetVoiceState(context.Background(), target.ID); err != nil || state == nil || state.ChannelID != toID {
+		t.Fatalf("the refused rejoin moved the target: state=%+v err=%v", state, err)
+	}
+}
+
+// The user's own rejoin retires the block: a later automatic rejoin of the
+// same channel (the reconnect loop of the call the user chose) is not refused.
+func TestVoiceMod_Move_UserRejoinClearsTheBlock(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-clear-from")
+	toID := seedVoiceChan(t, database, "vc-clear-to")
+	target := seedVoiceUserWithRole(t, database, "member-clear", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+	moveAndAnswer(t, hub, database, targetClient, targetSend, target, fromID, toID)
+	hub.HandleMessageForTest(targetClient, userJoinMsg(fromID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == fromID
+	}, "target to rejoin the source channel themselves")
+	hub.HandleMessageForTest(targetClient, voiceLeaveMsg())
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state == nil
+	}, "target to leave")
+
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(fromID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == fromID
+	}, "an automatic rejoin of the channel the user chose")
+}

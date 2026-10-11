@@ -42,6 +42,10 @@ interface Canary {
   readonly code: string;
   /** The messageId the rule reports. */
   readonly messageId: string;
+  /** Names the shape when a rule has more than one canary. */
+  readonly shape?: string;
+  /** The severity eslint.config.js sets: 2 (error, the default) or 1 (warn). */
+  readonly severity?: 1 | 2;
 }
 
 const CANARIES: readonly Canary[] = [
@@ -82,24 +86,75 @@ const CANARIES: readonly Canary[] = [
     messageId: "placeholderFallback",
   },
   {
+    rule: "local/invoke-needs-try-catch",
+    severity: 1,
+    filePath: "src/platform/desktop/nativeVoiceService.ts",
+    code: `const service = { clearRoomKey: () => invoke("native_voice_clear_key") };`,
+    messageId: "bareInvoke",
+  },
+  {
     rule: "local/no-store-write-in-ws-on",
     filePath: "src/pages/main-page/ChannelController.ts",
     code: `import { setActiveChannel } from "@stores/channels.store";
     ws.on("x", () => { setActiveChannel(1); });`,
     messageId: "storeWriteOutsideDispatcher",
   },
+  // One canary per widened shape (the receivers, methods and write forms the
+  // first version could not see), each at a real production module.
+  {
+    rule: "local/no-store-write-in-ws-on",
+    shape: "this.ws receiver",
+    filePath: "src/pages/main-page/ChannelController.ts",
+    code: `import { setActiveChannel } from "@stores/channels.store";
+    this.ws.on("x", () => { setActiveChannel(1); });`,
+    messageId: "storeWriteOutsideDispatcher",
+  },
+  {
+    rule: "local/no-store-write-in-ws-on",
+    shape: "onStateChange method",
+    filePath: "src/pages/main-page/ChannelController.ts",
+    code: `import { setActiveChannel } from "@stores/channels.store";
+    ws.onStateChange(() => { setActiveChannel(1); });`,
+    messageId: "storeWriteOutsideDispatcher",
+  },
+  {
+    rule: "local/no-store-write-in-ws-on",
+    shape: "setState on a store",
+    filePath: "src/main.ts",
+    code: `import { authStore } from "@stores/auth.store";
+    ws.on("x", () => { authStore.setState({}); });`,
+    messageId: "storeWriteOutsideDispatcher",
+  },
+  {
+    rule: "local/no-store-write-in-ws-on",
+    shape: "getState() mutator",
+    filePath: "src/lib/presence.ts",
+    code: `import { messagesStore } from "@stores/messages.store";
+    ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
+    messageId: "storeWriteOutsideDispatcher",
+  },
+  {
+    rule: "local/no-store-write-in-ws-on",
+    shape: "named callback",
+    filePath: "src/pages/main-page/SidebarArea.ts",
+    code: `import { setActiveChannel } from "@stores/channels.store";
+    function onX() { setActiveChannel(1); }
+    ws.on("x", onX);`,
+    messageId: "storeWriteOutsideDispatcher",
+  },
 ];
 
 describe("custom lint-rule canaries (ARCH-06)", () => {
   for (const canary of CANARIES) {
-    it(`${canary.rule} is enabled at ${canary.filePath} and fires on its canary shape`, async () => {
+    const shape = canary.shape === undefined ? "" : ` (${canary.shape})`;
+    it(`${canary.rule}${shape} is enabled at ${canary.filePath} and fires on its canary shape`, async () => {
       // Scope check: a rule that a refactor scoped away is disabled here, and
       // an inert rule is exactly the failure this canary exists to catch.
       const config = await eslint.calculateConfigForFile(path.join(clientRoot, canary.filePath));
       expect(
         config?.rules?.[canary.rule],
         `${canary.rule} not enabled at ${canary.filePath}`,
-      ).toEqual([2]);
+      ).toEqual([canary.severity ?? 2]);
 
       const fired = linter.verify(canary.code, [
         { ...flatConfig, rules: { [canary.rule]: "error" } },

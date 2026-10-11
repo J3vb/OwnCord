@@ -15,7 +15,10 @@
  */
 import { fetch } from "@tauri-apps/plugin-http";
 import { listen } from "@tauri-apps/api/event";
+import { createLogger } from "@lib/logger";
 import type { HttpClient, UploadProgress } from "../contracts/http";
+
+const log = createLogger("http");
 
 export const http: HttpClient = {
   // Forwarded exactly as it arrived: a caller that passed no `init` must not
@@ -27,10 +30,12 @@ export const http: HttpClient = {
     let unlisten: (() => void) | null = null;
     void listen<UploadProgress>("upload-progress", (event) => {
       if (active) handler(event.payload);
-    }).then((stop) => {
-      if (active) unlisten = stop;
-      else stop();
-    });
+    })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((err: unknown) => log.warn("upload-progress listen failed", err));
     return () => {
       active = false;
       unlisten?.();
