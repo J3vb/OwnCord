@@ -74,6 +74,9 @@ export interface VideoGridCallbacks {
   readonly onExitGrid?: () => void;
   /** Back to the full stream view of `tileId`, from its mini-player. */
   readonly onReturnToStream?: (tileId: number) => void;
+  /** Focus a control on the main page, for focus that was in a mini-player
+   *  that has just closed. */
+  readonly focusFallback?: () => void;
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -917,6 +920,7 @@ export function createVideoGrid(): VideoGridComponent {
       return { enabled: true };
     }
     if (entry.mini !== undefined) {
+      if (document.hidden) return { enabled: false };
       const box = entry.mini.element.getBoundingClientRect();
       return {
         enabled: true,
@@ -1062,15 +1066,21 @@ export function createVideoGrid(): VideoGridComponent {
       entry.mini = openMiniPlayer({
         name: entry.name,
         video: entry.video,
-        onReturn: () => callbacks.onReturnToStream?.(tileId),
+        onReturn: () => {
+          callbacks.onReturnToStream?.(tileId);
+          if (root !== null && !root.contains(document.activeElement)) {
+            restoreFocusedControl({ userId: tileId, control: "grid" });
+          }
+        },
         onPopout: () => togglePopout(tileId),
         onStopWatching: () => {
           callbacks.setStreamWatched?.(tileId, false);
           // The grid is closed: no focus to move into it.
           setStopped(tileId, true, false);
         },
-        onClosed: () => {
+        onClosed: (hadFocus) => {
           entry.mini = undefined;
+          if (hadFocus) callbacks.focusFallback?.();
           entry.el.insertBefore(entry.video, entry.el.firstChild);
           entry.video.play()?.catch(() => {});
           syncViews();

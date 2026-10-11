@@ -1440,6 +1440,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
       // The mini-player's way back to the full stream view.
+      focusFallback: () => void focusReachable(),
       onReturnToStream: (tileId) => {
         videoModeCtrl?.showVideoGrid();
         videoModeCtrl?.setFocus(tileId);

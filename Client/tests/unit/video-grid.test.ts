@@ -2529,5 +2529,62 @@ describe("VideoGrid", () => {
 
       expect(onReturnToStream).toHaveBeenCalledWith(7);
     });
+
+    it("stops the stream's video while the app is hidden, and resumes it when shown", async () => {
+      const setStreamView = vi.fn();
+      let hidden = false;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      try {
+        grid.setCallbacks({ setStreamView });
+        grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+        grid.showMiniPlayer();
+        await opened();
+
+        hidden = true;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(7, { enabled: false });
+
+        hidden = false;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(
+          7,
+          expect.objectContaining({ enabled: true }),
+        );
+      } finally {
+        delete (document as { hidden?: boolean }).hidden;
+      }
+    });
+
+    it("moves focus off the closing mini-player, but not when focus was elsewhere", async () => {
+      const focusFallback = vi.fn();
+      grid.setCallbacks({ focusFallback });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      mini()!.focus();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+
+      grid.showMiniPlayer();
+      await opened();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("Return from the keyboard lands focus in the grid, not on the page", async () => {
+      const focusFallback = vi.fn();
+      document.body.appendChild(container);
+      grid.setCallbacks({ focusFallback, onReturnToStream: () => grid.hideMiniPlayer() });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      const btn = mini()!.querySelector<HTMLButtonElement>("[data-testid='stream-mini-return']")!;
+      btn.focus();
+      btn.click();
+
+      expect(container.contains(document.activeElement)).toBe(true);
+    });
   });
 });

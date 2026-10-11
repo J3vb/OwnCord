@@ -27,8 +27,9 @@ export interface MiniPlayerOptions {
   /** Into the pop-out window instead. */
   readonly onPopout: () => void;
   readonly onStopWatching: () => void;
-  /** The player is gone: the video is the caller's to put back. Called once. */
-  readonly onClosed: () => void;
+  /** The player is gone: the video is the caller's to put back. Called once.
+   *  `hadFocus`: focus was inside it, so it is the caller's to move. */
+  readonly onClosed: (hadFocus: boolean) => void;
 }
 
 export interface MiniPlayer {
@@ -176,9 +177,10 @@ export function openMiniPlayer(opts: MiniPlayerOptions): MiniPlayer {
     element: root,
     close(): void {
       if (signal.aborted) return;
+      const hadFocus = root.contains(document.activeElement);
       listeners.destroy();
       root.remove();
-      opts.onClosed();
+      opts.onClosed(hadFocus);
     },
   };
 }
