@@ -384,8 +384,8 @@ describe("SettingsOverlay", () => {
 
     const selects = container.querySelectorAll("select.form-input");
     // input device, output device, camera quality, screen share quality,
-    // screen share fps, video device = 6
-    expect(selects.length).toBe(6);
+    // screen share fps, video codec, video device = 7
+    expect(selects.length).toBe(7);
 
     const sliders = container.querySelectorAll(".settings-slider");
     expect(sliders.length).toBeGreaterThanOrEqual(1);

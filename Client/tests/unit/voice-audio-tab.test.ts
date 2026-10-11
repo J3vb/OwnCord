@@ -263,8 +263,8 @@ describe("VoiceAudioTab UI structure", () => {
 
     const selects = el.querySelectorAll("select");
     // Input, output, camera quality, screen share quality, screen share fps,
-    // video = 6 selects
-    expect(selects.length).toBe(6);
+    // video codec, video = 7 selects
+    expect(selects.length).toBe(7);
     ac.abort();
   });
 
@@ -679,6 +679,53 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("video codec select offers VP8, H.264 and Auto, defaults to VP8 and saves the choice", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+    expect([...codecSelect.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
+    expect(codecSelect.value).toBe("vp8");
+    codecSelect.value = "auto";
+    codecSelect.dispatchEvent(new Event("change"));
+
+    expect(localStorage.getItem("owncord:settings:videoCodec")).toBe('"auto"');
+    ac.abort();
+  });
+
+  it("warns under the video codec choice that H.264 does not work from Intel graphics yet", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+
+    const warning = codecSelect.nextElementSibling;
+    expect(warning?.classList.contains("setting-desc")).toBe(true);
+    expect(warning?.textContent).toBe(
+      "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
+    );
+    ac.abort();
+  });
+
+  it("video codec select shows the saved choice, and VP8 for an unknown one", () => {
+    stubNavigator();
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const ac = new AbortController();
+    let el = createVoiceAudioTab(ac.signal).build();
+    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+      "h264",
+    );
+
+    localStorage.setItem("owncord:settings:videoCodec", '"av1"');
+    el = createVoiceAudioTab(ac.signal).build();
+    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+      "vp8",
+    );
+    ac.abort();
+  });
+
   describe("device and processing cards", () => {
     function build(): { el: HTMLDivElement; ac: AbortController } {
       stubNavigator();
@@ -714,6 +761,7 @@ describe("VoiceAudioTab UI structure", () => {
         "Camera Quality",
         "Screen Share Quality",
         "Screen Share FPS",
+        "Video Codec",
       ]) {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
@@ -1659,6 +1707,17 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     });
     return select!;
   }
+
+  it("hides the video codec choice: the native engine always publishes VP8", async () => {
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const tab = await mount();
+    expect(tab.element.querySelector('select[aria-label="Video Codec"]')).toBeNull();
+    const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
+      (h) => h.textContent,
+    );
+    expect(headings).not.toContain("Video Codec");
+    expect(headings).toContain("Screen Share FPS");
+  });
 
   it("hides the input volume control and explains why", async () => {
     const tab = await mount();
