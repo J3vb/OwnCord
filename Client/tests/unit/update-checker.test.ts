@@ -211,6 +211,18 @@ describe("createUpdateChecker", () => {
     });
   });
 
+  it("postpones a reconnect check that lands inside the gap after a manual check", async () => {
+    checker.start();
+    await checker.checkNow("manual");
+    expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    checker.notifyReconnected();
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
+    await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
+    expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
+    expect(outcomes.at(-1)?.reason).toBe("reconnect");
+  });
+
   it("reports a manual check that joins a background check as manual", async () => {
     let resolve!: (v: typeof V2) => void;
     mockCheckForUpdate.mockReturnValueOnce(new Promise((r) => (resolve = r)));

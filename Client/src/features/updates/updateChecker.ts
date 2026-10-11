@@ -11,7 +11,7 @@ const log = createLogger("update-checker");
 
 /** Gap between background checks. */
 export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60_000;
-/** Floor between fresh background checks, so a flapping socket cannot hammer the feed. A scheduled retry is exempt: it already waits RETRY_MIN_MS. */
+/** Floor between fresh background checks, so a flapping socket cannot hammer the feed. A check inside the floor is postponed to its end, not dropped; a scheduled retry is exempt because it already waits RETRY_MIN_MS. */
 export const MIN_BACKGROUND_GAP_MS = 60_000;
 
 /** A reconnect check waits a random 0..this, so clients behind one IP that all
@@ -39,7 +39,7 @@ export interface UpdateChecker {
   /** Begin the periodic checks and become the active checker. */
   start(): void;
   stop(): void;
-  /** Run a check now. `manual` always runs; any other reason respects the gap floor, except a scheduled retry. */
+  /** Run a check now. `manual` always runs; any other reason is postponed to the end of the gap floor, except a scheduled retry. */
   checkNow(reason: UpdateCheckReason): Promise<UpdateOutcome>;
   /** The socket came back (possibly to an updated server): check again. */
   notifyReconnected(): void;
@@ -68,6 +68,7 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   let inFlightReason: UpdateCheckReason = "interval";
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let deferTimer: ReturnType<typeof setTimeout> | null = null;
   let retries = 0;
   let retrying = false;
 
@@ -136,6 +137,13 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
       lastCheckAt !== null &&
       now - lastCheckAt < MIN_BACKGROUND_GAP_MS
     ) {
+      deferTimer ??= setTimeout(
+        () => {
+          deferTimer = null;
+          void checkNow(reason);
+        },
+        lastCheckAt + MIN_BACKGROUND_GAP_MS - now,
+      );
       return Promise.resolve({ kind: "up-to-date" });
     }
     if (reason !== "manual" && !isRetry) retries = 0;
@@ -159,10 +167,10 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   function stop(): void {
     lifetime?.destroy();
     lifetime = null;
-    for (const pending of [timer, reconnectTimer, retryTimer]) {
+    for (const pending of [timer, reconnectTimer, retryTimer, deferTimer]) {
       if (pending !== null) clearTimeout(pending);
     }
-    timer = reconnectTimer = retryTimer = null;
+    timer = reconnectTimer = retryTimer = deferTimer = null;
     retries = 0;
     if (active === checker) active = null;
   }
