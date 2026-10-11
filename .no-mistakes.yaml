@@ -69,6 +69,12 @@ review:
           must go through one queue or one ordered send. Flag related events
           delivered on different queues or goroutines, since they can reorder.
         - Name the lock or transaction that protects each new shared field.
+        Goroutines and errors (CLAUDE.md, "AI Quality Guardrails"):
+        - Every new goroutine takes a context and exits on ctx.Done(); bounded
+          work carries a WithTimeout/WithDeadline with its cancel deferred.
+          Flag a `go func()` with no context and no exit path as a leak.
+        - An error passed up is wrapped with %w and context; flag %v/%s on an
+          error and a naked return in a function with named results.
     - path: "Client/src/**"
       instructions: |
         UI state and layout:
@@ -85,3 +91,13 @@ review:
           events reach stores only via src/lib/dispatcher.ts (see AGENTS.md).
         - When rebasing or merging, keep values the base already has; do not
           overwrite them with the stale branch copy.
+        Types and IPC (CLAUDE.md, "AI Quality Guardrails"):
+        - `any` is banned: flag a new `any` or a new eslint-disable for
+          no-explicit-any; the fix is the precise type or `unknown` plus a
+          narrowing check.
+        - Every Tauri invoke() in src/platform/desktop/ is wrapped in try/catch
+          at its call site and the catch yields a typed result or a
+          user-visible error; flag a bare `await invoke(...)` in touched code.
+        - A ws.on handler or reconnect cleanup acts only on the connection
+          attempt it owns (the generation counter in src/lib/ws.ts); flag one
+          that touches shared state without checking it still owns the attempt.
