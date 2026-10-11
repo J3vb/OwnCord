@@ -136,7 +136,16 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
-	if h.voiceRejoinBlocks.blocked(c.userID, channelID) {
+	// The rejoin block stops only an automatic rejoin; the user's own join
+	// (user_initiated) acknowledges the removal and retires it. The block is
+	// not an access rule — CanJoinVoice below still refuses a denied channel.
+	var intent struct {
+		UserInitiated bool `json:"user_initiated"`
+	}
+	_ = json.Unmarshal(payload, &intent) // parseCallChannelID already accepted it; a non-bool reads as false
+	if intent.UserInitiated {
+		h.voiceRejoinBlocks.clear(c.userID)
+	} else if h.voiceRejoinBlocks.blocked(c.userID, channelID) {
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, voiceRejoinRefusal))
 		return 0, nil, false
 	}

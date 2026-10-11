@@ -402,7 +402,7 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockJoinVoiceChannel).toHaveBeenCalledWith(42);
     expect(ws.send).toHaveBeenCalledWith({
       type: "voice_join",
-      payload: { channel_id: 42 },
+      payload: { channel_id: 42, user_initiated: true },
     });
   });
 
@@ -457,7 +457,10 @@ describe("createSidebarVoiceCallbacks", () => {
     );
 
     cbs.onVoiceJoin(42);
-    expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 42 } });
+    expect(ws.send).toHaveBeenCalledWith({
+      type: "voice_join",
+      payload: { channel_id: 42, user_initiated: true },
+    });
 
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),
