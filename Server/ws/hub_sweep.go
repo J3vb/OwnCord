@@ -80,6 +80,17 @@ func (h *Hub) kickClientTerminal(c *Client) {
 // retries. A var so tests can shorten it.
 var sweepTimeout = 30 * time.Second
 
+// sweepTailTimeout bounds the follow-up steps of a sweep action that already
+// committed (broadcast, key-holder re-election, SFU removal). They run
+// detached from the sweep's cancellation so a committed delete is always
+// announced, but cannot block forever on a stalled DB. A var so tests can
+// shorten it.
+var sweepTailTimeout = 5 * time.Second
+
+func sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
+}
+
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
 // blocks on the DB-heavy periodic sweeps (they already lock correctly for
 // concurrent execution with the hub). inFlight guarantees a sweep never runs
@@ -251,7 +262,10 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
-		if !h.handleVoiceLeaveIfStillIn(context.WithoutCancel(ctx), c, chID, voiceLeaveReasonRevoked) {
+		tailCtx, cancelTail := sweepTailCtx(ctx)
+		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
+		cancelTail()
+		if !evicted {
 			continue
 		}
 		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
@@ -341,7 +355,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		tailCtx := context.WithoutCancel(ctx)
+		tailCtx, cancelTail := sweepTailCtx(ctx)
 		h.broadcastVoiceEvent(tailCtx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this
@@ -356,6 +370,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		if h.livekit != nil {
 			_ = h.livekit.RemoveParticipant(tailCtx, s.channelID, s.userID, s.joinedAt)
 		}
+		cancelTail()
 	}
 }
 

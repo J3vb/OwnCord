@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"errors"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,5 +95,75 @@ func TestStartSweep_BlockedSweepEndsAtSweepTimeout(t *testing.T) {
 	}
 	for h.sessionSweepInFlight.Load() {
 		time.Sleep(time.Millisecond)
+	}
+}
+
+type armOnLeaveStore struct {
+	VoiceStore
+	armed *atomic.Bool
+}
+
+func (s armOnLeaveStore) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
+	deleted, err := s.VoiceStore.LeaveIfMatch(ctx, userID, channelID, joinedAt)
+	s.armed.Store(true)
+	return deleted, err
+}
+
+// stallAfterArmVisibility blocks GetChannel — the broadcast audience's first
+// read — until its ctx ends, once armed: a DB that stalls right after a commit.
+type stallAfterArmVisibility struct {
+	VisibilityReader
+	armed *atomic.Bool
+}
+
+func (v stallAfterArmVisibility) GetChannel(ctx context.Context, id int64) (*db.Channel, error) {
+	if v.armed.Load() {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return v.VisibilityReader.GetChannel(ctx, id)
+}
+
+// The post-commit tail runs detached from the sweep's cancellation but must
+// still end at sweepTailTimeout: a stalled DB cannot pin the in-flight guard
+// or keep Done open.
+func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
+	old := sweepTailTimeout
+	sweepTailTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { sweepTailTimeout = old })
+
+	database := newHarvestVoiceDB(t)
+	ghostUID := seedHarvestVoiceUser(t, database, "tail-ghost")
+	chID := mustCreateVoiceChannel(t, database, "voice-tail-stall")
+	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
+	}
+
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	var armed atomic.Bool
+	h.voice = armOnLeaveStore{VoiceStore: h.voice, armed: &armed}
+	h.readers.Visibility = stallAfterArmVisibility{VisibilityReader: h.readers.Visibility, armed: &armed}
+	go h.Run()
+
+	h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+	deadline := time.Now().Add(5 * time.Second)
+	for !armed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("sweep never committed the ghost delete")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for h.voiceSweepInFlight.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("stalled tail never ended: voiceSweepInFlight stayed set")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	h.Stop()
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done never closed after Stop")
 	}
 }
