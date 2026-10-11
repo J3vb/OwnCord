@@ -730,7 +730,7 @@ func handleInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
 			name, err := liveServerName(ctx, cfg, deps)
 			cancel()
 			if err != nil {
-				slog.Error("failed to read server name", "error", err)
+				slog.Error("failed to read server info", "error", err)
 				name = cfg.Server.Name
 			}
 			cachedName, cachedAt = name, time.Now()

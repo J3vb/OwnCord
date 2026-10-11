@@ -35,8 +35,6 @@ var allowedSettingKeys = map[string]struct{}{
 	"server_name":       {},
 	"server_icon":       {},
 	"motd":              {},
-	"max_upload_bytes":  {},
-	"voice_quality":     {},
 	"require_2fa":       {},
 	"registration_mode": {},
 	"backup_schedule":   {},
@@ -47,6 +45,15 @@ var allowedSettingKeys = map[string]struct{}{
 	// The upload file-type lists (upload_filetypes.go).
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
+}
+
+// inertSettingKeys are rows the setup wizard still writes and GET /settings
+// still shows, but that no code reads at runtime: config.yaml owns the real
+// limits (upload.max_size_mb, voice.quality). A PATCH is refused rather than
+// accepted and ignored.
+var inertSettingKeys = map[string]struct{}{
+	"max_upload_bytes": {},
+	"voice_quality":    {},
 }
 
 // ownerOnlySettingKeys are the settings that decide the owner-only backup
@@ -115,6 +122,9 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	// ErrBadRequest without adding its text: the admin surface's response
 	// bodies are pinned to exactly these messages, prefix-free.
 	for key := range updates {
+		if _, inert := inertSettingKeys[key]; inert {
+			return nil, fmt.Errorf("%s is set in config.yaml, not here%.0w", key, ErrBadRequest)
+		}
 		if _, ok := allowedSettingKeys[key]; !ok {
 			return nil, fmt.Errorf("unknown setting key: %q%.0w", key, ErrBadRequest)
 		}

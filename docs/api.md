@@ -3976,7 +3976,7 @@ audited as `setting_change`.
 #### Request
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
-`motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
+`motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`.
 Boolean settings
@@ -4016,15 +4016,13 @@ per-channel override in either direction is
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
 
-Three keys are accepted and stored but have **no runtime effect**:
-`server_icon` (reserved for a future release), `max_upload_bytes` (the real
-limit is `upload.max_size_mb` in config.yaml, applied at startup), and
-`voice_quality` (the real setting is `voice.quality` in config.yaml). The
-admin panel does not show them; it reads the values in effect from
-[`GET /admin/api/config`](#get-adminapiconfig). They are still validated like
-the wizard's values: `max_upload_bytes` is a whole number of bytes from
-1048576 (1 MB) to 10737418240 (10240 MB), and `voice_quality` is `low`,
-`medium` or `high` (case-insensitive, stored lower-case).
+`server_icon` is accepted and stored but has **no runtime effect** (reserved
+for a future release). `max_upload_bytes` and `voice_quality` are refused with
+`400` (`<key> is set in config.yaml, not here`): the real settings are
+`upload.max_size_mb` and `voice.quality` in config.yaml. The setup wizard still
+writes both rows and `GET /admin/api/settings` still returns them; the admin
+panel reads the values in effect from
+[`GET /admin/api/config`](#get-adminapiconfig).
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
