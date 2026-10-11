@@ -63,6 +63,58 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 
 ### Added
 
+**Accounts & admin**
+
+- The admin panel's Server configuration page has a **Restart server** button. It and Restart now open one dialog that warns that everyone is briefly disconnected, says how the server comes back (container restart policy, service manager, or its own replacement), then waits and reloads the panel.
+- Dashboard warning cards and the update notice now have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until that problem clears or changes, and a "dismissed, show" link brings them back. The pending-restart banner on the Server config page stays until you restart.
+
+**Messaging**
+
+- You can now save GIFs as favorites, as in Discord. Star a GIF in the GIF picker or on a GIF in a message, then open the picker's new Favorites tab to send it again (newest first). Favorites are stored on your server, follow you across devices, and are capped at 250. The server needs a restart to apply the update (new database table).
+
+**Voice**
+
+- Your own avatar in the user panel at the bottom left now shows the green speaking ring while you talk in voice, as voice-channel members do; it stays off while you are muted, deafened or not holding push-to-talk.
+- Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it. Linux always uses VP8 and does not show the choice.
+
+### Fixed
+
+**Messages**
+
+- A link wrapped in `||spoiler||` no longer shows a link preview or inline image before you reveal it.
+- Scrolling through history no longer jumps. Loading an older page could throw the view off by several rows, and scrolling up or down through a long channel jerked the text by a few pixels at every row: the list sized rows it had not drawn yet by estimate, and sized the top row of the drawn window without its spacing. The row you are reading now stays exactly where it was.
+
+**Desktop UI**
+
+- The Mark All as Read button was never visible: it sat in a sidebar header that is hidden. It now shows as an icon beside Invite in the server header whenever a channel or DM is unread.
+- The Invite button now shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
+
+**Voice**
+
+- Voice participants in the sidebar now show their profile picture left of their name instead of a solid coloured circle; the initial only appears when they have no picture or it fails to load.
+- A DM call the server refuses (blocked, not in the call, or a server error) no longer leaves you hearing the ringback for 30 seconds; "Calling…" and the tone stop at once and you stay in the voice room.
+
+**Accounts & admin**
+
+- Changing a member's role, banning, unbanning and force-logging-out from the member list no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. The server enforces the same permission and rank checks on both routes. The new routes are not limited to `server.admin_allowed_cidrs`; they accept only this server's own sessions and API tokens, with the permission and rank checks.
+- The member list no longer offers Change Role, Force Logout or Ban on members at or above your rank, and the role menu now lists only roles below your own, instead of offering actions the server would refuse.
+- When something in front of the server (such as a reverse proxy) answers a request with a web page instead of the API, the client now says so instead of showing a raw "Unexpected token '<'" error.
+
+**Messages & files**
+
+- Uploaded or pasted `.mov` videos showed only as a download; they now play inline like `.mp4`, a clip with no picture on your system plays as audio, and one it cannot decode shows the download with "Can't play this format".
+- Messages you watched arrive in the open channel came back as "N new messages" after restarting the app; they are now recorded as read as they land and when the window closes.
+- A long session with many linked images no longer keeps every one of them in memory; the image, link-preview and missing-image caches are now bounded.
+- On Linux, GIF picker previews and linked images no longer show as broken images when the webview falls back to its slower internal message channel; the log now says when that happens.
+
+**Desktop UI**
+
+- A channel reorder the server rejects now rolls the channel back to its old position in the sidebar, with the "Failed to save channel order" message, instead of leaving the unsaved order showing.
+
+**Messages**
+
+- Clicking an author name, avatar or @mention in a message now opens that person's profile card.
+
 **Voice and video**
 
 - Stream audio controls: a watched screen share has its own volume and mute on its tile.

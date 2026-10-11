@@ -30,6 +30,7 @@ import {
   nativeCameraSupport,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { getVideoCodecPref } from "@lib/videoCodec";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
@@ -529,6 +530,22 @@ function buildVoiceAudioTabInner(
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
+  // The Linux native engine always publishes VP8 (lib/videoCodec).
+  if (!isLinuxDesktop()) {
+    cameraCard.append(
+      ...qualityGroup(
+        t("voiceAudio.videoCodec"),
+        t("voiceAudio.videoCodecDesc"),
+        "videoCodec",
+        getVideoCodecPref(),
+        [
+          ["vp8", t("voiceAudio.videoCodec.vp8")],
+          ["h264", t("voiceAudio.videoCodec.h264")],
+          ["auto", t("voiceAudio.videoCodec.auto")],
+        ],
+      ),
+    );
+  }
 
   // Device names seen while this tab is open, to name one that is unplugged.
   const deviceLabels = new Map<string, string>();
