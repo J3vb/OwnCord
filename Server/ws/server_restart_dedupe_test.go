@@ -103,4 +103,10 @@ func TestBroadcastServerRestart_SameReasonWithinWindowIsSentOnce(t *testing.T) {
 	if got := drainFor(notices, 500*time.Millisecond); len(got) != 2 {
 		t.Errorf("a different reason plus a cancel delivered %v, want two", got)
 	}
+
+	// A cancel re-arms the gate: a retry right after it must announce again.
+	hub.BroadcastServerRestart(ws.RestartReasonShutdown, 5)
+	if got := drainFor(notices, 500*time.Millisecond); len(got) != 1 {
+		t.Errorf("a retry after a cancel delivered %v, want one", got)
+	}
 }

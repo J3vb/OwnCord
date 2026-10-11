@@ -63,7 +63,7 @@ func TestPatchSettings_MaxUploadBytes(t *testing.T) {
 }
 
 // assertInertSetting checks that a PATCH of a config.yaml-owned key is refused
-// with the inert message and leaves the stored row untouched (ARCH-045).
+// with the inert message and leaves the stored row untouched (ARCH-024).
 func assertInertSetting(t *testing.T, key, value string) {
 	t.Helper()
 	code, msg, body, database := patchSetting(t, key, value)

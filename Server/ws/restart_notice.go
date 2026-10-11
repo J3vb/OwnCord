@@ -24,6 +24,10 @@ type restartNoticeGate struct {
 func (g *restartNoticeGate) claim(reason RestartReason, delaySeconds int) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if delaySeconds == 0 {
+		g.at = time.Time{}
+		return true
+	}
 	now := time.Now()
 	if g.reason == reason && g.delaySeconds == delaySeconds && now.Sub(g.at) < restartNoticeDedupeWindow {
 		return false
@@ -42,7 +46,7 @@ func (g *restartNoticeGate) claim(reason RestartReason, delaySeconds int) bool {
 // the graceful stop, and clients should see one countdown. A cancel
 // (delaySeconds 0) is never dropped.
 func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
-	if delaySeconds > 0 && !h.restartGate.claim(reason, delaySeconds) {
+	if !h.restartGate.claim(reason, delaySeconds) {
 		return
 	}
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds, restartSpreadMS(h.ClientCount())))
