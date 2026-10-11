@@ -55,6 +55,14 @@ Full rules: [CODE_STYLE.md](CODE_STYLE.md). Match the surrounding code rather th
 - **Client WebSocket events** reach domain stores only through the single `ws.on(...)` subscription point in `src/lib/dispatcher.ts`; handler bodies live in `src/features/*/wsHandlers.ts`.
 - **Rust:** `cargo fmt` + `cargo clippy`, minimal code, native APIs only. Native services live there (the TOFU proxies, the external-content broker, and on Linux the native voice session); a Linux-only voice behaviour belongs in the adapter or the Rust session, never as a branch in `joinOrchestration`/`mediaControl`.
 
+## AI quality guardrails
+
+Binding for every agent and model. Full rules and rationale: [CLAUDE.md](CLAUDE.md#ai-quality-guardrails--engineering-standards).
+
+- **Pre-flight plan:** before writing code for anything beyond a one-line fix, state the affected files, the state mutations, and exactly two edge cases you will handle and test, then wait for the user's confirmation. An unattended run (a bughunt-fix workflow, a routine, a CI-triggered session) writes the same three parts into the commit body or PR description and proceeds.
+- **Go:** no naked returns; wrap every error you pass up with `%w` (`errorlint`); every new goroutine takes a `context.Context` and exits on `ctx.Done()`, with `context.WithTimeout`/`WithDeadline` for bounded work (`contextcheck`).
+- **Frontend/Tauri:** `any` is banned — use the precise type or `unknown` plus a narrowing check, and never add an `eslint-disable` for `no-explicit-any`; every Tauri `invoke()` is wrapped in `try/catch` where it is called, in `src/platform/desktop/`; WebSocket state stays isolated per connection attempt (the generation counter in `src/lib/ws.ts`), and server events reach stores only through `src/lib/dispatcher.ts`.
+
 ## Design rules
 
 Full rules: [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
