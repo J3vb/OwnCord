@@ -160,6 +160,20 @@ describe("createUpdateChecker", () => {
       expect(mockCheckForUpdate).toHaveBeenCalledTimes(1 + MAX_RETRIES + 2);
     });
 
+    it("still runs a pending retry when another check failed just before it", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValue(FAILED);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS * 0.5 - 30_000);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+      void checker.checkNow("interval");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(3);
+    });
+
     it("is not retried for a manual check, which answers the user directly", async () => {
       checker.start();
       mockCheckForUpdate.mockResolvedValue(FAILED);

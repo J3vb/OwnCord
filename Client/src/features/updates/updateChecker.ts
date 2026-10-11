@@ -80,6 +80,19 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     }, UPDATE_CHECK_INTERVAL_MS);
   }
 
+  function scheduleRetry(reason: UpdateCheckReason): void {
+    if (lifetime === null || retries >= MAX_RETRIES || retryTimer !== null) return;
+    retries += 1;
+    retryTimer = setTimeout(
+      () => {
+        retryTimer = null;
+        retrying = true;
+        void checkNow(reason);
+      },
+      RETRY_MIN_MS + random() * RETRY_SPREAD_MS,
+    );
+  }
+
   async function run(reason: UpdateCheckReason, owner: Disposable | null): Promise<UpdateOutcome> {
     let outcome: UpdateOutcome;
     try {
@@ -95,17 +108,7 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     }
     if (reason !== "manual" && owner === lifetime && owner !== null) {
       if (outcome.kind !== "failed") retries = 0;
-      else if (retries < MAX_RETRIES && retryTimer === null) {
-        retries += 1;
-        retryTimer = setTimeout(
-          () => {
-            retryTimer = null;
-            retrying = true;
-            void checkNow(reason);
-          },
-          RETRY_MIN_MS + random() * RETRY_SPREAD_MS,
-        );
-      }
+      else scheduleRetry(reason);
     }
     // A check that outlives stop() reports to nobody: its page is gone.
     if (owner === lifetime) {
@@ -117,15 +120,25 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   function checkNow(reason: UpdateCheckReason): Promise<UpdateOutcome> {
     const isRetry = retrying;
     retrying = false;
-    if (reason !== "manual" && !isRetry) retries = 0;
     if (inFlight !== null) {
       if (reason === "manual") inFlightReason = reason;
+      if (isRetry) {
+        void inFlight.then((outcome) => {
+          if (outcome.kind === "failed") scheduleRetry(reason);
+        });
+      }
       return inFlight;
     }
     const now = Date.now();
-    if (reason !== "manual" && lastCheckAt !== null && now - lastCheckAt < MIN_BACKGROUND_GAP_MS) {
+    if (
+      reason !== "manual" &&
+      !isRetry &&
+      lastCheckAt !== null &&
+      now - lastCheckAt < MIN_BACKGROUND_GAP_MS
+    ) {
       return Promise.resolve({ kind: "up-to-date" });
     }
+    if (reason !== "manual" && !isRetry) retries = 0;
     lastCheckAt = now;
     inFlightReason = reason;
     const pending = run(reason, lifetime).finally(() => {
