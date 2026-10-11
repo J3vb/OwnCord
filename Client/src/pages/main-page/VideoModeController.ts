@@ -96,6 +96,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
   /** Move the grid into the panel (or keep it there). */
   function hostInPanel(el: HTMLElement): void {
+    // The panel shows the stream itself: take it back from the mini-player.
+    videoGrid.hideMiniPlayer();
     const slot = slots.videoGridSlot;
     if (slot.parentNode !== el) {
       if (slotHome === null && slot.parentNode !== null) {
@@ -125,6 +127,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
   function showVideoGrid(): void {
     userDismissedVideo = false;
+    videoGrid.hideMiniPlayer();
     if (videoMode) return;
     videoMode = true;
     slots.messagesSlot.style.display = "none";
@@ -162,6 +165,9 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (voice.localCamera || voice.localScreenshare) {
       userDismissedVideo = true;
     }
+    // The stream being watched keeps playing in the mini-player (Discord's),
+    // picked while the grid still knows which tile is focused.
+    if (videoMode) videoGrid.showMiniPlayer();
     closeVideoGrid();
   }
 

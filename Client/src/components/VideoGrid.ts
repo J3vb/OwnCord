@@ -22,6 +22,7 @@ import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import { openPopout, type Popout } from "../features/voice/popout";
+import type { MiniPlayer } from "../features/voice/miniPlayer";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;
@@ -71,6 +72,8 @@ export interface VideoGridCallbacks {
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
+  /** Back to the full stream view of `tileId`, from its mini-player. */
+  readonly onReturnToStream?: (tileId: number) => void;
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -122,6 +125,12 @@ export interface VideoGridComponent extends MountableComponent {
   }): void;
   /** Show or hide the grid header's exit control (video mode only). */
   setExitVisible(visible: boolean): void;
+  /** Keep the watched remote stream (the focused one, else the first playing
+   *  in the grid) playing in the mini-player while the grid is closed. A
+   *  no-op when nothing is being watched here. */
+  showMiniPlayer(): void;
+  /** Put the mini-player's stream back in its tile. */
+  hideMiniPlayer(): void;
 }
 
 /** Create a fresh volume icon element. */
@@ -254,6 +263,8 @@ interface CellEntry {
   video: HTMLVideoElement;
   /** The pop-out window the video is in, if any. */
   popout?: Popout;
+  /** The mini-player the video is in, if any. */
+  mini?: MiniPlayer;
   config?: TileConfig;
   trackCleanup?: () => void;
   /** Owns the tile's menu listeners and its open menu; goes with the tile. */
@@ -268,6 +279,17 @@ interface CellEntry {
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
   view?: string;
+}
+
+/** A remote stream playing in its tile (watched, not in a pop-out window). */
+function isPlayingHere(e: CellEntry | undefined): boolean {
+  return (
+    e?.config !== undefined &&
+    !e.config.isSelf &&
+    e.popout === undefined &&
+    e.video.srcObject != null &&
+    !e.el.classList.contains("video-cell--stopped")
+  );
 }
 
 /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
@@ -894,6 +916,16 @@ export function createVideoGrid(): VideoGridComponent {
     if (entry.popout !== undefined) {
       return { enabled: true };
     }
+    if (entry.mini !== undefined) {
+      const box = entry.mini.element.getBoundingClientRect();
+      return {
+        enabled: true,
+        size: {
+          width: Math.round(box.width * devicePixelRatio),
+          height: Math.round(box.height * devicePixelRatio),
+        },
+      };
+    }
     const { width, height } = entry.el.getBoundingClientRect();
     if (document.hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
       return { enabled: false };
@@ -944,6 +976,7 @@ export function createVideoGrid(): VideoGridComponent {
       return;
     }
     if (isFullscreen(tileId)) leaveFullscreen();
+    entry.mini?.close();
     // Popping out a stopped tile means watching it: its video is hidden.
     if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
@@ -1000,6 +1033,58 @@ export function createVideoGrid(): VideoGridComponent {
     syncViews();
   }
 
+  // --- Mini-player -----------------------------------------------------------
+
+  /** The remote stream being watched in the grid: the focused tile, else the
+   *  first playing one. Not one in a pop-out window (it plays there). */
+  function watchedTile(): number | null {
+    if (focusedTileId !== null && isPlayingHere(cells.get(focusedTileId))) return focusedTileId;
+    for (const [id, e] of cells) if (isPlayingHere(e)) return id;
+    return null;
+  }
+
+  /** Bumped by every show and hide, so a mini-player still loading opens
+   *  only if nothing has changed the request since. */
+  let miniRequest = 0;
+
+  function showMiniPlayer(): void {
+    if ([...cells.values()].some((e) => e.mini !== undefined)) return;
+    // Picked now: the grid drops its focus as it closes.
+    const tileId = watchedTile();
+    if (tileId === null) return;
+    const request = ++miniRequest;
+    if (isFullscreen(tileId)) leaveFullscreen();
+    // Loaded on first use: only leaving a watched stream needs it.
+    void import("../features/voice/miniPlayer").then(({ openMiniPlayer }) => {
+      const entry = cells.get(tileId);
+      if (request !== miniRequest || root === null || entry === undefined) return;
+      if (entry.mini !== undefined || !isPlayingHere(entry)) return;
+      entry.mini = openMiniPlayer({
+        name: entry.name,
+        video: entry.video,
+        onReturn: () => callbacks.onReturnToStream?.(tileId),
+        onPopout: () => togglePopout(tileId),
+        onStopWatching: () => {
+          callbacks.setStreamWatched?.(tileId, false);
+          // The grid is closed: no focus to move into it.
+          setStopped(tileId, true, false);
+        },
+        onClosed: () => {
+          entry.mini = undefined;
+          entry.el.insertBefore(entry.video, entry.el.firstChild);
+          entry.video.play()?.catch(() => {});
+          syncViews();
+        },
+      });
+      syncViews();
+    });
+  }
+
+  function hideMiniPlayer(): void {
+    miniRequest++;
+    for (const entry of cells.values()) entry.mini?.close();
+  }
+
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
   }
@@ -1017,7 +1102,10 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(tileId);
     if (entry === undefined) return;
     const cell = entry.el;
-    if (stopped) entry.popout?.close();
+    if (stopped) {
+      entry.popout?.close();
+      entry.mini?.close();
+    }
     cell.classList.toggle("video-cell--stopped", stopped);
     syncViews();
     entry.video.hidden = stopped;
@@ -1393,6 +1481,7 @@ export function createVideoGrid(): VideoGridComponent {
     const savedFocus = captureFocusedControl();
 
     entry.popout?.close();
+    entry.mini?.close();
     // The stream is gone: so is the watch (a new one starts unwatched).
     if (entry.config !== undefined && !entry.config.isSelf) {
       callbacks.setStreamWatched?.(userId, false);
@@ -1564,6 +1653,7 @@ export function createVideoGrid(): VideoGridComponent {
 
     for (const [, entry] of cells) {
       entry.popout?.close();
+      entry.mini?.close();
       if (entry.trackCleanup) {
         entry.trackCleanup();
         entry.trackCleanup = undefined;
@@ -1610,5 +1700,7 @@ export function createVideoGrid(): VideoGridComponent {
     setExitVisible(visible: boolean): void {
       if (exitBtn !== null) exitBtn.hidden = !visible;
     },
+    showMiniPlayer,
+    hideMiniPlayer,
   };
 }
