@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Voice**
+
+- Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
+
 ### Fixed
 
 **Voice**
@@ -54,11 +60,6 @@ and only when it changes something a contributor or fork holder must do
 - Undeafening no longer unmutes you if you were muted before you deafened.
 - After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
 - Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.
-### Added
-
-**Voice**
-
-- Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 
 ## v2.2.0-beta.3
 
