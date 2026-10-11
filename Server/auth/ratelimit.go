@@ -243,10 +243,10 @@ func (r *RateLimiter) RetryAfter(key string, limit int, window time.Duration) ti
 // (WithoutCancel) rather than aborting the write mid-request.
 func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Duration) {
 	s := r.shardFor(key)
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	expiresAt := time.Now().Add(duration)
+	s.mu.Lock()
 	s.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
+	s.mu.Unlock()
 	if r.store != nil {
 		if err := r.store.UpsertLockout(context.WithoutCancel(ctx), key, expiresAt); err != nil {
 			slog.Warn("ratelimit: failed to persist lockout; it will not survive a restart",
@@ -306,13 +306,16 @@ func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
 
 // Reset clears all rate-limit state (timestamps and lockout) for key.
 // Like Lockout, the store delete must complete once decided (WithoutCancel).
+// The store is touched only when an in-memory lockout existed, and never
+// while the shard lock is held.
 func (r *RateLimiter) Reset(ctx context.Context, key string) {
 	s := r.shardFor(key)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.windows, key)
+	_, hadLockout := s.lockouts[key]
 	delete(s.lockouts, key)
-	if r.store != nil {
+	s.mu.Unlock()
+	if hadLockout && r.store != nil {
 		if err := r.store.DeleteLockout(context.WithoutCancel(ctx), key); err != nil {
 			slog.Warn("ratelimit: failed to delete persisted lockout; it may reappear after a restart",
 				"key", key, "err", err)
