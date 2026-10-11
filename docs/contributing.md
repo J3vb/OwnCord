@@ -419,6 +419,14 @@ the diff: what was wrong, why the obvious fix is wrong, what was done, concrete
 numbers, and a `Verified:` paragraph proving both directions — that the defect
 was present before and is absent after.
 
+A change made by an agent with no human in the loop (the `bughunt-fix`
+workflow, a routine, a CI-triggered session) also carries the pre-flight parts
+that [CLAUDE.md](../CLAUDE.md#ai-quality-guardrails--engineering-standards)
+requires before code is written: the affected files, the state mutations, and
+the two edge cases it handled and tested. In an interactive session those were
+confirmed before the work started; in an unattended one the commit body or PR
+description is where a reviewer sees what was assumed.
+
 End with an explicit **`Not included:`** line naming adjacent scope you
 deliberately left out, and why. A written deferral is a deliverable: it is what
 separates considered-and-declined from silently-missed, and it means adjacent

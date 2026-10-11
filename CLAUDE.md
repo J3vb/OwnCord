@@ -88,7 +88,7 @@ and proceeds, so a reviewer can see what was assumed.
 
 - **No naked returns.** Every `return` names its values, even in a function
   with named results. A naked return hides which value is live at that point.
-  Nothing lints this yet, so check for it in review.
+  `nakedret` fails one at any function length (`max-func-lines: 0`).
 - **Wrap every error you pass up with `%w`:** `fmt.Errorf("<op>: %w", err)`
   for context, `fmt.Errorf("%w: <detail>", ErrX)` for a sentinel. Callers
   use `errors.Is`/`errors.As`. `errorlint` fails `%v`/`%s` on an error and
@@ -103,10 +103,9 @@ and proceeds, so a reviewer can see what was assumed.
 ### Frontend and Tauri (`Client/`)
 
 - **`any` is banned.** Use the precise type, a generated protocol type, or
-  `unknown` plus a narrowing check. `@typescript-eslint/no-explicit-any` is
-  only a warning in `eslint.config.js`; treat it as an error. The residue in
-  `src/lib/livekitReconnect.ts` only shrinks — never add an `eslint-disable`
-  for this rule.
+  `unknown` plus a narrowing check. `@typescript-eslint/no-explicit-any` is an
+  error in `eslint.config.js`. The residue in `src/lib/livekitReconnect.ts`
+  only shrinks — never add an `eslint-disable` for this rule.
 - **Every Tauri `invoke()` is wrapped in `try/catch`** where it is called, in
   `src/platform/desktop/` (the only place a `@tauri-apps` import may appear).
   The `catch` turns the rejection into a typed result or a user-visible

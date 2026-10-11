@@ -27,7 +27,15 @@ linters:
     - errorlint # errors.Is/As instead of == and type assertions on wrapped errors; %w in Errorf
     - durationcheck # time.Duration multiplied by a Duration-typed value, e.g. d*time.Second where d is already a Duration
 
+    # Naked returns (added 2026-10-11, CLAUDE.md "AI Quality Guardrails"). The
+    # tree had zero when this was enabled, so any finding is a regression.
+    - nakedret # a bare `return` in a function with named results hides which value is live
+
   settings:
+    nakedret:
+      # The tool default (30) only flags functions longer than 30 lines. The
+      # rule here is "every return names its values", at any length.
+      max-func-lines: 0
     exhaustive:
       # An explicit default branch is a deliberate catch-all; only switches without
       # one, which fall through in silence, must list every member.
