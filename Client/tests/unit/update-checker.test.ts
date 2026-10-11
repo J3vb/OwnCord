@@ -12,7 +12,6 @@ import {
   createUpdateChecker,
   getActiveUpdateChecker,
   UPDATE_CHECK_INTERVAL_MS,
-  UPDATE_CHECK_JITTER,
   MIN_BACKGROUND_GAP_MS,
   type UpdateChecker,
   type UpdateOutcome,
@@ -30,7 +29,7 @@ describe("createUpdateChecker", () => {
     mockCheckForUpdate.mockReset();
     mockCheckForUpdate.mockResolvedValue(NONE);
     outcomes = [];
-    checker = createUpdateChecker({ serverUrl: "https://s.example", random: () => 0.5 });
+    checker = createUpdateChecker({ serverUrl: "https://s.example" });
     checker.onOutcome((outcome, reason) => outcomes.push({ outcome, reason }));
   });
 
@@ -51,22 +50,6 @@ describe("createUpdateChecker", () => {
 
     await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
-  });
-
-  it("jitters each interval so clients do not all hit the feed together", async () => {
-    for (const [random, expected] of [
-      [0, UPDATE_CHECK_INTERVAL_MS * (1 - UPDATE_CHECK_JITTER)],
-      [1, UPDATE_CHECK_INTERVAL_MS * (1 + UPDATE_CHECK_JITTER)],
-    ] as const) {
-      mockCheckForUpdate.mockClear();
-      const c = createUpdateChecker({ serverUrl: "https://s.example", random: () => random });
-      c.start();
-      await vi.advanceTimersByTimeAsync(expected - 1);
-      expect(mockCheckForUpdate).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
-      c.stop();
-    }
   });
 
   it("stops checking after stop()", async () => {

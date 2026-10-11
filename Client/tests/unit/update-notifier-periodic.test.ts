@@ -19,7 +19,11 @@ vi.mock("@lib/updater", () => ({
 }));
 
 import { createUpdateNotifier } from "../../src/components/UpdateNotifier";
-import { UPDATE_CHECK_INTERVAL_MS, getActiveUpdateChecker } from "../../src/lib/updateChecker";
+import {
+  MIN_BACKGROUND_GAP_MS,
+  UPDATE_CHECK_INTERVAL_MS,
+  getActiveUpdateChecker,
+} from "../../src/lib/updateChecker";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { UpdateInstallState } from "../../src/lib/updater";
 
@@ -113,9 +117,12 @@ describe("createUpdateNotifier while the app keeps running", () => {
     expect(mockCheckForUpdate.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(banners()).toBe(0);
 
+    const before = mockCheckForUpdate.mock.calls.length;
     setConnectionStatus("reconnecting");
+    await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
     setConnectionStatus("connected");
     await vi.advanceTimersByTimeAsync(0);
+    expect(mockCheckForUpdate.mock.calls.length).toBe(before + 1);
     expect(banners()).toBe(0);
 
     mockCheckForUpdate.mockResolvedValue(update("2.1.0"));

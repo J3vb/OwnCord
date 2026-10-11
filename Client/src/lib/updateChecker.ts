@@ -9,9 +9,8 @@ import { checkForUpdate } from "./updater";
 
 const log = createLogger("update-checker");
 
-/** Mean gap between background checks; each gap is jittered by ±JITTER. */
+/** Gap between background checks. */
 export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60_000;
-export const UPDATE_CHECK_JITTER = 0.25;
 /** Floor between background checks, so a flapping socket cannot hammer the feed. */
 export const MIN_BACKGROUND_GAP_MS = 60_000;
 
@@ -37,7 +36,6 @@ export interface UpdateChecker {
 
 export interface UpdateCheckerOptions {
   readonly serverUrl: string;
-  readonly random?: () => number;
 }
 
 let active: UpdateChecker | null = null;
@@ -48,7 +46,7 @@ export function getActiveUpdateChecker(): UpdateChecker | null {
 }
 
 export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecker {
-  const { serverUrl, random = Math.random } = options;
+  const { serverUrl } = options;
   const listeners = new Set<(outcome: UpdateOutcome, reason: UpdateCheckReason) => void>();
   let lifetime: Disposable | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -57,13 +55,12 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   let inFlightReason: UpdateCheckReason = "interval";
 
   function scheduleNext(): void {
-    const jitter = 1 + (random() * 2 - 1) * UPDATE_CHECK_JITTER;
     timer = setTimeout(() => {
       timer = null;
       void checkNow("interval").finally(() => {
         if (lifetime !== null && timer === null) scheduleNext();
       });
-    }, UPDATE_CHECK_INTERVAL_MS * jitter);
+    }, UPDATE_CHECK_INTERVAL_MS);
   }
 
   async function run(reason: UpdateCheckReason, owner: Disposable | null): Promise<UpdateOutcome> {
