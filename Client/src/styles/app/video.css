@@ -271,10 +271,11 @@
   opacity: 1;
 }
 /* The mini-player: the watched stream floating over a text channel. Placed
-   by script (left/top), kept inside the window. Below the overlays. */
+   by script (left/top), kept inside the window. Above the chat, below the
+   composer pickers (90) and the overlays. */
 .stream-mini {
   position: fixed;
-  z-index: 150;
+  z-index: 80;
   width: min(320px, calc(100vw - 32px));
   aspect-ratio: 16 / 9;
   overflow: hidden;
