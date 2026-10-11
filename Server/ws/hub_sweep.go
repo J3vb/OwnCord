@@ -83,9 +83,10 @@ var sweepTimeout = 30 * time.Second
 // sweepTailTimeout bounds the follow-up steps of a sweep action that already
 // committed (broadcast, key-holder re-election, SFU removal). They run
 // detached from the sweep's cancellation so a committed delete is always
-// announced, but cannot block forever on a stalled DB. A var so tests can
-// shorten it.
-var sweepTailTimeout = 5 * time.Second
+// announced, but cannot block forever on a stalled DB. 15s keeps it above the
+// DB busy_timeout (5s), so a delete that waits out the lock still leaves budget
+// to broadcast. A var so tests can shorten it.
+var sweepTailTimeout = 15 * time.Second
 
 func sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
