@@ -4,7 +4,7 @@ import type { TestServer } from "./server";
 type TestEnvelope = { type: string; id?: string; payload?: Record<string, unknown> };
 
 /** The path token the test tunnel hands out, standing in for the native one. */
-const TUNNEL_TOKEN = "e2e-tunnel";
+export const TUNNEL_TOKEN = "e2e-tunnel";
 
 /** Test-only replacement for native IPC. HTTP/WS bytes go to the real server;
  * no responses, auth, messages, membership or E2EE offers are fabricated.
