@@ -31,7 +31,9 @@ describeLiveKitProxiesSuite(async () => {
     native: {
       succeedWith(port: number) {
         invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy" ? Promise.resolve(port) : Promise.resolve(undefined),
+          cmd === "start_livekit_proxy"
+            ? Promise.resolve({ port, token: "tun" })
+            : Promise.resolve(undefined),
         );
       },
       failWith(error: unknown) {

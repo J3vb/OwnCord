@@ -65,6 +65,7 @@ pub struct HttpProxyState {
 
 struct ProxyEntry {
     port: u16,
+    token: String,
     shutdown_tx: tokio::sync::oneshot::Sender<()>,
 }
 
@@ -115,19 +116,20 @@ impl HttpProxyState {
 
 use crate::proxy_common::{
     connect_tls_over, content_length, copy_with_deadline, dial_tcp, header_value,
-    read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched,
-    validate_remote_host, CountingStream,
+    random_tunnel_token, read_request_headers, resolve_remote_target, rewrite_headers,
+    run_accept_loop, spawn_watched, strip_tunnel_token, validate_remote_host, CountingStream,
+    TunnelEndpoint, FORBIDDEN_RESPONSE,
 };
 
-/// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
-/// loopback port. The webview should send its REST traffic to
-/// `http://127.0.0.1:{port}`.
+/// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return its
+/// loopback port and path token. The webview sends its REST traffic to
+/// `http://127.0.0.1:{port}/{token}`; a request without the token gets 403.
 #[tauri::command]
 pub async fn start_http_proxy<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, HttpProxyState>,
     remote_host: String,
-) -> Result<u16, String> {
+) -> Result<TunnelEndpoint, String> {
     validate_remote_host(&remote_host)?;
 
     let mut inner = state.inner.lock().await;
@@ -137,8 +139,13 @@ pub async fn start_http_proxy<R: Runtime>(
             "[http_proxy] reusing tunnel on port {} for {}",
             entry.port, remote_host
         );
-        return Ok(entry.port);
+        return Ok(TunnelEndpoint {
+            port: entry.port,
+            token: entry.token.clone(),
+        });
     }
+
+    let token = random_tunnel_token()?;
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -151,6 +158,7 @@ pub async fn start_http_proxy<R: Runtime>(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let conn_app = app.clone();
     let conn_host = remote_host.clone();
+    let conn_token = token.clone();
     let dead_host = remote_host.clone();
     spawn_watched(
         "http_proxy",
@@ -161,8 +169,9 @@ pub async fn start_http_proxy<R: Runtime>(
             move |stream| {
                 let app = conn_app.clone();
                 let host = conn_host.clone();
+                let token = conn_token.clone();
                 async move {
-                    if let Err(e) = handle_connection(app, stream, &host).await {
+                    if let Err(e) = handle_connection(app, stream, &host, &token).await {
                         warn!("[http_proxy] connection to {} failed: {}", host, e);
                     }
                 }
@@ -184,8 +193,15 @@ pub async fn start_http_proxy<R: Runtime>(
         "[http_proxy] tunnel started on 127.0.0.1:{} → {}",
         port, remote_host
     );
-    inner.insert(remote_host, ProxyEntry { port, shutdown_tx });
-    Ok(port)
+    inner.insert(
+        remote_host,
+        ProxyEntry {
+            port,
+            token: token.clone(),
+            shutdown_tx,
+        },
+    );
+    Ok(TunnelEndpoint { port, token })
 }
 
 /// Stop the tunnel for `remote_host` (no-op if none is running).
@@ -256,9 +272,14 @@ async fn handle_connection<R: Runtime>(
     app: AppHandle<R>,
     mut local: TcpStream,
     remote_host: &str,
+    token: &str,
 ) -> Result<(), BoxError> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n), 10s guard ─────────
-    let buf = read_request_headers(&mut local).await?;
+    let raw = read_request_headers(&mut local).await?;
+    let Some(buf) = strip_tunnel_token(&raw, token) else {
+        let _ = local.write_all(FORBIDDEN_RESPONSE).await;
+        return Ok(());
+    };
 
     // Defense-in-depth (primary validation is in start_http_proxy).
     validate_remote_host(remote_host)?;
@@ -621,6 +642,7 @@ mod tests {
                 "example.com:8443".to_string(),
                 ProxyEntry {
                     port: 4242,
+                    token: "tok".to_string(),
                     shutdown_tx: tx,
                 },
             );
@@ -766,5 +788,47 @@ mod tests {
             !state.claim_trusted_report("other.example:8443"),
             "clearing one host leaves another host's claim in place"
         );
+    }
+
+    // ── start_http_proxy endpoint and path token ────────────────────────────
+
+    #[tokio::test]
+    async fn a_reused_tunnel_keeps_its_token_and_refuses_requests_without_it() {
+        use tokio::io::AsyncReadExt;
+        let app = tauri::test::mock_builder()
+            .manage(HttpProxyState::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let host = "127.0.0.1:9".to_string();
+
+        let first = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("first start");
+        let second = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("second start");
+        assert_eq!(first, second, "reuse must return the same port and token");
+        assert_eq!(first.token.len(), 64);
+
+        for request in [
+            "GET /api/v1/health HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
+            format!(
+                "GET /{}/api/v1/health HTTP/1.1\r\nHost: x\r\n\r\n",
+                "cd".repeat(32)
+            ),
+        ] {
+            let mut client = TcpStream::connect(("127.0.0.1", first.port))
+                .await
+                .expect("connect");
+            client.write_all(request.as_bytes()).await.expect("write");
+            let mut reply = Vec::new();
+            tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut reply))
+                .await
+                .expect("reply in time")
+                .expect("read");
+            assert_eq!(reply, FORBIDDEN_RESPONSE, "request: {request:?}");
+        }
+
+        stop_http_proxy(app.state(), host).await.expect("stop");
     }
 }

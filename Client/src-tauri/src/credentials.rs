@@ -504,11 +504,14 @@ pub async fn login_with_saved_password(
         .password
         .ok_or_else(|| "no saved password for this host".to_string())?;
 
-    let port = crate::http_proxy::start_http_proxy(app, state, host).await?;
+    let tunnel = crate::http_proxy::start_http_proxy(app, state, host).await?;
 
-    timeout(SAVED_LOGIN_TIMEOUT, post_login(port, &username, &password))
-        .await
-        .map_err(|_| "saved-password login timed out".to_string())?
+    timeout(
+        SAVED_LOGIN_TIMEOUT,
+        post_login(tunnel.port, &tunnel.token, &username, &password),
+    )
+    .await
+    .map_err(|_| "saved-password login timed out".to_string())?
 }
 
 /// Identifies this client to the server, distinct from the webview's own
@@ -541,10 +544,11 @@ const CLIENT_USER_AGENT: &str = concat!("OwnCord-Client/", env!("CARGO_PKG_VERSI
 /// endpoint actually returns. `Accept-Encoding` is deliberately not sent:
 /// the response below is read and parsed without any content decoding, so
 /// advertising a compression this code cannot decode would break parsing.
-fn build_login_request(username: &str, password: &str) -> String {
+fn build_login_request(token: &str, username: &str, password: &str) -> String {
     let body = serde_json::json!({ "username": username, "password": password }).to_string();
     format!(
-        "POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /{}/api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        token,
         CLIENT_USER_AGENT,
         body.len(),
         body
@@ -554,10 +558,11 @@ fn build_login_request(username: &str, password: &str) -> String {
 /// POST the login body to the loopback proxy and return the raw response.
 async fn post_login(
     port: u16,
+    token: &str,
     username: &str,
     password: &str,
 ) -> Result<SavedLoginResponse, String> {
-    let request = build_login_request(username, password);
+    let request = build_login_request(token, username, password);
 
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .await
@@ -993,7 +998,11 @@ mod tests {
     /// since the response is read without content decoding.
     #[test]
     fn build_login_request_carries_the_user_agent_and_correct_framing() {
-        let request = build_login_request("alice", "hunter2");
+        let request = build_login_request("tok", "alice", "hunter2");
+        assert!(
+            request.starts_with("POST /tok/api/v1/auth/login HTTP/1.1\r\n"),
+            "{request}"
+        );
         let expected_ua = format!("User-Agent: {CLIENT_USER_AGENT}\r\n");
         assert!(request.contains(&expected_ua), "{request}");
         assert!(

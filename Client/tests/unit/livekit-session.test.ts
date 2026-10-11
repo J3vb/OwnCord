@@ -156,7 +156,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const mockInvoke = vi.hoisted(() =>
   vi.fn((cmd: string, _payload?: unknown) => {
-    if (cmd === "start_livekit_proxy") return Promise.resolve(7881);
+    if (cmd === "start_livekit_proxy") return Promise.resolve({ port: 7881, token: "tun" });
     if (cmd === "stop_livekit_proxy") return Promise.resolve();
     return Promise.resolve();
   }),
@@ -948,9 +948,13 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token", {
-        autoSubscribe: false,
-      });
+      expect(mockRoom.connect).toHaveBeenCalledWith(
+        "ws://127.0.0.1:7881/tun/livekit",
+        "test-token",
+        {
+          autoSubscribe: false,
+        },
+      );
     });
 
     it("handles mic permission denied gracefully", async () => {
@@ -2817,7 +2821,7 @@ describe("LiveKitSession", () => {
       // Detected as local, but CSP host-sources cannot name an IPv6 literal,
       // so connect-src has no ws://[::1] entry: the direct URL would be
       // refused, and it goes through the loopback tunnel instead.
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("tunnels an IPv6 loopback directUrl when serverHost is bracketed [::1]:7880", async () => {
@@ -2825,7 +2829,7 @@ describe("LiveKitSession", () => {
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
       // Bracketed IPv6 — host extracted as "::1", detected as local, and
       // tunnelled for the same connect-src reason as the bare form.
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {
@@ -2834,7 +2838,7 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("passes through proxyPath that does not start with / for remote host", async () => {
@@ -2850,14 +2854,14 @@ describe("LiveKitSession", () => {
         "/livekit",
         "ws://example.com:7880/livekit",
       );
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("does not return directUrl for localhost when directUrl is undefined", async () => {
       session.setServerHost("localhost:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit");
       // No directUrl provided, isLocal but directUrl falsy -> falls to proxy
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
   });
 
