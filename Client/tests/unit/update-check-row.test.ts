@@ -1,15 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockActive, mockInstall } = vi.hoisted(() => ({
+const { mockActive, mockInstall, mockInstallState } = vi.hoisted(() => ({
   mockActive: vi.fn(),
   mockInstall: vi.fn(),
+  mockInstallState: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../src/features/updates/updateChecker", () => ({ getActiveUpdateChecker: mockActive }));
-vi.mock("@lib/updater", () => ({ downloadAndInstallUpdate: mockInstall }));
+vi.mock("@lib/updater", () => ({
+  downloadAndInstallUpdate: mockInstall,
+  // Like the real one: replays the app-wide install state to a new subscriber.
+  subscribeToUpdateInstall: (listener: (state: unknown) => void) => {
+    listener(mockInstallState());
+    return () => undefined;
+  },
+}));
 
 import { buildUpdateCheckRow } from "../../src/features/updates/UpdateCheckRow";
 import type { UpdateOutcome } from "../../src/features/updates/updateChecker";
@@ -34,6 +42,7 @@ describe("Settings → Check for updates", () => {
     checkNow.mockImplementation(() => new Promise<UpdateOutcome>((r) => (resolveCheck = r)));
     mockInstall.mockReset();
     mockInstall.mockResolvedValue(undefined);
+    mockInstallState.mockReturnValue({ status: "idle" });
     mockActive.mockReturnValue({ serverUrl: "https://s.example", checkNow });
     row = buildUpdateCheckRow(ac.signal);
     document.body.appendChild(row);
@@ -71,6 +80,31 @@ describe("Settings → Check for updates", () => {
 
     (row.querySelector(".update-check-install") as HTMLButtonElement).click();
     expect(mockInstall).toHaveBeenCalledWith("https://s.example");
+  });
+
+  it("does not offer the install again once an install already succeeded and only a restart is pending", async () => {
+    mockInstallState.mockReturnValue({ status: "failed", restartRequired: true });
+    await settle({ kind: "available", version: "2.0.0", body: "" });
+    expect(status()).toBe("Update installed. Please restart OwnCord to finish.");
+    expect(row.querySelector(".update-check-install")).toBeNull();
+  });
+
+  it("does not offer a second install while one is downloading or restarting", async () => {
+    mockInstallState.mockReturnValue({ status: "downloading", progress: null });
+    await settle({ kind: "available", version: "2.0.0", body: "" });
+    expect(status()).toBe("Downloading update…");
+    expect(row.querySelector(".update-check-install")).toBeNull();
+
+    mockInstallState.mockReturnValue({ status: "restarting" });
+    await settle({ kind: "available", version: "2.0.0", body: "" });
+    expect(status()).toBe("Update installed. Restarting…");
+    expect(row.querySelector(".update-check-install")).toBeNull();
+  });
+
+  it("still offers a retry after a failed download that can be retried", async () => {
+    mockInstallState.mockReturnValue({ status: "failed", restartRequired: false });
+    await settle({ kind: "available", version: "2.0.0", body: "" });
+    expect(row.querySelector(".update-check-install")).not.toBeNull();
   });
 
   it("says so when this install cannot update itself", async () => {

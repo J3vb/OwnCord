@@ -14,6 +14,18 @@ export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60_000;
 /** Floor between background checks, so a flapping socket cannot hammer the feed. */
 export const MIN_BACKGROUND_GAP_MS = 60_000;
 
+/** A reconnect check waits a random 0..this, so clients behind one IP that all
+ *  reconnect after a server restart do not burst the update endpoint's per-IP
+ *  rate limit. Only the reconnect check is spread; the interval stays fixed. */
+export const RECONNECT_SPREAD_MS = 60_000;
+/** A failed background check is retried after RETRY_MIN_MS plus a random
+ *  0..RETRY_SPREAD_MS, up to MAX_RETRIES times. The updater plugin does not
+ *  expose the HTTP status, so a 429 cannot be told from any other failure:
+ *  all of them are "try later" rather than a four-hour wait. */
+export const RETRY_MIN_MS = 2 * 60_000;
+export const RETRY_SPREAD_MS = 3 * 60_000;
+export const MAX_RETRIES = 3;
+
 export type UpdateCheckReason = "startup" | "interval" | "reconnect" | "manual";
 
 export type UpdateOutcome =
@@ -36,6 +48,7 @@ export interface UpdateChecker {
 
 export interface UpdateCheckerOptions {
   readonly serverUrl: string;
+  readonly random?: () => number;
 }
 
 let active: UpdateChecker | null = null;
@@ -46,13 +59,16 @@ export function getActiveUpdateChecker(): UpdateChecker | null {
 }
 
 export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecker {
-  const { serverUrl } = options;
+  const { serverUrl, random = Math.random } = options;
   const listeners = new Set<(outcome: UpdateOutcome, reason: UpdateCheckReason) => void>();
   let lifetime: Disposable | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<UpdateOutcome> | null = null;
   let lastCheckAt: number | null = null;
   let inFlightReason: UpdateCheckReason = "interval";
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retries = 0;
 
   function scheduleNext(): void {
     timer = setTimeout(() => {
@@ -75,6 +91,19 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     } catch (err) {
       log.error("Update check failed", { reason, error: String(err) });
       outcome = { kind: "failed" };
+    }
+    if (reason !== "manual" && owner === lifetime && owner !== null) {
+      if (outcome.kind !== "failed") retries = 0;
+      else if (retries < MAX_RETRIES && retryTimer === null) {
+        retries += 1;
+        retryTimer = setTimeout(
+          () => {
+            retryTimer = null;
+            void checkNow(reason);
+          },
+          RETRY_MIN_MS + random() * RETRY_SPREAD_MS,
+        );
+      }
     }
     // A check that outlives stop() reports to nobody: its page is gone.
     if (owner === lifetime) {
@@ -112,10 +141,11 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   function stop(): void {
     lifetime?.destroy();
     lifetime = null;
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
+    for (const pending of [timer, reconnectTimer, retryTimer]) {
+      if (pending !== null) clearTimeout(pending);
     }
+    timer = reconnectTimer = retryTimer = null;
+    retries = 0;
     if (active === checker) active = null;
   }
 
@@ -125,7 +155,11 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     stop,
     checkNow,
     notifyReconnected() {
-      if (lifetime !== null) void checkNow("reconnect");
+      if (lifetime === null || reconnectTimer !== null) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void checkNow("reconnect");
+      }, random() * RECONNECT_SPREAD_MS);
     },
     onOutcome(listener) {
       listeners.add(listener);

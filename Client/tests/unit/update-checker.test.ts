@@ -13,6 +13,10 @@ import {
   getActiveUpdateChecker,
   UPDATE_CHECK_INTERVAL_MS,
   MIN_BACKGROUND_GAP_MS,
+  RECONNECT_SPREAD_MS,
+  RETRY_MIN_MS,
+  RETRY_SPREAD_MS,
+  MAX_RETRIES,
   type UpdateChecker,
   type UpdateOutcome,
 } from "../../src/features/updates/updateChecker";
@@ -29,7 +33,7 @@ describe("createUpdateChecker", () => {
     mockCheckForUpdate.mockReset();
     mockCheckForUpdate.mockResolvedValue(NONE);
     outcomes = [];
-    checker = createUpdateChecker({ serverUrl: "https://s.example" });
+    checker = createUpdateChecker({ serverUrl: "https://s.example", random: () => 0.5 });
     checker.onOutcome((outcome, reason) => outcomes.push({ outcome, reason }));
   });
 
@@ -61,12 +65,13 @@ describe("createUpdateChecker", () => {
 
   it("checks again after a reconnect, so a server that updated is noticed", async () => {
     checker.start();
-    await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
     mockCheckForUpdate.mockResolvedValue(V2);
 
     checker.notifyReconnected();
     await vi.advanceTimersByTimeAsync(0);
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
 
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS / 2);
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
     expect(outcomes.at(-1)).toEqual({
       outcome: { kind: "available", version: "2.0.0", body: "notes" },
@@ -74,26 +79,98 @@ describe("createUpdateChecker", () => {
     });
   });
 
+  it("spreads the reconnect check over a random delay, so a shared IP does not burst", async () => {
+    for (const [random, delay] of [
+      [0, 0],
+      [0.999, RECONNECT_SPREAD_MS * 0.999],
+    ] as const) {
+      mockCheckForUpdate.mockClear();
+      const c = createUpdateChecker({ serverUrl: "https://s.example", random: () => random });
+      c.start();
+      c.notifyReconnected();
+      if (delay > 0) {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(mockCheckForUpdate).not.toHaveBeenCalled();
+      }
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+      c.stop();
+    }
+  });
+
   it("does not hammer the feed when the socket flaps", async () => {
     checker.start();
     checker.notifyReconnected();
-    await vi.advanceTimersByTimeAsync(0);
     checker.notifyReconnected();
     checker.notifyReconnected();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
     checker.notifyReconnected();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a reconnect check still waiting when the checker stops", async () => {
+    checker.start();
+    checker.notifyReconnected();
+    checker.stop();
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS * 2);
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
+  });
+
+  describe("a failed background check (a rate limit looks like one)", () => {
+    const FAILED = { ...NONE, failed: true };
+
+    it("is retried after a random delay instead of waiting for the next interval", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValueOnce(FAILED).mockResolvedValue(V2);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+
+      const delay = RETRY_MIN_MS + RETRY_SPREAD_MS * 0.5;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
+      expect(outcomes.at(-1)?.outcome.kind).toBe("available");
+    });
+
+    it("gives up after MAX_RETRIES and leaves the rest to the interval", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValue(FAILED);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS);
+      await vi.advanceTimersByTimeAsync((RETRY_MIN_MS + RETRY_SPREAD_MS) * MAX_RETRIES);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1 + MAX_RETRIES);
+    });
+
+    it("is not retried for a manual check, which answers the user directly", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValue(FAILED);
+      expect(await checker.checkNow("manual")).toEqual({ kind: "failed" });
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops retrying once the checker stops", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValue(FAILED);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(0);
+      checker.stop();
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("reports a manual check that joins a background check as manual", async () => {
     let resolve!: (v: typeof V2) => void;
     mockCheckForUpdate.mockReturnValueOnce(new Promise((r) => (resolve = r)));
     checker.start();
-    checker.notifyReconnected();
+    void checker.checkNow("reconnect");
     const manual = checker.checkNow("manual");
     resolve(V2);
     await manual;

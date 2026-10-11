@@ -21,6 +21,7 @@ vi.mock("@lib/updater", () => ({
 import { createUpdateNotifier } from "../../src/components/UpdateNotifier";
 import {
   MIN_BACKGROUND_GAP_MS,
+  RECONNECT_SPREAD_MS,
   UPDATE_CHECK_INTERVAL_MS,
   getActiveUpdateChecker,
 } from "../../src/features/updates/updateChecker";
@@ -82,7 +83,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
     setConnectionStatus("reconnecting");
     await vi.advanceTimersByTimeAsync(60_000);
     setConnectionStatus("connected");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
 
     expect(bannerText()).toBe("Update v2.0.0 available");
   });
@@ -121,7 +122,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
     setConnectionStatus("reconnecting");
     await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
     setConnectionStatus("connected");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
     expect(mockCheckForUpdate.mock.calls.length).toBe(before + 1);
     expect(banners()).toBe(0);
 

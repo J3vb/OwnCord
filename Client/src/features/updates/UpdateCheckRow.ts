@@ -6,21 +6,60 @@
  * update banner the notifier raises for the same outcome.
  */
 
-import { createElement, appendChildren } from "../../lib/dom";
+import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createLogger } from "../../lib/logger";
 import { getActiveUpdateChecker } from "./updateChecker";
 import type { UpdateOutcome } from "./updateChecker";
-import { downloadAndInstallUpdate } from "../../lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "../../lib/updater";
+import type { UpdateInstallState } from "../../lib/updater";
 import { connectText } from "../../i18n/connect";
 import { settingsText as t } from "../../i18n/settings";
-import { outcomeEl, showOutcome } from "../../components/settings/helpers";
 
 const log = createLogger("UpdateCheckRow");
+
+// The shared field-message classes (login.css), as components/settings/helpers
+// `showOutcome` uses them; a lower layer cannot import that UI module.
+const OUTCOME_CLASS = {
+  error: "form-error",
+  success: "form-status",
+  warning: "form-warning",
+} as const;
+type Outcome = keyof typeof OUTCOME_CLASS;
+
+function showOutcome(el: HTMLElement, outcome: Outcome, text: string): void {
+  el.className = OUTCOME_CLASS[outcome];
+  setText(el, text);
+}
+
+/** The app-wide install state now: the subscription replays it on subscribe. */
+function currentInstallState(): UpdateInstallState {
+  let state: UpdateInstallState = { status: "idle" };
+  subscribeToUpdateInstall((s) => {
+    state = s;
+  })();
+  return state;
+}
+
+/** Text for an install that is under way or done: offering Install again would
+ *  only rejoin the same operation, so say where it stands instead. A failed
+ *  download that can be retried is not one of these. */
+function installInProgressText(state: UpdateInstallState): string | null {
+  if (state.status === "downloading") return connectText("update.downloading");
+  if (state.status === "restarting") return connectText("update.installedRestarting");
+  if (state.status === "failed" && state.restartRequired) {
+    return connectText("update.installedRestart");
+  }
+  return null;
+}
 
 export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
-  const status = outcomeEl("success", "update-check-status");
+  const status = createElement("div", {
+    class: OUTCOME_CLASS.success,
+    role: "status",
+    "data-testid": "update-check-status",
+  });
   appendChildren(
     info,
     createElement("div", { class: "setting-label" }, t("updates.label")),
@@ -59,6 +98,11 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
         showOutcome(status, "warning", connectText("update.unavailable"));
         return;
       case "available": {
+        const underway = installInProgressText(currentInstallState());
+        if (underway !== null) {
+          showOutcome(status, "warning", underway);
+          return;
+        }
         showOutcome(
           status,
           "success",
