@@ -7,6 +7,7 @@ package admin
 // event code. The message text itself is never exported: supportEvents emits
 // only the code, so a bundle cannot carry free-form text. Codes are derived
 // from the literal alone — no runtime data — so none can embed a request value.
+//
 // The entries were generated from the message literals in this tree. They are
 // hand-maintained from here: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded
 // parses the tree, and when a new Warn/Error message has no code it names the
@@ -94,7 +95,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"audit log write failed":                                 "audit_write_failed",
 	"audit writer: flush lost audit entries":                 "audit_writer_flush_lost_audit_entries",
 	"auth service returned a non-refusal error":              "auth_service_non_refusal_error",
-	"settings patch failed":                                  "settings_patch_failed",
 	"auth: token resolution failed":                          "auth_token_resolution_failed",
 	"backup failed integrity check — removing":               "backup_verification_failed",
 	"backup maintenance: failed to remove stale backup temp": "backup_maintenance_remove_stale_temp_failed",
