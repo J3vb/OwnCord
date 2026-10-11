@@ -667,6 +667,29 @@ describe("handleActiveSpeakersChanged", () => {
       expect(speaking()).toBe(true);
     });
 
+    it("does not relight a channel the client has left", () => {
+      seedVoiceUsers(12, [3, 7]);
+      let channel: number | null = 12;
+      const h = build({ getCurrentChannelId: () => channel });
+      const u3 = join(h, "user-3:tok");
+      const u7 = join(h, "user-7:tok");
+      h.handlers.handleActiveSpeakersChanged([u3, u7]);
+      h.handlers.handleActiveSpeakersChanged([u7]);
+
+      channel = 99;
+      voiceStore.setState((prev) => {
+        const voiceUsers = new Map(prev.voiceUsers);
+        const users = new Map(voiceUsers.get(12));
+        for (const [id, u] of users) users.set(id, { ...u, speaking: false });
+        voiceUsers.set(12, users);
+        return { ...prev, voiceUsers };
+      });
+      vi.advanceTimersByTime(500);
+
+      expect(speaking()).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("drops the pending hold when the session resets", () => {
       seedVoiceUsers(12, [7]);
       const h = build();
