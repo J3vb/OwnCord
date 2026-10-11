@@ -42,7 +42,8 @@ func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64)
 	}
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
 	if err != nil {
-		return fmt.Errorf("%w: failed to resolve permissions", ErrInternal)
+		// channelSubject already classifies the failure as ErrInternal.
+		return fmt.Errorf("check channel visibility: %w", err)
 	}
 	if permissions.CanViewChannel(sub) != nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
@@ -78,7 +79,7 @@ func (s *NSFWService) Acknowledge(ctx context.Context, userID, channelID int64) 
 	}
 	labelled, err := s.st.AcknowledgeNSFW(ctx, userID, channelID)
 	if err != nil {
-		return fmt.Errorf("%w: failed to record acknowledgement", ErrInternal)
+		return fmt.Errorf("%w: failed to record acknowledgement: %w", ErrInternal, err)
 	}
 	if !labelled {
 		return ErrNotNSFW
@@ -97,7 +98,7 @@ func (s *NSFWService) Revoke(ctx context.Context, userID, channelID int64) error
 		return err
 	}
 	if err := s.st.RevokeNSFW(ctx, userID, channelID); err != nil {
-		return fmt.Errorf("%w: failed to remove acknowledgement", ErrInternal)
+		return fmt.Errorf("%w: failed to remove acknowledgement: %w", ErrInternal, err)
 	}
 	return nil
 }

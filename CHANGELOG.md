@@ -64,6 +64,9 @@ and only when it changes something a contributor or fork holder must do
 **Server**
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+**Accounts & admin**
+
+- Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
 
 **Login & connection**
 

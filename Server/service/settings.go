@@ -122,11 +122,15 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 
 	normalized, err := normalizeSettingUpdates(updates)
 	if err != nil {
-		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
+		return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
 
 	if err := s.validateRequire2FAUpdate(ctx, normalized); err != nil {
-		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
+		// A store fault is the server's, not a bad request: let it through.
+		if errors.Is(err, ErrInternal) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
 
 	// Read the mode before the apply so the transition row can name both ends.
@@ -281,7 +285,7 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 
 	count, err := s.st.CountUsersWithoutTOTP(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to validate 2FA enrollment")
+		return fmt.Errorf("%w: failed to validate 2FA enrollment: %w", ErrInternal, err)
 	}
 	if count > 0 {
 		return fmt.Errorf("require_2fa cannot be enabled until all users have 2FA enabled")
@@ -299,7 +303,11 @@ func (s *SettingsService) targetRegistrationMode(ctx context.Context, updates ma
 		}
 		return mode, nil
 	}
-	return registrationModeSetting(ctx, s.st)
+	mode, err := registrationModeSetting(ctx, s.st)
+	if err != nil {
+		return "", fmt.Errorf("%w: failed to read registration mode: %w", ErrInternal, err)
+	}
+	return mode, nil
 }
 
 func (s *SettingsService) targetBoolSetting(ctx context.Context, updates map[string]string, key string) (bool, error) {
