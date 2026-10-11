@@ -346,6 +346,7 @@ func (s *AuthService) UseErasure(e *ErasureService) {
 func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 	mode, err := registrationModeSetting(ctx, s.st)
 	if err != nil {
+		slog.Error("registration policy: reading registration_mode failed", "err", err)
 		return ErrRegistrationPolicyUnavailable
 	}
 	if mode == RegistrationClosed {
@@ -354,6 +355,7 @@ func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 
 	require2FA, err := s.require2FAEnabled(ctx)
 	if err != nil {
+		slog.Error("registration policy: reading require_2fa failed", "err", err)
 		return ErrRegistrationPolicyUnavailable
 	}
 	if require2FA {
@@ -376,6 +378,7 @@ const (
 func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (RegistrationMode, error) {
 	mode, err := registrationModeSetting(ctx, s.st)
 	if err != nil {
+		slog.Error("register: reading registration_mode failed", "err", err)
 		return "", ErrRegistrationPolicyUnavailable
 	}
 	switch mode {
@@ -400,6 +403,7 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 	if mode == RegistrationApproval {
 		pending, err := s.st.CountPendingUsers(ctx)
 		if err != nil {
+			slog.Error("register: counting pending applications failed", "err", err)
 			return "", ErrRegistrationPolicyUnavailable
 		}
 		if pending >= maxPendingRegistrations {
@@ -461,6 +465,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	hash, err := auth.HashPassword(in.Password)
 	release()
 	if err != nil {
+		slog.Error("register: password hashing failed", "err", err)
 		return nil, ErrPasswordHash
 	}
 
@@ -563,6 +568,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 
 	require2FA, err := s.require2FAEnabled(ctx)
 	if err != nil {
+		slog.Error("login: reading require_2fa failed", "err", err, "user_id", user.ID)
 		return nil, ErrAuthPolicyUnavailable
 	}
 	if user.TOTPSecret != nil {
@@ -580,6 +586,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 	// Issue session.
 	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {
+		slog.Error("login: session issue failed", "err", err, "user_id", user.ID)
 		return nil, ErrSessionIssue
 	}
 
@@ -814,6 +821,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 			s.usedCodes.Unmark(ctx, user.ID, code)
 		}
 		s.partial.Restore(ctx, partialToken, claimed)
+		slog.Error("verify-totp: session issue failed", "err", err, "user_id", user.ID)
 		return nil, ErrSessionIssue
 	}
 
@@ -950,6 +958,7 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 	// The client clears its token optimistically — once logout reaches the
 	// server, the revocation must not die with a dropped connection.
 	if err := s.st.DeleteSession(context.WithoutCancel(ctx), sess.TokenHash); err != nil {
+		slog.Error("logout: session delete failed", "err", err, "user_id", sess.UserID)
 		return ErrLogoutFailed
 	}
 
@@ -1062,6 +1071,7 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password stri
 
 	secret, err := auth.GenerateTOTPSecret()
 	if err != nil {
+		slog.Error("totp enrol: secret generation failed", "err", err, "user_id", user.ID)
 		return nil, ErrTOTPSecretGenerate
 	}
 
@@ -1110,6 +1120,7 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 	}
 
 	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, &encryptedSecret); err != nil {
+		slog.Error("totp confirm: storing the secret failed", "err", err, "user_id", user.ID)
 		return nil, ErrTOTPEnableFailed
 	}
 	s.pending.Delete(ctx, user.ID)
@@ -1152,6 +1163,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 
 	require2FA, err := s.require2FAEnabled(ctx)
 	if err != nil {
+		slog.Error("totp disable: reading require_2fa failed", "err", err, "user_id", user.ID)
 		return nil, ErrAuthPolicyUnavailable
 	}
 	if require2FA {
@@ -1160,6 +1172,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 
 	s.pending.Delete(ctx, user.ID)
 	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
+		slog.Error("totp disable: clearing the secret failed", "err", err, "user_id", user.ID)
 		return nil, ErrTOTPDisableFailed
 	}
 	// The recovery codes stand in for a TOTP code and mean nothing without
