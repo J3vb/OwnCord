@@ -2478,6 +2478,17 @@ session or API token issued by this server (any other token gets `401`), with
 the permission and rank checks. A member the caller does not
 outrank, or a role at or above the caller's own, is refused with `403`.
 
+### Channel actions: `/api/v1/moderation/channels`
+
+`POST /`, `PATCH /{id}` and `DELETE /{id}` are the channel create, edit and
+delete actions of the desktop client. They run the same handlers, with the same
+request and response shapes, as `POST /admin/api/channels` and
+`PATCH`/`DELETE /admin/api/channels/{id}`, but live outside `/admin` so a
+reverse proxy that answers `/admin` with a web page does not break them, and
+they are not subject to `server.admin_allowed_cidrs`. They accept only a
+session or API token issued by this server (any other token gets `401`) and
+require `MANAGE_CHANNELS` (otherwise `403`).
+
 ### POST /api/v1/moderation/queue/{id}/act
 
 Perform a moderator action against the report's subject (or, for
