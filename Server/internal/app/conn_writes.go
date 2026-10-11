@@ -36,8 +36,8 @@ func (a *App) installConnWrites(services *service.Services) {
 // loop, queue a disconnect stamp for each user connected still reports, then
 // flush what is pending (P5-S07). A nil connected stamps no one. When dbClosed
 // reports the handle already closed (a backup restore closes it before the
-// restart), the pending writes belong to the replaced database and are
-// dropped: failing the step would make the restarting process exit non-zero.
+// restart), the pending writes cannot land and are dropped: failing the step
+// would make the restarting process exit non-zero.
 func startConnWrites(bgCtx context.Context, w *service.ConnWrites, users *service.UserService, connected func() []int64, dbClosed func() bool) func(context.Context) error {
 	ctx, cancel := context.WithCancel(bgCtx)
 	done := make(chan struct{})
