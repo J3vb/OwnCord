@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -40,13 +44,37 @@ type retentionSummary struct {
 type serverInfoDeps struct {
 	registrationMode func(context.Context) (service.RegistrationMode, error)
 	retentionDays    func(context.Context) (int, error)
+	serverName       func(context.Context) (string, error)
 }
 
 func routerServerInfoDeps(svc *service.Services) serverInfoDeps {
 	return serverInfoDeps{
 		registrationMode: svc.Settings.RegistrationMode,
 		retentionDays:    svc.Retention.ServerDays,
+		serverName: func(ctx context.Context) (string, error) {
+			return svc.Settings.Setting(ctx, "server_name")
+		},
 	}
+}
+
+// liveServerName is the name the admin page edits: the server_name setting,
+// falling back to config.yaml's server.name when the setting is missing or
+// blank. Any other read error is returned so the caller can decide.
+func liveServerName(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (string, error) {
+	if deps.serverName == nil {
+		return cfg.Server.Name, nil
+	}
+	name, err := deps.serverName(ctx)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return cfg.Server.Name, nil
+		}
+		return "", fmt.Errorf("server name: %w", err)
+	}
+	if strings.TrimSpace(name) == "" {
+		return cfg.Server.Name, nil
+	}
+	return name, nil
 }
 
 const (
@@ -93,6 +121,10 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDep
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
+	name, err := liveServerName(ctx, cfg, deps)
+	if err != nil {
+		return serverInfoResponse{}, err
+	}
 	// C-2: no version, build or commit on an unauthenticated endpoint —
 	// that is what lets a scanner match this server to a CVE list. If you
 	// are here to add one, it belongs on the admin-gated diagnostics
@@ -105,7 +137,7 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDep
 	// Reporting BrowserClientEnabled is not hosting: no route is mounted
 	// and no asset is served either way (browser_hosting_posture_test.go).
 	return serverInfoResponse{
-		Name:                 cfg.Server.Name,
+		Name:                 name,
 		ProtocolEpoch:        ws.ProtocolEpoch,
 		BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
 		RegistrationMode:     string(mode),

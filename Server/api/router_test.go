@@ -55,6 +55,11 @@ func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
+	// The migration seeds server_name; blank it so the config.yaml name is the
+	// fallback these tests exercise unless one sets the setting itself.
+	if err := database.SetSetting(t.Context(), "server_name", ""); err != nil {
+		t.Fatalf("blank server_name: %v", err)
+	}
 	if configure != nil {
 		configure(rt.Services, database)
 	}
@@ -160,6 +165,41 @@ func TestAPIV1InfoReturnsServerName(t *testing.T) {
 
 	if body["name"] != "Test Server" {
 		t.Errorf("name = %v, want 'Test Server'", body["name"])
+	}
+}
+
+// ARCH-024: the admin page edits the server_name setting, so the public
+// endpoints must report it rather than config.yaml's server.name.
+func TestAPIV1InfoAndServerInfoReportEditedServerName(t *testing.T) {
+	router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
+		if err := database.SetSetting(t.Context(), "server_name", "Renamed In Admin"); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	var info map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&info); err != nil {
+		t.Fatalf("JSON decode error: %v", err)
+	}
+	if info["name"] != "Renamed In Admin" {
+		t.Errorf("/info name = %v, want the edited setting", info["name"])
+	}
+	if got := serverInfoBody(t, router)["name"]; got != "Renamed In Admin" {
+		t.Errorf("/server-info name = %v, want the edited setting", got)
+	}
+}
+
+func TestAPIV1InfoFallsBackToConfigNameWhenSettingBlank(t *testing.T) {
+	router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
+		if err := database.SetSetting(t.Context(), "server_name", "  "); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got := serverInfoBody(t, router)["name"]; got != "Test Server" {
+		t.Errorf("/server-info name = %v, want the config.yaml fallback", got)
 	}
 }
 
@@ -471,6 +511,9 @@ func TestAPIV1ServerInfoIsCached(t *testing.T) {
 	}
 	// cfg is ours, so mutating it between calls proves whether the handler
 	// re-derives the response or serves the cached one.
+	if err := database.SetSetting(t.Context(), "server_name", ""); err != nil {
+		t.Fatalf("blank server_name: %v", err)
+	}
 	cfg := &config.Config{Server: config.ServerConfig{Name: "First Name", Port: 8443}}
 	rt, rtErr := app.StartRuntime(cfg, database, nil)
 	if rtErr != nil {
