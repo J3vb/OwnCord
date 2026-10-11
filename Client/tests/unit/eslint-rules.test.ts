@@ -282,6 +282,12 @@ describe("eslint-rules", () => {
         function onCancel() {
           setActiveChannel(null);
         }`,
+        // A callback passed in as a parameter runs later, not in this function.
+        `import { setLoading } from "@stores/ui.store";
+        function bind(handler) {
+          setLoading(true);
+          ws.on("x", handler);
+        }`,
         // A ws.on() handler outside dispatcher.ts that only READS a store
         // (channelsStore.getState()) to drive page-local UI — this is the
         // real ChannelController.ts shape and must stay legal.
@@ -358,6 +364,13 @@ describe("eslint-rules", () => {
               updateUser({ username: "x" });
             });
           });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // A factory's returned name resolves in the factory's own scope.
+        {
+          code: `import { setX } from "@stores/ui.store";
+          function make() { const h = () => setX(1); return h; }
+          ws.on("x", make());`,
           errors: [{ messageId: "storeWriteOutsideDispatcher" }],
         },
         // OC-0478: the B9 domain stores live under features/*/store.ts, not
@@ -510,6 +523,10 @@ describe("eslint-rules", () => {
         }`,
         // Something else named like it is not the Tauri command.
         `async function f() { await other("x"); await client.invoke("x"); }`,
+        // An inner try without a catch defers to the enclosing try's catch.
+        `async function f() {
+          try { try { await invoke("a"); } finally { cleanup(); } } catch (err) { log.warn("x", err); }
+        }`,
       ],
       invalid: [
         {
@@ -522,6 +539,15 @@ describe("eslint-rules", () => {
             const { invoke } = await import("@tauri-apps/api/core");
             await invoke("set_unread_badge", { count });
           }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // Not awaited: the rejection escapes the try.
+        {
+          code: `async function f() { try { invoke("a"); } catch {} }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        {
+          code: `async function f() { try { void invoke("a"); } catch {} }`,
           errors: [{ messageId: "bareInvoke" }],
         },
         // A try that has no catch lets the rejection through.

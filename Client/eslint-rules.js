@@ -394,8 +394,8 @@ function resolveLocalFunction(scope, name) {
     const variable = s.set.get(name);
     if (variable === undefined) continue;
     const def = variable.defs[0];
-    if (def?.node.type === "FunctionDeclaration") return def.node;
-    if (def?.node.type === "VariableDeclarator") return def.node.init;
+    if (def?.type === "FunctionName") return def.node;
+    if (def?.type === "Variable") return def.node.init;
     return null;
   }
   return null;
@@ -424,18 +424,18 @@ function returnedExpressions(fn, visitorKeys) {
 /** Every function that `expr` can hand to a subscription as its callback: an
  *  inline function, a local function or const it names, or what a local
  *  factory returns. An imported factory cannot be followed (known limit). */
-function handlerFunctions(expr, scope, visitorKeys, seen = new Set()) {
+function handlerFunctions(expr, sourceCode, seen = new Set()) {
   if (!expr || seen.has(expr)) return [];
   seen.add(expr);
   if (isFunctionNode(expr)) return [expr];
   if (expr.type === "Identifier") {
-    return handlerFunctions(resolveLocalFunction(scope, expr.name), scope, visitorKeys, seen);
+    return handlerFunctions(resolveLocalFunction(sourceCode.getScope(expr), expr.name), sourceCode, seen);
   }
   if (expr.type === "CallExpression" && expr.callee.type === "Identifier") {
-    const factory = resolveLocalFunction(scope, expr.callee.name);
+    const factory = resolveLocalFunction(sourceCode.getScope(expr), expr.callee.name);
     if (!factory || !isFunctionNode(factory)) return [];
-    return returnedExpressions(factory, visitorKeys).flatMap((returned) =>
-      handlerFunctions(returned, scope, visitorKeys, seen),
+    return returnedExpressions(factory, sourceCode.visitorKeys).flatMap((returned) =>
+      handlerFunctions(returned, sourceCode, seen),
     );
   }
   return [];
@@ -507,13 +507,7 @@ const noStoreWriteInWsOn = {
       CallExpression(node) {
         const callback = wsSubscriptionCallback(node);
         if (callback !== null) {
-          for (const fn of handlerFunctions(
-            callback,
-            sourceCode.getScope(node),
-            sourceCode.visitorKeys,
-          )) {
-            handlers.add(fn);
-          }
+          for (const fn of handlerFunctions(callback, sourceCode)) handlers.add(fn);
         }
         const name =
           node.callee.type === "Identifier" && storeMutatorImports.has(node.callee.name)
@@ -573,12 +567,10 @@ function isInjectedInvoke(scope, name) {
  *  function that makes the call. */
 function invokeIsGuarded(node) {
   let awaited = false;
-  let returned = false;
   let child = node;
   for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
     if (isFunctionNode(parent)) return false;
     if (parent.type === "AwaitExpression") awaited = true;
-    else if (parent.type === "ReturnStatement" && !awaited) returned = true;
     else if (
       parent.type === "MemberExpression" &&
       parent.object === child &&
@@ -590,7 +582,7 @@ function invokeIsGuarded(node) {
       const { name } = parent.property;
       if (name === "catch" || (name === "then" && parent.parent.arguments.length >= 2)) return true;
     } else if (parent.type === "TryStatement" && child === parent.block) {
-      return parent.handler !== null && !returned;
+      if (parent.handler !== null) return awaited;
     }
   }
   return false;
