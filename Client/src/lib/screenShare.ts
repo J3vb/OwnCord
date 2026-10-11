@@ -428,6 +428,14 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       maxFramerate,
       CAMERA_PUBLISH_BITRATES[quality],
     );
+    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+      // A disableCamera (or the track unplugging) ran to completion while
+      // Auto's probe was pending: it already stopped this track and sent
+      // voice_camera(false). Nothing is published yet, so just let go.
+      removeEndedListener();
+      videoTrack.stop();
+      return;
+    }
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
@@ -600,6 +608,14 @@ export async function enableScreenshare(
       videoTrack === undefined
         ? "vp8"
         : await resolveVideoCodec(videoTrack.mediaStreamTrack, effectiveFps, maxBitrate);
+    if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
+      // A disableScreenshare (or the OS stop-sharing button) ran to
+      // completion while Auto's probe was pending: it already stopped these
+      // tracks and sent voice_screenshare(false). Nothing is published yet.
+      removeEndedListener?.();
+      for (const t of screenTracks) t.stop();
+      return;
+    }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
       const simulcast = isVideo && isScreenShareSimulcast(quality, fps);

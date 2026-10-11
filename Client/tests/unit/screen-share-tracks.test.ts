@@ -1612,4 +1612,56 @@ describe("video codec", () => {
     });
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
   });
+
+  it("does not publish a camera turned off while Auto's probe is pending", async () => {
+    prefs({ videoCodec: "auto" });
+    let answer!: (info: MediaCapabilitiesInfo) => void;
+    encodingInfo.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const rig = fakeRoom();
+    const track = capturedVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+    const deps = fakeDeps(rig.room);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => expect(encodingInfo).toHaveBeenCalled());
+    await disableCamera(state, deps);
+    answer({ supported: true, smooth: true, powerEfficient: true });
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+    expect(track.stop).toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
+
+  it("does not publish a screen share ended while Auto's probe is pending", async () => {
+    prefs({ videoCodec: "auto" });
+    let answer!: (info: MediaCapabilitiesInfo) => void;
+    encodingInfo.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const rig = fakeRoom();
+    const video = capturedVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    const deps = fakeDeps(rig.room);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    const enabling = enableScreenshare(state, deps);
+    await vi.waitFor(() => expect(encodingInfo).toHaveBeenCalled());
+    await disableScreenshare(state, deps);
+    answer({ supported: true, smooth: true, powerEfficient: true });
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: true },
+    });
+    expect(video.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
 });
