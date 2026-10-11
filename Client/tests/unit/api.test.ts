@@ -1265,7 +1265,7 @@ describe("API Client", () => {
   });
 
   describe("admin channel endpoints", () => {
-    it("adminCreateChannel calls POST /admin/api/channels", async () => {
+    it("adminCreateChannel calls POST /api/v1/moderation/channels", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));
       const result = await api.adminCreateChannel({
         name: "general",
@@ -1274,7 +1274,7 @@ describe("API Client", () => {
         topic: "General chat",
         position: 0,
       });
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/channels");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/channels");
       expect(fetchCallOpts().method).toBe("POST");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({
@@ -1287,7 +1287,7 @@ describe("API Client", () => {
       expect(result).toEqual({ id: 1, name: "general", type: "text" });
     });
 
-    it("adminUpdateChannel calls PATCH /admin/api/channels/{id}", async () => {
+    it("adminUpdateChannel calls PATCH /api/v1/moderation/channels/{id}", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 5, name: "renamed", topic: "new topic" }));
       const result = await api.adminUpdateChannel(5, {
         name: "renamed",
@@ -1296,7 +1296,7 @@ describe("API Client", () => {
         position: 2,
         archived: false,
       });
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/channels/5");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/channels/5");
       expect(fetchCallOpts().method).toBe("PATCH");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({
@@ -1309,10 +1309,10 @@ describe("API Client", () => {
       expect(result.name).toBe("renamed");
     });
 
-    it("adminDeleteChannel calls DELETE /admin/api/channels/{id}", async () => {
+    it("adminDeleteChannel calls DELETE /api/v1/moderation/channels/{id}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminDeleteChannel(5);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/admin/api/channels/5");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/channels/5");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
   });

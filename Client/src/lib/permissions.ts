@@ -90,7 +90,7 @@ export function canManageMessages(): boolean {
 /**
  * Whether the signed-in user's role holds MANAGE_CHANNELS — create, edit,
  * delete and reorder channels, all of which the server gates on the same bit
- * behind `/admin/api/channels*`.
+ * behind `/api/v1/moderation/channels*`.
  *
  * Routed through `roleHasPermission` rather than `currentUserHasPermission` so
  * a server that sent no role list still shows the affordances to owner/admin
