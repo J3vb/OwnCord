@@ -239,10 +239,7 @@ type Hub struct {
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	if h.runDone != nil {
-		defer func() {
-			h.sweeps.Wait()
-			close(h.runDone)
-		}()
+		defer h.finishRun()
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)

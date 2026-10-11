@@ -14,6 +14,14 @@ func (h *Hub) closeStop() {
 	}
 }
 
+// finishRun closes runDone once every sweep Run started has returned. A
+// method, not a closure in Run, so Run's dispatch loop stays Run.func1 — the
+// name the api suite's goleak filter ignores.
+func (h *Hub) finishRun() {
+	h.sweeps.Wait()
+	close(h.runDone)
+}
+
 // Done returns a channel that closes once Run has returned, with
 // DispatchAlive already false and every sweep Run started finished. Stop and
 // GracefulStopContext do not wait for that, so a caller that must know the
