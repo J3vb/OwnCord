@@ -34,7 +34,7 @@ import {
 import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
-import { resolveVideoCodec, type PublishCodec } from "@lib/videoCodec";
+import { resolveVideoCodec } from "@lib/videoCodec";
 
 const log = createLogger("screenShare");
 
@@ -220,47 +220,6 @@ export function getScreenShareCaptureOptions(
 }
 
 // ---------------------------------------------------------------------------
-// Encoder report
-// ---------------------------------------------------------------------------
-
-/** How long after a publish the encoder has run long enough to say which
- *  implementation it uses. */
-const ENCODER_REPORT_DELAY_MS = 3_000;
-
-/** Logs, once the encoder has run, which implementation each layer uses and
- *  whether it is hardware: a chosen H.264 can still fall back to software.
- *  Returns the timer for the track's stop path to clear; nothing is scheduled
- *  for a track with no WebRTC sender (the Linux native tracks). */
-function reportEncoderLater(
-  message: string,
-  track: LocalTrack,
-  codec: PublishCodec,
-): ReturnType<typeof setTimeout> | undefined {
-  const sender = track.sender;
-  if (sender === undefined) return undefined;
-  return setTimeout(() => {
-    sender
-      .getStats()
-      .then((report) => {
-        const encoders: Array<{ encoderImplementation: unknown; powerEfficientEncoder: unknown }> =
-          [];
-        report.forEach((s: Record<string, unknown>) => {
-          if (s["type"] === "outbound-rtp") {
-            encoders.push({
-              encoderImplementation: s["encoderImplementation"],
-              powerEfficientEncoder: s["powerEfficientEncoder"],
-            });
-          }
-        });
-        log.debug(message, { codec, encoders });
-      })
-      .catch((err: unknown) => {
-        log.debug(`${message}: stats unavailable`, err);
-      });
-  }, ENCODER_REPORT_DELAY_MS);
-}
-
-// ---------------------------------------------------------------------------
 // Dependencies injected by the caller (LiveKitSession)
 // ---------------------------------------------------------------------------
 
@@ -330,7 +289,6 @@ export function rollbackPendingVideo(id: string): "camera" | "screen" | undefine
 /** Mutable state for the manually published camera track. */
 export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | NativeCameraTrack | null;
-  encoderReport?: ReturnType<typeof setTimeout>;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -370,7 +328,6 @@ function unpublishManualTrack(
 }
 
 export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
-  clearTimeout(state.encoderReport);
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
@@ -480,8 +437,6 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
         maxFramerate,
       },
       videoCodec,
-      // E2EE already turns the backup codec off; this states it.
-      backupCodec: false,
     });
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
@@ -504,8 +459,6 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
       codec: videoCodec,
     });
-    // i18n-exempt: log message, never rendered
-    state.encoderReport = reportEncoderLater("Camera encoder", videoTrack, videoCodec);
   } catch (err) {
     cameraEndedCleanup?.();
     if ((state.generation ?? 0) !== generation) {
@@ -565,12 +518,10 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
   screenTrackEndedCleanup?: () => void;
-  encoderReport?: ReturnType<typeof setTimeout>;
 }
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
-  clearTimeout(state.encoderReport);
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
@@ -665,8 +616,6 @@ export async function enableScreenshare(
                 maxFramerate: effectiveFps,
               },
               videoCodec,
-              // E2EE already turns the backup codec off; this states it.
-              backupCodec: false,
             }
           : {}),
         ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
@@ -704,10 +653,6 @@ export async function enableScreenshare(
         ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate, codec: videoCodec }
         : { quality, fps: effectiveFps, maxBitrate, codec: videoCodec },
     );
-    if (videoTrack !== undefined) {
-      // i18n-exempt: log message, never rendered
-      state.encoderReport = reportEncoderLater("Screenshare encoder", videoTrack, videoCodec);
-    }
   } catch (err) {
     removeEndedListener?.();
     if ((state.generation ?? 0) !== generation) {
