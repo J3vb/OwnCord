@@ -65,7 +65,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
-		tailCtx, cancelTail := sweepTailCtx(ctx)
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
 		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
 		cancelTail()
 		if !evicted {

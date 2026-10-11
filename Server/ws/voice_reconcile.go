@@ -201,7 +201,7 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
 	c := h.GetClient(userID)
 	if c != nil && h.clearExactJoin(c, channelID, joinedAt) {
-		tailCtx, cancelTail := sweepTailCtx(ctx)
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
 		defer cancelTail()
 		h.finishVoiceLeave(tailCtx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
 		return
@@ -220,7 +220,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	if !deleted {
 		return
 	}
-	tailCtx, cancelTail := sweepTailCtx(ctx)
+	tailCtx, cancelTail := h.sweepTailCtx(ctx)
 	defer cancelTail()
 	h.broadcastVoiceEventWithLeaver(tailCtx, channelID, buildVoiceLeave(channelID, userID), userID)
 	h.updateKeyHolder(channelID)

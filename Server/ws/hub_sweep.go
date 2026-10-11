@@ -82,14 +82,19 @@ var sweepTimeout = 30 * time.Second
 
 // sweepTailTimeout bounds the follow-up steps of a sweep action that already
 // committed (broadcast, key-holder re-election, SFU removal). They run
-// detached from the sweep's cancellation so a committed delete is always
-// announced, but cannot block forever on a stalled DB. 15s keeps it above the
-// DB busy_timeout (5s), so a delete that waits out the lock still leaves budget
-// to broadcast. A var so tests can shorten it.
+// detached from the sweep's own timeout so a committed delete is still
+// announced, but end when the hub stops so they never outlast the shutdown
+// step. 15s keeps it above the DB busy_timeout (5s), so a delete that waits
+// out the lock still leaves budget to broadcast. A var so tests can shorten it.
 var sweepTailTimeout = 15 * time.Second
 
-func sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
+func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	tail, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
+	stop := context.AfterFunc(h.life, cancel)
+	return tail, func() {
+		stop()
+		cancel()
+	}
 }
 
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
@@ -292,7 +297,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		tailCtx, cancelTail := sweepTailCtx(ctx)
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
 		h.broadcastVoiceEvent(tailCtx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this

@@ -167,3 +167,40 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
 		t.Fatal("Done never closed after Stop")
 	}
 }
+
+// A tail stalled on the DB with a long budget must still end when the hub
+// stops, so Done does not outlast the shutdown step.
+func TestSweepStaleVoiceStates_StalledTailEndsAtHubStop(t *testing.T) {
+	old := sweepTailTimeout
+	sweepTailTimeout = time.Minute
+	t.Cleanup(func() { sweepTailTimeout = old })
+
+	database := newHarvestVoiceDB(t)
+	ghostUID := seedHarvestVoiceUser(t, database, "tail-stop-ghost")
+	chID := mustCreateVoiceChannel(t, database, "voice-tail-stop")
+	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
+	}
+
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	var armed atomic.Bool
+	h.voice = armOnLeaveStore{VoiceStore: h.voice, armed: &armed}
+	h.readers.Visibility = stallAfterArmVisibility{VisibilityReader: h.readers.Visibility, armed: &armed}
+	go h.Run()
+
+	h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+	deadline := time.Now().Add(5 * time.Second)
+	for !armed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("sweep never committed the ghost delete")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	h.Stop()
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done stayed open: the stalled tail outlasted Stop")
+	}
+}
