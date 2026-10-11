@@ -463,9 +463,7 @@ export function setModeratorDeafened(applied: boolean): void {
 
 /** Remember whether the member was muted at the moment they deafened. */
 export function setMutedBeforeDeafen(muted: boolean): void {
-  voiceStore.setState((prev) =>
-    prev.mutedBeforeDeafen === muted ? prev : { ...prev, mutedBeforeDeafen: muted },
-  );
+  voiceStore.setState((prev) => ({ ...prev, mutedBeforeDeafen: muted }));
 }
 
 /** Toggle local mute state. */
@@ -683,15 +681,11 @@ export function getChannelVoiceUsers(channelId: number): readonly VoiceUser[] {
 // row unmuted and undeafened, while the client keeps localMuted/localDeafened
 // across a leave) and a chat socket that came back after the user toggled
 // mute offline (the toggles apply locally and send nothing while it is down).
-export interface RestateOptions {
-  /** The caller knows the local mute is not the member's own (a moderator's). */
-  readonly skipMute?: boolean;
-  readonly skipDeafen?: boolean;
-}
-
+// skipMute/skipDeafen: the caller knows that state is a moderator's, not ours.
 export function restateSelfVoiceState(
   ws: Pick<WsClient, "send">,
-  options: RestateOptions = {},
+  skipMute = false,
+  skipDeafen = false,
 ): void {
   const state = voiceStore.getState();
   if (state.currentChannelId === null) return;
@@ -699,19 +693,20 @@ export function restateSelfVoiceState(
   if (userId === 0) return;
 
   const row = state.voiceUsers.get(state.currentChannelId)?.get(userId);
-  const serverMuted = row?.muted ?? false;
-  const serverDeafened = row?.deafened ?? false;
 
   // A moderator's mute or deafen is not the member's own state to restate:
   // sending it would turn it into a self-mute that outlives the lift.
   const moderated = state.localServerDeafened === true || state.moderatorDeafened === true;
-  const skipMute = options.skipMute === true || state.localServerMuted === true || moderated;
-  const skipDeafen = options.skipDeafen === true || moderated;
 
-  if (!skipMute && state.localMuted !== serverMuted) {
+  if (
+    !skipMute &&
+    !moderated &&
+    state.localServerMuted !== true &&
+    state.localMuted !== (row?.muted ?? false)
+  ) {
     ws.send({ type: "voice_mute", payload: { muted: state.localMuted } });
   }
-  if (!skipDeafen && state.localDeafened !== serverDeafened) {
+  if (!skipDeafen && !moderated && state.localDeafened !== (row?.deafened ?? false)) {
     ws.send({ type: "voice_deafen", payload: { deafened: state.localDeafened } });
   }
 }

@@ -136,7 +136,7 @@ describe("restateSelfVoiceState", () => {
     setSelfRow(selfRow());
     const socket = socketStub();
 
-    restateSelfVoiceState(socket, { skipMute: true, skipDeafen: true });
+    restateSelfVoiceState(socket, true, true);
 
     expect(socket.send).not.toHaveBeenCalled();
   });

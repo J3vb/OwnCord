@@ -163,10 +163,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // restriction in play on either side of the outage is left to it.
       const modMuted = prevSelfServerMuted || selfVoiceState.server_muted === true;
       const modDeafened = prevSelfServerDeafened || selfVoiceState.server_deafened === true;
-      restateSelfVoiceState(ws, {
-        skipMute: modMuted || modDeafened,
-        skipDeafen: modDeafened,
-      });
+      restateSelfVoiceState(ws, modMuted || modDeafened, modDeafened);
 
       // OC-0201: same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the

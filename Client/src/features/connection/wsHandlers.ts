@@ -24,9 +24,7 @@ import type { ConnectionState } from "../../lib/ws";
 
 /** A join still in flight restates itself when it connects; an error frame
  *  for a send made before then would roll that join back. */
-function isSettledVoiceStatus(status: string): boolean {
-  return status === "connected" || status === "reconnecting" || status === "securing";
-}
+const SETTLED_VOICE = new Set(["connected", "reconnecting", "securing"]);
 
 export function handleAuthOk(
   ws: DispatchWs,
@@ -60,7 +58,7 @@ export function handleAuthOk(
   // is restated here; a full flow restates from ready instead.
   if (
     (payload.replay_source === "buffer" || payload.replay_source === "db") &&
-    isSettledVoiceStatus(voiceStore.getState().voiceStatus)
+    SETTLED_VOICE.has(voiceStore.getState().voiceStatus)
   ) {
     restateSelfVoiceState(ws);
   }
