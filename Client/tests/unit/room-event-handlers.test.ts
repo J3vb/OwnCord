@@ -58,6 +58,9 @@ interface Harness {
     on: ReturnType<typeof vi.fn>;
     off: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
+    localParticipant: { identity: string; sid: string };
+    remoteParticipants: Map<string, RemoteParticipant>;
+    activeSpeakers: Participant[];
   };
   spies: {
     applyMicMuteState: ReturnType<typeof vi.fn>;
@@ -83,6 +86,9 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     on: vi.fn(),
     off: vi.fn(),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    localParticipant: { identity: "user-1:tok", sid: "PA_me" },
+    remoteParticipants: new Map<string, RemoteParticipant>(),
+    activeSpeakers: [] as Participant[],
   };
   const spies = {
     applyMicMuteState: vi.fn().mockResolvedValue(undefined),
@@ -580,8 +586,17 @@ describe("handleTrackUnpublished", () => {
 // ── handleActiveSpeakersChanged ────────────────────────────────────────────
 
 describe("handleActiveSpeakersChanged", () => {
-  function speaker(identity: string): Participant {
-    return { identity } as unknown as Participant;
+  /** A remote participant in the room, microphone published and unmuted. */
+  function join(h: Harness, identity: string, sid = `PA_${identity}`): RemoteParticipant {
+    const mic = { source: Track.Source.Microphone, isMuted: false };
+    const p = {
+      identity,
+      sid,
+      getTrackPublication: (source: Track.Source) =>
+        source === Track.Source.Microphone ? mic : undefined,
+    } as unknown as RemoteParticipant;
+    h.room.remoteParticipants.set(identity, p);
+    return p;
   }
 
   function seedVoiceUsers(channelId: number, userIds: number[]): void {
@@ -604,11 +619,13 @@ describe("handleActiveSpeakersChanged", () => {
     });
   }
 
+  const speaking = () => voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking;
+
   it("marks the reported users as speaking", () => {
     seedVoiceUsers(12, [3, 7]);
     const h = build();
 
-    h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+    h.handlers.handleActiveSpeakersChanged([join(h, "user-7:tok")]);
 
     const users = voiceStore.getState().voiceUsers.get(12);
     expect(users?.get(7)?.speaking).toBe(true);
@@ -616,8 +633,6 @@ describe("handleActiveSpeakersChanged", () => {
   });
 
   describe("anti-flicker hold", () => {
-    const speaking = () => voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking;
-
     beforeEach(() => {
       vi.useFakeTimers();
     });
@@ -628,7 +643,7 @@ describe("handleActiveSpeakersChanged", () => {
     it("keeps a dropped speaker lit for 200 ms, then clears them", () => {
       seedVoiceUsers(12, [7]);
       const h = build();
-      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      h.handlers.handleActiveSpeakersChanged([join(h, "user-7:tok")]);
 
       h.handlers.handleActiveSpeakersChanged([]);
       expect(speaking()).toBe(true);
@@ -641,11 +656,12 @@ describe("handleActiveSpeakersChanged", () => {
     it("never goes dark for a speaker who returns within the hold", () => {
       seedVoiceUsers(12, [7]);
       const h = build();
-      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      const u7 = join(h, "user-7:tok");
+      h.handlers.handleActiveSpeakersChanged([u7]);
       h.handlers.handleActiveSpeakersChanged([]);
       vi.advanceTimersByTime(100);
 
-      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      h.handlers.handleActiveSpeakersChanged([u7]);
       vi.advanceTimersByTime(500);
 
       expect(speaking()).toBe(true);
@@ -654,7 +670,7 @@ describe("handleActiveSpeakersChanged", () => {
     it("drops the pending hold when the session resets", () => {
       seedVoiceUsers(12, [7]);
       const h = build();
-      h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+      h.handlers.handleActiveSpeakersChanged([join(h, "user-7:tok")]);
       h.handlers.handleActiveSpeakersChanged([]);
 
       h.handlers.resetEncryptionRecovery();
@@ -663,22 +679,118 @@ describe("handleActiveSpeakersChanged", () => {
     });
   });
 
+  // livekit-client never prunes a participant who left from its speaker list:
+  // the SFU's "stopped" update for them names a sid it no longer knows, and
+  // it skips it. Every later ActiveSpeakersChanged lists them again.
+  describe("a speaker who can no longer be talking", () => {
+    it("ignores a speaker LiveKit still lists after they left the room", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const u7 = join(h, "user-7:tok");
+      h.room.remoteParticipants.delete("user-7:tok");
+
+      h.handlers.handleActiveSpeakersChanged([u7]);
+
+      expect(speaking()).toBe(false);
+    });
+
+    it("ignores the old session of a user who rejoined under a new sid", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const old = join(h, "user-7:tok", "PA_old");
+      join(h, "user-7:tok", "PA_new");
+
+      h.handlers.handleActiveSpeakersChanged([old]);
+
+      expect(speaking()).toBe(false);
+    });
+
+    it("clears a speaker who leaves the room at once, without the hold", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const u7 = join(h, "user-7:tok");
+      h.handlers.handleActiveSpeakersChanged([u7]);
+      h.room.remoteParticipants.delete("user-7:tok");
+
+      h.handlers.handleParticipantDisconnected(u7);
+
+      expect(speaking()).toBe(false);
+      h.handlers.handleActiveSpeakersChanged([u7]);
+      expect(speaking()).toBe(false);
+    });
+
+    it("clears a speaker who mutes at once, and keeps them dark while muted", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const u7 = join(h, "user-7:tok");
+      h.handlers.handleActiveSpeakersChanged([u7]);
+      const mic = u7.getTrackPublication(Track.Source.Microphone) as { isMuted: boolean };
+      mic.isMuted = true;
+
+      h.handlers.handleTrackMuted(mic as unknown as RemoteTrackPublication, u7);
+
+      expect(speaking()).toBe(false);
+      // The SFU's own "stopped" update trails the mute by a detection window.
+      h.handlers.handleActiveSpeakersChanged([u7]);
+      expect(speaking()).toBe(false);
+    });
+
+    it("keeps a speaker whose camera, not microphone, was muted", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const u7 = join(h, "user-7:tok");
+      h.handlers.handleActiveSpeakersChanged([u7]);
+
+      h.handlers.handleTrackMuted(pub(Track.Source.Camera), u7);
+
+      expect(speaking()).toBe(true);
+    });
+  });
+
+  // A resumed or replaced room never hears the "stopped" updates the SFU sent
+  // while it was cut off.
+  describe("a room that reconnects", () => {
+    it("clears every ring and LiveKit's speaker list when the SDK reconnects", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      const u7 = join(h, "user-7:tok");
+      h.room.activeSpeakers = [u7];
+      h.handlers.handleActiveSpeakersChanged([u7]);
+
+      h.handlers.handleSdkReconnected();
+
+      expect(speaking()).toBe(false);
+      expect(h.room.activeSpeakers).toEqual([]);
+    });
+
+    it("clears every ring when the room is dropped for the app's own reconnect", () => {
+      seedVoiceUsers(12, [7]);
+      const h = build();
+      h.handlers.handleActiveSpeakersChanged([join(h, "user-7:tok")]);
+
+      h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
+
+      expect(h.spies.attemptAutoReconnect).toHaveBeenCalled();
+      expect(speaking()).toBe(false);
+    });
+  });
+
   it("ignores participants with an unparseable identity", () => {
     seedVoiceUsers(12, [7]);
     const h = build();
 
-    h.handlers.handleActiveSpeakersChanged([speaker("garbage"), speaker("user-7:tok")]);
+    h.handlers.handleActiveSpeakersChanged([join(h, "garbage"), join(h, "user-7:tok")]);
 
-    expect(voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking).toBe(true);
+    expect(speaking()).toBe(true);
   });
 
   it("does nothing when not in a channel", () => {
     seedVoiceUsers(12, [7]);
     const h = build({ getCurrentChannelId: () => null });
 
-    h.handlers.handleActiveSpeakersChanged([speaker("user-7:tok")]);
+    h.handlers.handleActiveSpeakersChanged([join(h, "user-7:tok")]);
 
-    expect(voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking).toBe(false);
+    expect(speaking()).toBe(false);
   });
 });
 

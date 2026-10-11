@@ -354,6 +354,24 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
+/** No LiveKit update reaches a channel this client is no longer in, so a ring
+ *  lit there as it left would never clear. */
+function withoutRings(
+  voiceUsers: VoiceState["voiceUsers"],
+  channelId: number | null,
+): VoiceState["voiceUsers"] {
+  const channel = channelId === null ? undefined : voiceUsers.get(channelId);
+  if (channelId === null || channel === undefined) return voiceUsers;
+  const next = new Map(voiceUsers);
+  next.set(
+    channelId,
+    new Map(
+      [...channel].map(([id, user]) => [id, user.speaking ? { ...user, speaking: false } : user]),
+    ),
+  );
+  return next;
+}
+
 /** Set the current voice channel (local join) and record the join timestamp.
  *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
@@ -362,6 +380,7 @@ export function joinVoiceChannel(channelId: number): void {
     if (prev.currentChannelId === channelId) return prev;
     return {
       ...prev,
+      voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
       currentChannelId: channelId,
       joinedAt: Date.now(),
       // Optimistic: the widget shows "Connecting…" the moment the user clicks,
@@ -388,14 +407,15 @@ export function leaveVoiceChannel(): void {
       encryptionDegraded: false,
     };
     const channelId = prev.currentChannelId;
+    const voiceUsers = withoutRings(prev.voiceUsers, channelId);
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, ...cleared };
+      return { ...prev, ...cleared, voiceUsers };
     }
-    const existingChannel = prev.voiceUsers.get(channelId);
+    const existingChannel = voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, ...cleared };
+      return { ...prev, ...cleared, voiceUsers };
     }
-    const nextChannels = new Map(prev.voiceUsers);
+    const nextChannels = new Map(voiceUsers);
     const nextUsers = new Map(existingChannel);
     nextUsers.delete(currentUserId);
     if (nextUsers.size === 0) {

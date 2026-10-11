@@ -626,6 +626,24 @@ describe("voice store", () => {
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)).toBe(before);
     });
+
+    // No LiveKit update reaches a channel this client has left, so a ring lit
+    // at that moment stayed lit in the sidebar for good.
+    it("clears the rings of the channel you leave", () => {
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+
+      leaveVoiceChannel();
+
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
+
+    it("clears the rings of the channel you switch away from", () => {
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+
+      joinVoiceChannel(20);
+
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
   });
 
   describe("setLocalGateSpeaking", () => {
