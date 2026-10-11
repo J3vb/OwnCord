@@ -116,6 +116,9 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 	}
 
 	for channelID, roomRows := range byRoom {
+		if ctx.Err() != nil {
+			return
+		}
 		identities, listErr := h.livekit.ListParticipants(ctx, channelID)
 		if listErr != nil {
 			// A transient failure is not "the room is empty": treating it as
@@ -133,6 +136,9 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		// Reap memberships whose SFU participant is gone, after the grace.
 		expected := make(map[string]struct{}, len(roomRows))
 		for _, row := range roomRows {
+			if ctx.Err() != nil {
+				return
+			}
 			id := participantIdentity(row.userID, row.joinedAt)
 			expected[id] = struct{}{}
 			if _, ok := present[id]; ok {

@@ -30,6 +30,9 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	}
 	h.mu.RUnlock()
 	for _, c := range inVoice {
+		if ctx.Err() != nil {
+			return
+		}
 		chID := c.getVoiceChID()
 		if chID == 0 {
 			continue

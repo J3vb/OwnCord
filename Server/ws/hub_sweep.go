@@ -249,6 +249,9 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	parked := h.voiceGrace.snapshot()
 
 	for _, s := range stale {
+		if ctx.Err() != nil {
+			return
+		}
 		if parked[s.userID] == s.channelID {
 			continue
 		}
