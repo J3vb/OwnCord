@@ -66,7 +66,7 @@ and only when it changes something a contributor or fork holder must do
 - Undeafening no longer unmutes you if you were muted before you deafened.
 - After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
 - Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.
-**Accounts & admin**
+  **Accounts & admin**
 
 - Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
 - Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
@@ -790,11 +790,11 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  administrator, including one holding MANAGE*SERVER or ADMINISTRATOR, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7
-  and 3650 days, and the `pre_restore_*` safety copies are never pruned.
+  and 3650 days, and the `pre_restore*\*` safety copies are never pruned.
 - The connectivity diagnostics now name the kind of address a client connected
   from (`address_class`), so a Tailscale peer is no longer reported as coming
   from the public internet. Addresses in `100.64.0.0/10` were previously counted
