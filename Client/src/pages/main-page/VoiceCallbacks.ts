@@ -206,7 +206,9 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       }
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
-      ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+      // The user's own join: the server's rejoin block after a moderator
+      // move or kick refuses only automatic rejoins (voice_rejoin_block.go).
+      ws.send({ type: "voice_join", payload: { channel_id: channelId, user_initiated: true } });
     },
     onVoiceLeave: () => {
       log.info("Leaving voice channel");
