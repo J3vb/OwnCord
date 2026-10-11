@@ -99,7 +99,7 @@ func TestLiveKitWebhook_JoinedFailuresRemainRetryable(t *testing.T) {
 			}
 			before := calls.Load()
 			failing.Store(false)
-			h.sweepStaleVoiceStates()
+			h.sweepStaleVoiceStates(context.Background())
 			if calls.Load() != before {
 				t.Fatal("fixture must exercise an SFU identity invisible to the DB sweep")
 			}

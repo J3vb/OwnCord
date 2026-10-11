@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   navigateToChannel,
+  onChannelReselect,
   findChannelById,
   findChannelByName,
   stepChannel,
@@ -55,6 +56,28 @@ describe("channel-navigation", () => {
   });
 
   describe("navigateToChannel", () => {
+    it("tells reselect listeners when the channel is already open, and only then", () => {
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([
+          [1, makeChannel()],
+          [2, makeChannel({ id: 2, name: "random" })],
+        ]),
+        activeChannelId: 1,
+      }));
+      const seen = vi.fn();
+      const off = onChannelReselect(seen);
+
+      navigateToChannel(2);
+      expect(seen).not.toHaveBeenCalled();
+      navigateToChannel(2);
+      expect(seen).toHaveBeenCalledWith(2);
+
+      off();
+      navigateToChannel(2);
+      expect(seen).toHaveBeenCalledTimes(1);
+    });
+
     it("activates the channel and clears its channelsStore unread badge", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);

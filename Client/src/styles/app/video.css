@@ -270,6 +270,67 @@
   left: 12px;
   opacity: 1;
 }
+/* The mini-player: the watched stream floating over a text channel. Placed
+   by script (left/top), kept inside the window. Above the chat, below the
+   composer pickers (90) and the overlays. */
+.stream-mini {
+  position: fixed;
+  z-index: 80;
+  width: min(320px, calc(100vw - 32px));
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000; /* intentional: letterbox bars, as on a tile */
+  box-shadow: var(--shadow-lg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.stream-mini--dragging {
+  cursor: grabbing;
+}
+.stream-mini video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.stream-mini video.track-muted {
+  visibility: hidden;
+}
+.stream-mini .stream-mini__name {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stream-mini__controls {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.stream-mini:hover .stream-mini__controls,
+.stream-mini:focus-within .stream-mini__controls {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-mini__controls {
+    transition: none;
+  }
+}
 /* Your own screen share: what is going out, never a hall of mirrors. */
 .video-self-cover {
   position: absolute;

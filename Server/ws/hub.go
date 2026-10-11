@@ -89,11 +89,20 @@ type Hub struct {
 	// dispatch loop dead, so nothing else makes the outage observable.
 	dispatchExited atomic.Bool
 
-	// runDone closes when Run returns, after dispatchExited is set. Stop and
+	// runDone closes when Run returns, after dispatchExited is set and the
+	// sweeps it started have returned. Stop and
 	// GracefulStopContext only signal the loop; whoever started Run joins it
 	// here (Done) before releasing what the loop reads. Made by NewHub; nil
 	// on the struct-literal hubs internal tests build.
 	runDone chan struct{}
+
+	// life is cancelled when the hub stops (closeStop). Each background sweep
+	// derives its ctx from it, so Stop interrupts a sweep blocked on the DB or
+	// LiveKit, and sweeps counts the ones still running so Run's exit — and
+	// with it Done — waits for them. Made by NewHub.
+	life     context.Context
+	stopLife context.CancelFunc
+	sweeps   sync.WaitGroup
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -231,7 +240,7 @@ type Hub struct {
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	if h.runDone != nil {
-		defer close(h.runDone)
+		defer h.finishRun()
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
@@ -330,18 +339,6 @@ func (h *Hub) Run() {
 	}
 }
 
-// Stop signals Run to exit. Safe to call multiple times.
-func (h *Hub) Stop() {
-	h.stopOnce.Do(func() { close(h.stop) })
-}
-
-// Done returns a channel that closes once Run has returned, with
-// DispatchAlive already false. Stop and GracefulStopContext do not wait for
-// that, so a caller that must know the loop is gone waits here.
-func (h *Hub) Done() <-chan struct{} {
-	return h.runDone
-}
-
 // StopLiveKit stops and reaps the owned companion before a restart handoff.
 // It is safe to call concurrently with GracefulStopContext, and deliberately
 // does not wait on hub/client teardown so the restart backstop can use it too.
@@ -395,6 +392,6 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		h.StopLiveKit()
 
 		// Stop the hub dispatch loop.
-		h.stopOnce.Do(func() { close(h.stop) })
+		h.stopOnce.Do(h.closeStop)
 	})
 }

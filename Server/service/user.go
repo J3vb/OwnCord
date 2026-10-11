@@ -292,7 +292,7 @@ func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error
 // Returns the updated user for response building.
 func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key string) (*db.User, error) {
 	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
-		return nil, fmt.Errorf("%w: failed to update identity key", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to update identity key: %w", ErrInternal, err)
 	}
 	// Detached for the same reason as UpdateProfile's post-commit re-read: a
 	// request ctx canceled right after the write above commits must not turn
@@ -301,7 +301,7 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 	// for TOFU pinning.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to fetch updated user: %w", ErrInternal, err)
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "identity_key_update", "user", userID, "")
 	slog.Info("identity key published", "user_id", userID)

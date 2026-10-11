@@ -372,27 +372,7 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 	go func() { runErr <- runApp(log, logBuf, levelVar, rc) }()
 
 	// Wait for the server to actually serve before requesting the restart.
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	up := false
-	// Startup migrates a fresh DB; under -race on a loaded Windows CI runner that
-	// alone has taken 15s, so the deadline leaves generous headroom.
-	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); {
-		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
-		if healthErr == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-			up = true
-			break
-		}
-		select {
-		case err := <-runErr:
-			t.Fatalf("Run exited before serving: %v", err)
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if !up {
-		t.Fatal("server never became reachable on /health")
-	}
+	waitForHealth(t, port, runErr)
 
 	rc.Request("test-restart")
 
@@ -412,6 +392,10 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 
 	// Everything must have drained: this is the guarantee that lets main()
 	// start the successor with zero lock/port contention.
+	// The server's own outbound calls (the LiveKit SDK client) pool keep-alive
+	// connections on the shared default transport. Those are client-side pool
+	// state, not goroutines Run owns, and they close late on their own.
+	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
 	if err := goleak.Find(leakOpt); err != nil {
 		t.Errorf("goroutines leaked after a restart-request drain: %v", err)
 	}

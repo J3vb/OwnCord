@@ -178,7 +178,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: Server/
@@ -212,6 +212,34 @@ jobs:
           version: v2.14.0
           working-directory: Server/
           verify: false
+
+      # Lint only sees the default build, so a file behind a build tag or a
+      # GOOS suffix is never linted: a `%v` on an error in plugin/
+      # sandbox_wazero.go (`wazero`) went unseen that way. These passes re-run
+      # the two Go guardrail linters from CLAUDE.md ("AI Quality Guardrails"),
+      # nakedret and errorlint, over each tagged variant. They are limited with
+      # --enable-only because the other linters report older findings in those
+      # variants, and this pass must only fail on what the guardrails forbid.
+      # skip-save-cache: the first Lint step already owns the cache entry.
+      - name: Lint guardrails (-tags otel,wazero)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          working-directory: Server/
+          verify: false
+          skip-save-cache: true
+          args: --enable-only nakedret,errorlint --build-tags otel,wazero
+
+      - name: Lint guardrails (GOOS=windows)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOOS: windows
+        with:
+          version: v2.14.0
+          working-directory: Server/
+          verify: false
+          skip-save-cache: true
+          args: --enable-only nakedret,errorlint
 
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})

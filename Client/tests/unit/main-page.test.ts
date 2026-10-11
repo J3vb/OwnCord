@@ -155,6 +155,8 @@ const {
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
         setExitVisible: ReturnType<typeof vi.fn>;
+        showMiniPlayer: ReturnType<typeof vi.fn>;
+        hideMiniPlayer: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -240,6 +242,8 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
       setExitVisible: vi.fn(),
+      showMiniPlayer: vi.fn(),
+      hideMiniPlayer: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -803,6 +807,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // attachments.ts); this one did not.
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://[2001:db8::1]",
+      keepChecking: true,
     });
   });
 
@@ -818,6 +823,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
+      keepChecking: true,
     });
   });
 

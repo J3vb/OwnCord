@@ -58,6 +58,8 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
     setExitVisible: vi.fn(),
+    showMiniPlayer: vi.fn(),
+    hideMiniPlayer: vi.fn(),
   } as unknown as VideoModeControllerOptions["videoGrid"];
 }
 
@@ -260,6 +262,88 @@ describe("createVideoModeController", () => {
     ctrl.showChat();
     expect(ctrl.isVideoMode()).toBe(false);
     expect(slots.videoGridSlot.style.display).toBe("none");
+  });
+
+  describe("mini-player", () => {
+    it("going to a text channel hands the watched stream to the mini-player before the grid drops its focus", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+      ctrl.setFocus(3);
+
+      ctrl.showChat({ keepWatching: true });
+
+      expect(grid.showMiniPlayer).toHaveBeenCalledTimes(1);
+      const mini = vi.mocked(grid.showMiniPlayer).mock.invocationCallOrder[0]!;
+      const unfocus = vi.mocked(grid.setFocusedTile).mock.invocationCallOrder.at(-1)!;
+      expect(mini).toBeLessThan(unfocus);
+    });
+
+    it("closing the grid itself (its Show chat control) opens no mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+
+      ctrl.showChat();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("showChat with the grid already closed opens no mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.showChat({ keepWatching: true });
+
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("the grid closing on its own (no streams left) opens no mini-player", () => {
+      const users = new Map([
+        [2, { userId: 2, camera: false, screenshare: false, username: "bob" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
+      );
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("showVideoGrid takes the stream back from the mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.showVideoGrid();
+
+      expect(grid.hideMiniPlayer).toHaveBeenCalled();
+    });
   });
 
   it("destroy resets video mode state and restores DOM", () => {

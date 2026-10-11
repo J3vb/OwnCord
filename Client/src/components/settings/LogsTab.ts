@@ -16,6 +16,7 @@ import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
+import { buildUpdateCheckRow } from "../../features/updates/UpdateCheckRow";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 
@@ -384,6 +385,8 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       .catch(() => {
         versionEl.textContent = t("logs.version.unknown");
       });
+
+    section.appendChild(buildUpdateCheckRow(buildSignal));
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();
