@@ -2,15 +2,12 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -52,26 +49,23 @@ func routerServerInfoDeps(svc *service.Services) serverInfoDeps {
 		registrationMode: svc.Settings.RegistrationMode,
 		retentionDays:    svc.Retention.ServerDays,
 		serverName: func(ctx context.Context) (string, error) {
-			return svc.Settings.Setting(ctx, "server_name")
+			return svc.Settings.ServerName(ctx)
 		},
 	}
 }
 
 // liveServerName is the name the admin page edits: the server_name setting,
 // falling back to config.yaml's server.name when the setting is missing or
-// blank. Any other read error is returned so the caller can decide.
+// blank. A read error is returned so the caller can decide.
 func liveServerName(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (string, error) {
 	if deps.serverName == nil {
 		return cfg.Server.Name, nil
 	}
 	name, err := deps.serverName(ctx)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return cfg.Server.Name, nil
-		}
 		return "", fmt.Errorf("server name: %w", err)
 	}
-	if strings.TrimSpace(name) == "" {
+	if name == "" {
 		return cfg.Server.Name, nil
 	}
 	return name, nil

@@ -36,10 +36,6 @@ type Hub struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
-	// restartNoticeMu guards lastRestartNotice (leaf lock): see
-	// BroadcastServerRestart's dedupe.
-	restartNoticeMu   syncutil.Mutex
-	lastRestartNotice restartNoticeRecord
 	// stopUsers: see StoppedUserIDs. Guarded by mu.
 	stopUsers   []int64
 	livekit     *LiveKitClient
@@ -56,8 +52,9 @@ type Hub struct {
 	// real message send (permissions, DM membership, DM blocks). Nil only in
 	// bare test hubs; the broadcast gate fails closed then.
 	messageSvc *service.MessageService
+	pubsub     *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
-	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
+	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order

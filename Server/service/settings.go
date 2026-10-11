@@ -100,6 +100,19 @@ func (s *SettingsService) Setting(ctx context.Context, key string) (string, erro
 	return s.st.GetSetting(ctx, key)
 }
 
+// ServerName returns the server_name setting, or "" when it is missing or
+// blank so the caller can fall back to config.yaml's server.name.
+func (s *SettingsService) ServerName(ctx context.Context) (string, error) {
+	name, err := s.st.GetSetting(ctx, "server_name")
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("ServerName: %w", err)
+	}
+	return strings.TrimSpace(name), nil
+}
+
 // RegistrationMode returns the live registration policy, defaulting to invite
 // for a missing setting and failing closed for an unparseable value.
 func (s *SettingsService) RegistrationMode(ctx context.Context) (RegistrationMode, error) {
