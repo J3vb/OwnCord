@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 **Server**
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+- The periodic maintenance sweeps (signed-out session checks, stale voice cleanup, voice reconcile) could keep running into the database after the server began shutting down or restarting, and a stalled database could hold one forever — a sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it to finish.
 
 **Login & connection**
 

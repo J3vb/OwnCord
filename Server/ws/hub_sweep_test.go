@@ -13,13 +13,13 @@ import (
 // shut: while one sweep is still running, further startSweep calls for the
 // same guard must be dropped, and once it finishes the next call runs again.
 func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
-	h := &Hub{}
+	h := &Hub{life: context.Background()}
 
 	var inFlight atomic.Bool
 	var active, maxActive, runs atomic.Int64
 	release := make(chan struct{})
 
-	sweep := func() {
+	sweep := func(context.Context) {
 		// runs first, then active: the test waits on active, so by the time
 		// it sees the sweep in flight the run is already counted — counting
 		// after would let a preemption between the two stores read runs = 0.
@@ -54,7 +54,7 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 
 	// Guard released — the next tick runs a fresh sweep.
 	done := make(chan struct{})
-	h.startSweep(&inFlight, func() { close(done) })
+	h.startSweep(&inFlight, func(context.Context) { close(done) })
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -133,7 +133,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 		t.Fatalf("rename channel_overrides: %v", err)
 	}
 
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 
 	if got := c.getVoiceChID(); got != chID {
 		t.Fatalf("client voice channel = %d after a transient permission-read error, want it to stay at %d (not evicted)", got, chID)
@@ -186,7 +186,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 	h.voiceKeyHolders[chID] = ghostUID
 	h.keyHolderMu.Unlock()
 
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 
 	if h.IsVoiceKeyHolder(chID, ghostUID) {
 		t.Error("ghost user is still recorded as key holder after the sweep removed its ghost voice state")

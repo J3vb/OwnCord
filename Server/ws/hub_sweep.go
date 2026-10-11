@@ -75,19 +75,28 @@ func (h *Hub) kickClientTerminal(c *Client) {
 	h.kickClient(c)
 }
 
+// sweepTimeout bounds one background sweep, so a wedged DB or LiveKit call
+// cannot hold a sweep (and its in-flight guard) forever; the next tick
+// retries. A var so tests can shorten it.
+var sweepTimeout = 30 * time.Second
+
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
 // blocks on the DB-heavy periodic sweeps (they already lock correctly for
 // concurrent execution with the hub). inFlight guarantees a sweep never runs
 // concurrently with itself: a tick arriving while the previous run is still
-// going is dropped, and the next tick retries.
-func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func()) {
+// going is dropped, and the next tick retries. The sweep's ctx ends at
+// sweepTimeout or when the hub stops, and Run waits for it before Done closes.
+// Only Run calls this, so no Add can race the Wait in Run's exit.
+func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
 	if !inFlight.CompareAndSwap(false, true) {
 		return
 	}
-	go func() {
+	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
+	h.sweeps.Go(func() {
 		defer inFlight.Store(false)
-		sweep()
-	}()
+		defer cancel()
+		sweep(ctx)
+	})
 }
 
 // sweepStaleClients iterates over all connected clients and kicks any that
@@ -114,10 +123,7 @@ func (h *Hub) sweepStaleClients() {
 // session has been deleted, expired, or whose user has been banned. This
 // provides time-based session enforcement for idle WebSocket connections
 // that never trigger the message-count-based check (BUG-109).
-func (h *Hub) sweepRevokedSessions() {
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
+func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
@@ -258,10 +264,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 // don't match a connected client's voiceChID. This catches ghost users that
 // slip through the primary cleanup paths (registerNow, readPump defer,
 // LiveKit webhook).
-func (h *Hub) sweepStaleVoiceStates() {
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
+func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	h.sweepStaleVoiceEvictRevoked(ctx)
 
 	allStates, err := h.voice.AllStates(ctx)

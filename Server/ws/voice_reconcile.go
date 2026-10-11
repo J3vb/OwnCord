@@ -76,13 +76,10 @@ func (s *voiceReconcileState) prune(live map[string]struct{}) {
 
 // reconcileVoiceMembership is the polling reconciler's entry point, run from
 // the hub's voice-reconcile ticker through startSweep.
-func (h *Hub) reconcileVoiceMembership() {
+func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 	if h.livekit == nil || h.voice == nil {
 		return
 	}
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
 	rows, err := h.voice.AllStates(ctx)
 	if err != nil {
 		slog.Warn("voice reconcile: AllStates failed", "err", err)
