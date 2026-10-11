@@ -56,6 +56,7 @@ and only when it changes something a contributor or fork holder must do
 **Updates**
 
 - A server update shows one restart countdown instead of two.
+
 ### Added
 
 **Voice**
