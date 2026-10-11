@@ -137,6 +137,7 @@ export const shards = {
     "src/stores/channels.store.ts",
     "src/stores/dm.store.ts",
     "src/stores/emoji.store.ts",
+    "src/stores/gifFavorites.store.ts",
     "src/stores/members.store.ts",
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",

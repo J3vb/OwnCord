@@ -313,6 +313,13 @@ function displayHost(url: string): string {
   }
 }
 
+/** Decorates every inline image; the main page registers the GIF favorite star,
+ *  so its store and copy stay out of the lazy chunk that shares this module. */
+let imageDecorator: ((url: string) => HTMLElement | null) | null = null;
+export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null) | null): void {
+  imageDecorator = fn;
+}
+
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
   // Use cached height from a previous render if available, otherwise 200px.
@@ -346,6 +353,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
     });
     wrap.appendChild(watermark);
   }
+
+  const extra = imageDecorator?.(url);
+  if (extra) wrap.appendChild(extra);
 
   // The failure line and its bounded retry sit beside the image; the image is
   // hidden, not discarded, so retry can reuse it and tests keep one element.

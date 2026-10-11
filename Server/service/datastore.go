@@ -300,6 +300,11 @@ type Store interface {
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
+	// ── GIF favorites (migration 059) ──
+	AddGIFFavorite(ctx context.Context, userID int64, f db.GIFFavorite) error
+	RemoveGIFFavorite(ctx context.Context, userID int64, url string) error
+	ListGIFFavorites(ctx context.Context, userID int64) ([]db.GIFFavorite, error)
+
 	// ── NSFW acknowledgements (migration 047, B5-7) ──
 	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
 	RevokeNSFW(ctx context.Context, userID, channelID int64) error

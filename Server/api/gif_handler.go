@@ -103,13 +103,24 @@ type gifResponse struct {
 // a dedicated per-IP rate-limit bucket — the picker searches on every debounced
 // keystroke, so it must not share the empty-prefix bucket used by password and
 // TOTP endpoints.
-func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config) {
+func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, favorites *service.GIFFavoriteService) {
 	r.Route("/api/v1/gif", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))
-		r.Use(RateLimitMiddleware(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
 
-		r.Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))
-		r.Get("/trending", handleGIFProxy(cfg.GIF.APIKey, "/featured", false))
+		r.Group(func(r chi.Router) {
+			r.Use(RateLimitMiddleware(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
+			r.Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))
+			r.Get("/trending", handleGIFProxy(cfg.GIF.APIKey, "/featured", false))
+		})
+
+		// Saved GIFs work without a provider key: they are stored URLs. They
+		// make no upstream call, so they get their own, looser bucket.
+		r.Group(func(r chi.Router) {
+			r.Use(RateLimitMiddleware(limiter, "giffav:", gifFavoritesRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
+			r.Get("/favorites", handleListGIFFavorites(favorites))
+			r.Put("/favorites", handleAddGIFFavorite(favorites))
+			r.Delete("/favorites", handleRemoveGIFFavorite(favorites))
+		})
 	})
 }
 
