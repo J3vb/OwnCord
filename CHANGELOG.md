@@ -53,23 +53,19 @@ and only when it changes something a contributor or fork holder must do
 
 - Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
 
+**Voice**
+
+- After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute ("You were removed from this voice channel"). You can now rejoin it straight away; channel permissions and bans still apply. Update the server and the desktop app together.
+
+**Server**
+
+- A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+
 ### Added
 
 **Voice**
 
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
-
-### Fixed
-
-**Voice**
-
-- After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute ("You were removed from this voice channel"). You can now rejoin it straight away; channel permissions and bans still apply. Update the server and the desktop app together.
-
-### Fixed
-
-**Server**
-
-- A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
 
 ## v2.2.0-beta.3
 
