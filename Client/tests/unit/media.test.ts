@@ -146,19 +146,6 @@ function fireImgError(parent: HTMLElement): void {
   img.dispatchEvent(new Event("error"));
 }
 
-/** Create a MouseEvent with specified client coordinates. */
-function mouseEvent(
-  type: string,
-  opts: { clientX?: number; clientY?: number; deltaY?: number } = {},
-): MouseEvent {
-  return new MouseEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: opts.clientX ?? 0,
-    clientY: opts.clientY ?? 0,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -446,6 +433,38 @@ describe("media.ts", () => {
       await awaitImgSrc(wrap);
       fireImgLoad(wrap);
       expect(document.activeElement).toBe(wrap.querySelector("img"));
+    });
+
+    it("the inline image load handler runs once", async () => {
+      const wrap = renderInlineImage("https://example.com/once.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      const heightReads = vi.fn(() => 120);
+      Object.defineProperty(wrap, "offsetHeight", { get: heightReads, configurable: true });
+
+      const img = wrap.querySelector("img")!;
+      img.dispatchEvent(new Event("load"));
+      img.dispatchEvent(new Event("load"));
+
+      expect(heightReads).toHaveBeenCalledTimes(1);
+    });
+
+    it("a retry after a prior load still lands in the loaded state", async () => {
+      const wrap = renderInlineImage("https://example.com/reload.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      fireImgLoad(wrap);
+      fireImgError(wrap);
+      expect(wrap.dataset.mediaState).toBe("failed");
+
+      imageMock.mockResolvedValueOnce(imageResponse("image/png"));
+      wrap.querySelector<HTMLButtonElement>(".msg-media-retry")!.click();
+      await vi.waitFor(() => {
+        expect(wrap.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+      });
+      fireImgLoad(wrap);
+      expect(wrap.dataset.mediaState).toBe("loaded");
+      expect(wrap.querySelector("img")!.hidden).toBe(false);
     });
 
     it("does not cache height of 0", async () => {
@@ -1440,6 +1459,67 @@ describe("media.ts", () => {
     it("skips URLs inside inline code", () => {
       const urls = extractUrls("See `https://hidden.com` here");
       expect(urls).toEqual([]);
+    });
+
+    it("skips a URL that is wholly inside a spoiler", () => {
+      expect(extractUrls("||https://example.com/a.png||")).toEqual([]);
+    });
+
+    it("skips a spoilered URL but keeps one outside it", () => {
+      expect(extractUrls("look ||https://example.com/a.png|| and https://example.com/b")).toEqual([
+        "https://example.com/b",
+      ]);
+    });
+
+    it("skips a URL inside a spoiler that also holds prose", () => {
+      expect(extractUrls("||see https://example.com/a.png now||")).toEqual([]);
+    });
+
+    it("skips a URL inside a spoiler that spans lines", () => {
+      expect(extractUrls("||first\nhttps://example.com/a.png||")).toEqual([]);
+    });
+
+    it("leaves other URLs alone when a spoiler holds no URL", () => {
+      expect(extractUrls("||secret|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat a single pipe as a spoiler", () => {
+      expect(extractUrls("a | https://example.com/x")).toEqual(["https://example.com/x"]);
+      expect(extractUrls("a | b | https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an empty || || pair as a spoiler", () => {
+      expect(extractUrls("|||| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("keeps a URL inside a spoiler whose body holds an escaped pipe", () => {
+      expect(extractUrls("||secret \\|| https://example.com/a.png ||")).toEqual([]);
+      expect(extractUrls("||a\\|b https://example.com/x||")).toEqual([]);
+    });
+
+    it("keeps a URL inside a spoiler that spans a blank line", () => {
+      expect(extractUrls("||secret\n\nhttps://example.com/a.png||")).toEqual([]);
+      expect(extractUrls("||secret\n  \nhttps://example.com/a.png||")).toEqual([]);
+    });
+
+    it("counts an escaped pipe right after the opener as spoiler content", () => {
+      expect(extractUrls("||\\|a https://example.com/x||")).toEqual([]);
+    });
+
+    it("lets an escaped backslash end the spoiler normally", () => {
+      expect(extractUrls("||a\\\\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not treat an escaped pipe outside a spoiler as hiding a URL", () => {
+      expect(extractUrls("a \\| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not close a spoiler on an escaped pipe followed by a lone pipe", () => {
+      expect(extractUrls("||oops \\|| https://example.com/x")).toEqual(["https://example.com/x"]);
+    });
+
+    it("does not let an unclosed spoiler hide a later URL", () => {
+      expect(extractUrls("||oops https://example.com/x")).toEqual(["https://example.com/x"]);
     });
 
     it("extracts URLs outside code blocks but not inside", () => {

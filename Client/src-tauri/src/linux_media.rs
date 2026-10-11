@@ -1,7 +1,8 @@
 //! Linux-only WebKitGTK media capture support.
 //!
 //! On Windows and macOS the webview grants media capture itself (wry's
-//! WKWebView delegate auto-grants; WebView2 prompts). WebKitGTK does
+//! WKWebView delegate auto-grants; WebView2 auto-accepts through a browser
+//! flag, with the permission recorded by `windows_media`). WebKitGTK does
 //! neither: `enable-media-stream` and `enable-webrtc` default to off, and
 //! any `permission-request` signal without a handler is denied. The result
 //! is that `navigator.mediaDevices.getUserMedia` fails and

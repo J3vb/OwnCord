@@ -1217,7 +1217,7 @@ export interface MemberResponse {
 }
 
 /**
- * One user row from the admin API (`GET /admin/api/users`), the shape
+ * One user row from the admin API (`GET /api/v1/moderation/members`), the shape
  * `toAdminUserResponse` writes (Server/admin/types.go). Distinct from
  * `MemberResponse`: this one carries the ban state the moderation surface
  * needs, and the list is paged server-side.
@@ -1311,6 +1311,17 @@ export interface GifApiResult {
     readonly tinygif?: { readonly url: string };
     readonly gif?: { readonly url: string };
   };
+}
+
+/** One saved GIF (GET /api/v1/gif/favorites). */
+export interface GifFavorite {
+  readonly url: string;
+  readonly preview_url: string;
+  readonly title: string;
+}
+
+export interface GifFavoritesResponse {
+  readonly favorites: readonly GifFavorite[];
 }
 
 /** Envelope for both GIF endpoints. */

@@ -294,6 +294,7 @@ describeNotifierSuite(async () => {
     show: async () => undefined,
     showMessage: async () => undefined,
     showCall: async () => undefined,
+    clearCall: async () => undefined,
     onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
     requestAttention: async () => undefined,
@@ -309,6 +310,8 @@ describeNotifierSuite(async () => {
     attentionRequests: () => 0,
     urgentAttentionRequests: () => 0,
     badgeCounts: () => [],
+    ringsShown: () => [],
+    callsCleared: () => [],
   };
   return { subject, native };
 }, failEveryTest);

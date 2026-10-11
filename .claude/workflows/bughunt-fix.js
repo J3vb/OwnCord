@@ -377,7 +377,10 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `stage it too; if it cites another cluster's findings, leave it. Commit with subject:\n` +
     `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(", ")})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
-    `Co-Authored-By trailer.\n` +
+    `Co-Authored-By trailer. The body carries the pre-flight parts CLAUDE.md requires of an unattended ` +
+    `run, as three short lines: "Affected files:", "State mutations:" (each store, table, lock-guarded ` +
+    `field or on-disk file the fix writes) and "Edge cases:" (the two the new tests pin). Describe the ` +
+    `fix, never the exploit.\n` +
     `  9. Return the short sha.\n\n` +
     `Client tests run from Client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +

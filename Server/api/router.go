@@ -175,7 +175,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
 	// with no key configured the endpoints answer 503 GIF_DISABLED so the
 	// client can hide the picker rather than discover a 404.
-	MountGIFRoutes(r, svc.Sessions, limiter, cfg)
+	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
 	if cfg.GIF.APIKey == "" {
 		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
 	}
@@ -264,6 +264,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
 		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
+	// The client's member actions, reachable without the /admin prefix (see
+	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
+	// accept only a session or API token issued by this server, plus the
+	// per-action permission and rank checks.
+	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

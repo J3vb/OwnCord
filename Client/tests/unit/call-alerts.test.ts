@@ -7,9 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RingState } from "../../src/lib/call-ring";
 
-const { testPrefs, showCall, requestAttention, showToast } = vi.hoisted(() => ({
+const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
   showCall: vi.fn(),
+  clearCall: vi.fn(),
   requestAttention: vi.fn(),
   showToast: vi.fn(),
 }));
@@ -20,11 +21,11 @@ vi.mock("../../src/lib/preferences", () => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 vi.mock("../../src/platform/desktop", () => ({
-  desktop: { notifier: { showCall, requestAttention } },
+  desktop: { notifier: { showCall, clearCall, requestAttention } },
 }));
 vi.mock("../../src/lib/toast", () => ({ showToast }));
 
-const { alertIncomingCall, alertMissedCall } =
+const { alertIncomingCall, alertMissedCall, clearIncomingCall } =
   await import("../../src/features/direct-messages/callAlerts");
 const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/notificationSound");
@@ -79,6 +80,7 @@ beforeEach(() => {
   frequencies.length = 0;
   oscillators.length = 0;
   showCall.mockReset().mockResolvedValue(undefined);
+  clearCall.mockReset().mockResolvedValue(undefined);
   requestAttention.mockReset().mockResolvedValue(undefined);
   showToast.mockReset();
   setChannelMutesHost("a.example");
@@ -97,9 +99,15 @@ describe("an incoming call", () => {
     alertIncomingCall(ring);
 
     expect(showCall.mock.calls).toEqual([
-      ["Otto is calling you", "Voice call", { host: "a.example", channelId: 50 }],
+      ["Otto is calling you", "Voice call", { host: "a.example", channelId: 50 }, true],
     ]);
     expect(requestAttention).toHaveBeenCalledTimes(1);
+  });
+
+  // D-13: the ring's toast must not outlive the ring in the notification centre.
+  it("withdraws the ring's notification when the ring ends", () => {
+    clearIncomingCall(ring);
+    expect(clearCall.mock.calls).toEqual([[50]]);
   });
 
   // The banner is the answer surface while the app is in front of the user;
@@ -146,7 +154,7 @@ describe("a missed call", () => {
 
     expect(showToast.mock.calls).toEqual([["Missed call from Otto", "info"]]);
     expect(showCall.mock.calls).toEqual([
-      ["Missed call from Otto", "Voice call", { host: "a.example", channelId: 50 }],
+      ["Missed call from Otto", "Voice call", { host: "a.example", channelId: 50 }, false],
     ]);
     expect(requestAttention).not.toHaveBeenCalled();
   });

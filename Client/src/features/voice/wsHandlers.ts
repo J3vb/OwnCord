@@ -15,6 +15,7 @@ import {
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
+import { noteJoinFailed } from "./joinBackoff";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -419,6 +420,9 @@ export function handleVoiceJoinRollback(): void {
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
   if (voiceStore.getState().voiceStatus === "joining") {
+    // A refused join (often before any voice token) is a failed join: back
+    // off the next one, or every click re-sends voice_join.
+    noteJoinFailed();
     void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
       failPendingRejoin();
       if (isVoiceSessionActive()) leaveVoice(true);

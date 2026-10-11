@@ -86,6 +86,15 @@ Each item links to the guidance that owns it.
   Windows follows Settings › Voice & Audio, and voice media itself is routed by
   the native engine and unaffected — see
   [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
+- **On Linux, mp4 video, colour emoji and PipeWire cameras come from distro
+  packages.** Video attachments and YouTube embeds that use H264/AAC play only
+  with `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`, emoji render in
+  colour only with `fonts-noto-color-emoji`, and a PipeWire-only camera needs
+  `gstreamer1.0-pipewire`. The `.deb` recommends all four, so apt installs them
+  by default (not with `--no-install-recommends`). The AppImage only reads host
+  fonts: it pins GStreamer to its own bundled plugins, so installing the
+  GStreamer packages on the host does nothing for it, and H264/AAC playback and
+  PipeWire cameras stay unavailable there until the release build bundles them.
 
 ## Voice and video
 
@@ -107,6 +116,9 @@ Each item links to the guidance that owns it.
   host's LAN address or hostname instead, so voice goes through the server's
   `/livekit` tunnel —
   [Linux desktop voice](deployment.md#linux-desktop-voice).
+- **On Linux Wayland, screen shares top out at 60 fps.** The PipeWire capture
+  is negotiated at 60 fps, so the screen-share picker disables 120 fps there
+  and a saved 120 falls back to 60.
 
 ## FAQ
 

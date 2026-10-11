@@ -573,8 +573,15 @@ function buildVoiceAudioTabInner(
         // Keep the leading "Default" option, replace the rest.
         while (select.options.length > 1) select.remove(1);
         let savedStillPresent = false;
+        // Without a media permission the webview hides the list behind one
+        // nameless entry per kind, so whether the saved device is here is unknown.
+        let hidden = false;
         for (const d of devices) {
           if (d.kind !== kind) continue;
+          if (d.deviceId === "") {
+            hidden = true;
+            continue;
+          }
           if (d.deviceId === saved) savedStillPresent = true;
           const name = d.label || `${label} (${d.deviceId.slice(0, 8)})`;
           deviceLabels.set(d.deviceId, name);
@@ -584,11 +591,13 @@ function buildVoiceAudioTabInner(
         if (saved !== "" && !savedStillPresent && keepSaved) {
           const device = deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
           select.appendChild(
-            createElement(
-              "option",
-              { value: saved, disabled: "" },
-              t("voiceAudio.deviceDisconnected", { device }),
-            ),
+            hidden
+              ? createElement("option", { value: saved }, device)
+              : createElement(
+                  "option",
+                  { value: saved, disabled: "" },
+                  t("voiceAudio.deviceDisconnected", { device }),
+                ),
           );
         }
         select.value = keepSaved ? saved : "";

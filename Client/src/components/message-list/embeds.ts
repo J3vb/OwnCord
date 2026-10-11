@@ -51,6 +51,27 @@ const ogInFlight = new Map<string, Promise<OgLoad>>();
  *  once per URL until the next cache clear, shared by every embed of it. */
 const ogReasked = new Map<string, Promise<OgLoad>>();
 let embedCacheGeneration = 0;
+/** Bounds ogCache and ogReasked: one entry per distinct link would otherwise
+ *  grow until logout. Least recently used goes first. */
+const OG_CACHE_MAX = 500;
+
+function lruGet<V>(map: Map<string, V>, key: string): V | undefined {
+  const value = map.get(key);
+  if (value !== undefined) {
+    map.delete(key);
+    map.set(key, value);
+  }
+  return value;
+}
+
+function lruSet<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > OG_CACHE_MAX) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+}
 
 export function clearEmbedCaches(): void {
   embedCacheGeneration += 1;
@@ -74,7 +95,7 @@ function nonBlank(text: string | null): string | null {
  *  flattened into an empty success (B9-9). */
 function fetchOgMeta(url: string): Promise<OgLoad> {
   const generation = embedCacheGeneration;
-  const cached = ogCache.get(url);
+  const cached = lruGet(ogCache, url);
   if (cached !== undefined) return Promise.resolve(cached);
 
   // Return the existing in-flight promise so all callers get the real result.
@@ -105,7 +126,7 @@ function fetchOgMeta(url: string): Promise<OgLoad> {
     }
     // A cache clear while this was in flight means the answer belongs to a
     // session that is gone: hand it to this caller, but never cache it.
-    if (generation === embedCacheGeneration) ogCache.set(url, load);
+    if (generation === embedCacheGeneration) lruSet(ogCache, url, load);
     return load;
   })();
 
@@ -246,7 +267,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   };
 
   // Check cache first for instant render
-  const cached = ogCache.get(url);
+  const cached = lruGet(ogCache, url);
   if (cached !== undefined) {
     apply(cached);
   } else {
@@ -323,11 +344,11 @@ function showOgImage(
 ): Promise<void> {
   const reaskPreview = (): Promise<void> => {
     if (!reask) return Promise.resolve();
-    let fresh = ogReasked.get(url);
+    let fresh = lruGet(ogReasked, url);
     if (fresh === undefined) {
       clearOgEntry(url);
       fresh = fetchOgMeta(url);
-      ogReasked.set(url, fresh);
+      lruSet(ogReasked, url, fresh);
     }
     return fresh.then((next) =>
       next.ok && next.meta.image !== null

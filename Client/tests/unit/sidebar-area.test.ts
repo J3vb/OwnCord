@@ -302,7 +302,7 @@ function defaultOpts(): SidebarAreaOptions {
     ws: {
       send: vi.fn(),
       close: vi.fn(),
-      on: vi.fn(),
+      on: vi.fn(() => vi.fn()),
       off: vi.fn(),
     } as unknown as SidebarAreaOptions["ws"],
     api: {
@@ -559,22 +559,29 @@ describe("SidebarArea", () => {
     const testIds = (buttons: HTMLButtonElement[]): Array<string | null> =>
       buttons.map((b) => b.getAttribute("data-testid"));
 
-    it("shows a plain member Invite alone", () => {
+    it("shows a plain member no actions (Invite needs MANAGE_INVITES)", () => {
       signInAs(Permission.SEND_MESSAGES);
+      const result = mount();
+      expect(testIds(visibleActions(result))).toEqual([]);
+      cleanup(result);
+    });
+
+    it("shows Invite alone for MANAGE_INVITES", () => {
+      signInAs(Permission.MANAGE_INVITES);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn"]);
       cleanup(result);
     });
 
     it("adds Audit Log for VIEW_AUDIT_LOG alone", () => {
-      signInAs(Permission.VIEW_AUDIT_LOG);
+      signInAs(Permission.MANAGE_INVITES | Permission.VIEW_AUDIT_LOG);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn", "audit-log-btn"]);
       cleanup(result);
     });
 
     it("adds Moderation for MODERATE_MEMBERS alone", () => {
-      signInAs(Permission.MODERATE_MEMBERS);
+      signInAs(Permission.MANAGE_INVITES | Permission.MODERATE_MEMBERS);
       const result = mount();
       expect(testIds(visibleActions(result))).toEqual(["invite-btn", "moderation-btn"]);
       cleanup(result);
@@ -2240,6 +2247,182 @@ describe("SidebarArea", () => {
 
       cleanup(result);
     });
+
+    describe("onReorderChannel rollback", () => {
+      function seedOrder(positions: Record<number, number>): void {
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          for (const [id, position] of Object.entries(positions)) {
+            channels.set(Number(id), {
+              id: Number(id),
+              name: `ch-${id}`,
+              type: "text",
+              category: null,
+              position,
+              unreadCount: 0,
+              mentionCount: 0,
+              lastMessageId: null,
+              canSend: true,
+              topic: "",
+              slowMode: 0,
+              nsfw: false,
+              voiceMaxUsers: 0,
+              voiceMaxVideo: 0,
+            });
+          }
+          return { ...prev, channels };
+        });
+      }
+      const positionOf = (id: number): number | undefined =>
+        channelsStore.getState().channels.get(id)?.position;
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      };
+
+      // The sidebar has already applied the optimistic order (channels 1 and
+      // 2 swapped) by the time onReorderChannel runs.
+      const swap = [
+        { channelId: 1, newPosition: 1, previousPosition: 0 },
+        { channelId: 2, newPosition: 0, previousPosition: 1 },
+      ];
+
+      it("restores only the entry whose own write failed", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        await flush();
+
+        // Channel 1's PATCH was accepted, so it stays at its new position;
+        // channel 2's was rejected, so it goes back.
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(1);
+        expect(toast.show).toHaveBeenCalledWith("Failed to save channel order", "error");
+
+        cleanup(result);
+      });
+
+      it("leaves the new positions in place when every write succeeds", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        await flush();
+
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(0);
+        expect(toast.show).not.toHaveBeenCalled();
+
+        cleanup(result);
+      });
+
+      it("leaves a confirmed entry alone when its broadcast lands before the batch settles", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // The server broadcasts channel_update before it answers the PATCH, so
+        // channel 1's confirmed position can arrive before the batch settles.
+        seedOrder({ 1: 1 });
+        await flush();
+
+        expect(positionOf(1)).toBe(1);
+        expect(positionOf(2)).toBe(1);
+
+        cleanup(result);
+      });
+
+      it("keeps the server value of a channel confirmed by a broadcast before its write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // The server persisted channel 2's move and broadcast it, then the
+        // response was lost: the broadcast carries the same position the
+        // optimistic update set, so only the broadcast itself tells them apart.
+        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+          (c: unknown[]) => c[0] === "channel_update",
+        )![1] as (payload: { id: number }) => void;
+        onUpdate({ id: 2 });
+        await flush();
+
+        expect(positionOf(2)).toBe(0);
+
+        cleanup(result);
+      });
+
+      it("still rolls back when only an unread badge touched the channel while the write failed", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("forbidden"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // An ordinary badge mutation replaces the channel object but is not a
+        // channel_update, so it must not count as a server confirmation.
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          const ch = channels.get(2)!;
+          channels.set(2, { ...ch, unreadCount: ch.unreadCount + 1 });
+          return { ...prev, channels };
+        });
+        await flush();
+
+        expect(positionOf(2)).toBe(1);
+
+        cleanup(result);
+      });
+
+      it("does not overwrite a newer position that arrived while the failed write was in flight", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("response lost"));
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedOrder({ 1: 1, 2: 0 });
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel(swap);
+        // A newer reorder (or broadcast) moved channel 2 elsewhere before the
+        // failure surfaced; the stale rollback must not clobber it.
+        seedOrder({ 2: 5 });
+        await flush();
+
+        expect(positionOf(2)).toBe(5);
+
+        cleanup(result);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -3147,6 +3330,71 @@ describe("SidebarArea", () => {
 
       expect(mockOpenUrl).not.toHaveBeenCalled();
       expect(show).toHaveBeenCalledWith("Not connected to a server", "error");
+      cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Invite entry point
+  // -------------------------------------------------------------------------
+  //
+  // The invite routes are MANAGE_INVITES-only on the server, so the button is
+  // hidden from roles without the bit instead of failing on click.
+
+  describe("invite entry point", () => {
+    function signInAs(roleName: string, permissions: number): void {
+      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: roleName },
+        isAuthenticated: true,
+      }));
+    }
+
+    function inviteBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
+      return result.sidebarWrapper.querySelector("[data-testid='invite-btn']");
+    }
+
+    it("is shown to a role holding MANAGE_INVITES", () => {
+      signInAs("Inviter", Permission.MANAGE_INVITES);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is shown to ADMINISTRATOR", () => {
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is hidden from a role without the bit", () => {
+      signInAs("Member", Permission.SEND_MESSAGES);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).toBe("none");
+      cleanup(result);
+    });
+
+    it("follows a role list that arrives or changes after mount", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: "Member" },
+        isAuthenticated: true,
+      }));
+      setRoles([]);
+      const result = createSidebarArea(defaultOpts());
+      expect(inviteBtn(result)?.style.display).toBe("none");
+
+      setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.MANAGE_INVITES }]);
+      channelsStore.flush();
+      expect(inviteBtn(result)?.style.display).not.toBe("none");
+
+      setRoles([{ id: 9, name: "Member", color: null, permissions: Permission.SEND_MESSAGES }]);
+      channelsStore.flush();
+      expect(inviteBtn(result)?.style.display).toBe("none");
       cleanup(result);
     });
   });

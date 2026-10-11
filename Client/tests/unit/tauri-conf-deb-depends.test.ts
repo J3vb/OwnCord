@@ -23,6 +23,30 @@ describe("tauri.conf.json — Linux GStreamer runtime", () => {
     );
   });
 
+  // Recommends, not Depends: a minimal system still installs the package, and
+  // apt pulls recommends in by default (the artifact smoke installs with
+  // --no-install-recommends, so it is unaffected). Each closes a gap the
+  // Windows build does not have: fonts-noto-color-emoji gives colour emoji
+  // glyphs; gstreamer1.0-libav and -plugins-bad give WebKitGTK the H264/AAC
+  // decoders for mp4 attachments and YouTube embeds; gstreamer1.0-pipewire is
+  // the pipewiresrc camera source camera.rs already tries.
+  it("recommends the emoji font, video codecs and PipeWire source without depending on them", () => {
+    const { depends, recommends } = tauriConf.bundle.linux.deb as {
+      depends: string[];
+      recommends?: string[];
+    };
+    const wanted = [
+      "fonts-noto-color-emoji",
+      "gstreamer1.0-libav",
+      "gstreamer1.0-plugins-bad",
+      "gstreamer1.0-pipewire",
+    ];
+    expect(recommends).toEqual(wanted);
+    for (const pkg of wanted) {
+      expect(depends).not.toContain(pkg);
+    }
+  });
+
   it("bundles GStreamer into the AppImage", () => {
     expect(tauriConf.bundle.linux.appimage.bundleMediaFramework).toBe(true);
   });

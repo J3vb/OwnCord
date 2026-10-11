@@ -404,6 +404,34 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("does not list nameless devices or mark the saved ones disconnected while the webview hides the device list", async () => {
+    // Without a granted media permission Chromium (WebView2) answers
+    // enumerateDevices with one entry per kind, id and label both empty.
+    stubNavigator([
+      { kind: "audioinput", deviceId: "", label: "" },
+      { kind: "audiooutput", deviceId: "", label: "" },
+    ]);
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
+    localStorage.setItem("owncord:settings:audioOutputDevice", JSON.stringify("default"));
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const [inputSelect, outputSelect] = el.querySelectorAll("select");
+    await vi.waitFor(() => expect(inputSelect!.value).toBe("abcdef0123456789"));
+    for (const select of [inputSelect!, outputSelect!]) {
+      const options = Array.from(select.querySelectorAll("option"));
+      expect(options.map((o) => o.textContent)).not.toContain("Microphone ()");
+      expect(options.map((o) => o.textContent)).not.toContain("Speaker ()");
+      expect(options.some((o) => o.textContent?.includes("(disconnected)"))).toBe(false);
+      expect(options.some((o) => o.disabled)).toBe(false);
+    }
+    expect(inputSelect!.selectedOptions[0]!.textContent).toBe("Microphone (abcdef01)");
+    expect(outputSelect!.value).toBe("default");
+    ac.abort();
+  });
+
   it("meters the system default while the saved microphone is unplugged", async () => {
     localStorage.setItem("owncord:settings:audioInputDevice", '"mic-gone"');
     stubNavigator();

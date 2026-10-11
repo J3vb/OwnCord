@@ -142,6 +142,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.frameRate": "Frame rate",
   "picker.fps": "{fps} fps",
   "picker.fpsDefault": "Default ({fps} fps)",
+  "picker.fpsWaylandLimit": "Wayland screen capture is limited to 60 fps",
   "picker.goLive": "Go Live",
   "picker.quality.low": "Low (720p)",
   "picker.quality.medium": "Medium (720p)",
@@ -172,6 +173,10 @@ export const voiceText = defineCatalog("voice", {
   "key.unknown": "Key 0x{code}",
 
   "join.connectionError": "Failed to join voice — connection error",
+  "join.securingTimeout":
+    "Couldn't secure the voice call — no encryption key arrived. Try joining again.",
+  "join.backoff": "Voice join failed — try again in {seconds} s",
+  "join.switchBackoff": "Please wait {seconds} s before switching voice channels",
   "mic.stillUnavailable": "Microphone still unavailable — check your browser permissions",
   "mic.unavailableMuted": "Microphone unavailable — you are muted",
   "session.listenOnlyPermission": "Microphone permission denied — joined in listen-only mode",

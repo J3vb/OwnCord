@@ -34,6 +34,7 @@ import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
   MASKED_LINK_REGEX,
+  SPOILER_REGEX,
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
@@ -312,6 +313,13 @@ function displayHost(url: string): string {
   }
 }
 
+/** Decorates every inline image; the main page registers the GIF favorite star,
+ *  so its store and copy stay out of the lazy chunk that shares this module. */
+let imageDecorator: ((url: string) => HTMLElement | null) | null = null;
+export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null) | null): void {
+  imageDecorator = fn;
+}
+
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
   // Use cached height from a previous render if available, otherwise 200px.
@@ -345,6 +353,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
     });
     wrap.appendChild(watermark);
   }
+
+  const extra = imageDecorator?.(url);
+  if (extra) wrap.appendChild(extra);
 
   // The failure line and its bounded retry sit beside the image; the image is
   // hidden, not discarded, so retry can reuse it and tests keep one element.
@@ -382,7 +393,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // height so future virtual-scroll rebuilds start at the correct size.
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener("load", () => {
+  // Once per load: a GIF freeze/unfreeze changes src and would re-run it (a
+  // forced layout each time). load() re-arms it for a retry.
+  const onLoad = (): void => {
     log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
     // A retry that succeeds hands keyboard focus from the retry to the image.
     const refocus = failure.contains(document.activeElement);
@@ -393,7 +406,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
     const h = wrap.offsetHeight;
     if (h > 0) cacheImageHeight(url, h);
     if (refocus) img.focus();
-  });
+  };
+  img.addEventListener("load", onLoad, { once: true });
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
   // When the animateGifs pref is disabled, start frozen so the first frame is
@@ -431,6 +445,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.style.minHeight = `${cachedH ?? 200}px`;
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
+    img.addEventListener("load", onLoad, { once: true });
     void loadExternalImage({ url }).then((result) => {
       if (!result.ok) {
         showFailure(result.failure);
@@ -450,11 +465,13 @@ export function renderInlineImage(url: string): HTMLDivElement {
 /** Extract all URLs from a message content string. */
 export function extractUrls(content: string): string[] {
   // Skip URLs inside code blocks, and inside masked links: `[text](url)` is a
-  // deliberate act of hiding the address, so it gets no embed either.
+  // deliberate act of hiding the address, so it gets no embed either. The
+  // same goes for `||spoilers||`: a hidden address must not be previewed.
   const withoutCodeBlocks = content
     .replace(CODE_BLOCK_REGEX, "")
     .replace(INLINE_CODE_REGEX, "")
-    .replace(MASKED_LINK_REGEX, "");
+    .replace(MASKED_LINK_REGEX, "")
+    .replace(SPOILER_REGEX, "");
   const matches = withoutCodeBlocks.match(URL_REGEX);
   // Strip the same trailing sentence punctuation the linkifier strips (see
   // stripUrlTrailingPunctuation), so the embed pipeline and the rendered

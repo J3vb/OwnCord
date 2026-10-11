@@ -17,14 +17,12 @@ import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
-import type { UserProfilePopupComponent } from "@components/UserProfilePopup";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
-import { roleHasPermission } from "@lib/permissions";
+import { positionForRole, roleHasPermission } from "@lib/permissions";
 import { createAvatarElement } from "./message-list/avatar";
 import { readableRoleColor } from "@lib/themes";
-import { showToast } from "@lib/toast";
-import { reportEntryText } from "../i18n/reportEntry";
 import { shellText } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
@@ -58,12 +56,18 @@ const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["admin", "moderator", "mem
  * Role names an admin can assign, taken from the server's role list. "owner" is
  * excluded — ownership transfer isn't a context-menu action.
  */
-function assignableRoleNames(): readonly string[] {
-  const roles = channelsStore
-    .getState()
-    .roles.map((r) => r.name.toLowerCase())
-    .filter((name) => name !== "owner");
-  return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
+function assignableRoleNames(actorPosition: number | undefined): readonly string[] {
+  const all = channelsStore.getState().roles;
+  if (all.length === 0) return FALLBACK_ASSIGNABLE_ROLES;
+  return all
+    .filter(
+      // The server refuses a role at or above the actor's own rank; with no
+      // positions to compare it stays the authority.
+      (r) =>
+        r.name.toLowerCase() !== "owner" &&
+        (actorPosition === undefined || r.position === undefined || r.position < actorPosition),
+    )
+    .map((r) => r.name.toLowerCase());
 }
 
 /** Which moderation menu items the signed-in user may see. */
@@ -185,23 +189,11 @@ function isAwayStatus(status: UserStatus): boolean {
 }
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
-let activePopup: UserProfilePopupComponent | null = null;
-/** Bumped by every open and close, so a popup still loading when the user
- *  moves on (or the list is destroyed) is dropped instead of mounted. */
-let popupSeq = 0;
 
 function closeActiveMenu(): void {
   if (activeMenu !== null) {
     activeMenu.destroy();
     activeMenu = null;
-  }
-}
-
-function closeActivePopup(): void {
-  popupSeq++;
-  if (activePopup !== null) {
-    activePopup.destroy?.();
-    activePopup = null;
   }
 }
 
@@ -220,6 +212,13 @@ function handleOutsideClick(e: MouseEvent): void {
     releaseMenuDismiss();
   }
 }
+
+/**
+ * Closers for the profile popups this list opened. destroy() runs only these:
+ * each is a no-op once another opener replaced its popup, so a card MessageList
+ * opened stays up when the sidebar switches away from the member list.
+ */
+const ownPopupClosers = new Set<() => void>();
 
 function createMemberItem(
   member: Member,
@@ -283,58 +282,29 @@ function createMemberItem(
   // the profile, and its Report action, is reachable from the keyboard.
   const openProfile = (anchorX: number, anchorY: number): void => {
     closeActiveMenu();
-    closeActivePopup();
-    const currentUserId = authStore.getState().user?.id ?? 0;
-    const isSelf = member.id === currentUserId;
-    const onMessageUser = opts.onMessageUser;
-    const onCallUser = opts.onCallUser;
-    const onReportUser = opts.onReportUser;
+    const list = item.parentElement;
     // `member` is the row's render-time snapshot; a presence-only update
     // (see patchPresence) recolors the dot in place without rebuilding the
-    // row, so that snapshot's `status` can be stale. Re-resolve against the
-    // live store so the popup always agrees with the dot it was opened from.
-    const live = membersStore.getState().members.get(member.id) ?? member;
-    const list = item.parentElement;
-    // Loaded on first open: the popup is only ever needed after a click, so
-    // it stays out of the main-page bundle.
-    const seq = ++popupSeq;
-    import("@components/UserProfilePopup").then(
-      ({ createUserProfilePopup }) => {
-        if (seq !== popupSeq || signal.aborted) return;
-        const popup = createUserProfilePopup({
-          user: {
-            id: live.id,
-            username: live.username,
-            avatar: live.avatar,
-            role: live.role,
-            status: live.status,
-            displayName: live.displayName,
-            customStatus: live.customStatus,
-          },
-          anchorX,
-          anchorY,
-          ...(isSelf || onMessageUser === undefined
-            ? {}
-            : { onMessage: (userId: number) => onMessageUser(userId) }),
-          ...(isSelf || onCallUser === undefined
-            ? {}
-            : { onCall: (userId: number) => onCallUser(userId) }),
-          ...(isSelf || onReportUser === undefined
-            ? {}
-            : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),
-          onClose: () => {
-            if (activePopup === popup) activePopup = null;
-          },
-          fallbackFocus: () =>
-            list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
-            list?.querySelector<HTMLElement>(".member-item") ??
-            null,
-        });
-        activePopup = popup;
-        popup.mount(document.body);
+    // row, so that snapshot's `status` can be stale. The opener re-resolves
+    // against the live store so the popup always agrees with the dot it was
+    // opened from; the snapshot is only the fallback.
+    const close = openUserProfilePopup({
+      userId: member.id,
+      anchorX,
+      anchorY,
+      fallbackUser: member,
+      signal,
+      callbacks: {
+        ...(opts.onMessageUser === undefined ? {} : { onMessage: opts.onMessageUser }),
+        ...(opts.onCallUser === undefined ? {} : { onCall: opts.onCallUser }),
+        ...(opts.onReportUser === undefined ? {} : { onReport: opts.onReportUser }),
       },
-      () => showToast(reportEntryText("profileLoadFailed"), "error"),
-    );
+      fallbackFocus: () =>
+        list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
+        list?.querySelector<HTMLElement>(".member-item") ??
+        null,
+    });
+    ownPopupClosers.add(close);
   };
   item.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal });
   item.addEventListener(
@@ -362,16 +332,30 @@ function createMemberItem(
     // taken once at mount -- dispatcher.ts keeps authStore.user.role
     // current on every self MEMBER_UPDATE precisely so gates like this one
     // see a promotion/demotion without waiting for the sidebar to rebuild.
-    const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
+    const actorRole = authStore.getState().user?.role ?? opts.currentUserRole;
+    const baseGates = moderationGates(actorRole);
+    // The server refuses moderation of a member ranked at or above the actor
+    // and any role assignment at or above the actor's own rank; mirror both so
+    // the menu never offers a request that cannot succeed. Unknown positions
+    // (an older server) leave the decision to the server.
+    const actorPosition = positionForRole(actorRole);
+    const targetPosition = positionForRole(member.role);
+    const outranks =
+      actorPosition === undefined || targetPosition === undefined || actorPosition > targetPosition;
+    // Roles come from the server's `ready` payload — a hardcoded list made
+    // custom roles unreachable and, worse, unresolvable to a role id, so
+    // picking one silently did nothing.
+    const availableRoles = assignableRoleNames(actorPosition);
+    const gates: ModerationGates = {
+      canKick: baseGates.canKick && outranks,
+      canBan: baseGates.canBan && outranks,
+      canManageRoles: baseGates.canManageRoles && outranks && availableRoles.length > 0,
+    };
     const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
     closeActiveMenu();
     releaseMenuDismiss();
 
-    // Roles come from the server's `ready` payload — a hardcoded list made
-    // custom roles unreachable and, worse, unresolvable to a role id, so
-    // picking one silently did nothing.
-    const availableRoles = assignableRoleNames();
     const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
 
     activeMenu = createMemberContextMenu({
@@ -638,7 +622,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function destroy(): void {
     closeActiveMenu();
-    closeActivePopup();
+    for (const close of ownPopupClosers) close();
+    ownPopupClosers.clear();
     releaseMenuDismiss();
     disposable.destroy();
     renderOwner?.destroy();

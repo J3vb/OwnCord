@@ -129,7 +129,9 @@
   transition: background 0.1s ease;
   border-left: 2px solid transparent;
 }
-.message:first-child,
+/* The list is virtualized: its first child is whichever row the window
+   starts at, so a :first-child rule would size rows by scroll position. The
+   first message of a day always follows its divider. */
 .msg-day-divider + .message {
   margin-top: 0;
 }
@@ -1023,7 +1025,8 @@ ul.md-list-nested {
 .msg-file-name:hover {
   text-decoration: underline;
 }
-.msg-file-size {
+.msg-file-size,
+.msg-file-note {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
@@ -1058,6 +1061,7 @@ ul.md-list-nested {
   display: block;
   max-width: 100%;
   max-height: 300px;
+  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {

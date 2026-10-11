@@ -39,6 +39,8 @@ mod tofu;
 mod tray;
 mod unread_badge;
 mod update_commands;
+#[cfg(windows)]
+mod windows_media;
 mod ws_proxy;
 
 /// Map the RUST_LOG env var to a global level filter for the log plugin.
@@ -172,6 +174,8 @@ pub fn run() {
             commands::get_cert_fingerprint,
             #[cfg(desktop)]
             message_notification::notify_message,
+            #[cfg(desktop)]
+            message_notification::clear_call_notification,
             unread_badge::set_unread_badge,
             commands::store_identity_pin,
             commands::get_identity_pin,
@@ -296,6 +300,9 @@ pub fn run() {
                     })
                 };
                 let window = builder.build()?;
+                // WebView2 hides device names until mic/camera are allowed.
+                #[cfg(windows)]
+                windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if matches!(event, tauri::WindowEvent::Destroyed) {

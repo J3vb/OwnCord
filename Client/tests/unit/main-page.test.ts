@@ -9,6 +9,7 @@
  * mocked out here and only the wiring under test (the store subscription) is
  * exercised for real.
  */
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
@@ -62,6 +63,7 @@ vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
+  getLocalScreenshareFps: vi.fn().mockResolvedValue(57),
   setRemoteVideoView: vi.fn(),
 }));
 
@@ -79,6 +81,7 @@ vi.mock("@lib/notificationSound", () => ({
 vi.mock("../../src/features/direct-messages/callAlerts", () => ({
   alertIncomingCall: vi.fn(),
   alertMissedCall: vi.fn(),
+  clearIncomingCall: vi.fn(),
 }));
 
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
@@ -142,6 +145,7 @@ const {
         addStream: ReturnType<typeof vi.fn>;
         removeStream: ReturnType<typeof vi.fn>;
         clearStreams: ReturnType<typeof vi.fn>;
+        watch: ReturnType<typeof vi.fn>;
         hasStreams: ReturnType<typeof vi.fn>;
         setFocusedTile: ReturnType<typeof vi.fn>;
         getFocusedTileId: ReturnType<typeof vi.fn>;
@@ -226,6 +230,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       addStream: vi.fn(),
       removeStream: vi.fn(),
       clearStreams: vi.fn(),
+      watch: vi.fn(),
       hasStreams: vi.fn(() => false),
       setFocusedTile: vi.fn(),
       getFocusedTileId: vi.fn(() => null),
@@ -611,6 +616,51 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(videoGrid.clearStreams).not.toHaveBeenCalled();
   });
 
+  it("applies a cross-channel roster click's channel change before watching, so clearStreams cannot drop the watch", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(10, { ...textChannel(10, "lounge", 1), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    const user = (userId: number, screenshare: boolean) => ({
+      userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [9, new Map([[100, user(100, true)]])],
+        [10, new Map([[200, user(200, true)]])],
+      ]),
+    }));
+    voiceStore.flush();
+    channelsStore.flush();
+
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    grid.clearStreams.mockClear();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
+    // The roster click (ChannelSidebar) joins first, then asks the page to watch.
+    (
+      mockCreateSidebarArea.mock.calls.at(-1)![0] as { onWatchStream: (userId: number) => void }
+    ).onWatchStream(200);
+
+    expect(grid.watch).toHaveBeenCalledOnce();
+    expect(grid.clearStreams).toHaveBeenCalled();
+    expect(grid.clearStreams.mock.invocationCallOrder[0]!).toBeLessThan(
+      grid.watch.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -859,6 +909,33 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("keeps an incoming ring alive when Accept is clicked during the join backoff", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    noteJoinFailed();
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const acceptBtn = document.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement;
+    acceptBtn.click();
+
+    expect(banner.style.display).not.toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(document.body.textContent).toContain("Voice join failed — try again in 2 s");
+
+    noteJoinFailed(Date.now(), true);
+    acceptBtn.click();
+    expect(document.body.textContent).toContain("Please wait 4 s before switching voice channels");
+
+    noteJoinSucceeded();
+    acceptBtn.click();
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+  });
+
   function openOneToOneDm(id: number): void {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -1089,6 +1166,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       setWindowFullscreen: (on: boolean) => Promise<void>;
       callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
       getStreamStats: (tileId: number) => Promise<unknown>;
+      getLocalShareFps: () => Promise<number | null>;
       setStreamView: (tileId: number, view: { enabled: boolean }) => void;
     };
 
@@ -1100,6 +1178,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
     await cbs.getStreamStats(10);
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+    // Your own share's tile reads the rate it is sending.
+    await expect(cbs.getLocalShareFps()).resolves.toBe(57);
     // A tile's view goes to that user's screen share or camera the same way.
     cbs.setStreamView(10 + SCREENSHARE_TILE_ID_OFFSET, { enabled: false });
     expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "screenshare", { enabled: false });
@@ -1308,6 +1388,33 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
     expect(panel.dataset.state).toBe("unanswered");
+    page.destroy?.();
+  });
+
+  it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s (D-14)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        recipient: { ...c.recipient, status: "offline" },
+        participants: c.participants.map((p) => ({ ...p, status: "offline" })),
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    vi.mocked(startRingback).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("unanswered");
+    expect(panel.querySelector('[data-testid="dcp-caption"]')!.textContent).toBe("bob is offline");
+    expect(startRingback).not.toHaveBeenCalled();
+    // Still rung: an invisible contact is shown offline but can still answer.
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
     page.destroy?.();
   });
 
@@ -1551,6 +1658,52 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(panel.dataset.state).not.toBe("outgoing");
     expect(panel.dataset.state).not.toBe("unanswered");
     page.destroy?.();
+  });
+
+  describe("any error answering the ring ends the outgoing call", () => {
+    async function mountRinging(): Promise<HTMLElement> {
+      const ws = fakeWs();
+      uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+      openOneToOneDm(50);
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.dynamicImportSettled();
+      vi.mocked(stopRingback).mockClear();
+      vi.mocked(ws.send).mockImplementation((m) =>
+        (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+      );
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      finishCallJoin();
+      const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+      expect(panel.dataset.state).toBe("outgoing");
+      ringWs = ws;
+      return panel;
+    }
+    let ringWs: ReturnType<typeof fakeWs>;
+
+    it.each(["FORBIDDEN", "TIMED_OUT", "VOICE_ERROR", "INTERNAL"])(
+      "%s answering the ring stops the ringback and clears Calling",
+      async (code) => {
+        const panel = await mountRinging();
+
+        ringWs.emit("error", { code, message: "refused" }, "ring-id");
+
+        expect(stopRingback).toHaveBeenCalledTimes(1);
+        expect(panel.dataset.state).not.toBe("outgoing");
+        expect(panel.dataset.state).not.toBe("unanswered");
+        page.destroy?.();
+      },
+    );
+
+    it("a FORBIDDEN error answering another envelope leaves the call alone", async () => {
+      const panel = await mountRinging();
+
+      ringWs.emit("error", { code: "FORBIDDEN", message: "refused" }, "other-id");
+
+      expect(stopRingback).not.toHaveBeenCalled();
+      expect(panel.dataset.state).toBe("outgoing");
+      page.destroy?.();
+    });
   });
 
   it("a callee's decline while the caller is on another channel shows one toast", async () => {
@@ -2906,5 +3059,99 @@ describe("MainPage — B9-4 content view wiring", () => {
 
     expect(inertModeration.signals[0]?.aborted).toBe(true);
     expect(uiStore.getState().activeView).toBeNull();
+  });
+});
+
+describe("MainPage — focus fallback skips hidden sidebar buttons", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  // A member without MANAGE_INVITES has the sidebar's Invite button hidden
+  // (inline display:none), and it is the first button in the sidebar. The
+  // channel controller's focusFallback (declining the NSFW gate) must not
+  // spend its attempt on it: focusing a hidden control is a no-op and focus
+  // would stay on <body>. jsdom does not compute display, so it would take
+  // the hidden button's focus; the assertion reads the inline style instead.
+  it("lands focus on the first visible sidebar button, not a hidden one", () => {
+    const sidebar = container.querySelector<HTMLElement>(
+      "[data-testid='app-layout'] > :first-child",
+    )!;
+    const hiddenInvite = document.createElement("button");
+    hiddenInvite.style.display = "none";
+    const visible = document.createElement("button");
+    sidebar.append(hiddenInvite, visible);
+
+    const { focusFallback } = mockCreateChannelController.mock.calls.at(-1)![0] as {
+      focusFallback: () => void;
+    };
+    focusFallback();
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBeInstanceOf(HTMLButtonElement);
+    expect((document.activeElement as HTMLElement).style.display).not.toBe("none");
+    expect(document.activeElement).toBe(visible);
+  });
+});
+
+describe("MainPage — focus fallback when the channel is declined", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    mockCreateChannelController.mockClear();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: null,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+  });
+
+  // Declining the age-restricted gate leaves the channel and hands focus to
+  // `focusFallback`. With no composer on screen it must land on a sidebar
+  // control that can actually take focus: the header's first button (Mark All
+  // as Read) is hidden while nothing is unread, and focusing a hidden button is
+  // a silent no-op that leaves focus on <body>.
+  it("lands on a visible sidebar button, skipping a hidden first one", () => {
+    const sidebar = container.querySelector("[data-testid='app-layout']")!.firstElementChild!;
+    const hidden = document.createElement("button");
+    hidden.style.display = "none";
+    const shown = document.createElement("button");
+    sidebar.append(hidden, shown);
+
+    const { focusFallback } = mockCreateChannelController.mock.calls.at(-1)![0] as {
+      focusFallback: () => void;
+    };
+    focusFallback();
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(shown);
   });
 });

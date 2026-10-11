@@ -69,7 +69,7 @@ pub fn on_new_window<R: Runtime>(
         .build();
     match built {
         Ok(window) => {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             close_with_page(&window);
             NewWindowResponse::Create { window }
         }
@@ -93,6 +93,35 @@ fn close_with_page<R: Runtime>(window: &tauri::WebviewWindow<R>) {
             let _ = owner.close();
             None
         });
+    });
+    if let Err(e) = result {
+        log::warn!("[popout] window.close() will leave the window open: {e}");
+    }
+}
+
+/// WebView2 answers the page's `window.close()` (Bring back, or the stream
+/// ending) the same way: wry destroys only the webview's child container, so
+/// the window stayed open, empty, on screen. Close the window along with it.
+#[cfg(windows)]
+fn close_with_page<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let owner = window.clone();
+    let result = window.with_webview(move |webview| {
+        let handler =
+            webview2_com::WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                let _ = owner.close();
+                Ok(())
+            }));
+        let mut token = Default::default();
+        // SAFETY: COM calls on the live controller, on the webview's own thread.
+        let added = unsafe {
+            webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.add_WindowCloseRequested(&handler, &mut token))
+        };
+        if let Err(e) = added {
+            log::warn!("[popout] window.close() will leave the window open: {e}");
+        }
     });
     if let Err(e) = result {
         log::warn!("[popout] window.close() will leave the window open: {e}");

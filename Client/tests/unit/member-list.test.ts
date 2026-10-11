@@ -7,6 +7,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { applyThemeByName } from "@lib/themes";
+import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
 /**
  * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
@@ -536,6 +537,72 @@ describe("MemberList", () => {
     });
   });
 
+  describe("role hierarchy", () => {
+    // The server refuses a moderation action on a member ranked at or above
+    // the actor and a role assignment at or above the actor's own rank; the
+    // menu mirrors both so it never offers a request that cannot succeed.
+    function seedRanks(memberPerms = 0): void {
+      setRoles([
+        { id: 1, name: "Owner", color: null, permissions: Permission.ADMINISTRATOR, position: 100 },
+        { id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR, position: 80 },
+        { id: 3, name: "Moderator", color: null, permissions: 0x000fffff, position: 60 },
+        { id: 4, name: "Member", color: null, permissions: memberPerms, position: 40 },
+      ]);
+    }
+
+    function openMenuOn(actorRole: string, targetId: number, actorPerms = 0): HTMLElement | null {
+      seedRanks(actorPerms);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 99, username: "Actor", avatar: null, role: actorRole },
+        serverName: "Test",
+        motd: null,
+        isAuthenticated: true,
+      }));
+      setTestMembers(testMembers);
+      memberList.mount(container);
+      const item = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
+      item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      return document.body.querySelector<HTMLElement>(".context-menu");
+    }
+
+    function topLabels(menu: HTMLElement): string[] {
+      return Array.from(menu.children)
+        .filter((el) => el.classList.contains("context-menu__item"))
+        .map((el) => el.firstChild?.textContent ?? "");
+    }
+
+    afterEach(() => {
+      document.body.querySelector(".context-menu")?.remove();
+    });
+
+    it("offers only roles below the actor's own rank", () => {
+      const menu = openMenuOn("Admin", 4);
+      const roleLabels = Array.from(
+        menu!.querySelectorAll(".context-menu__submenu .context-menu__item"),
+      ).map((i) => i.textContent);
+      expect(roleLabels).toEqual(["moderator", "member"]);
+    });
+
+    it("withholds Change Role, Force Logout and Ban for a member the actor does not outrank", () => {
+      for (const targetId of [1, 2]) {
+        const menu = openMenuOn("Admin", targetId);
+        expect(menu).not.toBeNull();
+        expect(topLabels(menu!)).toEqual(["Block"]);
+        document.body.querySelector(".context-menu")?.remove();
+        memberList.destroy?.();
+        memberList = createMemberList(defaultOpts());
+      }
+    });
+
+    it("keeps every action for a member ranked below the actor", () => {
+      const menu = openMenuOn("Admin", 3);
+      expect(topLabels(menu!)).toEqual(
+        expect.arrayContaining(["Change Role", "Force Logout", "Ban", "Block"]),
+      );
+    });
+  });
+
   it("context menu does not appear when right-clicking yourself", () => {
     // Set authStore so current user is id=1 (Alice)
     authStore.setState(() => ({
@@ -971,6 +1038,41 @@ describe("MemberList profile fields", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.activeElement).toBe(after);
+  });
+
+  it("leaves a profile popup another component opened open when it is destroyed", async () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    // A message author card, opened by MessageList through the shared opener.
+    const closeOther = openUserProfilePopup({ userId: 1, anchorX: 0, anchorY: 0 });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+
+    list.destroy?.();
+    list = undefined as never;
+
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull();
+    closeOther();
+  });
+
+  it("closes the profile popup it opened itself when it is destroyed", async () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+    container
+      .querySelector<HTMLElement>('[data-testid="member-1"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+
+    list.destroy?.();
+    list = undefined as never;
+
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
   });
 
   it("describes each row by its custom status and presence, kept current (B9-10)", () => {

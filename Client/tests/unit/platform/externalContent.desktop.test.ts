@@ -5,6 +5,7 @@
 // binding uses.
 import { vi } from "vitest";
 import type { ExternalContentBroker } from "../../../src/platform/contracts/externalContent";
+import { expectConsole } from "../../helpers/console";
 import { describeExternalContentSuite } from "./externalContent.suite";
 
 const core: {
@@ -48,6 +49,9 @@ describeExternalContentSuite(async () => {
         core.invoke = undefined;
       },
       asked: () => [...asked],
+      claimFallbackNotice() {
+        expectConsole("warn", "postMessage IPC fallback");
+      },
     },
   };
 });

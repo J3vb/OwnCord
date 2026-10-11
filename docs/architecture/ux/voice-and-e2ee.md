@@ -83,7 +83,7 @@ stateDiagram-v2
 > a persistent "Secured" chip (shield icon) once the room key is ready and the room is
 > connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
-> badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves
+> badge. An E2EE-timeout still shows the "couldn't secure the voice call" message and auto-leaves
 > (`features/voice/joinOrchestration.ts` `connectAndSetup`). **Code vs. diagram note:** the client
 > actually runs the ECDH key exchange _before_ `room.connect()`, so `securing`
 > spans the key wait and the media connect; the state diagram below draws them in
@@ -117,7 +117,7 @@ the accepted cost.
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                 |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
-| speaking       | Green ring on the speaking user's tile/avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers)                                                                                                               |
+| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers)                                                                            |
 
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
@@ -130,9 +130,17 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, also 0–100 %) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
 `components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
-volumes apart and offers Mute stream and **Stop watching**, which hides the
-stream behind a **Watch stream** card (the track stays subscribed but receives
-no video; opt-in watching is open question Q3). Your own screen share is covered by what
+volumes apart and offers Mute stream and **Stop watching**. Watching is
+opt-in, Discord-style: a remote camera or screen share arrives as a tile behind
+a **Watch stream** card, and nothing of it (screen-share audio included) is
+subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
+out; Stop watching unsubscribes it and returns the card. A watch survives a
+channel switch and the app's own reconnect or rejoin, but not livekit-client's
+full reconnect, and ends when you leave voice. The room connects with
+`autoSubscribe: false`: `handleTrackPublished` (`lib/roomEventHandlers.ts`)
+subscribes each voice unless deafened, and `RemoteTracks.watch` the streams.
+On Linux the native backend still auto-subscribes, so it unsubscribes an
+unwatched stream as it is published. Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
@@ -145,7 +153,8 @@ accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's pro
 second subscription), which can be maximised or go full screen from its own control, F or a
 double-click. No capability names the pop-out label on purpose (capabilities only grant IPC;
 the pop-out has none, and the main window drives its full screen by label), and the about:blank
-popup inherits the app's CSP. The tile shows **Bring back**, and closing the window returns the video; closing the main window closes every pop-out. Where
+popup inherits the app's CSP. The stream's volume and mute go along into the window, shown over the video.
+The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
 no window opens the video stays in the grid. Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
@@ -236,7 +245,7 @@ Peer identity state lives in `voice.store` (per-participant
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)                                                          | Interaction                               |
+| State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
 | `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
@@ -251,8 +260,8 @@ at warn, and a warning toast naming the peer stays until dismissed
 for the rest of the call. `mismatch` is now only a pinned peer whose key is no
 longer delivered, or an announce that fails verification.
 
-The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
-opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so
+The mismatch modal (`createIdentityMismatchModal()`, `components/IdentityMismatchModal.ts`;
+opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust New Key" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
 was displayed, not a fresh store read, so a malicious server cannot swap the

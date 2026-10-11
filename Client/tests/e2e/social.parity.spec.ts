@@ -5,7 +5,7 @@
  * Both flows are HTTP-only from the client's side (no ws_send involved):
  *   - Group DM create:  POST /api/v1/dms/group   (SidebarDmHelpers.handleCreateGroupDm)
  *   - Group DM leave:   DELETE /api/v1/dms/{id}  (SidebarArea.closeOrLeaveDm → api.closeDm)
- *   - Change Role:      PATCH /admin/api/users/{id} { role_id }  (SidebarMemberSection.onChangeRole)
+ *   - Change Role:      PATCH /api/v1/moderation/members/{id} { role_id }  (SidebarMemberSection.onChangeRole)
  *
  * A `wrappers` entry wraps window.__TAURI_INTERNALS__.invoke (run inside the
  * init script buildTauriMockScript installs) to record every HTTP fetch
@@ -149,7 +149,7 @@ async function mockSocialSession(page: Page): Promise<void> {
         // shorter generic "/api/v1/dms/" leave/close pattern below.
         { pattern: "/api/v1/dms/group", status: 200, body: CREATED_GROUP_DM },
         { pattern: "/api/v1/dms/", status: 200, body: { success: true } },
-        { pattern: "/admin/api/users/", status: 200, body: {} },
+        { pattern: "/api/v1/moderation/members/", status: 200, body: {} },
       ],
       simulateWsFlow: true,
       readyOverrides: {
@@ -259,7 +259,7 @@ async function mockRoleChangeSession(page: Page): Promise<void> {
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/admin/api/users/", status: 200, body: {} },
+        { pattern: "/api/v1/moderation/members/", status: 200, body: {} },
       ],
       simulateWsFlow: true,
       readyOverrides: {
@@ -306,10 +306,11 @@ test.describe("@parity Change Role via member context menu", () => {
     const memberOption = submenu.locator(".context-menu__item", { hasText: "member" }).first();
     await memberOption.click();
 
-    // Outgoing request: PATCH /admin/api/users/2 { role_id: 3 } (member's id in MOCK_ROLES).
+    // Outgoing request: PATCH /api/v1/moderation/members/2 { role_id: 3 } (member's id in MOCK_ROLES).
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").includes("/admin/api/users/2"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").includes("/api/v1/moderation/members/2"),
     );
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as { role_id: number };

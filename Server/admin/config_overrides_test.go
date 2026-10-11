@@ -328,6 +328,9 @@ func TestConfigOverrides_RestartNow(t *testing.T) {
 	token := createAdminUser(t, f.database)
 	rec := audittest.Install(t, f.database)
 
+	if w := doRequest(t, f.handler, http.MethodPatch, "/config/settings", token, map[string]any{"logging.level": "debug"}); w.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d; body: %s", w.Code, w.Body.String())
+	}
 	w := doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("POST /restart = %d, want 202; body: %s", w.Code, w.Body.String())
@@ -335,12 +338,89 @@ func TestConfigOverrides_RestartNow(t *testing.T) {
 	if reason := <-f.restarts; reason != "config_change" {
 		t.Errorf("restart reason = %q, want config_change", reason)
 	}
-	rec.Wait(t, "server_restart_requested")
+	if entry := rec.Wait(t, "server_restart_requested"); entry.Detail != "config_change" {
+		t.Errorf("audit detail = %q, want config_change", entry.Detail)
+	}
 
 	// The process is now committed to restarting: a second request loses.
 	w = doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "RESTART_PENDING") {
 		t.Errorf("second POST /restart = %d %s, want 409 RESTART_PENDING", w.Code, w.Body.String())
+	}
+}
+
+// The panel's dedicated Restart server button restarts with nothing saved
+// pending: the request and its audit row say it was a manual restart, not a
+// config change.
+func TestConfigOverrides_RestartWithNothingPendingIsManual(t *testing.T) {
+	f := newConfigOverridesFixture(t)
+	token := createAdminUser(t, f.database)
+	rec := audittest.Install(t, f.database)
+
+	w := doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("POST /restart = %d, want 202; body: %s", w.Code, w.Body.String())
+	}
+	if reason := <-f.restarts; reason != "manual" {
+		t.Errorf("restart reason = %q, want manual", reason)
+	}
+	if entry := rec.Wait(t, "server_restart_requested"); entry.Detail != "manual" {
+		t.Errorf("audit detail = %q, want manual", entry.Detail)
+	}
+}
+
+// A restart is refused while an update apply or backup restore holds the
+// restart-sensitive slot, and nothing is restarted.
+func TestConfigOverrides_RestartRefusedWhileUpdateOrRestoreRuns(t *testing.T) {
+	f := newConfigOverridesFixture(t)
+	token := createAdminUser(t, f.database)
+	admin.ForceRestartState(true)
+
+	w := doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "UPDATE_IN_PROGRESS") {
+		t.Errorf("POST /restart during an apply = %d %s, want 409 UPDATE_IN_PROGRESS", w.Code, w.Body.String())
+	}
+	select {
+	case reason := <-f.restarts:
+		t.Errorf("a refused POST /restart restarted the server (reason %q)", reason)
+	default:
+	}
+}
+
+// GET /config/settings tells the panel how this process comes back after a
+// restart, so the confirm dialog can say so before the owner commits.
+func TestConfigOverrides_ReportsRestartHandoff(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, container, invocation, want string
+	}{
+		{"container", "auto", "1", "", "container"},
+		{"systemd", "auto", "0", "unit-id", "supervisor"},
+		{"no supervisor", "auto", "0", "", "spawn"},
+		{"forced spawn", "spawn", "1", "", "spawn"},
+		{"supervised but none detected", "supervised", "0", "", "unsupervised"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OWNCORD_CONTAINER", tc.container)
+			t.Setenv("INVOCATION_ID", tc.invocation)
+			t.Setenv("NSSM_SERVICE_NAME", "")
+			f := newConfigOverridesFixture(t)
+			f.cfg.Server.RestartMode = tc.mode
+			token := createAdminUser(t, f.database)
+
+			w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET /config/settings = %d; body: %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				RestartHandoff string `json:"restart_handoff"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if resp.RestartHandoff != tc.want {
+				t.Errorf("restart_handoff = %q, want %q", resp.RestartHandoff, tc.want)
+			}
+		})
 	}
 }
 

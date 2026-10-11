@@ -333,6 +333,7 @@ export function renderMessage(
   const avatar = createAvatarElement(author, {
     className: "msg-avatar",
     background: roleColor,
+    attrs: { "data-user-id": String(msg.user.id) },
   });
   el.appendChild(avatar);
 
@@ -359,6 +360,11 @@ export function renderMessage(
     "span",
     {
       class: "msg-author",
+      // The list's one delegated handler opens the author's profile from this
+      // (and from the avatar), so the name is a real control for the keyboard.
+      role: "button",
+      tabindex: "0",
+      "data-user-id": String(msg.user.id),
       // The username stays as the title so the handle you would @mention is
       // one hover away even when a display name is standing in for it.
       title: author.username,

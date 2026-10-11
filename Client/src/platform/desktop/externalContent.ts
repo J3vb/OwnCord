@@ -1,8 +1,9 @@
 /**
  * Desktop external-content broker: the native surface behind the
  * `ExternalContentBroker` contract — `external_preview` answers with the typed
- * minimum, `external_image` with raw IPC bytes (never base64), which become a
- * same-origin `Blob` here so the GIF-freeze canvas path stays untainted.
+ * minimum, `external_image` with raw IPC bytes (never base64; an `ArrayBuffer`, or a
+ * number array on the postMessage fallback), which become a same-origin `Blob`
+ * here so the GIF-freeze canvas path stays untainted.
  *
  * The native side reports a refusal as its failure class and nothing more;
  * anything else — including no native host at all — reads as "unavailable",
@@ -14,6 +15,11 @@ import type {
   ExternalContentResult,
   ExternalPreview,
 } from "../contracts/externalContent";
+import { createLogger } from "@lib/logger";
+import { ipcBytes } from "./ipcBytes";
+
+const log = createLogger("externalContent");
+let warnedPostMessageIpc = false;
 
 const FAILURES: readonly string[] = [
   "blocked-destination",
@@ -59,10 +65,17 @@ export const externalContent: ExternalContentBroker = {
   async image(partition, source) {
     const args = "handle" in source ? { handle: source.handle } : { url: source.url };
     const result = await call((invoke) =>
-      invoke<ArrayBuffer>("external_image", { partition, ...args }),
+      invoke<ArrayBuffer | number[]>("external_image", { partition, ...args }),
     );
     if (!result.ok) return result;
-    const type = sniffImageType(new Uint8Array(result.value));
-    return { ok: true, value: new Blob([result.value], { type }) };
+    if (Array.isArray(result.value) && !warnedPostMessageIpc) {
+      warnedPostMessageIpc = true;
+      // i18n-exempt: log line, never displayed
+      log.warn(
+        "native host is on the postMessage IPC fallback; raw bytes arrive as a number array",
+      );
+    }
+    const bytes = ipcBytes(result.value);
+    return { ok: true, value: new Blob([bytes], { type: sniffImageType(bytes) }) };
   },
 };

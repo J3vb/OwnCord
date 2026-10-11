@@ -18,8 +18,9 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
-import { unobserveMedia } from "@lib/media-visibility";
+import { discardMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
 import {
@@ -49,10 +50,17 @@ import {
   resolveAuthor,
   roleColorVar,
 } from "@lib/formatting";
-import { isAudioMime, isVideoMime } from "./message-list/attachments";
+import { isAudioMime, isVideoAttachment } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
-import { markChannelRead, hasUnread, isChannelAway, setLiveTailInView } from "@lib/read-state";
+import {
+  markChannelRead,
+  hasUnread,
+  isChannelAway,
+  isChannelCovered,
+  noteLiveMessageSeen,
+  setLiveTailInView,
+} from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -150,7 +158,7 @@ function estimateItemHeight(item: VirtualItem): number {
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
   for (const att of item.message.attachments) {
-    if (isVideoMime(att.mime)) {
+    if (isVideoAttachment(att)) {
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;
@@ -363,6 +371,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let newDividerAnchorId: number | null = null;
   /** Set while the divider waits for a revisit's refetched tail. */
   let newDividerDeferred = false;
+  /** The loaded-and-empty welcome state is what the region currently shows. */
+  let loadedEmptyShown = false;
 
   /**
    * Resolve the NEW divider's position for this rebuild. Prefers the latched
@@ -412,7 +422,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /** Discard one rendered row: stop tracking its media and abort its listeners. */
   function releaseRow(el: HTMLElement): void {
-    for (const img of el.querySelectorAll("img")) unobserveMedia(img);
+    for (const img of el.querySelectorAll("img")) discardMedia(img);
     rowOwners.get(el)?.destroy();
     rowOwners.delete(el);
     el.remove();
@@ -534,8 +544,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
-    // The caller decides whether to re-window now; the scroll event does on the next frame.
-    root.scrollTop = Math.max(0, offsetBefore(idx) - UNREAD_BAR_CLEARANCE);
+    // The rows between here and the divider are estimates until rendered, so
+    // settle against their measured heights, as a jump does.
+    for (let pass = 0; pass < 3; pass++) {
+      if (!placeIndex(idx, -UNREAD_BAR_CLEARANCE)) break;
+    }
     updateScrollToBottomBtn();
     return true;
   }
@@ -605,6 +618,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     markChannelRead(options.channelId);
   }
 
+  /**
+   * A live message was appended while the reader had the live tail in view. The
+   * dispatcher does not count it unread, so markReadIfSeen (gated on a local
+   * unread count) never sends for it; tell the server it was seen, throttled
+   * (lib/read-state.ts). Same away and deferred-divider checks as above, plus
+   * the Settings overlay and content views, which cover a still-mounted list.
+   */
+  function markLiveArrivalSeen(): void {
+    if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (isChannelAway(options.channelId) || isChannelCovered()) return;
+    if (newDividerDeferred) return;
+    noteLiveMessageSeen(options.channelId, disposable.signal);
+  }
+
   // ---------------------------------------------------------------------------
   // Render visible window
   // ---------------------------------------------------------------------------
@@ -668,7 +696,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function releaseTrackedMedia(): void {
     if (contentContainer === null) return;
     for (const img of contentContainer.querySelectorAll("img")) {
-      unobserveMedia(img);
+      discardMedia(img);
     }
   }
 
@@ -738,6 +766,57 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // per dropped call, so the image-height oscillation it stops cannot restart.
   let renderWindowSuppressed = false;
 
+  /** Where `el`'s top edge sits in the scroller, in px below the top of the
+   *  view; the one measure of position the heights model cannot drift from. */
+  function edgeOf(el: Element): number {
+    return root === null ? 0 : el.getBoundingClientRect().top - root.getBoundingClientRect().top;
+  }
+
+  /** Scroll so `el`'s top edge is back at `edge` after rows above it were
+   *  built, released or re-measured: a row that entered above the view
+   *  measures differently from the estimate its spacer share was cut by, and
+   *  a divider's collapsed margin never matches the summed one. */
+  function holdRow(el: Element, edge: number): void {
+    if (root === null) return;
+    const delta = edgeOf(el) - edge;
+    if (Math.abs(delta) >= 1) root.scrollTop += delta;
+  }
+
+  /** Slide the rendered window to [start, end), which overlaps it: release the
+   *  rows that left, render only the rows that entered, keep the rest. */
+  function shiftWindow(start: number, end: number): void {
+    if (contentContainer === null) return;
+    // Record the rows' heights before any of them leave.
+    measureRendered();
+    const rows = [...contentContainer.children] as HTMLElement[];
+    // Rows entering above the view keep the first row that stays in place on
+    // screen; rows leaving above it are measured, so their spacer share is exact.
+    const kept = start < renderedStart ? rows[0] : undefined;
+    const keptEdge = kept === undefined ? 0 : edgeOf(kept);
+    // Only a row the reader could see is worth holding: a jump to the top
+    // shows the rows above it instead, laid out as they really are.
+    const hold = kept !== undefined && keptEdge < (root?.clientHeight ?? 0) && root!.scrollTop > 0;
+    for (let i = 0; i < rows.length; i++) {
+      const globalIdx = renderedStart + i;
+      if (globalIdx < start || globalIdx >= end) releaseRow(rows[i]!);
+    }
+    const head = document.createDocumentFragment();
+    for (let i = start; i < renderedStart; i++) {
+      head.appendChild(renderVirtualItem(virtualItems[i]!));
+    }
+    const tail = document.createDocumentFragment();
+    for (let i = renderedEnd; i < end; i++) {
+      tail.appendChild(renderVirtualItem(virtualItems[i]!));
+    }
+    contentContainer.insertBefore(head, contentContainer.firstChild);
+    contentContainer.appendChild(tail);
+    renderedStart = start;
+    renderedEnd = end;
+    measureRendered();
+    updateSpacers();
+    if (hold && kept.isConnected) holdRow(kept, keptEdge);
+  }
+
   function renderWindow(): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
       return;
@@ -760,6 +839,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       }
+      loadedEmptyShown = loadState === null;
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -771,8 +851,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const firstVisible = offsetToIndex(scrollTop);
     const lastVisible = offsetToIndex(scrollTop + clientHeight);
 
-    const start = Math.max(0, firstVisible - OVERSCAN);
+    let start = Math.max(0, firstVisible - OVERSCAN);
     const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
+    // A divider is drawn with the row under it: that row's top margin depends
+    // on the divider being there, so a window starting between them would
+    // measure the row differently from how it is laid out once both show.
+    while (start > 0 && virtualItems[start - 1]!.kind !== "message") start--;
 
     // Rebuild the DOM when explicitly requested by renderAll (which sets
     // renderedStart to -1) or when the target range has left the rendered
@@ -782,6 +866,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // prevents the height oscillation loop where images loading → height
     // change → range recalculation → DOM rebuild → images reload → repeat.
     const rangeAlreadyRendered = renderedStart >= 0 && start >= renderedStart && end <= renderedEnd;
+    // A scroll that only slides the window keeps the rows still in range and
+    // builds just the ones entering it. It is cheap and never reloads a kept
+    // row's media, so it neither consumes the rebuild breaker below nor can
+    // feed the height oscillation that breaker guards.
+    if (
+      !rangeAlreadyRendered &&
+      renderedStart >= 0 &&
+      start < renderedEnd &&
+      end > renderedStart &&
+      contentContainer.children.length === renderedEnd - renderedStart
+    ) {
+      shiftWindow(start, end);
+      return;
+    }
     if (!rangeAlreadyRendered) {
       // Rate-limit DOM rebuilds only (expensive path).
       // Scroll-driven spacer updates are cheap and don't need limiting.
@@ -1041,6 +1139,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return item?.kind === "message" && item.message.id !== 0 ? idx : -1;
   }
 
+  function renderedRowAt(idx: number): Element | undefined {
+    if (renderedStart < 0 || idx < renderedStart || idx >= renderedEnd) return undefined;
+    return contentContainer?.children[idx - renderedStart];
+  }
+
   function renderAll(): void {
     if (root === null) return;
     if (renderAllRunning) return; // prevent re-entrancy
@@ -1081,11 +1184,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // survives the prepend, since the id is stable while the index shifts.
       let anchorMessageId: number | null = null;
       let anchorOffsetInItem = 0;
+      let anchorEdge: number | null = null;
       if (!wasAtBottom && root !== null) {
         const anchorIdx = topMessageIndex();
         if (anchorIdx !== -1) {
           anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
           anchorOffsetInItem = root.scrollTop - offsetBefore(anchorIdx);
+          const el = renderedRowAt(anchorIdx);
+          if (el !== undefined) anchorEdge = edgeOf(el);
         }
       }
 
@@ -1134,6 +1240,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (wasAtBottom) {
         scrollToBottom();
         updateScrollToBottomBtn();
+      } else if (anchorMessageId !== null) {
+        // The anchor above was applied against estimates for the rows the
+        // rebuild put above the reader (a prepended page); renderWindow has
+        // now measured the ones it built, so re-place the row and re-window
+        // until it stays put, as scrollToMessage settles.
+        const idx = virtualItems.findIndex(
+          (item) => item.kind === "message" && item.message.id === anchorMessageId,
+        );
+        if (idx !== -1) {
+          for (let pass = 0; pass < 3; pass++) {
+            if (!placeIndex(idx, anchorOffsetInItem)) break;
+          }
+          // Then by its real edge: the rebuilt row is on screen now.
+          const el = renderedRowAt(idx);
+          if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
+        }
       }
       log.debug("renderAll END");
     } finally {
@@ -1230,6 +1352,40 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   // ---------------------------------------------------------------------------
+  // Profile popup (author name, avatar, @mention chip)
+  // ---------------------------------------------------------------------------
+
+  /** Closes the popup this list opened; null until one has been. */
+  let closeProfilePopup: (() => void) | null = null;
+
+  /** The author name, avatar or user @mention chip `target` is inside, if any.
+   *  @everyone/@here chips carry no `data-user-id`, so they never match. */
+  function profileControlOf(target: EventTarget | null): HTMLElement | null {
+    if (!(target instanceof Element)) return null;
+    const control = target.closest<HTMLElement>(
+      ".msg-author[data-user-id], .msg-avatar[data-user-id], .mention[data-user-id]",
+    );
+    if (control === null || contentContainer === null || !contentContainer.contains(control)) {
+      return null;
+    }
+    return control;
+  }
+
+  function openProfileFrom(target: EventTarget | null, anchorX: number, anchorY: number): void {
+    const control = profileControlOf(target);
+    if (control === null) return;
+    const userId = Number(control.dataset["userId"]);
+    if (!Number.isInteger(userId) || userId <= 0) return;
+    closeProfilePopup = openUserProfilePopup({
+      userId,
+      anchorX,
+      anchorY,
+      signal: disposable.signal,
+      fallbackFocus: () => (control.isConnected ? control : null),
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Mount / Destroy
   // ---------------------------------------------------------------------------
 
@@ -1300,6 +1456,39 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       passive: true,
     });
 
+    // One delegated pair of listeners opens a user's profile from an author
+    // name, an avatar or an @mention chip, so no row carries its own handler
+    // (rows are rebuilt by virtual scrolling). Owned by disposable.signal.
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        const control = profileControlOf(e.target);
+        if (control === null) return;
+        // A mention can be the label of a masked link ([@name](https://...)),
+        // which would otherwise also navigate: the anchor's default action, and
+        // main.ts's bubbling document listener that hands target=_blank links
+        // to the system browser. Handle the click here and stop it, but only
+        // inside an anchor so other document-level dismissals still see it.
+        e.preventDefault();
+        if (control.closest("a") !== null) e.stopPropagation();
+        openProfileFrom(control, e.clientX, e.clientY);
+      },
+      { signal: disposable.signal },
+    );
+    contentContainer.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const control = profileControlOf(e.target);
+        if (control === null) return;
+        e.preventDefault();
+        const rect = control.getBoundingClientRect();
+        openProfileFrom(control, rect.left, rect.bottom);
+      },
+      { signal: disposable.signal },
+    );
+    disposable.signal.addEventListener("abort", () => closeProfilePopup?.(), { once: true });
+
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
     window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
@@ -1355,7 +1544,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAll();
     updateJumpToPresentPill();
     const openedAtDivider = openAtDividerIfReady();
-    if (openedAtDivider) renderWindow();
     updateUnreadBar();
     // A deferred divider still moves the view later, so only the bottom
     // scrolls are skipped when the open already landed on it.
@@ -1383,12 +1571,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         () => {
           // Optimistic rows (id 0) sit at the tail; live rows land before them.
           const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
+          // The loaded-and-empty welcome state was on screen, so a first row
+          // is a live arrival and not the first page landing.
+          const firstLive = prevLast === 0 && loadedEmptyShown;
           const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();
           }
-          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
-            // Only an append counts: a window swap drops the previous last row.
+          // Only an append counts: a window swap drops the previous last row.
+          const appended =
+            firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
+          if (!wasBottom && appended) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
@@ -1396,6 +1589,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           }
           updateScrollToBottomBtn();
           settleUnreadNav();
+          if (wasBottom && appended && allMessages.some((m) => m.id > prevLast)) {
+            markLiveArrivalSeen();
+          }
         },
       ),
     );
@@ -1538,7 +1734,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const avatar = el.querySelector<HTMLElement>(".msg-avatar");
       if (avatar !== null) {
         avatar.replaceWith(
-          createAvatarElement(author, { className: "msg-avatar", background: roleColor }),
+          createAvatarElement(author, {
+            className: "msg-avatar",
+            background: roleColor,
+            attrs: { "data-user-id": String(msg.user.id) },
+          }),
         );
       }
     }
@@ -1642,14 +1842,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     olderLoadingRow = null;
   }
 
+  /** Scroll so row `idx` sits `offset` px below the top of the view and
+   *  render there; false when it already does. Each pass can build and
+   *  measure rows above the target, moving it, so callers settle in a few. */
+  function placeIndex(idx: number, offset: number): boolean {
+    if (root === null) return false;
+    const target = Math.max(0, offsetBefore(idx) + offset);
+    if (Math.abs(target - root.scrollTop) < 1) return false;
+    root.scrollTop = target;
+    renderWindow();
+    return true;
+  }
+
   /** Scroll so row `idx` is centred; false when it was already centred. */
   function centreOnIndex(idx: number): boolean {
     if (root === null) return false;
-    const centred = Math.max(0, offsetBefore(idx) - (root.clientHeight - getItemHeight(idx)) / 2);
-    if (centred === root.scrollTop) return false;
-    root.scrollTop = centred;
-    renderWindow();
-    return true;
+    return placeIndex(idx, -(root.clientHeight - getItemHeight(idx)) / 2);
   }
 
   function scrollToMessage(messageId: number): boolean {

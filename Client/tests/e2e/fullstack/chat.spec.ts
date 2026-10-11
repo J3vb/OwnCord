@@ -452,3 +452,132 @@ test("revisiting a long channel with unread messages trims, appends and marks NE
   }).toPass({ timeout: 30_000 });
   await expect(alice.getByText(text(39), { exact: true })).toHaveCount(0);
 });
+
+test("loading older history keeps the row the reader was looking at in place", async ({
+  alice,
+  aliceTransport,
+  server,
+}) => {
+  await server.api("/admin/api/channels", { name: "history", type: "text" }, server.owner!.token);
+  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
+  const history = channels.find((c: { name: string }) => c.name === "history").id;
+  await server.api("/api/v1/auth/register", {
+    username: "carol",
+    password: TEST_PASSWORD,
+    invite_code: server.owner!.invite_code,
+  });
+  const bob = await rawSocket(server, "bob");
+  const carol = await rawSocket(server, "carol");
+  const id = crypto.randomUUID().slice(0, 8);
+  const text = (n: number) => `older-${id}-${n}.`;
+  // Alice is elsewhere, so the first visit loads the newest page (81..130) and
+  // the rest waits above it. Two authors alternate for full-height rows.
+  for (let n = 1; n <= 130; n++) await (n % 2 === 0 ? carol : bob).post(history, [text(n)]);
+  bob.close();
+  carol.close();
+  await channelItem(alice, "history").click();
+  await expect(alice.getByText(text(130), { exact: true })).toBeVisible();
+
+  // Scrolling to the top fetches the older page; hold it at the transport so
+  // the oldest loaded row can be measured where the reader sees it first.
+  const release = aliceTransport.holdHttpRequests(
+    ({ path, method }) => method === "GET" && path.endsWith("/messages"),
+  );
+  const scroller = alice.locator(".messages-container");
+  await scroller.evaluate((el) => (el.scrollTop = 0));
+  const oldest = alice.locator(".message", {
+    has: alice.locator(".msg-text", { hasText: text(81) }),
+  });
+  await expect(oldest).toBeInViewport();
+  const edge = (el: Element) =>
+    el.getBoundingClientRect().top - el.closest(".messages-container")!.getBoundingClientRect().top;
+  const before = {
+    top: await oldest.evaluate(edge),
+    height: await scroller.evaluate((el) => el.scrollHeight),
+  };
+  release();
+  // The older page lands above the reader: the list grows and the scroll
+  // offset moves down by the page's height.
+  await expect
+    .poll(() => scroller.evaluate((el) => el.scrollHeight))
+    .toBeGreaterThan(before.height);
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+  await alice.waitForTimeout(500);
+  // The row the reader was looking at has not moved, not even by the gap
+  // between the new rows' estimated and measured heights.
+  expect(Math.abs((await oldest.evaluate(edge)) - before.top)).toBeLessThanOrEqual(1);
+  await expect(oldest).toBeInViewport();
+});
+
+for (const direction of ["up", "down"] as const) {
+  test(`stepping ${direction} through a long channel moves the text by exactly the scrolled distance`, async ({
+    alice,
+    server,
+  }) => {
+    await server.api("/admin/api/channels", { name: "steps", type: "text" }, server.owner!.token);
+    const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
+    const steps = channels.find((c: { name: string }) => c.name === "steps").id;
+    const bob = await rawSocket(server, "bob");
+    const id = crypto.randomUUID().slice(0, 8);
+    const text = (n: number) => `step-${id}-${n}.`;
+    // One author, so the rows group and their estimated height is furthest
+    // from the drawn one; everything above the first window is undrawn.
+    for (let n = 1; n <= 100; n++) await bob.post(steps, [text(n)]);
+    bob.close();
+    await channelItem(alice, "steps").click();
+    await expect(alice.getByText(text(100), { exact: true })).toBeVisible();
+    await alice.waitForTimeout(500);
+
+    const scroller = alice.locator(".messages-container");
+    if (direction === "down") {
+      // Start at the oldest row with everything drawn once: stepping down
+      // releases rows above the view whose place the spacer must take exactly.
+      // The first scroll to the top loads the older page above the reader;
+      // the next one reaches the real top.
+      await expect(async () => {
+        await scroller.evaluate((el) => (el.scrollTop = 0));
+        await expect(alice.getByText(text(1), { exact: true })).toBeVisible({ timeout: 1_500 });
+      }).toPass({ timeout: 20_000 });
+      await alice.waitForTimeout(500);
+    }
+    // Each step: pick a row in view, scroll 120px, let the window shift and
+    // settle, and check the row moved on screen by those 120px and nothing
+    // more. (The scroll offset may differ: it absorbs the difference between
+    // the estimated and drawn heights of the rows that entered above.)
+    const deviations: number[] = [];
+    for (let step = 0; step < 25; step++) {
+      const result = await scroller.evaluate(
+        async (el, sign) => {
+          const rect = el.getBoundingClientRect();
+          const row = [...el.querySelectorAll<HTMLElement>(".message")].find(
+            (m) => m.getBoundingClientRect().top >= rect.top + 40,
+          );
+          const room = sign < 0 ? el.scrollTop : el.scrollHeight - el.scrollTop - el.clientHeight;
+          // The last partial step would reach the very top, where the rows
+          // above the reader are laid out as they are rather than held.
+          if (row === undefined || room < 120) return null;
+          const before = row.getBoundingClientRect().top - rect.top;
+          const asked = 120;
+          el.scrollTop += sign * asked;
+          // Settled: the window has shifted and the row has not moved for
+          // three frames.
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          for (let still = 0, seen = row.getBoundingClientRect().top; still < 3;) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            const now = row.getBoundingClientRect().top;
+            still = now === seen ? still + 1 : 0;
+            seen = now;
+          }
+          const after = row.getBoundingClientRect().top - rect.top;
+          return after - before + sign * asked;
+        },
+        direction === "up" ? -1 : 1,
+      );
+      if (result === null) break;
+      deviations.push(Math.round(Math.abs(result)));
+    }
+    expect(deviations.length).toBeGreaterThan(10);
+    // Grouped rows have fractional heights that the drawn window rounds.
+    expect(Math.max(...deviations)).toBeLessThanOrEqual(2);
+  });
+}

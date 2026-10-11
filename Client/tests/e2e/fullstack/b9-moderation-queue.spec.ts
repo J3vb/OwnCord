@@ -224,7 +224,9 @@ test.describe("Moderation Center (real server)", () => {
         (s) =>
           s.includes("/moderation") &&
           !/^GET \/api\/v1\/moderation\/queue(\/[0-9a-f]+)?$/.test(s) &&
-          s !== "GET /api/v1/users/me/moderation",
+          s !== "GET /api/v1/users/me/moderation" &&
+          // The member list's own read; it is not a moderation-queue route.
+          s !== "GET /api/v1/moderation/members",
       ),
     ).toEqual([]);
 

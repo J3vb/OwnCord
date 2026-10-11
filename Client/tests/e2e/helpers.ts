@@ -875,7 +875,7 @@ export function buildTauriMockScript(opts: {
         // Explicit desktop-only no-ops. Unknown commands are never success.
         if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
-             "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message",
+             "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message", "clear_call_notification",
              "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;

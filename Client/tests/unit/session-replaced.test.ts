@@ -2,10 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // B7-14: a second device signing in displaces this one. Before the server
 // named the reason, the close looked like a network drop, the client
-// reconnected at its 1 s floor (auth_ok resets the backoff) and kicked the
-// other device — two devices traded the socket forever. The real ws client
-// and the real dispatcher are wired together here, so the test covers the
-// whole path from the frame to "no reconnect".
+// reconnected on its first backoff step (auth_ok resets the backoff) and
+// kicked the other device — two devices traded the socket forever. The real
+// ws client and the real dispatcher are wired together here, so the test
+// covers the whole path from the frame to "no reconnect".
+//
+// The reconnect delay uses equal jitter: attempt n waits somewhere in
+// [ceiling / 2, ceiling) with ceiling = 1000 * 2^n ms, so the first retry
+// lands in [500, 1000) and the second in [1000, 2000). The clients here
+// inject `random` instead of drawing from Math.random, which keeps the
+// timing exact: `() => 1` is the upper edge (1000 ms, then 2000 ms) and
+// `() => 0` the lower edge (500 ms, then 1000 ms).
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./helpers/ws-mocks")).mockInvoke,
@@ -44,15 +51,16 @@ describe("SESSION_REPLACED stops the two-device reconnect fight", () => {
   let client: ReturnType<typeof createWsClient>;
   let cleanups: Array<() => void>;
 
-  beforeEach(async () => {
-    vi.useFakeTimers();
+  // `random` is fixed when the client is created, so a test that needs a
+  // different jitter point stops the running client and calls this again.
+  async function startClient(random: () => number): Promise<void> {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue(undefined);
     mockListen.mockClear();
     eventHandlers.clear();
     setSessionReplaced(false);
     setConnectionStatus("disconnected");
-    client = createWsClient();
+    client = createWsClient({ random });
     cleanups = [wireDispatcher(client), wireConnectionStatus(client)];
     authStore.setState((prev) => ({ ...prev, token: "t", isAuthenticated: true }));
     client.connect({ host: "localhost:8443", token: "t" });
@@ -60,11 +68,21 @@ describe("SESSION_REPLACED stops the two-device reconnect fight", () => {
     emitTauriEvent("ws-state", "open");
     emitTauriEvent("ws-message", authOk());
     expect(client.getState()).toBe("connected");
+  }
+
+  function stopClient(): void {
+    for (const c of cleanups) c();
+    client.disconnect();
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    // Pin the upper jitter endpoint: the delays are exactly 1000 ms, then 2000 ms.
+    await startClient(() => 1);
   });
 
   afterEach(() => {
-    for (const c of cleanups) c();
-    client.disconnect();
+    stopClient();
     vi.useRealTimers();
   });
 
@@ -120,11 +138,39 @@ describe("SESSION_REPLACED stops the two-device reconnect fight", () => {
     emitTauriEvent("ws-state", "open");
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(1000);
+    // The second delay is in [1000, 2000) ms. Nothing may fire just under its
+    // lower edge, and with the upper endpoint pinned the retry lands at 2000.
+    await vi.advanceTimersByTimeAsync(999);
+    expect(wsConnects()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
     expect(wsConnects()).toBe(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wsConnects()).toBe(1);
     expect(uiStore.getState().sessionReplaced).toBe(false);
+  });
+
+  it("control: at the lower jitter edge the second retry fires at exactly 1000 ms", async () => {
+    // The flake this pins: with the second delay at the bottom of its window,
+    // the retry fires inside a 1000 ms advance, not after it.
+    stopClient();
+    await startClient(() => 0);
+
+    emitTauriEvent("ws-state", "closed");
+    expect(client.getState()).toBe("reconnecting");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(wsConnects()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wsConnects()).toBe(1);
+
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(wsConnects()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wsConnects()).toBe(1);
   });
 
   it("a later connection clears the signed-in-elsewhere state", () => {

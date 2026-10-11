@@ -41,15 +41,26 @@ export function isLegacyAdminRole(roleName: string): boolean {
  * server that sent none) the legacy owner/admin name check stands in — a mask
  * of 0 would otherwise hide moderation from every actual admin.
  *
- * This is the single derivation every moderation affordance uses, so the
- * member-list gates and the voice moderation menu cannot drift apart. Drives
- * affordances only — the server is still the authority on every action, and
- * enforces the rank rule the client cannot evaluate.
+ * This is the single derivation every moderation affordance uses for the
+ * permission bits, so the member-list gates and the voice moderation menu
+ * cannot drift apart. The member list also mirrors the rank rule through
+ * `positionForRole`; the voice moderation menu does not. Drives affordances
+ * only — the server is still the authority on every action and on rank.
  */
 export function roleHasPermission(roleName: string, perm: Permission): boolean {
   const perms = permissionsForRole(roleName);
   if (perms === null) return isLegacyAdminRole(roleName);
   return hasPermission(perms, perm);
+}
+
+/**
+ * Hierarchy rank of the role named `roleName` (higher outranks lower), or
+ * undefined when the role is unknown or the server sent no positions. Callers
+ * treat undefined as "cannot tell" and leave the decision to the server.
+ */
+export function positionForRole(roleName: string): number | undefined {
+  const name = roleName.toLowerCase();
+  return channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name)?.position;
 }
 
 /**
@@ -100,6 +111,16 @@ export function canManageChannels(): boolean {
 export function canViewAuditLog(): boolean {
   const roleName = authStore.getState().user?.role ?? "";
   return roleHasPermission(roleName, Permission.VIEW_AUDIT_LOG);
+}
+
+/**
+ * Whether the signed-in user's role holds MANAGE_INVITES (ADMINISTRATOR implies
+ * it). The server gates every `/api/v1/invites` route on this bit, so the
+ * header Invite button is only offered to roles that can use it.
+ */
+export function canManageInvites(): boolean {
+  const roleName = authStore.getState().user?.role ?? "";
+  return roleHasPermission(roleName, Permission.MANAGE_INVITES);
 }
 
 /**

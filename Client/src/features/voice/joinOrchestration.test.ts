@@ -16,6 +16,7 @@ vi.mock("../../lib/logger", () => ({
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
+import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 function fakeRoom(state = "connected"): Room {
   return {
@@ -39,7 +40,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     nextJoinGeneration: vi.fn(() => ++generation),
     getRoom: () => (state.type === "connected" ? state.room : null),
     getE2EE: () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) }),
-    getAudioPipeline: () => ({ setRoom: vi.fn() }),
+    getAudioPipeline: () => ({ setRoom: vi.fn(), setupAudioPipeline: vi.fn() }),
     getAudioElements: () => ({ setRoom: vi.fn() }),
     getDeviceManager: () => ({
       setRoom: vi.fn(),
@@ -57,6 +58,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     leaveVoice: vi.fn(() => {
       state = { type: "idle" };
     }),
+    sweepPublications: vi.fn(),
     handleVoiceTokenRefresh: vi.fn(),
     connectAndSetup: vi.fn(async () => true as const),
   };
@@ -66,6 +68,7 @@ function setup(initial: SessionState = { type: "idle" }) {
 
 beforeEach(() => {
   store.currentChannelId = null;
+  noteJoinSucceeded();
 });
 
 describe("isStateConnected", () => {
@@ -119,7 +122,22 @@ describe("connectAndSetup", () => {
     expect(host.nextJoinGeneration).toHaveBeenCalledOnce();
     expect(room.disconnect).toHaveBeenCalled();
     expect(host.leaveVoice).not.toHaveBeenCalled();
+    expect(host.sweepPublications).not.toHaveBeenCalled();
     expect(getState()).toEqual({ type: "connecting", pendingJoin: null, joinGeneration: 99 });
+  });
+
+  it("keeps the viewer's watches when it leaves the old room to switch channels", async () => {
+    const room = fakeRoom();
+    const { host, join } = setup({
+      type: "connected",
+      room,
+      channelId: 1,
+      latestToken: "t",
+      lastUrl: "u",
+      lastDirectUrl: undefined,
+    });
+    await join.connectAndSetup("t", "u", 2);
+    expect(host.leaveVoice).toHaveBeenCalledWith(false, true);
   });
 
   it("SRE-M2: records a URL-resolution failure at stage resolve and its url kind", async () => {
@@ -135,7 +153,17 @@ describe("connectAndSetup", () => {
       succeeded: false,
       stage: "resolve",
     });
-    expect(host.leaveVoice).toHaveBeenCalledWith(true);
+    expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
+  });
+
+  it("offers the adopted room's published streams once the join is connected", async () => {
+    const { host, join } = setup();
+    const room = fakeRoom();
+    host.createRoom.mockResolvedValueOnce(room);
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
+
+    expect(host.sweepPublications).toHaveBeenCalledExactlyOnceWith(room);
   });
 
   it("SRE-M2: records a failure after the room connected at stage activate", async () => {
@@ -149,6 +177,70 @@ describe("connectAndSetup", () => {
       succeeded: false,
       stage: "activate",
     });
+  });
+
+  it("backs off the next join after the key exchange gives up, and clears it on a success", async () => {
+    store.currentChannelId = 7;
+    const { host, join } = setup();
+    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => false) });
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
+    expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+
+    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) });
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("does not count a second failure when the give-up finds a switch already queued", async () => {
+    const { host, join } = setup();
+    host.getE2EE = () => ({
+      clearState: vi.fn(),
+      setupKeyExchange: vi.fn(async () => {
+        host.setState({
+          type: "connecting",
+          joinGeneration: 1,
+          pendingJoin: { token: "t2", url: "u2", channelId: 4 },
+        });
+        return false;
+      }),
+    });
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("does not count a second failure when a connect failure finds a switch already queued", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockImplementationOnce(async () => {
+      host.setState({
+        type: "connecting",
+        joinGeneration: 1,
+        pendingJoin: { token: "t2", url: "u2", channelId: 4 },
+      });
+      throw new Error("proxy refused");
+    });
+
+    await expect(join.connectAndSetup("t", "/livekit", 8)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("keeps a switch backoff when the join the user switched away from finishes", async () => {
+    store.currentChannelId = 9;
+    noteJoinFailed(Date.now(), true);
+    const { join } = setup();
+
+    await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+  });
+
+  it("backs off the next join after a connect failure", async () => {
+    const { host, join } = setup();
+    host.resolveLiveKitUrl.mockRejectedValueOnce(new Error("proxy refused"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 8)).resolves.toBe(false);
+    expect(joinRetryInMs()).toBeGreaterThan(0);
   });
 
   it("leaves no devicechange listener behind for a Room superseded before connect", async () => {

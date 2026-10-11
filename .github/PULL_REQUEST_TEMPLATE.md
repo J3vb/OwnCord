@@ -17,6 +17,17 @@
 
 -
 
+## Pre-flight
+
+<!-- The three parts CLAUDE.md's "AI Quality Guardrails" require before code is
+     written. An unattended run (bughunt-fix, a routine, a CI-triggered session)
+     records them here so a reviewer can see what was assumed. -->
+
+- Affected files:
+- State mutations:
+- Edge case 1, handled and tested:
+- Edge case 2, handled and tested:
+
 ## Test Plan
 
 - [ ] `npm run check` passes from the repository root — the one entry point that

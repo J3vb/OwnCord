@@ -399,4 +399,4 @@ This section carries the security-relevant rows only.
 - [ ] Keep the server updated (admin panel shows available updates)
 - [ ] Firewall: only expose port 8443 (HTTPS); for voice/video also 7881/TCP and the media UDP port(s) — `50000-60000` by default, or a single `voice.udp_port` (LiveKit TCP fallback + media — see [deployment.md](deployment.md)); port 80 only when using ACME. Do not expose 7880 (LiveKit's own API); own clients tunnel signalling through `/livekit` on 8443.
 - [ ] Enable server-wide 2FA requirement once all users have enrolled
-- [ ] Set `admin_allowed_cidrs` to restrict admin panel access to trusted networks
+- [ ] Set `admin_allowed_cidrs` to restrict admin panel access to trusted networks (member moderation at `/api/v1/moderation/members` is not covered by it: it needs a session or token issued by this server and the permission and rank checks)

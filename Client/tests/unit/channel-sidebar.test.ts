@@ -29,6 +29,15 @@ vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
   };
 });
 
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
+});
+
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
   addChannel,
@@ -47,6 +56,7 @@ import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
 
 function resetStores(): void {
@@ -502,6 +512,25 @@ describe("ChannelSidebar", () => {
     expect(onVoiceJoin).not.toHaveBeenCalled();
   });
 
+  it("a repeat click on the voice channel being joined does not leave it", () => {
+    // Every click toggled, so clicking the row again while a join was still
+    // joining/securing (a double-click, or retrying a slow join) sent
+    // voice_leave before the SFU was ever reached: rapid clicks cycled
+    // voice_join/voice_leave on the server several times a second.
+    setChannels(testChannels);
+    sidebar.mount(container);
+    for (const voiceStatus of ["joining", "securing"] as const) {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus }));
+      voiceStore.flush();
+      (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+      expect(onVoiceLeave).not.toHaveBeenCalled();
+    }
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    voiceStore.flush();
+    (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+    expect(onVoiceLeave).toHaveBeenCalledOnce();
+  });
+
   // ── Voice join/leave freeze while the WS socket is not connected (§3) ──
 
   it("disables voice channel join with a 'Reconnecting…' reason while reconnecting", () => {
@@ -765,6 +794,7 @@ describe("ChannelSidebar", () => {
       camera: false,
       screenshare: true,
     });
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
     const voiceUserItem = container.querySelector(".voice-user-item") as HTMLElement;
@@ -803,6 +833,35 @@ describe("ChannelSidebar", () => {
     expect(onVoiceJoin).toHaveBeenCalledWith(3);
   });
 
+  it("opens no stream when the join backoff refuses the stream row's join", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+    noteJoinFailed();
+
+    try {
+      (container.querySelector(".voice-user-item") as HTMLElement).click();
+      // The join is still offered so its refusal toast shows, but no room was joined.
+      expect(onVoiceJoin).toHaveBeenCalledWith(3);
+      expect(onWatchStream).not.toHaveBeenCalled();
+    } finally {
+      noteJoinSucceeded();
+    }
+  });
+
   // ── Empty state ──
 
   it("shows empty state when no channels exist", () => {
@@ -825,9 +884,7 @@ describe("ChannelSidebar", () => {
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
     sidebar.mount(container);
 
-    const btn = container.querySelector(
-      "[data-testid='create-channel-empty']",
-    ) as HTMLButtonElement | null;
+    const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
     expect(onCreateChannel).toHaveBeenCalledWith("");
@@ -1000,6 +1057,74 @@ describe("ChannelSidebar", () => {
     expect(avatar!.textContent).toBe("Z");
     // Avatar should have a background color set
     expect((avatar as HTMLElement).style.background).not.toBe("");
+  });
+
+  it("renders the member's profile picture in the voice row, keeping the speaking class", async () => {
+    setChannels(testChannels);
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          72,
+          {
+            id: 72,
+            username: "Pic",
+            avatar: "/api/v1/files/pic",
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 72,
+      username: "Pic",
+      muted: false,
+      deafened: false,
+      speaking: true,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const row = container.querySelector(".voice-user-item")!;
+    expect(row.classList.contains("speaking")).toBe(true);
+    const avatar = row.querySelector<HTMLElement>(".vu-avatar")!;
+    await vi.waitFor(() => {
+      expect(avatar.querySelector<HTMLImageElement>(".avatar-img")?.getAttribute("src")).toBe(
+        "data:image/png;base64,AAAA",
+      );
+    });
+    expect(avatar.querySelector(".avatar-initial")).toBeNull();
+  });
+
+  it("keeps the initial for a voice user whose member has no avatar", () => {
+    setChannels(testChannels);
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          73,
+          { id: 73, username: "Nopic", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 73,
+      username: "Nopic",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const avatar = container.querySelector(".vu-avatar")!;
+    expect(avatar.querySelector(".avatar-img")).toBeNull();
+    expect(avatar.textContent).toBe("N");
   });
 
   it("shows '?' avatar for user with empty username", () => {
@@ -2444,7 +2569,7 @@ describe("ChannelSidebar voice identity badge", () => {
       expect(btn).not.toBeNull();
       return btn;
     });
-    expectConsole("warn", /\[ChannelSidebar\] E2EE: could not compute changed-key fingerprint/);
+    expectConsole("warn", /\[peer-verification\] E2EE: could not compute changed-key fingerprint/);
     trustBtn.click();
 
     expect(mockRePinPeerIdentity).not.toHaveBeenCalled();

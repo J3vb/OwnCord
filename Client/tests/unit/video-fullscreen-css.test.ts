@@ -29,3 +29,26 @@ describe("video full-screen CSS", () => {
     expect(zIndex(".context-menu.video-tile-menu")).toBeGreaterThan(zIndex(".video-cell--theatre"));
   });
 });
+
+// An inline video is capped like an image (max 300px tall, never wider than the
+// column); a 16:9 placeholder ratio limits the jump until metadata sets the real one.
+describe("inline video attachment CSS", () => {
+  it("has no fixed-size box", () => {
+    expect(cascadedDeclaration(".msg-video", "width")).toBeUndefined();
+    expect(cascadedDeclaration(".msg-video", "aspect-ratio")).toBeUndefined();
+  });
+
+  it("caps the video at the column width and 300px tall", () => {
+    expect(cascadedDeclaration(".msg-video video", "max-height")?.value.value).toMatchObject({
+      value: { type: "dimension", value: { unit: "px", value: 300 } },
+    });
+    expect(cascadedDeclaration(".msg-video video", "max-width")).toBeDefined();
+  });
+
+  it("starts with a 16:9 placeholder ratio", () => {
+    expect(cascadedDeclaration(".msg-video video", "aspect-ratio")?.value.value).toEqual({
+      auto: false,
+      ratio: [16, 9],
+    });
+  });
+});

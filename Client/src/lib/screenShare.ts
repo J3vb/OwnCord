@@ -138,14 +138,15 @@ export function getScreenShareQuality(): StreamQuality {
   return loadQuality("screenShareQuality", "medium");
 }
 
-/** Whether a screen share at `quality` is published with
+/** Whether a screen share at `quality` and `fps` is published with
  *  SCREENSHARE_SIMULCAST_LAYERS. Without a lower layer the SFU can only send
  *  a viewer whose link cannot carry the share the full stream, which they
  *  cannot decode at all (a frozen frame), while their keyframe requests raise
  *  the bitrate for every other viewer. Low is already a small stream, and
- *  Source is meant to arrive untouched. */
-export function isScreenShareSimulcast(quality: StreamQuality): boolean {
-  return quality === "medium" || quality === "high";
+ *  Source is meant to arrive untouched. High at 120 fps goes out as one layer
+ *  too: encoding both layers in turn held 1080p120 to 40-50 fps. */
+export function isScreenShareSimulcast(quality: StreamQuality, fps: number): boolean {
+  return quality === "medium" || (quality === "high" && fps !== 120);
 }
 
 /** The screen share's one lower layer (the SDK adds the full-resolution one
@@ -585,7 +586,7 @@ export async function enableScreenshare(
     }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
-      const simulcast = isVideo && isScreenShareSimulcast(quality);
+      const simulcast = isVideo && isScreenShareSimulcast(quality, fps);
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
@@ -712,4 +713,17 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
   if (screenPub?.track?.mediaStreamTrack)
     return new MediaStream([screenPub.track.mediaStreamTrack]);
   return null;
+}
+
+/** The frame rate your screen share's top layer is sending, or null before a
+ *  layer reports one or where the track has no WebRTC sender (the Linux
+ *  native track publishes in the backend). */
+export async function getLocalScreenshareFps(room: Room | null): Promise<number | null> {
+  const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
+    Partial<Pick<LocalVideoTrack, "getSenderStats">> | undefined;
+  if (typeof track?.getSenderStats !== "function") return null;
+  const rates = (await track.getSenderStats())
+    .map((s) => s.framesPerSecond as number | undefined)
+    .filter((fps): fps is number => fps !== undefined);
+  return rates.length > 0 ? Math.max(...rates) : null;
 }

@@ -33,6 +33,19 @@ test.describe("Native App Smoke Tests", () => {
     await expect(passwordInput).toBeVisible();
   });
 
+  test("microphone and camera are granted, so device names are listed", async ({ nativePage }) => {
+    // Auto-accepted capture records no permission; without one WebView2 hides
+    // every device id and name from enumerateDevices (windows_media.rs).
+    const states = await nativePage.evaluate(async () =>
+      Promise.all(
+        (["microphone", "camera"] as const).map(
+          async (name) => (await navigator.permissions.query({ name })).state,
+        ),
+      ),
+    );
+    expect(states).toEqual(["granted", "granted"]);
+  });
+
   test("real __TAURI_INTERNALS__ is present (not mocked)", async ({ nativePage }) => {
     // In the real app, __TAURI_INTERNALS__ is injected by Tauri, not by our mock script.
     // Verify it exists and has the expected structure.
@@ -169,7 +182,7 @@ test.describe("Native App Credential Store", () => {
         });
         // Should return null for nonexistent host, not throw
         return result === null || result === undefined;
-      } catch (e: any) {
+      } catch {
         // If the command doesn't exist, it throws
         return false;
       }

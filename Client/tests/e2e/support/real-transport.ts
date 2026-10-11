@@ -22,6 +22,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
   let receiveFilter: ((message: TestEnvelope) => boolean) | undefined;
   let sendObserver: ((message: TestEnvelope) => void) | undefined;
   let httpFailure: ((request: { path: string; method: string }) => boolean) | undefined;
+  let httpHold:
+    | { filter: (request: { path: string; method: string }) => boolean; gate: Promise<void> }
+    | undefined;
   const pendingEvents = new Set<Promise<void>>();
   // Main-frame navigations replace the document, and with it the frontend that
   // owned the current socket. The native proxy's frames for that document then
@@ -78,6 +81,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
           if (!online) throw new Error("Test transport offline");
           if (httpFailure?.({ path: new URL(request.url).pathname, method: request.method }))
             throw new Error("Test transport HTTP failure");
+          if (httpHold?.filter({ path: new URL(request.url).pathname, method: request.method }))
+            await httpHold.gate;
           const response = await fetch(request.url, {
             method: request.method,
             headers: request.headers,
@@ -279,6 +284,15 @@ export async function installRealTransport(page: Page, server: TestServer) {
     /** Fail selected HTTP sends at the native transport boundary. */
     failHttpRequests(filter?: (request: { path: string; method: string }) => boolean) {
       httpFailure = filter;
+    },
+    /** Hold selected HTTP sends at the transport boundary until the returned release runs. */
+    holdHttpRequests(filter: (request: { path: string; method: string }) => boolean) {
+      let release!: () => void;
+      httpHold = { filter, gate: new Promise<void>((resolve) => (release = resolve)) };
+      return () => {
+        httpHold = undefined;
+        release();
+      };
     },
     /** Drop selected actual frames after server processing to model lost delivery. */
     filterServerMessages(filter?: (message: TestEnvelope) => boolean) {

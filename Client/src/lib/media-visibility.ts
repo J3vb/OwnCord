@@ -32,6 +32,7 @@ interface MediaEntry {
   autoTimer: ReturnType<typeof setTimeout> | null;
   readonly button: HTMLButtonElement;
   readonly wrapper: HTMLElement;
+  readonly ref: WeakRef<HTMLImageElement>;
 }
 
 const tracked = new WeakMap<HTMLImageElement, MediaEntry>();
@@ -213,6 +214,7 @@ export function observeMedia(
   wrapper.style.position = "relative";
   wrapper.appendChild(button);
 
+  const ref = new WeakRef(img);
   const entry: MediaEntry = {
     originalSrc,
     frozenSrc: null,
@@ -221,9 +223,10 @@ export function observeMedia(
     autoTimer: null,
     button,
     wrapper,
+    ref,
   };
   tracked.set(img, entry);
-  allTracked.add(new WeakRef(img));
+  allTracked.add(ref);
 
   // Wire button click
   button.addEventListener("click", (e) => {
@@ -266,13 +269,24 @@ export function unobserveMedia(img: HTMLImageElement): void {
   }
   tracked.delete(img);
   observer?.unobserve(img);
-  // Remove from allTracked to prevent unbounded WeakRef accumulation.
-  for (const ref of allTracked) {
-    const target = ref.deref();
-    if (target === img || target === undefined) {
-      allTracked.delete(ref);
-    }
+  allTracked.delete(entry.ref);
+}
+
+/**
+ * Stop observing an image that is about to leave the DOM. Unlike
+ * `unobserveMedia` it leaves `src` alone, so a frozen GIF is not reloaded.
+ */
+export function discardMedia(img: HTMLImageElement): void {
+  const entry = tracked.get(img);
+  if (entry === undefined) return;
+
+  if (entry.autoTimer !== null) {
+    clearTimeout(entry.autoTimer);
+    entry.autoTimer = null;
   }
+  tracked.delete(img);
+  observer?.unobserve(img);
+  allTracked.delete(entry.ref);
 }
 
 /** Freeze all tracked GIFs (called on window hide/blur). */

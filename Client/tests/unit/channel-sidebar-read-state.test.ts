@@ -1,6 +1,7 @@
 /**
- * Explicit mark-as-read affordances in the channel sidebar: the per-channel
- * "Mark as Read" context-menu entry and the server-header "Mark All as Read".
+ * Explicit mark-as-read affordance in the channel sidebar: the per-channel
+ * "Mark as Read" context-menu entry. The server-wide "Mark All as Read" button
+ * lives in the unified sidebar header; see sidebar-area-mark-all-read.test.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
@@ -111,97 +112,5 @@ describe("ChannelSidebar — mark as read", () => {
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
     const menu = document.querySelector('[data-testid="channel-context-menu"]');
     expect(menu?.querySelector('[data-testid="ctx-mark-read"]') ?? null).toBeNull();
-  });
-});
-
-describe("ChannelSidebar — mark all as read", () => {
-  let container: HTMLDivElement;
-  let sidebar: ReturnType<typeof createChannelSidebar>;
-  let sent: number[];
-
-  beforeEach(() => {
-    sent = [];
-    setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
-    dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-    voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    setMarkReadSender(null);
-  });
-
-  function button(): HTMLElement {
-    return container.querySelector('[data-testid="mark-all-read"]') as HTMLElement;
-  }
-
-  it("hides the button while nothing is unread", () => {
-    setChannels([CHANNELS[1]!]);
-    sidebar.mount(container);
-
-    expect(button()).not.toBeNull();
-    expect(button().classList.contains("visible")).toBe(false);
-  });
-
-  it("shows the button once a channel goes unread", () => {
-    setChannels(CHANNELS);
-    sidebar.mount(container);
-
-    expect(button().classList.contains("visible")).toBe(true);
-  });
-
-  it("shows the button for a DM-only unread, whose badge lives in dm.store", async () => {
-    setChannels([CHANNELS[1]!]);
-    sidebar.mount(container);
-    expect(button().classList.contains("visible")).toBe(false);
-
-    dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 50,
-          recipient: { id: 9, username: "alice", avatar: "", status: "online" },
-          participants: [],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 2,
-          mentionCount: 0,
-        },
-      ],
-    }));
-
-    // Store notifications are batched on a microtask.
-    await vi.waitFor(() => {
-      expect(button().classList.contains("visible")).toBe(true);
-    });
-  });
-
-  it("clears every badge and hides itself when clicked", async () => {
-    setChannels(CHANNELS);
-    sidebar.mount(container);
-
-    button().click();
-
-    expect(sent).toEqual([1]);
-    expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
-    await vi.waitFor(() => {
-      expect(button().classList.contains("visible")).toBe(false);
-    });
   });
 });

@@ -35,13 +35,16 @@ import {
   wrapWithMarker,
   type MessageInputOptions,
 } from "@components/MessageInput";
-import type { GifApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 import { authStore } from "@stores/auth.store";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
-const stubGifApi: GifApi = {
+const stubGifApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(async () => ({ results: [] })),
   gifTrending: vi.fn(async () => ({ results: [] })),
+  gifFavorites: vi.fn(async () => ({ favorites: [] })),
+  addGifFavorite: vi.fn(async () => undefined),
+  removeGifFavorite: vi.fn(async () => undefined),
 };
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
@@ -1995,18 +1998,22 @@ describe("MessageInput", () => {
 
   // ── Paste file handling ──
 
-  it("pasting an image file triggers upload", async () => {
+  it.each([
+    ["paste.png", "image/png"],
+    ["clip.mov", "video/quicktime"],
+    ["clip.mp4", "video/mp4"],
+  ])("pasting %s triggers upload", async (filename, type) => {
     const onUploadFile = vi.fn(async () => ({
       id: "paste-1",
       url: "http://x",
-      filename: "paste.png",
+      filename,
     }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    const file = new File(["img"], "paste.png", { type: "image/png" });
+    const file = new File(["bytes"], filename, { type });
 
     // ClipboardEvent is not available in jsdom, so create a plain Event and
     // attach clipboardData manually
@@ -2018,7 +2025,7 @@ describe("MessageInput", () => {
         items: [
           {
             kind: "file",
-            type: "image/png",
+            type,
             getAsFile: () => file,
           },
         ],

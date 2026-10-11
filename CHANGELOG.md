@@ -47,6 +47,108 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.2.0-beta.3
+
+**OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
+
+It is still a **beta and a hobby project** — don't use it for anything sensitive. Update the server and the desktop app together; the server needs a restart to apply the update (new database table).
+
+### Highlights
+
+- **Click-to-watch streams**: someone else's screen share or camera waits behind a Watch stream button, and nothing of it is received until you click it.
+- **GIF favorites**: star a GIF and send it again from the picker's new Favorites tab, on every device.
+- **Videos play inline**: uploaded and pasted `.mov` and `.mp4` clips play in the message.
+- **Member actions work behind a reverse proxy**: role changes, bans and force logouts no longer go through `/admin`.
+- **Smoother chat and faster speaking rings**: history no longer jumps when you scroll, and speaking rings light as the voice is heard.
+
+### Added
+
+**Voice and video**
+
+- Stream audio controls: a watched screen share has its own volume and mute on its tile.
+- Your own avatar in the user panel at the bottom left shows the green speaking ring while you talk in voice.
+
+**Messages & files**
+
+- GIF favorites: star a GIF in the picker or on a GIF in a message, then open the Favorites tab to send it again (newest first). Favorites are stored on your server, follow you across devices, and are capped at 250.
+- Uploaded or pasted `.mov` videos play inline like `.mp4`. A clip with no picture on your system plays as audio, and one it cannot decode shows the download with "Can't play this format".
+- Clicking an author name, avatar or @mention in a message opens that person's profile card.
+
+**Accounts & admin**
+
+- A **Restart server** button on the admin panel's Server configuration page. It and Restart open one dialog that warns everyone is briefly disconnected, says how the server comes back, then waits and reloads the panel.
+- Dashboard warning cards and the update notice have a dismiss (×). A dismissed notice stays hidden for that admin, in that browser, until the problem clears or changes, and a "dismissed, show" link brings them back.
+- A Mark All as Read icon beside Invite in the server header whenever a channel or DM is unread.
+
+### Changed
+
+**Accounts & admin**
+
+- **Member actions no longer need the admin network.** Changing a member's role, banning, unbanning and force-logging-out now work from outside `server.admin_allowed_cidrs`, and no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. They accept only this server's own sessions and API tokens, with login, permission and rank checks only.
+- The member list offers Change Role, Force Logout and Ban only on members below your rank, and the role menu lists only roles below your own, instead of offering actions the server would refuse.
+- The Invite button shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
+
+**Voice and video**
+
+- Someone else's screen share or camera no longer plays for everyone straight away; it shows as a tile with Watch stream, and nothing of it (its audio included) is received until you click it. Stop watching returns the tile to Watch stream.
+- Speaking rings light about as the voice is heard, instead of 120-140 ms later, and no longer blink off between words. **For server owners:** a hand-managed `livekit.yaml` should copy the new audio block from `livekit.yaml.example` (`update_interval 100`).
+- With enhanced noise suppression on, joining voice downloads the noise model once and reuses it.
+- After a failed or refused voice join, the next join waits 2 s, doubling up to 30 s, and says so.
+
+**Messages & files**
+
+- Opening a channel full of new avatars and images, scrolling a long channel, and scrolling past paused GIFs are all lighter: the image cache is opened once, only rows coming into view are built, and GIFs are not re-downloaded as they leave the screen.
+
+**Linux desktop**
+
+- The .deb recommends the system packages that give you colour emoji, mp4 video playback and PipeWire cameras. The AppImage cannot use the host's codecs or camera plugins yet; only the emoji font works from the host.
+
+### Fixed
+
+**Messages & files**
+
+- Scrolling through history no longer jumps: loading an older page, or scrolling through a long channel, no longer shifts the row you are reading.
+- A link wrapped in `||spoiler||` no longer shows a link preview or inline image before you reveal it.
+- Messages you watched arrive in the open channel no longer come back as "N new messages" after restarting the app.
+- A long session with many linked images no longer keeps every one in memory; the image, link-preview and missing-image caches are bounded.
+- On Linux, GIF picker previews and linked images no longer show as broken when the webview falls back to its slower internal message channel.
+- Switching channels no longer resets the slow-mode countdown on the Send button.
+
+**Voice and video**
+
+- Voice participants in the sidebar show their profile picture instead of a solid circle.
+- A DM call the server refuses no longer leaves you hearing the ringback for 30 seconds; calling an offline 1:1 contact says so at once.
+- DM calls show an identity shield for each person, and a red (blocked) shield opens the prompt to review their new key.
+- A DM call's timer counts from when the other person joined, so both sides show the same length.
+- On Windows, the "is calling you" notification no longer stays in Action Center after the ring ends.
+- Clicking a voice channel again while it was still connecting no longer cycles join and leave several times a second.
+- A join that gave up while securing says the call could not be secured, instead of a raw "e2ee_timeout".
+- A screen share watched in a pop-out window had no volume or mute controls; they are back.
+- A High-quality screen share at 120 fps reached only about 40-50 fps; it now goes out as one layer, as Source does, and your own tile shows the rate actually sent.
+- On Linux Wayland, 120 fps is disabled in the screen-share picker, with the reason, because capture stops at 60.
+- On Windows, a popped-out stream or camera no longer leaves an empty black window behind.
+- On Windows, Settings > Voice & Audio lists your devices by name again, and a saved device that is still plugged in no longer shows "(disconnected)".
+
+**Desktop UI**
+
+- A channel reorder the server rejects rolls back in the sidebar, with the "Failed to save channel order" message.
+- When a reverse proxy answers a request with a web page instead of the API, the client says so instead of "Unexpected token '<'".
+
+### Known issues
+
+- **Not yet tested on a real machine:** the speaking ring across two machines; 120 fps screen share, which needs a 120 Hz or faster monitor on Windows; the restart dialog on a real server; `.mov` playback on Windows without the HEVC codec; and click-to-watch with two clients.
+- **Linux camera with screen share:** the crash seen in beta 1 when both are on has not been retested. If the app closes without warning, send the support bundle.
+- **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Eight fixes from a bug hunt of the desktop app's Rust backend, and a fix that keeps image bytes intact on the slower message channel.
+- CI: a bounded Playwright install, a tighter guard on the Claude review workflow, and a flaky native-voice test steadied. Client bundle budgets were raised for the new features.
+- New performance and Linux platform audits, and a CI flake audit, in the docs.
+
 ## v2.2.0-beta.2
 
 **OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.

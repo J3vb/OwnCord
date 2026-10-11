@@ -31,7 +31,10 @@
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
-//! new frame cryptor.
+//! new frame cryptor. Each camera (the first included) is kept until a
+//! subscriber acknowledges it with a data message on topic
+//! `camera-subscribed` whose payload is the camera's sid (5 s at most, else
+//! the example fails), so a peer must be subscribed and send that.
 //! `--screen WxH` also shares the screen the way the app does, through the
 //! same capture thread and publish, from a synthetic source (moving bars:
 //! CI has no display, so neither the X11 capturer nor the Wayland portal
@@ -67,6 +70,10 @@ mod linux {
     use tokio_tungstenite::tungstenite::Message;
 
     const SAMPLE_RATE: u32 = 48_000;
+    /// How long a camera cycle waits for a subscriber to acknowledge the new camera.
+    const CAMERA_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
+    /// Data topic on which a subscriber acknowledges a camera by its sid.
+    const CAMERA_ACK_TOPIC: &str = "camera-subscribed";
     const FRAME_MS: u64 = 10;
     const SINE_AMPLITUDE: f64 = 8000.0;
 
@@ -163,6 +170,43 @@ mod linux {
                 (sum_sq, count, ticks) = (0.0, 0, 0);
             }
         }
+    }
+
+    /// Waits for a subscriber to acknowledge `camera_sid` on `CAMERA_ACK_TOPIC`.
+    /// A subscriber that needs a negotiation of its own (the browser peer)
+    /// must finish it before the camera it just subscribed to goes away:
+    /// livekit-server answers the collision (its PeerConnection drops a
+    /// sender while the subscriber's offer is being applied) with a full
+    /// reconnect of that subscriber, and the browser then never sees the
+    /// final camera. The server's own "subscribed" event precedes that offer,
+    /// so the subscriber acknowledges once its track is attached, which is
+    /// after the negotiation. Other events are kept for the main loop in `run`.
+    async fn await_camera_bound(
+        room_events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+        pending_events: &mut std::collections::VecDeque<RoomEvent>,
+        camera_sid: &str,
+    ) -> Result<(), String> {
+        let acked = tokio::time::timeout(CAMERA_SUBSCRIBE_TIMEOUT, async {
+            loop {
+                match room_events.recv().await {
+                    Some(RoomEvent::DataReceived { payload, topic, .. })
+                        if topic.as_deref() == Some(CAMERA_ACK_TOPIC)
+                            && payload.as_slice() == camera_sid.as_bytes() =>
+                    {
+                        return true
+                    }
+                    Some(ev) => pending_events.push_back(ev),
+                    None => return false,
+                }
+            }
+        })
+        .await;
+        if acked != Ok(true) {
+            return Err(format!(
+                "no subscriber acknowledged camera {camera_sid} within {CAMERA_SUBSCRIBE_TIMEOUT:?}"
+            ));
+        }
+        Ok(())
     }
 
     /// Start a synthetic native camera capture and publish it, as the app's
@@ -350,6 +394,7 @@ mod linux {
         let mut session =
             NativeSession::connect(&url, &token, shared_key_material(&key), sink()).await?;
         let mut room_events = session.subscribe_room_events();
+        let mut pending_events = std::collections::VecDeque::new();
         emit(
             serde_json::json!({ "event": { "type": "joined", "identity": session.local_identity() } }),
         );
@@ -372,9 +417,11 @@ mod linux {
                 .parse()
                 .map_err(|_| "--camera-cycles")?;
             if camera_cycles > 0 {
-                // Settle as for the after sample, so the first camera's
-                // sender threads are counted in the baseline too.
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                // The first camera is subscribed too, and its subscriber
+                // must be done negotiating before the first cycle removes
+                // it. The wait also settles its sender threads into the
+                // baseline.
+                await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
                 );
@@ -388,7 +435,7 @@ mod linux {
                     (capture, camera_sid) =
                         start_camera(&mut session, width, height, simulcast).await?;
                     session.unpublish_camera(&stale).await;
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(
@@ -467,7 +514,12 @@ mod linux {
         loop {
             tokio::select! {
                 _ = &mut deadline => break,
-                ev = room_events.recv() => match ev {
+                ev = async {
+                    match pending_events.pop_front() {
+                        Some(ev) => Some(ev),
+                        None => room_events.recv().await,
+                    }
+                } => match ev {
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), participant, .. }) => {
                         if let Some(v) = volume {
                             session.set_volume(participant.identity().as_str(), v);

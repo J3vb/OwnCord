@@ -40,6 +40,15 @@ export const INLINE_CODE_REGEX = /`([^`]+)`/g;
 export const URL_REGEX = /https?:\/\/[^\s<>"']+/g;
 /** `[text](url)` — used to keep masked links from spawning link embeds. */
 export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
+/**
+ * `||hidden||` — used to keep spoilered URLs from spawning embeds. Mirrors
+ * the tokeniser in `@lib/markdown`: the span closes at the first `||` after
+ * its opener, holds at least one character (so `||||` is not a spoiler), may
+ * span lines and blank lines (the tokeniser keeps an open spoiler together
+ * across a paragraph break), a lone `|` is text, and a backslash escape
+ * (`\|`) is content that never closes the span.
+ */
+export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
 
@@ -120,6 +129,13 @@ function buildSpoiler(
 }
 
 /** A `[text](url)` anchor, or null when the URL is not a safe http(s) one. */
+/** Make a mention chip plain link content: no role, tab stop or profile target. */
+function stripMentionControl(chip: HTMLElement): void {
+  chip.removeAttribute("role");
+  chip.removeAttribute("tabindex");
+  chip.removeAttribute("data-user-id");
+}
+
 function buildMaskedLink(
   node: { readonly url: string; readonly children: readonly InlineNode[] },
   info?: MentionInfo,
@@ -135,6 +151,12 @@ function buildMaskedLink(
     rel: "noopener noreferrer",
   });
   appendInline(link, node.children, info);
+  // A mention that labels a link is part of the link: a nested button would
+  // give Tab and screen readers two controls with one label, one opening the
+  // URL and one a profile.
+  for (const chip of link.querySelectorAll<HTMLElement>(".mention[data-user-id]")) {
+    stripMentionControl(chip);
+  }
   return link;
 }
 
@@ -246,6 +268,10 @@ function buildMentionNode(raw: string, token: string, info?: MentionInfo): HTMLS
   const isSelf = authStore.getState().user?.id === userId;
   const span = createElement("span", {
     class: isSelf ? "mention mention-self" : "mention",
+    // Clicking or activating the chip opens that user's profile (delegated in
+    // MessageList), so it is a button for the keyboard and assistive tech.
+    role: "button",
+    tabindex: "0",
     "data-user-id": String(userId),
   });
   setText(span, raw);
@@ -443,6 +469,11 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       const raw = span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
       const replacement = buildMentionNode(raw, token, info);
+      // A mention that labels a masked link stays plain link content when it is
+      // rebuilt, as at first render (buildMaskedLink).
+      if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
+        stripMentionControl(replacement);
+      }
       if (replacement !== null && sameMention(span, replacement)) continue;
       span.replaceWith(replacement ?? document.createTextNode(raw));
     }

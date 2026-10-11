@@ -14,6 +14,7 @@ Server/.env
 !.claude/ecc-tools.json
 !.claude/identity.json
 !.claude/homunculus/
+!.claude/agents/
 # ECC's /plan writes step plans here. They are reviewable artifacts that belong
 # in the PR, not machine-local state. Prettier reads this file, so plans under
 # it are format-gated like any other tracked markdown -- `npm run format` fixes.

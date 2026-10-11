@@ -30,9 +30,12 @@ export default tseslint.config(
       ],
       "consistent-return": "error",
 
+      // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"). The
+      // residue in lib/livekitReconnect.ts carries a reasoned eslint-disable
+      // and only shrinks; a new `any` fails the build.
+      "@typescript-eslint/no-explicit-any": "error",
+
       // --- Relax rules that conflict with project style ---
-      // Project uses `any` sparingly with eslint-disable comments
-      "@typescript-eslint/no-explicit-any": "warn",
       // Project uses non-null assertions intentionally
       "@typescript-eslint/no-non-null-assertion": "off",
       // Empty functions are used for no-op callbacks

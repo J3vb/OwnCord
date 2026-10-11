@@ -24,7 +24,7 @@ import { listCustomEmoji } from "@stores/emoji.store";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
-import type { GifApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
   readonly channelId: number;
@@ -34,7 +34,7 @@ export interface MessageInputOptions {
    * entirely — the button is rendered disabled rather than offering a picker
    * that cannot load.
    */
-  readonly gifApi?: GifApi;
+  readonly gifApi?: GifApi & GifFavoritesApi;
   readonly onSend: (
     content: string,
     replyTo: number | null,

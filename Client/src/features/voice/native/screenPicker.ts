@@ -57,6 +57,6 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
     capture: captureOptions(getScreenShareCaptureOptions(pick.quality, pick.fps)),
     maxBitrate: getScreenShareMaxBitrate(pick.quality, pick.fps),
     maxFramerate: getEffectiveScreenShareFps(pick.quality, pick.fps),
-    simulcast: isScreenShareSimulcast(pick.quality),
+    simulcast: isScreenShareSimulcast(pick.quality, pick.fps),
   };
 }

@@ -26,6 +26,10 @@ export interface NativeControl {
   urgentAttentionRequests(): number;
   /** Every count the native host was asked to show as the unread badge. */
   badgeCounts(): readonly number[];
+  /** Channels whose call notification was shown as a ringing call. */
+  ringsShown(): readonly number[];
+  /** Channels whose ringing call notification the native host was asked to withdraw. */
+  callsCleared(): readonly number[];
 }
 
 export interface NotifierSubject {
@@ -100,6 +104,24 @@ export function describeNotifierSuite(
           target: { host: "h", channelId: 7 },
         },
       ]);
+    });
+
+    // D-13: a ringing call's notification is marked so it can be withdrawn by
+    // its channel once the ring ends; a missed-call notice is not.
+    check("marks a ringing call's notification and withdraws it by its channel", async () => {
+      await ctx.subject.showCall(
+        "Alice is calling you",
+        "Voice call",
+        { host: "h", channelId: 7 },
+        true,
+      );
+      await ctx.subject.showCall("Missed call from Alice", "Voice call", {
+        host: "h",
+        channelId: 8,
+      });
+      await ctx.subject.clearCall(7);
+      expect(ctx.native.ringsShown()).toEqual([7]);
+      expect(ctx.native.callsCleared()).toEqual([7]);
     });
 
     check("hands a call activation, with no message id, to its handler", async () => {
