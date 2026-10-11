@@ -47,6 +47,14 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+**Voice**
+
+- Undeafening no longer unmutes you if you were muted before you deafened.
+- After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
+- Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
