@@ -807,6 +807,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // attachments.ts); this one did not.
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://[2001:db8::1]",
+      keepChecking: true,
     });
   });
 
@@ -822,6 +823,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
+      keepChecking: true,
     });
   });
 

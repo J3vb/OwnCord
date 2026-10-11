@@ -65,7 +65,7 @@ async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
     return result;
   } catch (err) {
     log.error("Update check failed", { error: String(err) });
-    return { available: false, version: null, body: null, manual_upgrade: false };
+    return { available: false, version: null, body: null, manual_upgrade: false, failed: true };
   }
 }
 

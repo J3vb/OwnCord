@@ -18,6 +18,9 @@ export interface UpdateCheckResult {
   readonly version: string | null;
   readonly body: string | null;
   readonly manual_upgrade: boolean;
+  /** The check itself could not complete (network, feed error): `available: false`
+   *  then says nothing about whether a newer version exists. */
+  readonly failed?: boolean;
 }
 
 /** Re-declared, structurally identical to `DownloadProgress` (`lib/updater.ts`). */

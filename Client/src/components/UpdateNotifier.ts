@@ -3,7 +3,10 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import { createUpdateChecker } from "@lib/updateChecker";
+import type { UpdateCheckReason, UpdateOutcome } from "@lib/updateChecker";
+import { uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
 import { connectText } from "../i18n/connect";
@@ -12,7 +15,14 @@ const log = createLogger("update-notifier");
 
 export interface UpdateNotifierOptions {
   readonly serverUrl: string;
+  /** Keep checking while mounted — on an interval, after a reconnect and when
+   *  the window regains focus — and take the Settings "Check for updates" button.
+   *  The main page sets it; the connect page's refused-client notifier needs
+   *  the one startup check only. */
+  readonly keepChecking?: boolean;
 }
+
+const MANUAL_KEY = "manual-upgrade";
 
 export function isWindows(): boolean {
   return typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
@@ -32,16 +42,23 @@ export function formatDownloadProgress(p: DownloadProgress): string {
 }
 
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
-  const { serverUrl } = options;
+  const { serverUrl, keepChecking = false } = options;
   let container: Element | null = null;
   let banner: HTMLDivElement | null = null;
   /** Polite live region carrying the coarse install status, so a screen
    *  reader hears "update available / downloading / installed / failed" once —
    *  never the once-a-percent progress tick, which would read out continuously. */
   let liveRegion: HTMLDivElement | null = null;
-  let dismissed = false;
+  /** What the user last dismissed (a version, or MANUAL_KEY): that same offer is
+   *  not shown again by a background check, a newer version is. */
+  let dismissedKey: string | null = null;
+  /** The offer the banner currently shows. */
+  let shownKey: string | null = null;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeInstall: (() => void) | null = null;
+  let unsubscribeOutcome: (() => void) | null = null;
+  let unsubscribeStatus: (() => void) | null = null;
+  const checker = createUpdateChecker({ serverUrl });
   let installState: UpdateInstallState = { status: "idle" };
 
   function announce(text: string): void {
@@ -50,20 +67,22 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (liveRegion !== null && liveRegion.textContent !== text) setText(liveRegion, text);
   }
 
-  async function performCheck(): Promise<void> {
-    if (dismissed || installState.status !== "idle") return;
-
-    const result = await checkForUpdate(serverUrl);
-    if (dismissed || installState.status !== "idle") return;
-
-    if (result.manual_upgrade) {
-      showManualUpgradeBanner();
-      return;
-    }
-
-    if (!result.available || result.version === null) return;
-
-    showBanner(result.version, result.body ?? "");
+  function handleOutcome(outcome: UpdateOutcome, reason: UpdateCheckReason): void {
+    if (installState.status !== "idle") return;
+    const key =
+      outcome.kind === "available"
+        ? outcome.version
+        : outcome.kind === "manual-upgrade"
+          ? MANUAL_KEY
+          : null;
+    if (key === null) return;
+    // The user asked (Settings → Check for updates): a dismissal does not apply.
+    if (reason === "manual") dismissedKey = null;
+    else if (key === dismissedKey) return;
+    if (shownKey === key) return;
+    removeBanner();
+    if (outcome.kind === "available") showBanner(outcome.version, outcome.body);
+    else showManualUpgradeBanner();
   }
 
   /**
@@ -76,6 +95,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });
+    shownKey = MANUAL_KEY;
 
     const text = createElement(
       "span",
@@ -89,7 +109,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       connectText("update.dismiss"),
     );
     dismissBtn.addEventListener("click", () => {
-      dismissed = true;
+      dismissedKey = shownKey;
       removeBanner();
     });
 
@@ -102,6 +122,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });
+    shownKey = version;
 
     const text = createElement(
       "span",
@@ -124,7 +145,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       connectText("update.later"),
     );
     laterBtn.addEventListener("click", () => {
-      dismissed = true;
+      dismissedKey = shownKey;
       removeBanner();
     });
 
@@ -199,7 +220,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
         connectText("update.dismiss"),
       );
       dismissBtn.addEventListener("click", () => {
-        dismissed = true;
+        dismissedKey = shownKey;
         removeBanner();
       });
       banner.appendChild(dismissBtn);
@@ -210,6 +231,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (banner !== null) {
       banner.remove();
       banner = null;
+      shownKey = null;
     }
   }
 
@@ -227,16 +249,38 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     });
     target.appendChild(liveRegion);
     unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
-    // Delay the check slightly so the main UI renders first
+    unsubscribeOutcome = checker.onOutcome(handleOutcome);
+    if (keepChecking) {
+      // A socket that comes back may be an updated server: ask again. Read-only
+      // use of the store; this is not a ws.on handler and writes nothing.
+      let wasDown = false;
+      unsubscribeStatus = uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        (status) => {
+          if (status !== "connected") wasDown = true;
+          else if (wasDown) {
+            wasDown = false;
+            checker.notifyReconnected();
+          }
+        },
+      );
+      checker.start();
+    }
+    // Delay the first check slightly so the main UI renders first
     checkTimer = setTimeout(() => {
       checkTimer = null;
-      void performCheck();
+      if (installState.status === "idle") void checker.checkNow("startup");
     }, 3000);
   }
 
   function destroy(): void {
     unsubscribeInstall?.();
     unsubscribeInstall = null;
+    unsubscribeOutcome?.();
+    unsubscribeOutcome = null;
+    unsubscribeStatus?.();
+    unsubscribeStatus = null;
+    checker.stop();
     if (checkTimer !== null) {
       clearTimeout(checkTimer);
       checkTimer = null;
