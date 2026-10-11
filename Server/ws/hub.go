@@ -36,6 +36,10 @@ type Hub struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
+	// restartNoticeMu guards lastRestartNotice (leaf lock): see
+	// BroadcastServerRestart's dedupe.
+	restartNoticeMu   syncutil.Mutex
+	lastRestartNotice restartNoticeRecord
 	// stopUsers: see StoppedUserIDs. Guarded by mu.
 	stopUsers   []int64
 	livekit     *LiveKitClient

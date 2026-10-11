@@ -136,7 +136,15 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 // reason says why the server is restarting; delaySeconds tells clients how
 // long until the socket drops, and 0 cancels an earlier announcement. The
 // redial spread scales with who is connected now (P5-S04).
+//
+// An announcement identical to one sent in the last restartNoticeDedupeWindow
+// is dropped: a self-update announces from the admin handler and again from
+// the graceful stop, and clients should see one countdown. A cancel
+// (delaySeconds 0) is never dropped.
 func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
+	if delaySeconds > 0 && !h.claimRestartNotice(reason, delaySeconds) {
+		return
+	}
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds, restartSpreadMS(h.ClientCount())))
 }
 
@@ -497,4 +505,28 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		slog.Debug("hub: channel broadcast",
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}
+}
+
+// restartNoticeDedupeWindow is how long an identical restart announcement
+// suppresses a repeat.
+const restartNoticeDedupeWindow = 10 * time.Second
+
+// claimRestartNotice reports whether this announcement should go out, and
+// records it when it does. It takes only restartNoticeMu, a leaf lock.
+func (h *Hub) claimRestartNotice(reason RestartReason, delaySeconds int) bool {
+	h.restartNoticeMu.Lock()
+	defer h.restartNoticeMu.Unlock()
+	now := time.Now()
+	last := h.lastRestartNotice
+	if last.reason == reason && last.delaySeconds == delaySeconds && now.Sub(last.at) < restartNoticeDedupeWindow {
+		return false
+	}
+	h.lastRestartNotice = restartNoticeRecord{reason: reason, delaySeconds: delaySeconds, at: now}
+	return true
+}
+
+type restartNoticeRecord struct {
+	reason       RestartReason
+	delaySeconds int
+	at           time.Time
 }
