@@ -194,3 +194,11 @@ func UploadBodyCapForTest(fileCap int64) int64 { return uploadBodyCap(fileCap) }
 
 // UploadMultipartMarginForTest is uploadMultipartMargin for external tests.
 const UploadMultipartMarginForTest = uploadMultipartMargin
+
+// SetBackgroundWriteTimeoutForTest shortens the bound on AuthMiddleware's
+// background session writes, restoring it when tb ends.
+func SetBackgroundWriteTimeoutForTest(tb testing.TB, d time.Duration) {
+	old := backgroundWriteTimeout
+	backgroundWriteTimeout = d
+	tb.Cleanup(func() { backgroundWriteTimeout = old })
+}

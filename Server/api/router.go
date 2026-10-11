@@ -269,6 +269,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// accept only a session or API token issued by this server, plus the
 	// per-action permission and rank checks.
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
+	// Channel create, edit and delete, mounted the same way for the same reason.
+	r.Mount("/api/v1/moderation/channels", admin.NewChannelAPI(svc, hub))
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

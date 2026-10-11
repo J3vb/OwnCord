@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 187 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 190 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -169,6 +169,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/moderation/appeals/{id}`                                    |
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
 | POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
+| POST    | `/api/v1/moderation/channels/`                                       |
+| DELETE  | `/api/v1/moderation/channels/{id}`                                   |
+| PATCH   | `/api/v1/moderation/channels/{id}`                                   |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
@@ -2474,6 +2477,17 @@ they are not subject to `server.admin_allowed_cidrs`. They accept only a
 session or API token issued by this server (any other token gets `401`), with
 the permission and rank checks. A member the caller does not
 outrank, or a role at or above the caller's own, is refused with `403`.
+
+### Channel actions: `/api/v1/moderation/channels`
+
+`POST /`, `PATCH /{id}` and `DELETE /{id}` are the channel create, edit and
+delete actions of the desktop client. They run the same handlers, with the same
+request and response shapes, as `POST /admin/api/channels` and
+`PATCH`/`DELETE /admin/api/channels/{id}`, but live outside `/admin` so a
+reverse proxy that answers `/admin` with a web page does not break them, and
+they are not subject to `server.admin_allowed_cidrs`. They accept only a
+session or API token issued by this server (any other token gets `401`) and
+require `MANAGE_CHANNELS` (otherwise `403`).
 
 ### POST /api/v1/moderation/queue/{id}/act
 
