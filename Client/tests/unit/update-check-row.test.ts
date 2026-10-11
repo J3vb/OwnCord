@@ -8,11 +8,11 @@ const { mockActive, mockInstall } = vi.hoisted(() => ({
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@lib/updateChecker", () => ({ getActiveUpdateChecker: mockActive }));
+vi.mock("../../src/features/updates/updateChecker", () => ({ getActiveUpdateChecker: mockActive }));
 vi.mock("@lib/updater", () => ({ downloadAndInstallUpdate: mockInstall }));
 
-import { buildUpdateCheckRow } from "../../src/components/settings/UpdateCheckRow";
-import type { UpdateOutcome } from "../../src/lib/updateChecker";
+import { buildUpdateCheckRow } from "../../src/features/updates/UpdateCheckRow";
+import type { UpdateOutcome } from "../../src/features/updates/updateChecker";
 
 describe("Settings → Check for updates", () => {
   let ac: AbortController;

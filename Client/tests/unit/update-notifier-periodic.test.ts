@@ -23,7 +23,7 @@ import {
   MIN_BACKGROUND_GAP_MS,
   UPDATE_CHECK_INTERVAL_MS,
   getActiveUpdateChecker,
-} from "../../src/lib/updateChecker";
+} from "../../src/features/updates/updateChecker";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { UpdateInstallState } from "../../src/lib/updater";
 

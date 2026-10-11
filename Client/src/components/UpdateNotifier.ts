@@ -4,8 +4,8 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
-import { createUpdateChecker } from "@lib/updateChecker";
-import type { UpdateCheckReason, UpdateOutcome } from "@lib/updateChecker";
+import { createUpdateChecker } from "../features/updates/updateChecker";
+import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
 import { uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";

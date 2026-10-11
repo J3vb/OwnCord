@@ -6,14 +6,14 @@
  * update banner the notifier raises for the same outcome.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
-import { createLogger } from "@lib/logger";
-import { getActiveUpdateChecker } from "@lib/updateChecker";
-import type { UpdateOutcome } from "@lib/updateChecker";
-import { downloadAndInstallUpdate } from "@lib/updater";
+import { createElement, appendChildren } from "../../lib/dom";
+import { createLogger } from "../../lib/logger";
+import { getActiveUpdateChecker } from "./updateChecker";
+import type { UpdateOutcome } from "./updateChecker";
+import { downloadAndInstallUpdate } from "../../lib/updater";
 import { connectText } from "../../i18n/connect";
 import { settingsText as t } from "../../i18n/settings";
-import { outcomeEl, showOutcome } from "./helpers";
+import { outcomeEl, showOutcome } from "../../components/settings/helpers";
 
 const log = createLogger("UpdateCheckRow");
 

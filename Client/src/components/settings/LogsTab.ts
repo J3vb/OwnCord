@@ -16,7 +16,7 @@ import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
-import { buildUpdateCheckRow } from "./UpdateCheckRow";
+import { buildUpdateCheckRow } from "../../features/updates/UpdateCheckRow";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 

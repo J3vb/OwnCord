@@ -15,7 +15,7 @@ import {
   MIN_BACKGROUND_GAP_MS,
   type UpdateChecker,
   type UpdateOutcome,
-} from "../../src/lib/updateChecker";
+} from "../../src/features/updates/updateChecker";
 
 const NONE = { available: false, version: null, body: null, manual_upgrade: false };
 const V2 = { available: true, version: "2.0.0", body: "notes", manual_upgrade: false };

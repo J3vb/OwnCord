@@ -3,9 +3,9 @@
 // updated is noticed through the same question (the client feed it serves is
 // what changed), so a reconnect and a slow interval both route here. UI policy (banner, dismiss) stays in components/UpdateNotifier.
 
-import { Disposable } from "./disposable";
-import { createLogger } from "./logger";
-import { checkForUpdate } from "./updater";
+import { Disposable } from "../../lib/disposable";
+import { createLogger } from "../../lib/logger";
+import { checkForUpdate } from "../../lib/updater";
 
 const log = createLogger("update-checker");
 
