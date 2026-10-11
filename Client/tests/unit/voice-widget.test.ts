@@ -1040,10 +1040,10 @@ describe("VoiceWidget", () => {
     setConnectionStatus("reconnecting");
     uiStore.flush();
 
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     const disconnectBtn = container.querySelector('[aria-label="Disconnect"]') as HTMLButtonElement;
-    expect(muteBtn.disabled).toBe(true);
-    expect(muteBtn.title).toBe("Reconnecting…");
+    expect(cameraBtn.disabled).toBe(true);
+    expect(cameraBtn.title).toBe("Reconnecting…");
     expect(disconnectBtn.disabled).toBe(false);
     disconnectBtn.click();
     expect(onDisconnect).toHaveBeenCalledOnce();
@@ -1066,9 +1066,96 @@ describe("VoiceWidget", () => {
     setConnectionStatus("disconnected");
     uiStore.flush();
 
+    const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
+    expect(cameraBtn.disabled).toBe(true);
+    expect(cameraBtn.title).toBe("Not connected");
+
+    widget.destroy?.();
+  });
+
+  it("keeps mute and deafen usable while the WS socket is down", () => {
+    setVoiceChannel(1, []);
+    const onMuteToggle = vi.fn();
+    const onDeafenToggle = vi.fn();
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle,
+      onDeafenToggle,
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(false);
+    expect(muteBtn.title).toBe("");
+    expect(deafenBtn.disabled).toBe(false);
+    muteBtn.click();
+    deafenBtn.click();
+    expect(onMuteToggle).toHaveBeenCalledOnce();
+    expect(onDeafenToggle).toHaveBeenCalledOnce();
+
+    widget.destroy?.();
+  });
+
+  it("re-enables mute and deafen once a moderator restriction is lifted", () => {
+    setVoiceChannel(1, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: true,
+      localServerDeafened: true,
+    }));
+    voiceStore.flush();
+    expect(muteBtn.disabled).toBe(true);
+    expect(deafenBtn.disabled).toBe(true);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: false,
+      localServerDeafened: false,
+    }));
+    voiceStore.flush();
+    expect(muteBtn.disabled).toBe(false);
+    expect(muteBtn.title).toBe("");
+    expect(deafenBtn.disabled).toBe(false);
+    expect(deafenBtn.title).toBe("");
+
+    widget.destroy?.();
+  });
+
+  it("keeps mute disabled for a moderator mute while the socket is down", () => {
+    setVoiceChannel(1, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+    voiceStore.flush();
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
     const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
     expect(muteBtn.disabled).toBe(true);
-    expect(muteBtn.title).toBe("Not connected");
 
     widget.destroy?.();
   });
@@ -1087,13 +1174,13 @@ describe("VoiceWidget", () => {
 
     setConnectionStatus("reconnecting");
     uiStore.flush();
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.disabled).toBe(true);
+    const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
+    expect(cameraBtn.disabled).toBe(true);
 
     setConnectionStatus("connected");
     uiStore.flush();
-    expect(muteBtn.disabled).toBe(false);
-    expect(muteBtn.title).toBe("");
+    expect(cameraBtn.disabled).toBe(false);
+    expect(cameraBtn.title).toBe("");
 
     widget.destroy?.();
   });

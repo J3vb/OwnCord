@@ -12,6 +12,7 @@ import {
   leaveVoiceChannel,
   setVoiceConfig,
   setModeratorDeafened,
+  restateSelfVoiceState,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -157,6 +158,12 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
         selfVoiceState.muted,
         selfVoiceState.deafened,
       );
+      // The socket was down: tell the server any mute/deafen toggled meanwhile.
+      // enforceModeratorAudioState applies its releases later, so a moderator
+      // restriction in play on either side of the outage is left to it.
+      const modMuted = prevSelfServerMuted || selfVoiceState.server_muted === true;
+      const modDeafened = prevSelfServerDeafened || selfVoiceState.server_deafened === true;
+      restateSelfVoiceState(ws, modMuted || modDeafened, modDeafened);
 
       // OC-0201: same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the

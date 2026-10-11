@@ -11,6 +11,7 @@ import {
   setListenOnly,
   setVoiceStatus,
   setLocalGateSpeaking,
+  restateSelfVoiceState,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
@@ -268,6 +269,9 @@ export class LiveKitSession {
     resolveLiveKitUrl: (p, d) => this.resolveLiveKitUrl(p, d),
     restoreLocalVoiceState: (mode) => this.restoreLocalVoiceState(mode),
     reapplyMuteGain: () => this.reapplyMuteGain(),
+    restateSelfVoiceState: () => {
+      if (this.ws !== null) restateSelfVoiceState(this.ws);
+    },
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
     leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),

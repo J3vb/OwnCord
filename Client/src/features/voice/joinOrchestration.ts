@@ -50,6 +50,8 @@ export interface JoinHost {
   resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string>;
   restoreLocalVoiceState(mode: "join"): Promise<void>;
   reapplyMuteGain(): void;
+  /** Tell the server our own mute/deafen: a fresh join writes its row clean. */
+  restateSelfVoiceState(): void;
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
   leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
@@ -472,6 +474,11 @@ export class JoinOrchestration {
 
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
+        // A join the user already switched away from leaves the restate to
+        // the switch's own join.
+        if (voiceStore.getState().currentChannelId === channelId) {
+          this.host.restateSelfVoiceState();
+        }
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);

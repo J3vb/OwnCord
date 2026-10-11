@@ -91,6 +91,42 @@ describe("snapshotReadyVoice", () => {
     expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
   });
 
+  it("restates a mute toggled while the socket was down", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ muted: false })]));
+
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+  });
+
+  it("does not restate a mute the server already holds", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ muted: true })]));
+
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("does not fight the release of a moderator mute lifted while disconnected", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ server_muted: false })]));
+
+    expect(socket.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+  });
+
   it("releases a moderator mute lifted while disconnected, using the pre-ready flags", async () => {
     joinVoiceChannel(4);
     setVoiceStatus("connected");

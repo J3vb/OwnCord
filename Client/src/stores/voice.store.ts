@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import type { WsClient } from "@lib/ws";
 import type {
   ReadyVoiceState,
   VoiceStatePayload,
@@ -90,6 +91,11 @@ export interface VoiceState {
    *  member chose survives the lift. Follows localDeafened, so it outlives a
    *  leave (a moderator move) and clears on any undeafen. */
   readonly moderatorDeafened?: boolean;
+  /** The member was already muted when they deafened, so undeafening restores
+   *  that mute instead of lifting it. Written by the widget's deafen toggle and
+   *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
+   *  re-join restates the same pair. Optional for the fixture reason above. */
+  readonly mutedBeforeDeafen?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
    *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
    *  separate flag from localMuted: PTT never writes the flag that represents
@@ -141,6 +147,7 @@ const INITIAL_STATE: VoiceState = {
   localServerMuted: false,
   localServerDeafened: false,
   moderatorDeafened: false,
+  mutedBeforeDeafen: false,
   pttGated: false,
   localCamera: false,
   localScreenshare: false,
@@ -187,6 +194,7 @@ export function resetVoiceStore(): void {
     localServerMuted: false,
     localServerDeafened: false,
     moderatorDeafened: false,
+    mutedBeforeDeafen: false,
     pttGated: false,
     localGateSpeaking: null,
     localCamera: false,
@@ -453,6 +461,11 @@ export function setModeratorDeafened(applied: boolean): void {
   );
 }
 
+/** Remember whether the member was muted at the moment they deafened. */
+export function setMutedBeforeDeafen(muted: boolean): void {
+  voiceStore.setState((prev) => ({ ...prev, mutedBeforeDeafen: muted }));
+}
+
 /** Toggle local mute state. */
 export function setLocalMuted(muted: boolean): void {
   voiceStore.setState((prev) => withLocalRing({ ...prev, localMuted: muted }));
@@ -661,4 +674,39 @@ export function getChannelVoiceUsers(channelId: number): readonly VoiceUser[] {
     if (!channelUsers) return [];
     return Array.from(channelUsers.values());
   });
+}
+
+// Re-tells the server our own mute/deafen when its row for us can differ from
+// the local state: a fresh join or channel switch (the server writes the new
+// row unmuted and undeafened, while the client keeps localMuted/localDeafened
+// across a leave) and a chat socket that came back after the user toggled
+// mute offline (the toggles apply locally and send nothing while it is down).
+// skipMute/skipDeafen: the caller knows that state is a moderator's, not ours.
+export function restateSelfVoiceState(
+  ws: Pick<WsClient, "send">,
+  skipMute = false,
+  skipDeafen = false,
+): void {
+  const state = voiceStore.getState();
+  if (state.currentChannelId === null) return;
+  const userId = authStore.getState().user?.id ?? 0;
+  if (userId === 0) return;
+
+  const row = state.voiceUsers.get(state.currentChannelId)?.get(userId);
+
+  // A moderator's mute or deafen is not the member's own state to restate:
+  // sending it would turn it into a self-mute that outlives the lift.
+  const moderated = state.localServerDeafened === true || state.moderatorDeafened === true;
+
+  if (
+    !skipMute &&
+    !moderated &&
+    state.localServerMuted !== true &&
+    state.localMuted !== (row?.muted ?? false)
+  ) {
+    ws.send({ type: "voice_mute", payload: { muted: state.localMuted } });
+  }
+  if (!skipDeafen && !moderated && state.localDeafened !== (row?.deafened ?? false)) {
+    ws.send({ type: "voice_deafen", payload: { deafened: state.localDeafened } });
+  }
 }

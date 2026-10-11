@@ -8,7 +8,12 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
+import {
+  voiceStore,
+  leaveVoiceChannel,
+  joinVoiceChannel,
+  restateSelfVoiceState,
+} from "../../stores/voice.store";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
@@ -16,6 +21,10 @@ import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
+
+/** A join still in flight restates itself when it connects; an error frame
+ *  for a send made before then would roll that join back. */
+const SETTLED_VOICE = new Set(["connected", "reconnecting", "securing"]);
 
 export function handleAuthOk(
   ws: DispatchWs,
@@ -43,6 +52,15 @@ export function handleAuthOk(
   const activeChannelId = channelsStore.select((s) => s.activeChannelId);
   if (activeChannelId !== null) {
     ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
+  }
+
+  // A resumed socket gets no ready, so a mute/deafen toggled while it was down
+  // is restated here; a full flow restates from ready instead.
+  if (
+    (payload.replay_source === "buffer" || payload.replay_source === "db") &&
+    SETTLED_VOICE.has(voiceStore.getState().voiceStatus)
+  ) {
+    restateSelfVoiceState(ws);
   }
 }
 
