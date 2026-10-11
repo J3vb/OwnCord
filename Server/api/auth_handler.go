@@ -366,6 +366,11 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusBadRequest, "BAD_REQUEST"
 	case errors.Is(err, service.ErrInternal):
 		status, code = http.StatusInternalServerError, "INTERNAL_ERROR"
+		if _, bare := err.(interface{ Is(error) bool }); !bare {
+			slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
+			writeJSON(w, status, errorResponse{Error: code, Message: "internal error"})
+			return
+		}
 	default:
 		slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})

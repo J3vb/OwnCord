@@ -319,7 +319,7 @@ func (s *SettingsService) targetBoolSetting(ctx context.Context, updates map[str
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: failed to read %s: %w", ErrInternal, key, err)
 	}
 	return parseSettingsPatchBool(value)
 }
