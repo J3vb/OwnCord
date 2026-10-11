@@ -7,7 +7,6 @@ package admin
 // event code. The message text itself is never exported: supportEvents emits
 // only the code, so a bundle cannot carry free-form text. Codes are derived
 // from the literal alone — no runtime data — so none can embed a request value.
-//
 // The entries were generated from the message literals in this tree. They are
 // hand-maintained from here: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded
 // parses the tree, and when a new Warn/Error message has no code it names the
