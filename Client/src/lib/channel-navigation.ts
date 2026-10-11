@@ -14,19 +14,6 @@ import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@st
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
 import { hasUnread } from "./read-state";
 
-/**
- * Activate `channelId`, clearing its unread and mention badges.
- *
- * A channel absent from channelsStore is not necessarily invisible to the
- * user: a DM's row there is only synthesized on open (addDmToChannelsStore),
- * while dmStore carries every DM the user is a member of from the moment
- * `ready` lands. Fall back to dmStore and synthesize the mirror row so a
- * jump (permalink, search hit, pinned, reply) into a DM the user has not
- * clicked yet this session still lands, instead of degrading as if the
- * channel did not exist. True no-op only when neither store has it: the
- * caller resolved an id that no longer exists, and blanking the active
- * channel would be worse than staying put.
- */
 const reselectListeners = new Set<(channelId: number) => void>();
 
 /**
@@ -40,6 +27,19 @@ export function onChannelReselect(cb: (channelId: number) => void): () => void {
   return () => reselectListeners.delete(cb);
 }
 
+/**
+ * Activate `channelId`, clearing its unread and mention badges.
+ *
+ * A channel absent from channelsStore is not necessarily invisible to the
+ * user: a DM's row there is only synthesized on open (addDmToChannelsStore),
+ * while dmStore carries every DM the user is a member of from the moment
+ * `ready` lands. Fall back to dmStore and synthesize the mirror row so a
+ * jump (permalink, search hit, pinned, reply) into a DM the user has not
+ * clicked yet this session still lands, instead of degrading as if the
+ * channel did not exist. True no-op only when neither store has it: the
+ * caller resolved an id that no longer exists, and blanking the active
+ * channel would be worse than staying put.
+ */
 export function navigateToChannel(channelId: number): void {
   const reselect = channelsStore.getState().activeChannelId === channelId;
   if (!channelsStore.getState().channels.has(channelId)) {
