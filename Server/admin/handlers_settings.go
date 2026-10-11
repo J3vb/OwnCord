@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -165,6 +166,7 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			return
 		}
 		if err != nil {
+			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update settings")
 			return
 		}

@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
+- Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
 
 ### Added
 
