@@ -15,8 +15,8 @@ const log = createLogger("update-notifier");
 
 export interface UpdateNotifierOptions {
   readonly serverUrl: string;
-  /** Keep checking while mounted — on an interval, after a reconnect and when
-   *  the window regains focus — and take the Settings "Check for updates" button.
+  /** Keep checking while mounted — on an interval and after a reconnect —
+   *  and take the Settings "Check for updates" button.
    *  The main page sets it; the connect page's refused-client notifier needs
    *  the one startup check only. */
   readonly keepChecking?: boolean;

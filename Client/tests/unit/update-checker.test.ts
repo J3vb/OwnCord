@@ -13,7 +13,6 @@ import {
   getActiveUpdateChecker,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_CHECK_JITTER,
-  FOCUS_IDLE_MS,
   MIN_BACKGROUND_GAP_MS,
   type UpdateChecker,
   type UpdateOutcome,
@@ -107,32 +106,17 @@ describe("createUpdateChecker", () => {
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it("checks when the window regains focus after a long idle, not after a short one", async () => {
+  it("reports a manual check that joins a background check as manual", async () => {
+    let resolve!: (v: typeof V2) => void;
+    mockCheckForUpdate.mockReturnValueOnce(new Promise((r) => (resolve = r)));
     checker.start();
-    await vi.advanceTimersByTimeAsync(FOCUS_IDLE_MS - 1);
-    window.dispatchEvent(new Event("focus"));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(mockCheckForUpdate).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1);
-    window.dispatchEvent(new Event("focus"));
-    await vi.advanceTimersByTimeAsync(0);
+    checker.notifyReconnected();
+    const manual = checker.checkNow("manual");
+    resolve(V2);
+    await manual;
     expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
-    expect(outcomes.at(-1)?.reason).toBe("focus");
-
-    // The check just made restarts the idle clock.
-    window.dispatchEvent(new Event("focus"));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(mockCheckForUpdate).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores focus events after stop()", async () => {
-    checker.start();
-    checker.stop();
-    await vi.advanceTimersByTimeAsync(FOCUS_IDLE_MS * 2);
-    window.dispatchEvent(new Event("focus"));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(mockCheckForUpdate).not.toHaveBeenCalled();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]?.reason).toBe("manual");
   });
 
   it("maps every result shape to an outcome", async () => {

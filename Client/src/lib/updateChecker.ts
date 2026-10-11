@@ -1,8 +1,7 @@
 // updateChecker — keeps asking the connected server whether a newer client is
 // on offer while the app runs, instead of only once at startup. A server that
 // updated is noticed through the same question (the client feed it serves is
-// what changed), so a reconnect, a long-idle focus and a slow interval all
-// route here. UI policy (banner, dismiss) stays in components/UpdateNotifier.
+// what changed), so a reconnect and a slow interval both route here. UI policy (banner, dismiss) stays in components/UpdateNotifier.
 
 import { Disposable } from "./disposable";
 import { createLogger } from "./logger";
@@ -13,12 +12,10 @@ const log = createLogger("update-checker");
 /** Mean gap between background checks; each gap is jittered by ±JITTER. */
 export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60_000;
 export const UPDATE_CHECK_JITTER = 0.25;
-/** A focus event only checks when the last check is at least this old. */
-export const FOCUS_IDLE_MS = 60 * 60_000;
 /** Floor between background checks, so a flapping socket cannot hammer the feed. */
 export const MIN_BACKGROUND_GAP_MS = 60_000;
 
-export type UpdateCheckReason = "startup" | "interval" | "reconnect" | "focus" | "manual";
+export type UpdateCheckReason = "startup" | "interval" | "reconnect" | "manual";
 
 export type UpdateOutcome =
   | { readonly kind: "up-to-date" }
@@ -28,7 +25,7 @@ export type UpdateOutcome =
 
 export interface UpdateChecker {
   readonly serverUrl: string;
-  /** Begin the periodic and focus-driven checks and become the active checker. */
+  /** Begin the periodic checks and become the active checker. */
   start(): void;
   stop(): void;
   /** Run a check now. `manual` always runs; any other reason respects the gap floor. */
@@ -57,7 +54,7 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   let timer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<UpdateOutcome> | null = null;
   let lastCheckAt: number | null = null;
-  let startedAt = 0;
+  let inFlightReason: UpdateCheckReason = "interval";
 
   function scheduleNext(): void {
     const jitter = 1 + (random() * 2 - 1) * UPDATE_CHECK_JITTER;
@@ -84,18 +81,22 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     }
     // A check that outlives stop() reports to nobody: its page is gone.
     if (owner === lifetime) {
-      for (const listener of listeners) listener(outcome, reason);
+      for (const listener of listeners) listener(outcome, inFlightReason);
     }
     return outcome;
   }
 
   function checkNow(reason: UpdateCheckReason): Promise<UpdateOutcome> {
-    if (inFlight !== null) return inFlight;
+    if (inFlight !== null) {
+      if (reason === "manual") inFlightReason = reason;
+      return inFlight;
+    }
     const now = Date.now();
     if (reason !== "manual" && lastCheckAt !== null && now - lastCheckAt < MIN_BACKGROUND_GAP_MS) {
       return Promise.resolve({ kind: "up-to-date" });
     }
     lastCheckAt = now;
+    inFlightReason = reason;
     const pending = run(reason, lifetime).finally(() => {
       inFlight = null;
     });
@@ -108,12 +109,6 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     const owned = new Disposable();
     lifetime = owned;
     active = checker;
-    startedAt = Date.now();
-    owned.onEvent(window, "focus", () => {
-      if (Date.now() - Math.max(startedAt, lastCheckAt ?? 0) >= FOCUS_IDLE_MS) {
-        void checkNow("focus");
-      }
-    });
     scheduleNext();
   }
 

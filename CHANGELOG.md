@@ -51,7 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
-- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, after a reconnect (a server that just updated), and when you return to the window after a long idle. The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
+- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
 - Settings → Logs has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
 
 **Voice**
