@@ -15,6 +15,7 @@ export const shards = {
     "src/lib/livekitUrlResolver.ts",
     "src/lib/roomEventHandlers.ts",
     "src/lib/screenShare.ts",
+    "src/lib/videoCodec.ts",
     "src/features/voice/sessionState.ts",
     "src/features/voice/joinOrchestration.ts",
     "src/features/voice/joinBackoff.ts",
