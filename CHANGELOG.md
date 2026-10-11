@@ -53,6 +53,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 
+### Fixed
+
+**Server**
+
+- A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
