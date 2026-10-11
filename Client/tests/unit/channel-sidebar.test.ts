@@ -1004,13 +1004,15 @@ describe("ChannelSidebar", () => {
       camera: false,
       screenshare: false,
     });
+    // setSpeakers only applies to the channel the client is in; set it before
+    // mount so the later flip is speaking-only.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
     const rowBefore = container.querySelector('.voice-user-item[data-voice-uid="61"]');
     expect(rowBefore).not.toBeNull();
 
     // speaking-only flip → patched via the cached row map, not re-rendered
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     setSpeakers({ channel_id: 3, speakers: [61] });
     voiceStore.flush();
 
