@@ -9,8 +9,8 @@
  * H.264 there is slower than VP8.
  */
 
-import { loadPref } from "@lib/preferences";
-import { isLinuxDesktop } from "../features/voice/native/platform";
+import { loadPref } from "../../lib/preferences";
+import { isLinuxDesktop } from "./native/platform";
 
 export type VideoCodecPref = "vp8" | "h264" | "auto";
 export type PublishCodec = "vp8" | "h264";

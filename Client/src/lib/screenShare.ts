@@ -34,7 +34,7 @@ import {
 import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
-import { resolveVideoCodec } from "@lib/videoCodec";
+import { resolveVideoCodec } from "../features/voice/videoCodec";
 
 const log = createLogger("screenShare");
 

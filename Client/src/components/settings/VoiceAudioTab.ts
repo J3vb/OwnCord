@@ -30,7 +30,7 @@ import {
   nativeCameraSupport,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
-import { getVideoCodecPref } from "@lib/videoCodec";
+import { getVideoCodecPref } from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";

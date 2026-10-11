@@ -1,11 +1,11 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 
-const { getVideoCodecPref, pickAutoCodec, resolveVideoCodec } = await import("@lib/videoCodec");
+const { getVideoCodecPref, pickAutoCodec, resolveVideoCodec } = await import("./videoCodec");
 
 const encodingInfo = vi.fn();
 
