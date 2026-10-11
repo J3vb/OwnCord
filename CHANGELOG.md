@@ -58,9 +58,10 @@ and only when it changes something a contributor or fork holder must do
 **Server**
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+
 **Login & connection**
 
-- A failed local connection tunnel (`start_http_proxy`) now shows the normal "could not reach the server" error instead of a raw native message.
+- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
 
