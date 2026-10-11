@@ -567,15 +567,69 @@ function isInjectedInvoke(scope, name) {
   return false;
 }
 
+const PROMISE_COMBINATORS = new Set(["all", "allSettled", "race", "any"]);
+const TRANSPARENT_WRAPPERS = new Set([
+  "ChainExpression",
+  "TSAsExpression",
+  "TSNonNullExpression",
+  "TSSatisfiesExpression",
+]);
+
+/** The outermost expression that still carries the `invoke(...)` promise (or a
+ *  promise that rejects when it does): through a `.then`/`.finally` hop, a
+ *  type-only wrapper, or the array handed to Promise.all/allSettled/race/any.
+ *  `await` consumes the promise only when it awaits this node, so
+ *  `await [invoke(...)]` (an array resolves at once) does not. */
+function promiseCarrier(node) {
+  let carrier = node;
+  for (;;) {
+    const parent = carrier.parent;
+    if (TRANSPARENT_WRAPPERS.has(parent.type)) {
+      carrier = parent;
+    } else if (
+      parent.type === "MemberExpression" &&
+      parent.object === carrier &&
+      !parent.computed &&
+      parent.property.type === "Identifier" &&
+      (parent.property.name === "then" || parent.property.name === "finally") &&
+      parent.parent.type === "CallExpression" &&
+      parent.parent.callee === parent
+    ) {
+      carrier = parent.parent;
+    } else if (
+      parent.type === "ArrayExpression" &&
+      parent.parent.type === "CallExpression" &&
+      parent.parent.arguments[0] === parent &&
+      parent.parent.callee.type === "MemberExpression" &&
+      parent.parent.callee.object.type === "Identifier" &&
+      parent.parent.callee.object.name === "Promise" &&
+      parent.parent.callee.property.type === "Identifier" &&
+      PROMISE_COMBINATORS.has(parent.parent.callee.property.name)
+    ) {
+      carrier = parent.parent;
+    } else {
+      return carrier;
+    }
+  }
+}
+
+/** True when `arg` is a callback that can run, not an absent argument or a
+ *  literal nothing (`undefined`, `null`, `void 0`). */
+function isRejectionHandler(arg) {
+  if (arg === undefined) return false;
+  if (arg.type === "Literal") return arg.value !== null;
+  if (arg.type === "Identifier") return arg.name !== "undefined";
+  return !(arg.type === "UnaryExpression" && arg.operator === "void");
+}
+
 /** True when the rejection of the `invoke(...)` call `node` is handled in the
  *  function that makes the call. */
 function invokeIsGuarded(node) {
-  let awaited = false;
+  const awaited = promiseCarrier(node).parent.type === "AwaitExpression";
   let child = node;
   for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
     if (isFunctionNode(parent)) return false;
-    if (parent.type === "AwaitExpression") awaited = true;
-    else if (
+    if (
       parent.type === "MemberExpression" &&
       parent.object === child &&
       !parent.computed &&
@@ -584,7 +638,9 @@ function invokeIsGuarded(node) {
       parent.parent.callee === parent
     ) {
       const { name } = parent.property;
-      if (name === "catch" || (name === "then" && parent.parent.arguments.length >= 2)) return true;
+      const args = parent.parent.arguments;
+      if (name === "catch" && isRejectionHandler(args[0])) return true;
+      if (name === "then" && isRejectionHandler(args[1])) return true;
     } else if (parent.type === "TryStatement" && child === parent.block) {
       if (parent.handler !== null) return awaited;
     }

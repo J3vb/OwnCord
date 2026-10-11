@@ -512,6 +512,15 @@ describe("eslint-rules", () => {
             return null;
           }
         }`,
+        // The await still consumes the promise through a .then(ok) hop or a
+        // promise combinator, so the surrounding try/catch sees the rejection.
+        `async function f() {
+          try { await invoke("a").then(onOk); } catch (err) { log.warn("x", err); }
+        }`,
+        `async function f() {
+          try { await Promise.all([invoke("a"), invoke("b")]); } catch (err) { log.warn("x", err); }
+        }`,
+        `invoke("a").then(onOk, (err) => log.warn("x", err));`,
         // A promise chain that ends in a handler.
         `invoke("stop_livekit_proxy").catch((err) => log.warn("stop failed", err));`,
         `invoke("stop_livekit_proxy").then(onOk, onFail);`,
@@ -584,6 +593,23 @@ describe("eslint-rules", () => {
           }`,
           errors: [{ messageId: "bareInvoke" }],
         },
+        // A .catch / .then whose rejection callback is absent or a literal
+        // nothing (`undefined`, `null`, `void 0`) installs no handler.
+        ...[
+          `invoke("a").catch();`,
+          `invoke("a").catch(undefined);`,
+          `invoke("a").catch(null);`,
+          `invoke("a").then(onOk, undefined);`,
+          `invoke("a").then(onOk, null);`,
+          `invoke("a").then(onOk, void 0);`,
+        ].map((code) => ({ code, errors: [{ messageId: "bareInvoke" }] })),
+        // An await that does not consume the invoke promise: awaiting an array
+        // (or any value that merely contains the promise) resolves at once.
+        ...[
+          `async function f() { try { await [invoke("a")]; } catch {} }`,
+          `async function f() { try { await { p: invoke("a") }; } catch {} }`,
+          `async function f() { try { await Promise.resolve([invoke("a")]); } catch {} }`,
+        ].map((code) => ({ code, errors: [{ messageId: "bareInvoke" }] })),
         // A .then with no rejection handler, and a voided call.
         {
           code: `invoke("a").then(onOk);`,
