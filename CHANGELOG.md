@@ -58,14 +58,24 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
+- Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
 
 **Voice**
 
 - After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute ("You were removed from this voice channel"). You can now rejoin it straight away; channel permissions and bans still apply. Update the server and the desktop app together.
+- Someone's green speaking ring could stay lit after they stopped talking: in a channel you had left or switched away from, after they left or rejoined, or after your connection dropped. Rings now clear in those cases, and go dark as soon as the speaker mutes.
+- A voice reconnect you already left or replaced no longer asks for a new voice token, which could delay the live call's own refresh.
 
 **Server**
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
+- The periodic maintenance sweeps (signed-out session checks, stale voice cleanup, voice reconcile) could keep running into the database after the server began shutting down or restarting, and a stalled database could hold one forever — a sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it to finish. A delete that already went through is still announced, within its own short timeout.
+
+**Login & connection**
+
+- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
+- Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
+- A failed link open or native event registration is logged instead of raising an unhandled error.
 
 ## v2.2.0-beta.3
 

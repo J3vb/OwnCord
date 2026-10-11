@@ -76,13 +76,10 @@ func (s *voiceReconcileState) prune(live map[string]struct{}) {
 
 // reconcileVoiceMembership is the polling reconciler's entry point, run from
 // the hub's voice-reconcile ticker through startSweep.
-func (h *Hub) reconcileVoiceMembership() {
+func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 	if h.livekit == nil || h.voice == nil {
 		return
 	}
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
 	rows, err := h.voice.AllStates(ctx)
 	if err != nil {
 		slog.Warn("voice reconcile: AllStates failed", "err", err)
@@ -119,6 +116,9 @@ func (h *Hub) reconcileVoiceMembership() {
 	}
 
 	for channelID, roomRows := range byRoom {
+		if ctx.Err() != nil {
+			return
+		}
 		identities, listErr := h.livekit.ListParticipants(ctx, channelID)
 		if listErr != nil {
 			// A transient failure is not "the room is empty": treating it as
@@ -136,6 +136,9 @@ func (h *Hub) reconcileVoiceMembership() {
 		// Reap memberships whose SFU participant is gone, after the grace.
 		expected := make(map[string]struct{}, len(roomRows))
 		for _, row := range roomRows {
+			if ctx.Err() != nil {
+				return
+			}
 			id := participantIdentity(row.userID, row.joinedAt)
 			expected[id] = struct{}{}
 			if _, ok := present[id]; ok {
@@ -198,7 +201,9 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
 	c := h.GetClient(userID)
 	if c != nil && h.clearExactJoin(c, channelID, joinedAt) {
-		h.finishVoiceLeave(ctx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
+		defer cancelTail()
+		h.finishVoiceLeave(tailCtx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
 		return
 	}
 	// No client holds this exact instance (it left, reconnected, or moved).
@@ -215,10 +220,12 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	if !deleted {
 		return
 	}
-	h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, userID), userID)
+	tailCtx, cancelTail := h.sweepTailCtx(ctx)
+	defer cancelTail()
+	h.broadcastVoiceEventWithLeaver(tailCtx, channelID, buildVoiceLeave(channelID, userID), userID)
 	h.updateKeyHolder(channelID)
 	if h.livekit != nil {
-		_ = h.livekit.RemoveParticipant(ctx, channelID, userID, joinedAt)
+		_ = h.livekit.RemoveParticipant(tailCtx, channelID, userID, joinedAt)
 	}
 	slog.Warn("voice reconcile: reaped voice membership with no SFU participant",
 		"user_id", userID, "channel_id", channelID)

@@ -100,7 +100,7 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			h.sweepStaleVoiceStates()
+			h.sweepStaleVoiceStates(context.Background())
 		}()
 		wg.Wait()
 		if c.getVoiceChID() == 0 {

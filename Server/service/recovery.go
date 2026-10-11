@@ -159,7 +159,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 func (s *AuthService) RecoveryKitStatus(ctx context.Context, p Principal) (*RecoveryKitStatus, error) {
 	kit, err := s.st.GetRecoveryKit(ctx, p.User.ID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read the recovery kit", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to read the recovery kit: %w", ErrInternal, err)
 	}
 	if kit == nil {
 		return &RecoveryKitStatus{}, nil

@@ -61,7 +61,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 	}
 	defer func() { sweepStaleVoiceJoinRaceHook = nil }()
 
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 
 	gotChID, gotToken := c.getVoiceState()
 	if gotChID != chID || gotToken != vs.JoinedAt {

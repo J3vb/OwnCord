@@ -6,6 +6,8 @@ import {
   type RemoteParticipant,
   type Participant,
   type LocalTrackPublication,
+  type Room,
+  type TrackPublication,
   DisconnectReason,
 } from "livekit-client";
 import {
@@ -52,6 +54,19 @@ const SIGNAL_RESUME_BUDGET_MS = 10_000;
 const DECRYPT_QUIET_MS = 65_000;
 /** A speaker LiveKit drops stays lit this long, so a ring does not blink off between words. */
 const SPEAKER_HOLD_MS = 200;
+
+/** livekit-client keeps listing a participant who left (it skips the SFU's
+ *  "stopped" update for a sid it no longer knows), and the SFU's own update
+ *  trails a mute by a detection window. So a remote speaker counts only as
+ *  the room's current session for its identity, with the microphone on.
+ *  Native participants carry no sid, so both sides compare undefined. */
+function canBeSpeaking(room: Room, speaker: Participant): boolean {
+  if (speaker.identity === room.localParticipant.identity) return true;
+  const current = room.remoteParticipants.get(speaker.identity);
+  if (current === undefined || current.sid !== speaker.sid) return false;
+  const mic = current.getTrackPublication(Track.Source.Microphone);
+  return mic !== undefined && !mic.isMuted;
+}
 
 /** RT-9: the status a room that has just finished joining reports. The key
  *  can arrive over WS after the SFU dropped and livekit-client is already
@@ -136,6 +151,8 @@ export interface RoomEventHandlers {
   /** The room joined: the participants already in it publish no TrackPublished. */
   readonly handleConnected: (room: import("livekit-client").Room) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
+  readonly handleParticipantDisconnected: (participant: RemoteParticipant) => void;
+  readonly handleTrackMuted: (publication: TrackPublication, participant: Participant) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
   readonly handleSdkReconnecting: () => void;
@@ -230,6 +247,24 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       },
       Math.min(...speakerHoldUntil.values()) - now,
     );
+  }
+
+  /** A room that reconnected missed the "stopped" updates the SFU sent while
+   *  it was cut off, and the SFU repeats none of them: start the list over. */
+  function resetSpeakers(): void {
+    clearSpeakerHold();
+    const channelId = deps.getCurrentChannelId();
+    if (channelId !== null) setSpeakers({ channel_id: channelId, speakers: [] });
+  }
+
+  /** Muted or gone, a participant cannot be speaking: clear the ring now, with no hold. */
+  function dropSpeaker(participant: Participant): void {
+    const channelId = deps.getCurrentChannelId();
+    const userId = parseUserId(participant.identity);
+    if (channelId === null || (!liveSpeakers.has(userId) && !speakerHoldUntil.has(userId))) return;
+    liveSpeakers.delete(userId);
+    speakerHoldUntil.delete(userId);
+    publishSpeakers(channelId);
   }
 
   function removeAutoplayUnlock(): void {
@@ -348,11 +383,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
 
   const handleActiveSpeakersChanged = (speakers: Participant[]): void => {
     const channelId = deps.getCurrentChannelId();
-    if (channelId === null) return;
+    const room = deps.getRoom();
+    if (channelId === null || room === null) return;
     const live = new Set<number>();
     for (const speaker of speakers) {
       const userId = parseUserId(speaker.identity);
-      if (userId > 0) live.add(userId);
+      if (userId > 0 && canBeSpeaking(room, speaker)) live.add(userId);
     }
     const now = Date.now();
     for (const userId of liveSpeakers) {
@@ -362,6 +398,19 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
     liveSpeakers = live;
     publishSpeakers(channelId);
+  };
+
+  const handleParticipantDisconnected = (participant: RemoteParticipant): void => {
+    dropSpeaker(participant);
+  };
+
+  const handleTrackMuted = (publication: TrackPublication, participant: Participant): void => {
+    // Your own ring follows the mic gate and mute flags in voice.store.
+    if (
+      publication.source === Track.Source.Microphone &&
+      participant.identity !== deps.getRoom()?.localParticipant.identity
+    )
+      dropSpeaker(participant);
   };
 
   const handleAudioPlaybackChanged = (): void => {
@@ -395,6 +444,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     const channelId = deps.getCurrentChannelId();
     if (token === null || url === null || channelId === null) return false;
     const directUrl = deps.getLastDirectUrl();
+    resetSpeakers();
     // Clean up current room without sending WS leave (we're reconnecting, not leaving).
     deps.teardownForReconnect();
     removeAutoplayUnlock();
@@ -477,8 +527,11 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   };
   const handleSdkReconnected = (): void => {
     clearStallTimer();
-    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "reconnecting")
-      setVoiceStatus("connected");
+    const room = deps.getRoom();
+    if (room === null) return;
+    room.activeSpeakers = [];
+    resetSpeakers();
+    if (voiceStore.getState().voiceStatus === "reconnecting") setVoiceStatus("connected");
   };
 
   /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError
@@ -545,6 +598,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleTrackUnpublished,
     handleConnected,
     handleActiveSpeakersChanged,
+    handleParticipantDisconnected,
+    handleTrackMuted,
     handleAudioPlaybackChanged,
     handleDisconnected,
     handleSdkReconnecting,
