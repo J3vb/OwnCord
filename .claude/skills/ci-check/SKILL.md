@@ -35,6 +35,8 @@ go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml)
 go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
 go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/        # plain leg: serve_ready_alloc_test.go is !race && !deadlock
 golangci-lint run                        # CI pins v2.14.0 — check `golangci-lint --version` first
+golangci-lint run --enable-only nakedret,errorlint --build-tags otel,wazero ./...   # CI lints the tagged variants too (guardrail linters only)
+GOOS=windows golangci-lint run --enable-only nakedret,errorlint ./...
 
 # `ci.yml` also runs these three first, in `Server Lint & Invariants`, so they
 # report in seconds rather than after the race run. Mirroring them locally is

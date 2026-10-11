@@ -222,6 +222,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if opts.ReplayColdLimit > 0 {
 		h.coldReplayLimit = opts.ReplayColdLimit
 	}
+	h.life, h.stopLife = context.WithCancel(context.Background()) // the hub's own lifecycle, ended by closeStop
 
 	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})

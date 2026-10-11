@@ -901,6 +901,8 @@ export interface PresenceUpdatePayload {
 
 export interface VoiceJoinPayload {
   readonly channel_id: number;
+  /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
+  readonly user_initiated?: boolean;
 }
 
 /** Client → Server: leave current voice channel (no payload needed). */

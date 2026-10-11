@@ -1448,8 +1448,12 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 ### voice_join (Client -> Server)
 
 ```json
-{ "type": "voice_join", "payload": { "channel_id": 10 } }
+{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true } }
 ```
+
+`user_initiated` is optional: the client sets it when the user chose the join
+and omits it on automatic rejoins (voice reconnect, resume, `voice_moved`). It
+only exempts the join from a moderator's rejoin block (see `voice_mod_kick`).
 
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
@@ -1704,11 +1708,13 @@ broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
 call is being held for a reconnect is still removed, but gets no
 `voice_disconnected`; on resume it sees only the replayed `voice_leave`.
 
-For 60 seconds after any moderator kick or move, the server refuses a
-`voice_join` from the removed user to the channel it was removed from with
-`FORBIDDEN` ("You were removed from this voice channel"), so a client still
-reconnecting its voice cannot rejoin the call it was removed from. Other
-channels are unaffected.
+For 60 seconds after any moderator kick or move, the server refuses an
+automatic `voice_join` from the removed user to the channel it was removed from
+with `FORBIDDEN` ("You were removed from this voice channel"), so a client
+still reconnecting its voice cannot rejoin the call it was removed from. Other
+channels are unaffected. A `voice_join` with `"user_initiated": true` (the
+user's own click) is never refused this way and clears the block; the normal
+join checks (permissions, bans, archive, capacity) still apply.
 
 ### voice_disconnected (Server -> Client, direct)
 

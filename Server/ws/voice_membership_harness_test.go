@@ -598,7 +598,7 @@ func (h *vmHarness) stashSurvivesJoinFailure(m *vmMember, fullCh int64) {
 func (h *vmHarness) sweep() {
 	h.step++
 	h.t.Helper()
-	h.hub.sweepStaleVoiceStates()
+	h.hub.sweepStaleVoiceStates(context.Background())
 	if ghost := h.ghostRow(); ghost != "" {
 		h.failf("sweep left a ghost: %s", ghost)
 	}

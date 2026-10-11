@@ -161,6 +161,12 @@ export async function attemptAutoReconnect(
       // D-4: no attempt starts past the ceiling, and none waits on a chat
       // socket closed for good or a channel that is already gone.
       if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
+      // A loop superseded by its failed attempt must not touch the shared token
+      // waiter: that would spend the live session's refresh budget.
+      if (superseded()) {
+        log.info("Auto-reconnect aborted — user left or channel changed");
+        return;
+      }
       // OC-0014: the attempt after this delay must carry a live token.
       if (deps.serverMembership() === "held" && deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
         // oxlint-disable-next-line no-await-in-loop -- the attempt must wait for the fresh token it connects with

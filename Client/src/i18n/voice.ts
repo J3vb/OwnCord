@@ -103,6 +103,10 @@ export const voiceText = defineCatalog("voice", {
   "tile.popIn": "Bring back",
   "tile.poppedOut": "Playing in a pop-out window",
   "tile.popoutTitle": "{name} — OwnCord",
+  "mini.label": "{name}'s stream, mini player",
+  "mini.hint":
+    "Drag it or use the arrow keys to move it. Enter or a double-click returns to the stream.",
+  "mini.return": "Return to stream",
   "tile.callControls": "Call controls",
   "tile.leaveCall": "Leave call",
   "tile.stats": "Stream info",

@@ -76,11 +76,13 @@ func (s *MessageService) dispatchMentionBadges(bgCtx context.Context, job mentio
 		w.enqueue(job)
 		return
 	}
+	ctx, cancel := context.WithTimeout(bgCtx, backgroundJobTimeout)
 	s.bg(func() {
-		entries := job.apply(bgCtx)
+		defer cancel()
+		entries := job.apply(ctx)
 		if len(entries) == 0 {
 			return
 		}
-		s.emitIncrement(bgCtx, job.channelID, entries)
+		s.emitIncrement(ctx, job.channelID, entries)
 	})
 }

@@ -123,6 +123,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 		var err error
 		shown, canonical, err = auth.GenerateRecoveryKitSecret()
 		if err != nil {
+			slog.Error("recovery kit: secret generation failed", "err", err, "user_id", user.ID)
 			return nil, ErrRecoveryKitFailed
 		}
 	}
@@ -136,6 +137,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 	verifier, err := auth.HashRecoveryKitSecret(canonical)
 	release()
 	if err != nil {
+		slog.Error("recovery kit: verifier hashing failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveryKitFailed
 	}
 	if err := s.st.UpsertRecoveryKit(ctx, user.ID, verifier); err != nil {
@@ -144,6 +146,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 	}
 	kit, err := s.st.GetRecoveryKit(ctx, user.ID)
 	if err != nil || kit == nil {
+		slog.Error("recovery kit: read-back failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveryKitFailed
 	}
 	slog.Info("recovery kit issued", "user_id", user.ID, "client_generated", shown == "")
@@ -159,7 +162,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 func (s *AuthService) RecoveryKitStatus(ctx context.Context, p Principal) (*RecoveryKitStatus, error) {
 	kit, err := s.st.GetRecoveryKit(ctx, p.User.ID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read the recovery kit", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to read the recovery kit: %w", ErrInternal, err)
 	}
 	if kit == nil {
 		return &RecoveryKitStatus{}, nil
@@ -252,6 +255,7 @@ func (s *AuthService) recoverAdmitted(ctx context.Context, in RecoverInput, targ
 	}
 	newHash, err := auth.HashPassword(in.NewPassword)
 	if err != nil {
+		slog.Error("recovery: new password hashing failed", "err", err)
 		return auth.RecoverySecretMalformed, "", ErrPasswordHash
 	}
 	return kind, newHash, nil
@@ -298,6 +302,7 @@ func (s *AuthService) compareRecoverySecret(target recoveryTarget, secret string
 	canonical, kind := auth.NormalizeRecoverySecret(secret)
 	verifier, err := auth.DummyRecoveryKitVerifier()
 	if err != nil {
+		slog.Error("recovery: dummy verifier unavailable", "err", err)
 		return auth.RecoverySecretMalformed, ErrRecoveryFailed
 	}
 	held := false
@@ -365,6 +370,7 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 	}
 	fresh, err := s.st.GetUserByID(ctx, user.ID)
 	if err != nil || fresh == nil {
+		slog.Error("recovery: re-reading the user after redeem failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveryFailed
 	}
 	slog.Info("account recovered", "via", via, "user_id", user.ID, "ip", in.IP, "sessions_revoked", revoked)
@@ -442,10 +448,12 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 	}
 	shown, canonical, err := auth.GenerateRecoveryAssistSecret()
 	if err != nil {
+		slog.Error("recovery assist: secret generation failed", "err", err)
 		return nil, ErrRecoveryAssistFailed
 	}
 	verifier, err := auth.HashRecoveryKitSecret(canonical)
 	if err != nil {
+		slog.Error("recovery assist: verifier hashing failed", "err", err)
 		return nil, ErrRecoveryAssistFailed
 	}
 	expires := time.Now().Add(recoveryAssistTTL)

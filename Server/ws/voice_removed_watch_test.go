@@ -162,8 +162,8 @@ func TestRemovedIdentities_RecordExtendsExpiry(t *testing.T) {
 	}
 }
 
-// TestVoiceRemovedWatch_KeepsLiveMembership: an identity whose voice_states
-// row still names it is left in the room, and stays remembered.
+// TestVoiceRemovedWatch_KeepsLiveMembership: an identity whose user's
+// connection is still in that join is left in the room, and stays remembered.
 func TestVoiceRemovedWatch_KeepsLiveMembership(t *testing.T) {
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
@@ -198,5 +198,52 @@ func TestVoiceRemovedWatch_RunningHubRemovesWithoutManualTick(t *testing.T) {
 			t.Fatalf("watch loop left %q in the room for %v", identity, 3*voiceRemovedWatchInterval)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestVoiceRemovedWatch_StoredRowAloneDoesNotKeepIdentity: once the
+// connection has left the join, a voice_states row still naming it does not
+// keep the identity in the room.
+func TestVoiceRemovedWatch_StoredRowAloneDoesNotKeepIdentity(t *testing.T) {
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chID, identity := joinedIdentity(t, h, alice, "watch-stored-row")
+	_, token := alice.c.getVoiceState()
+
+	alice.c.setVoiceState(0, "")
+	h.hub.livekit.removed.record(chID, alice.userID, token)
+	h.watchTick()
+	if h.sfu.has(RoomName(chID), identity) {
+		t.Fatalf("a stored row kept %q in the room after its connection left", identity)
+	}
+}
+
+// TestRemovedIdentities_MintExtendsExpiry: a token minted for a remembered
+// identity restarts its window, so the window outlasts that token.
+func TestRemovedIdentities_MintExtendsExpiry(t *testing.T) {
+	start := time.Now()
+	now := start
+	lk := &LiveKitClient{apiKey: "test-key", apiSecret: "test-secret-at-least-32-bytes-long"}
+	lk.removed.now = func() time.Time { return now }
+
+	lk.removed.record(7, 42, "tok")
+	now = start.Add(tokenTTL - time.Second)
+	if _, err := lk.GenerateToken(42, "u", 7, "tok", true, false, false); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	now = start.Add(tokenTTL + time.Second)
+	if len(lk.removed.snapshot()) != 1 {
+		t.Fatal("a token minted for a remembered identity did not restart its window")
+	}
+}
+
+// TestRemovedIdentities_MintLeavesOthersAlone: minting never adds an entry.
+func TestRemovedIdentities_MintLeavesOthersAlone(t *testing.T) {
+	lk := &LiveKitClient{apiKey: "test-key", apiSecret: "test-secret-at-least-32-bytes-long"}
+	if _, err := lk.GenerateToken(42, "u", 7, "tok", true, false, false); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if lk.removed.pending() {
+		t.Fatal("minting a token remembered an identity nobody removed")
 	}
 }

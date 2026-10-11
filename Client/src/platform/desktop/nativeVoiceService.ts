@@ -18,6 +18,10 @@ import type {
   NativeVoiceScreenStarted,
 } from "../contracts/nativeVoice";
 
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("nativeVoiceService");
+
 export const NATIVE_VOICE_EVENT = "native-voice";
 
 export const nativeVoice: NativeVoice = {
@@ -69,10 +73,12 @@ export const nativeVoice: NativeVoice = {
     let unlisten: (() => void) | null = null;
     void listen<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, (e) => {
       if (active) handler(e.payload);
-    }).then((stop) => {
-      if (active) unlisten = stop;
-      else stop();
-    });
+    })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((err: unknown) => log.warn("native-voice listen failed", err));
     return () => {
       active = false;
       unlisten?.();

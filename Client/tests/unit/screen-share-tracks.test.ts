@@ -12,7 +12,7 @@
  * test would sail straight past.
  */
 
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import process from "node:process";
 import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
@@ -1428,8 +1428,7 @@ describe("video lifecycle across pending publication and session changes", () =>
     const deps = fakeDeps(rig.room);
     const state = { manualScreenTracks: [] as LocalTrack[] };
     const enabling = enableScreenshare(state, deps);
-    await Promise.resolve();
-    expect(rig.publishTrack).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(rig.publishTrack).toHaveBeenCalledTimes(1));
     Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "ended" });
     (video.mediaStreamTrack as unknown as { dispatch: (name: string) => void }).dispatch("ended");
     finishPublish();
@@ -1501,4 +1500,177 @@ it("detaches the previous share's ended listener before a replacement becomes li
   expect(next.stop).not.toHaveBeenCalled();
   expect(voiceStore.getState().localScreenshare).toBe(true);
   expect(deps.wsSend).not.toHaveBeenCalled();
+});
+
+// ── video codec ────────────────────────────────────────────────────────────
+
+describe("video codec", () => {
+  /** Saved prefs by key; anything unsaved reads as its fallback. */
+  function prefs(saved: Record<string, unknown>): void {
+    loadPref.mockImplementation((key: string, fallback: unknown) =>
+      key in saved ? saved[key] : fallback,
+    );
+  }
+
+  /** A captured video track whose settings report 1920x1080. */
+  function capturedVideoTrack(): ReturnType<typeof fakeVideoTrack> {
+    const track = fakeVideoTrack();
+    (track.mediaStreamTrack as unknown as { getSettings: () => MediaTrackSettings }).getSettings =
+      () => ({ width: 1920, height: 1080 });
+    return track;
+  }
+
+  const encodingInfo = vi.fn();
+  let getContext: { mockRestore(): void } | undefined;
+  beforeEach(() => {
+    encodingInfo.mockReset();
+    Object.defineProperty(navigator, "mediaCapabilities", {
+      value: { encodingInfo },
+      configurable: true,
+    });
+    // Auto's GPU check: a non-Intel GPU, so a hardware probe can pick H.264.
+    const UNMASKED_RENDERER_WEBGL = 0x9246;
+    getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      getExtension: (name: string) =>
+        name === "WEBGL_debug_renderer_info" ? { UNMASKED_RENDERER_WEBGL } : null,
+      getParameter: () => "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11)",
+    } as unknown as WebGLRenderingContext);
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "mediaCapabilities");
+    getContext?.mockRestore();
+  });
+
+  it("publishes the camera as VP8 by default", async () => {
+    prefs({});
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      videoCodec: "vp8",
+    });
+  });
+
+  it("publishes the camera with the saved codec", async () => {
+    prefs({ videoCodec: "h264" });
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      videoCodec: "h264",
+    });
+  });
+
+  it("publishes the screen share's video with the saved codec, audio without", async () => {
+    prefs({ videoCodec: "h264" });
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    expect(videoOpts).toMatchObject({ videoCodec: "h264" });
+    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+    expect(audioOpts).not.toHaveProperty("videoCodec");
+  });
+
+  it("on Auto probes the camera at its captured size, 30 fps and preset bitrate", async () => {
+    prefs({ videoCodec: "auto" });
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(capturedVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(encodingInfo).toHaveBeenCalledWith({
+      type: "webrtc",
+      video: expect.objectContaining({
+        width: 1920,
+        height: 1080,
+        framerate: 30,
+        bitrate: 1_700_000,
+      }),
+    });
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "h264" });
+  });
+
+  it("on Auto probes the screen share at its own frame rate and bitrate, separately from the camera", async () => {
+    prefs({ videoCodec: "auto", screenShareQuality: "high", screenShareFps: 120 });
+    encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+    const rig = fakeRoom();
+    const video = capturedVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(encodingInfo).toHaveBeenCalledTimes(1);
+    expect(encodingInfo).toHaveBeenCalledWith({
+      type: "webrtc",
+      video: expect.objectContaining({
+        width: 1920,
+        height: 1080,
+        framerate: 120,
+        bitrate: 12_000_000,
+      }),
+    });
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
+  });
+
+  it("does not publish a camera turned off while Auto's probe is pending", async () => {
+    prefs({ videoCodec: "auto" });
+    let answer!: (info: MediaCapabilitiesInfo) => void;
+    encodingInfo.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const rig = fakeRoom();
+    const track = capturedVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+    const deps = fakeDeps(rig.room);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => expect(encodingInfo).toHaveBeenCalled());
+    await disableCamera(state, deps);
+    answer({ supported: true, smooth: true, powerEfficient: true });
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+    expect(track.stop).toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
+
+  it("does not publish a screen share ended while Auto's probe is pending", async () => {
+    prefs({ videoCodec: "auto" });
+    let answer!: (info: MediaCapabilitiesInfo) => void;
+    encodingInfo.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const rig = fakeRoom();
+    const video = capturedVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    const deps = fakeDeps(rig.room);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    const enabling = enableScreenshare(state, deps);
+    await vi.waitFor(() => expect(encodingInfo).toHaveBeenCalled());
+    await disableScreenshare(state, deps);
+    answer({ supported: true, smooth: true, powerEfficient: true });
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: true },
+    });
+    expect(video.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
 });

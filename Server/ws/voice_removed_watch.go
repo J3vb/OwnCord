@@ -59,6 +59,19 @@ func (s *removedIdentities) record(channelID, userID int64, token string) {
 	s.entries[participantIdentity(userID, token)] = removedIdentity{channelID: channelID, userID: userID, token: token, until: s.clock().Add(tokenTTL)}
 }
 
+// extend restarts the window of an identity that is still remembered. Called
+// when another token is minted for it, so the window covers that token too.
+func (s *removedIdentities) extend(identity string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[identity]
+	if !ok {
+		return
+	}
+	e.until = s.clock().Add(tokenTTL)
+	s.entries[identity] = e
+}
+
 // pending reports whether any unexpired identity is remembered.
 func (s *removedIdentities) pending() bool {
 	s.mu.Lock()
@@ -86,11 +99,15 @@ func (s *removedIdentities) snapshot() map[int64]map[string]removedIdentity {
 }
 
 // runRemovedVoiceWatch checks remembered identities every
-// voiceRemovedWatchInterval until the hub stops. Started once by Run; a tick
-// with nothing remembered does no work.
+// voiceRemovedWatchInterval until the hub stops. Run starts it once on
+// h.sweeps, so Done waits for it; a tick with nothing remembered does no work.
 func (h *Hub) runRemovedVoiceWatch() {
 	if h.livekit == nil {
 		return
+	}
+	life := h.life
+	if life == nil {
+		life = context.Background()
 	}
 	ticker := time.NewTicker(voiceRemovedWatchInterval)
 	defer ticker.Stop()
@@ -102,8 +119,8 @@ func (h *Hub) runRemovedVoiceWatch() {
 			if !h.livekit.removed.pending() {
 				continue
 			}
-			// Hub-lifecycle loop — no request tie; each tick is bounded.
-			ctx, cancel := context.WithTimeout(context.Background(), voiceRemovedWatchTimeout)
+			// Each tick is bounded and ends early when the hub stops.
+			ctx, cancel := context.WithTimeout(life, voiceRemovedWatchTimeout)
 			h.enforceRemovedVoiceIdentities(ctx)
 			cancel()
 		}
@@ -127,18 +144,10 @@ func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			if h.voice != nil {
-				row, stateErr := h.voice.State(ctx, e.userID)
-				if stateErr != nil {
-					slog.Warn("voice removed watch: reading voice state failed, retrying next tick",
-						"err", stateErr, "user_id", e.userID, "channel_id", channelID)
-					continue
-				}
-				if row != nil && row.ChannelID == channelID && row.JoinedAt == e.token {
-					// A live membership names this identity: leave it alone
-					// this tick, without forgetting it.
-					continue
-				}
+			if h.holdsVoiceJoin(e.userID, channelID, e.token) {
+				// The user's connection is in this exact join: leave it
+				// alone this tick, without forgetting it.
+				continue
 			}
 			if err := h.livekit.removeIdentity(ctx, channelID, id); err != nil {
 				slog.Warn("voice removed watch: removing participant failed, retrying next tick",
@@ -149,4 +158,19 @@ func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context) {
 				"user_id", e.userID, "channel_id", channelID)
 		}
 	}
+}
+
+// holdsVoiceJoin reports whether userID's connection is in the join that
+// token names. Every eviction clears the connection's voice state before it
+// removes the SFU identity, so a stored voice_states row that outlived its
+// teardown does not count.
+func (h *Hub) holdsVoiceJoin(userID, channelID int64, token string) bool {
+	h.mu.RLock()
+	c := h.clients[userID]
+	h.mu.RUnlock()
+	if c == nil {
+		return false
+	}
+	chID, joinToken := c.getVoiceState()
+	return chID == channelID && joinToken == token
 }

@@ -146,6 +146,7 @@ func (c *LiveKitClient) GenerateToken(
 	if err != nil {
 		return "", fmt.Errorf("livekit: generating token: %w", err)
 	}
+	c.removed.extend(identity)
 
 	slog.Debug("livekit: generated token",
 		"identity", identity,
