@@ -251,7 +251,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
-		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
+		if !h.handleVoiceLeaveIfStillIn(context.WithoutCancel(ctx), c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
 		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
@@ -341,7 +341,8 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		h.broadcastVoiceEvent(ctx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
+		tailCtx := context.WithoutCancel(ctx)
+		h.broadcastVoiceEvent(tailCtx, s.channelID, s.userID, buildVoiceLeave(s.channelID, s.userID))
 		// Re-elect the key holder now that this ghost row is gone — every
 		// other path that removes a voice participant does this
 		// (finishVoiceLeave, the LiveKit webhook, registerNow,
@@ -353,7 +354,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		// the webhook call site.
 		h.updateKeyHolder(s.channelID)
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
+			_ = h.livekit.RemoveParticipant(tailCtx, s.channelID, s.userID, s.joinedAt)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -252,5 +253,55 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 	}
 	if !h.SubscribedToVoiceTopicForTest(c, chB) {
 		t.Error("client lost its new channel's voice-topic subscription to a concurrent CleanupVoiceForChannel clear")
+	}
+}
+
+type cancelAfterLeaveStore struct {
+	VoiceStore
+	cancel context.CancelFunc
+}
+
+func (s cancelAfterLeaveStore) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
+	deleted, err := s.VoiceStore.LeaveIfMatch(ctx, userID, channelID, joinedAt)
+	s.cancel()
+	return deleted, err
+}
+
+// A sweep whose ctx ends right after the ghost delete commits must still
+// announce the voice_leave: the row is gone, so no later sweep would.
+func TestSweepStaleVoiceStates_CommittedGhostDeleteStillBroadcastsAfterCancel(t *testing.T) {
+	database := newHarvestVoiceDB(t)
+	ghostUID := seedHarvestVoiceUser(t, database, "sweep-cancel-ghost")
+	survivorUID := seedHarvestVoiceUser(t, database, "sweep-cancel-survivor")
+	chID := mustCreateVoiceChannel(t, database, "voice-cancel-ghost")
+	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
+	}
+
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	send := make(chan []byte, 8)
+	survivor := NewTestClient(h, survivorUID, send)
+	survivor.setVoiceState(chID, "tok-survivor")
+	h.clients[survivorUID] = survivor
+	h.pubsub.Subscribe(survivor, VoiceTopic(chID))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.voice = cancelAfterLeaveStore{VoiceStore: h.voice, cancel: cancel}
+	go h.Run()
+	defer h.Stop()
+
+	h.sweepStaleVoiceStates(ctx)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case m := <-send:
+			if strings.Contains(string(m), "voice_leave") {
+				return
+			}
+		case <-deadline:
+			t.Fatal("voice_leave was not delivered after the sweep ctx ended post-commit")
+		}
 	}
 }

@@ -195,7 +195,7 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
 	c := h.GetClient(userID)
 	if c != nil && h.clearExactJoin(c, channelID, joinedAt) {
-		h.finishVoiceLeave(ctx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
+		h.finishVoiceLeave(context.WithoutCancel(ctx), c, channelID, joinedAt, voiceLeaveReasonReconciled)
 		return
 	}
 	// No client holds this exact instance (it left, reconnected, or moved).
@@ -212,10 +212,11 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	if !deleted {
 		return
 	}
-	h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, userID), userID)
+	tailCtx := context.WithoutCancel(ctx)
+	h.broadcastVoiceEventWithLeaver(tailCtx, channelID, buildVoiceLeave(channelID, userID), userID)
 	h.updateKeyHolder(channelID)
 	if h.livekit != nil {
-		_ = h.livekit.RemoveParticipant(ctx, channelID, userID, joinedAt)
+		_ = h.livekit.RemoveParticipant(tailCtx, channelID, userID, joinedAt)
 	}
 	slog.Warn("voice reconcile: reaped voice membership with no SFU participant",
 		"user_id", userID, "channel_id", channelID)
