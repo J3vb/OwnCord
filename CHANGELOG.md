@@ -47,6 +47,8 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
 **Accounts & admin**
 
 - The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
@@ -56,6 +58,7 @@ and only when it changes something a contributor or fork holder must do
 **Updates**
 
 - A server update shows one restart countdown instead of two.
+
 ### Fixed
 
 **Accounts & admin**
