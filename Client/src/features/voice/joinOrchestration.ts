@@ -474,7 +474,11 @@ export class JoinOrchestration {
 
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
-        this.host.restateSelfVoiceState();
+        // A join the user already switched away from leaves the restate to
+        // the switch's own join.
+        if (voiceStore.getState().currentChannelId === channelId) {
+          this.host.restateSelfVoiceState();
+        }
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);

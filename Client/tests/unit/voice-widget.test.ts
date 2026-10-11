@@ -1102,6 +1102,64 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("re-enables mute and deafen once a moderator restriction is lifted", () => {
+    setVoiceChannel(1, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: true,
+      localServerDeafened: true,
+    }));
+    voiceStore.flush();
+    expect(muteBtn.disabled).toBe(true);
+    expect(deafenBtn.disabled).toBe(true);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: false,
+      localServerDeafened: false,
+    }));
+    voiceStore.flush();
+    expect(muteBtn.disabled).toBe(false);
+    expect(muteBtn.title).toBe("");
+    expect(deafenBtn.disabled).toBe(false);
+    expect(deafenBtn.title).toBe("");
+
+    widget.destroy?.();
+  });
+
+  it("keeps mute disabled for a moderator mute while the socket is down", () => {
+    setVoiceChannel(1, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+    voiceStore.flush();
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+
+    widget.destroy?.();
+  });
+
   it("re-enables voice controls when the WS socket reconnects", () => {
     setVoiceChannel(1, []);
 

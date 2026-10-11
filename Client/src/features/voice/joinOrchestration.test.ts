@@ -168,6 +168,7 @@ describe("connectAndSetup", () => {
   });
 
   it("restates the member's own mute and deafen once the join is connected", async () => {
+    store.currentChannelId = 6;
     const { host, join } = setup();
 
     await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
@@ -176,6 +177,15 @@ describe("connectAndSetup", () => {
     expect(host.restateSelfVoiceState.mock.invocationCallOrder[0]).toBeGreaterThan(
       host.restoreLocalVoiceState.mock.invocationCallOrder[0] ?? Infinity,
     );
+  });
+
+  it("leaves the restate to the switch when the user already moved on", async () => {
+    store.currentChannelId = 99;
+    const { host, join } = setup();
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
+
+    expect(host.restateSelfVoiceState).not.toHaveBeenCalled();
   });
 
   it("does not restate for a join that fails", async () => {

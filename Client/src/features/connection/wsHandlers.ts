@@ -18,6 +18,12 @@ import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
 
+/** A join still in flight restates itself when it connects; an error frame
+ *  for a send made before then would roll that join back. */
+function isSettledVoiceStatus(status: string): boolean {
+  return status === "connected" || status === "reconnecting" || status === "securing";
+}
+
 export function handleAuthOk(
   ws: DispatchWs,
   clock: ReconnectClock,
@@ -50,7 +56,7 @@ export function handleAuthOk(
   // is restated here; a full flow restates from ready instead.
   if (
     (payload.replay_source === "buffer" || payload.replay_source === "db") &&
-    voiceStore.getState().voiceStatus !== "idle"
+    isSettledVoiceStatus(voiceStore.getState().voiceStatus)
   ) {
     restateSelfVoiceState(ws);
   }

@@ -79,6 +79,15 @@ describe("handleAuthOk", () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
+    it("sends nothing while a join is still in flight", () => {
+      setVoiceStatus("joining");
+      const ws = socketStub();
+
+      handleAuthOk(ws, createReconnectClock(), resumed);
+
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
     it("sends nothing with no voice session", () => {
       setVoiceStatus("idle");
       const ws = socketStub();

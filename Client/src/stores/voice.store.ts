@@ -92,7 +92,7 @@ export interface VoiceState {
   readonly moderatorDeafened?: boolean;
   /** The member was already muted when they deafened, so undeafening restores
    *  that mute instead of lifting it. Written by the widget's deafen toggle and
-   *  cleared by any undeafen. Like localDeafened it outlives a leave, so a
+   *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
    *  re-join restates the same pair. Optional for the fixture reason above. */
   readonly mutedBeforeDeafen?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —

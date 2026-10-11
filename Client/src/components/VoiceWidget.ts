@@ -307,6 +307,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       btn.disabled = frozen;
       btn.title = frozen ? reason : "";
     }
+    // render() tightens these again for a moderator restriction or listen-only
+    // mode; resetting here is what lets a lifted restriction re-enable them.
+    for (const btn of [muteBtn, deafenBtn]) {
+      if (btn === null) continue;
+      btn.disabled = false;
+      btn.title = "";
+    }
     // Camera and share need the room, which exists only once the join has
     // connected; before that the press would bounce off (D-08).
     const joining = isConnecting(voiceStore.getState().voiceStatus);
@@ -386,8 +393,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       if (pttGated) {
         muteBtn.title = t("widget.control.pttGated");
       }
-      // Only ever tighten: updateFrozen ran above and owns the socket-down
-      // disable, which must not be relaxed here.
+      // Only ever tighten: updateFrozen ran above and reset the button.
       if (serverMuted) {
         muteBtn.disabled = true;
         muteBtn.title = t("widget.mutedByModerator");
