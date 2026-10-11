@@ -128,6 +128,8 @@ check, `DisconnectIfSessionRevoked`, after a password or 2FA change or a
 session revoke), stale-voice-state sweep (60s),
 LiveKit membership reconciler (60s, `voice_reconcile.go`; see
 [livekit-setup.md](../livekit-setup.md)),
+each sweep runs on a per-sweep timeout under the hub's lifecycle context, so `Stop`
+cancels it and `Done()` waits for it (`hub_sweep.go`, `hub_stop.go`),
 panic containment on the run loop (3 panics/60s, or one Windows memory fault
 (SRE-08) → stop and exit), LiveKit client and
 optional managed subprocess, and the voice E2EE key-holder map
