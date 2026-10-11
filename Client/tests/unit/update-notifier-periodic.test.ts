@@ -130,6 +130,31 @@ describe("createUpdateNotifier while the app keeps running", () => {
     expect(bannerText()).toBe("Update v2.1.0 available");
   });
 
+  it("offers a newer version after a retryable download failure, even once the failure is dismissed", async () => {
+    let push!: (state: UpdateInstallState) => void;
+    mockSubscribeToUpdateInstall.mockImplementation(
+      (listener: (state: UpdateInstallState) => void) => {
+        push = listener;
+        listener({ status: "idle" });
+        return vi.fn();
+      },
+    );
+    notifier.destroy?.();
+    host.replaceChildren();
+    notifier = createUpdateNotifier({ serverUrl: "https://s.example", keepChecking: true });
+    notifier.mount(host);
+
+    mockCheckForUpdate.mockResolvedValue(update("2.0.0"));
+    await vi.advanceTimersByTimeAsync(3000);
+    push({ status: "failed", restartRequired: false });
+    click(".update-banner-later");
+    expect(banners()).toBe(0);
+
+    mockCheckForUpdate.mockResolvedValue(update("2.1.0"));
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    expect(bannerText()).toBe("Update v2.1.0 available");
+  });
+
   it("a manual check shows the banner again even for a dismissed version", async () => {
     mockCheckForUpdate.mockResolvedValue(update("2.0.0"));
     await vi.advanceTimersByTimeAsync(3000);

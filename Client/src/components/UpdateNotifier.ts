@@ -67,8 +67,15 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (liveRegion !== null && liveRegion.textContent !== text) setText(liveRegion, text);
   }
 
+  function installBusy(): boolean {
+    return (
+      installState.status !== "idle" &&
+      !(installState.status === "failed" && !installState.restartRequired)
+    );
+  }
+
   function handleOutcome(outcome: UpdateOutcome, reason: UpdateCheckReason): void {
-    if (installState.status !== "idle") return;
+    if (installBusy()) return;
     const key =
       outcome.kind === "available"
         ? outcome.version
@@ -269,7 +276,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     // Delay the first check slightly so the main UI renders first
     checkTimer = setTimeout(() => {
       checkTimer = null;
-      if (installState.status === "idle") void checker.checkNow("startup");
+      if (!installBusy()) void checker.checkNow("startup");
     }, 3000);
   }
 
