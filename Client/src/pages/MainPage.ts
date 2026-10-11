@@ -1569,7 +1569,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // update re-seats the grid through onVideoHostChange).
     const showChatFor = (active: { id: number; type: string }): void => {
       const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat();
+      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
     };
     // A click on the channel already open under the stream view changes no
     // store, so the subscriber below never sees it.

@@ -48,8 +48,10 @@ export interface VideoModeControllerOptions {
 export interface VideoModeController {
   /** Re-evaluate whether video mode should be active based on voice store state. */
   checkVideoMode(): void;
-  /** Force switch to chat mode. */
-  showChat(): void;
+  /** Force switch to chat mode. `keepWatching` (going to a text channel)
+   *  keeps the watched stream playing in the mini-player; without it (the
+   *  grid's own Show chat control) the stream stops showing. */
+  showChat(opts?: { keepWatching?: boolean }): void;
   /** Force switch to video grid mode. */
   showVideoGrid(): void;
   /** Whether video grid is currently visible. */
@@ -157,7 +159,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     videoGrid.setExitVisible(false);
   }
 
-  function showChat(): void {
+  function showChat(how?: { keepWatching?: boolean }): void {
     // The user asked for chat (switching to a text channel) while still
     // broadcasting — remember it, or checkVideoMode() drags them back into
     // the grid the next time any peer toggles a camera (v048).
@@ -167,7 +169,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     }
     // The stream being watched keeps playing in the mini-player (Discord's),
     // picked while the grid still knows which tile is focused.
-    if (videoMode) videoGrid.showMiniPlayer();
+    if (videoMode && how?.keepWatching === true) videoGrid.showMiniPlayer();
     closeVideoGrid();
   }
 

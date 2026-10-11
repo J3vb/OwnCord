@@ -41,6 +41,7 @@ export const shards = {
     "src/features/voice/peerVerification.ts",
     "src/features/voice/uiSounds.ts",
     "src/features/voice/popout.ts",
+    "src/features/voice/miniPlayer.ts",
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",

@@ -163,7 +163,8 @@ a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first 
 moves in, as with Pop out). It shows the streamer's name, drags (or moves with the arrow keys) anywhere
 inside the window and keeps that spot for the session; **Return to stream** (or a double-click or
 Enter) reopens the stream view, Pop out moves it to its window, Stop watching ends the watch, and it
-closes when the stream ends. The
+closes when the stream ends. The grid's own **Show chat** control still closes the stream view
+without a mini-player, so the stream stops receiving video as before. The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
