@@ -38,6 +38,10 @@ type LiveKitClient struct {
 	apiSecret string
 	url       string
 	roomSvc   *lksdk.RoomServiceClient
+
+	// removed holds identities RemoveParticipant removed, kept removed for
+	// tokenTTL by the hub's watch (voice_removed_watch.go).
+	removed removedIdentities
 }
 
 // NewLiveKitClient creates a new LiveKit client from the voice config.
@@ -238,10 +242,17 @@ func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error)
 	return ids, nil
 }
 
-// RemoveParticipant forcefully disconnects a participant from a room.
+// RemoveParticipant forcefully disconnects a participant from a room and
+// keeps that exact identity out of the room until any token minted for it
+// has expired (voice_removed_watch.go).
 func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
+	c.removed.record(channelID, userID, voiceJoinToken)
+	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
+}
+
+// removeIdentity disconnects one exact identity from a channel's room.
+func (c *LiveKitClient) removeIdentity(ctx context.Context, channelID int64, identity string) error {
 	roomName := RoomName(channelID)
-	identity := participantIdentity(userID, voiceJoinToken)
 
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()

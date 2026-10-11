@@ -234,6 +234,7 @@ func (h *Hub) Run() {
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
+	go h.runRemovedVoiceWatch()
 	var panicCount int
 	var lastPanicReset time.Time
 

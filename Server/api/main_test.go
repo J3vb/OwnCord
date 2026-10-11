@@ -18,5 +18,6 @@ func TestMain(m *testing.M) {
 		// API tests create routers (which start hubs) but don't always call
 		// Stop() — these are expected background goroutines, not leaks.
 		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).Run.func1"),
+		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).runRemovedVoiceWatch"),
 	)
 }
