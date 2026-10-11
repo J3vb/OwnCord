@@ -11,6 +11,7 @@ import {
   setListenOnly,
   setVoiceStatus,
   setLocalGateSpeaking,
+  restateSelfVoiceState,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
@@ -38,7 +39,6 @@ import type {
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
-import { restateSelfVoiceState } from "../features/voice/restateSelfVoiceState";
 import { RemoteTracks } from "../features/voice/remoteTracks";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";

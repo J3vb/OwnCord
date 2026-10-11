@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { restateSelfVoiceState } from "./restateSelfVoiceState";
-import { voiceStore, resetVoiceStore, joinVoiceChannel } from "../../stores/voice.store";
-import { authStore } from "../../stores/auth.store";
-import type { VoiceUser } from "../../stores/voice.store";
+import {
+  voiceStore,
+  resetVoiceStore,
+  joinVoiceChannel,
+  restateSelfVoiceState,
+} from "./voice.store";
+import { authStore } from "./auth.store";
+import type { VoiceUser } from "./voice.store";
 
 const ME = 9;
 const CHANNEL = 4;

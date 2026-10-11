@@ -12,11 +12,11 @@ import {
   leaveVoiceChannel,
   setVoiceConfig,
   setModeratorDeafened,
+  restateSelfVoiceState,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
-import { restateSelfVoiceState } from "./restateSelfVoiceState";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,

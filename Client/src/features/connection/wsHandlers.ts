@@ -8,12 +8,16 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
+import {
+  voiceStore,
+  leaveVoiceChannel,
+  joinVoiceChannel,
+  restateSelfVoiceState,
+} from "../../stores/voice.store";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
-import { restateSelfVoiceState } from "../voice/restateSelfVoiceState";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
