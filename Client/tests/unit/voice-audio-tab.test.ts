@@ -695,6 +695,20 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("warns under the video codec choice that H.264 does not work from Intel graphics yet", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+
+    const warning = codecSelect.nextElementSibling;
+    expect(warning?.classList.contains("setting-desc")).toBe(true);
+    expect(warning?.textContent).toBe(
+      "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
+    );
+    ac.abort();
+  });
+
   it("video codec select shows the saved choice, and VP8 for an unknown one", () => {
     stubNavigator();
     localStorage.setItem("owncord:settings:videoCodec", '"h264"');

@@ -291,12 +291,15 @@ trust action entirely (a blind accept is refused).
   (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
   cannot start, the processor runs without it.
 - **Video codec:** one setting in Settings → Voice & Audio (`videoCodec`,
-  `features/voice/videoCodec.ts`) covers camera and screen share: VP8 (default), H.264
-  or Auto. E2EE is always on, so livekit-client publishes no backup codec and
-  every viewer must decode the chosen one. Auto picks H.264 only when
-  `MediaCapabilities.encodingInfo` reports it supported and power-efficient
-  at that publish's size, frame rate and bitrate, else VP8. The Linux native
-  engine always publishes VP8 and the setting is hidden there.
+  `features/voice/videoCodec.ts`) covers camera and screen share: VP8
+  (default), H.264 or Auto. E2EE is always on, so livekit-client publishes no
+  backup codec and every viewer must decode the chosen one. Auto picks H.264
+  only when `MediaCapabilities.encodingInfo` reports it supported and
+  power-efficient at that publish's size, frame rate and bitrate and WebGL's
+  unmasked renderer names a non-Intel GPU, else VP8: livekit-client 2.22.3
+  cannot decrypt Intel Quick Sync H.264 (livekit/client-sdk-js#2140), so a
+  manual H.264 choice carries a warning. The Linux native engine always
+  publishes VP8 and the setting is hidden there.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
   (`startVadDetector`, with a setTimeout fallback of the same timing). It
   opens after about 32 ms of sustained level, so a mouse click does not open

@@ -355,6 +355,8 @@ export const settingsText = defineCatalog("settings", {
     "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
   "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
+  "voiceAudio.videoCodecIntel":
+    "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
   "voiceAudio.videoCodec.auto": "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
   "voiceAudio.videoDevice": "Video Device",
   "voiceAudio.kind.microphone": "Microphone",

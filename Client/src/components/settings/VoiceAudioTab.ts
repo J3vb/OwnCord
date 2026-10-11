@@ -544,6 +544,7 @@ function buildVoiceAudioTabInner(
           ["auto", t("voiceAudio.videoCodec.auto")],
         ],
       ),
+      createElement("p", { class: "setting-desc" }, t("voiceAudio.videoCodecIntel")),
     );
   }
 

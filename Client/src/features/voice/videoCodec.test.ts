@@ -5,9 +5,34 @@ vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 
-const { getVideoCodecPref, pickAutoCodec, resolveVideoCodec } = await import("./videoCodec");
+const { getVideoCodecPref, gpuRenderer, pickAutoCodec, resolveVideoCodec } =
+  await import("./videoCodec");
 
 const encodingInfo = vi.fn();
+const NVIDIA = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
+const INTEL = "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)";
+const HARDWARE = { supported: true, smooth: true, powerEfficient: true };
+
+/** Makes WebGL report `renderer` as the GPU (null: no debug extension) and
+ *  returns the getContext spy. */
+function stubGpu(renderer: string | null): ReturnType<typeof vi.spyOn> {
+  const UNMASKED_RENDERER_WEBGL = 0x9246;
+  const loseContext = vi.fn();
+  const gl = {
+    getExtension: (name: string) =>
+      name === "WEBGL_debug_renderer_info"
+        ? renderer === null
+          ? null
+          : { UNMASKED_RENDERER_WEBGL }
+        : name === "WEBGL_lose_context"
+          ? { loseContext }
+          : null,
+    getParameter: (param: number) => (param === UNMASKED_RENDERER_WEBGL ? renderer : null),
+  };
+  return vi
+    .spyOn(HTMLCanvasElement.prototype, "getContext")
+    .mockReturnValue(gl as unknown as WebGLRenderingContext);
+}
 
 /** A captured track whose settings report `width` x `height`. */
 function track(width = 1280, height = 720): MediaStreamTrack {
@@ -23,27 +48,62 @@ beforeEach(() => {
   isLinuxDesktop.mockReturnValue(false);
   encodingInfo.mockReset();
   vi.stubGlobal("navigator", { mediaCapabilities: { encodingInfo } });
+  stubGpu(NVIDIA);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("pickAutoCodec", () => {
-  it("picks H.264 when the probe reports a supported, power-efficient encoder", () => {
-    expect(pickAutoCodec({ supported: true, smooth: true, powerEfficient: true })).toBe("h264");
+  it("picks H.264 when the probe reports a supported, power-efficient encoder on a non-Intel GPU", () => {
+    expect(pickAutoCodec(HARDWARE, NVIDIA)).toBe("h264");
+    expect(pickAutoCodec(HARDWARE, "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11)")).toBe("h264");
+  });
+
+  it("keeps VP8 on Intel graphics: livekit-client cannot decrypt Intel Quick Sync H.264", () => {
+    expect(pickAutoCodec(HARDWARE, INTEL)).toBe("vp8");
+    expect(pickAutoCodec(HARDWARE, "ANGLE (Intel, Intel(R) UHD Graphics 620)")).toBe("vp8");
+  });
+
+  it("keeps VP8 when the GPU cannot be named", () => {
+    expect(pickAutoCodec(HARDWARE, null)).toBe("vp8");
   });
 
   it("keeps VP8 when H.264 is supported but only in software", () => {
-    expect(pickAutoCodec({ supported: true, smooth: true, powerEfficient: false })).toBe("vp8");
+    expect(pickAutoCodec({ supported: true, smooth: true, powerEfficient: false }, NVIDIA)).toBe(
+      "vp8",
+    );
   });
 
   it("keeps VP8 when H.264 is not supported", () => {
-    expect(pickAutoCodec({ supported: false, smooth: false, powerEfficient: false })).toBe("vp8");
+    expect(pickAutoCodec({ supported: false, smooth: false, powerEfficient: false }, NVIDIA)).toBe(
+      "vp8",
+    );
   });
 
   it("keeps VP8 when there is no probe result", () => {
-    expect(pickAutoCodec(null)).toBe("vp8");
+    expect(pickAutoCodec(null, NVIDIA)).toBe("vp8");
+  });
+});
+
+describe("gpuRenderer", () => {
+  it("names the GPU from WebGL's unmasked renderer, asking for the low-power one", () => {
+    const getContext = stubGpu(INTEL);
+    expect(gpuRenderer()).toBe(INTEL);
+    // A laptop with two GPUs names its integrated one, the likelier encoder.
+    expect(getContext).toHaveBeenCalledWith("webgl", { powerPreference: "low-power" });
+  });
+
+  it("is null without the debug renderer extension", () => {
+    stubGpu(null);
+    expect(gpuRenderer()).toBeNull();
+  });
+
+  it("is null without WebGL", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    expect(gpuRenderer()).toBeNull();
   });
 });
 
@@ -93,6 +153,29 @@ describe("resolveVideoCodec", () => {
         framerate: 120,
       },
     });
+  });
+
+  it("keeps VP8 on Auto on Intel graphics even when the hardware encoder is available", async () => {
+    savePref("auto");
+    stubGpu(INTEL);
+    encodingInfo.mockResolvedValue(HARDWARE);
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("keeps VP8 on Auto when the GPU cannot be named", async () => {
+    savePref("auto");
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    encodingInfo.mockResolvedValue(HARDWARE);
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("still publishes H.264 on Intel graphics when the user picked it", async () => {
+    savePref("h264");
+    stubGpu(INTEL);
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
   });
 
   it("falls back to VP8 on Auto when the hardware cannot take this size and rate", async () => {

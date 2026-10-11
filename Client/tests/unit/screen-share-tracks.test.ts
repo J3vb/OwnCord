@@ -1521,15 +1521,24 @@ describe("video codec", () => {
   }
 
   const encodingInfo = vi.fn();
+  let getContext: { mockRestore(): void } | undefined;
   beforeEach(() => {
     encodingInfo.mockReset();
     Object.defineProperty(navigator, "mediaCapabilities", {
       value: { encodingInfo },
       configurable: true,
     });
+    // Auto's GPU check: a non-Intel GPU, so a hardware probe can pick H.264.
+    const UNMASKED_RENDERER_WEBGL = 0x9246;
+    getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      getExtension: (name: string) =>
+        name === "WEBGL_debug_renderer_info" ? { UNMASKED_RENDERER_WEBGL } : null,
+      getParameter: () => "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11)",
+    } as unknown as WebGLRenderingContext);
   });
   afterEach(() => {
     Reflect.deleteProperty(navigator, "mediaCapabilities");
+    getContext?.mockRestore();
   });
 
   it("publishes the camera as VP8 by default", async () => {
