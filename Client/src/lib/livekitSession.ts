@@ -38,6 +38,7 @@ import type {
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
+import { restateSelfVoiceState } from "../features/voice/restateSelfVoiceState";
 import { RemoteTracks } from "../features/voice/remoteTracks";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
@@ -268,6 +269,9 @@ export class LiveKitSession {
     resolveLiveKitUrl: (p, d) => this.resolveLiveKitUrl(p, d),
     restoreLocalVoiceState: (mode) => this.restoreLocalVoiceState(mode),
     reapplyMuteGain: () => this.reapplyMuteGain(),
+    restateSelfVoiceState: () => {
+      if (this.ws !== null) restateSelfVoiceState(this.ws);
+    },
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
     leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),

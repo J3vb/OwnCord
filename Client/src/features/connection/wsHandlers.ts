@@ -13,6 +13,7 @@ import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
+import { restateSelfVoiceState } from "../voice/restateSelfVoiceState";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
@@ -43,6 +44,15 @@ export function handleAuthOk(
   const activeChannelId = channelsStore.select((s) => s.activeChannelId);
   if (activeChannelId !== null) {
     ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
+  }
+
+  // A resumed socket gets no ready, so a mute/deafen toggled while it was down
+  // is restated here; a full flow restates from ready instead.
+  if (
+    (payload.replay_source === "buffer" || payload.replay_source === "db") &&
+    voiceStore.getState().voiceStatus !== "idle"
+  ) {
+    restateSelfVoiceState(ws);
   }
 }
 

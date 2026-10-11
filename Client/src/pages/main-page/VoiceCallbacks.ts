@@ -5,7 +5,13 @@
 
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
-import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
+import {
+  voiceStore,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  isSelfMuted,
+  setMutedBeforeDeafen,
+} from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
@@ -82,43 +88,51 @@ export function createVoiceWidgetCallbacks(
       // unmute, so don't spend the round-trip (keybinds reach here too, not
       // just the disabled button).
       if (state.localServerMuted === true) return;
+      // Mute and deafen apply locally whatever the chat socket is doing; the
+      // frame goes out only on a live socket, and the reconnect restates it.
+      const live = socketLive();
       if (isSelfMuted(state)) {
         // With the push-to-talk key up the gate inside the mic processor
         // stays closed, so lifting the mute never opens a live mic.
         voiceSessionSetMuted(false);
-        ws.send({ type: "voice_mute", payload: { muted: false } });
+        if (live) ws.send({ type: "voice_mute", payload: { muted: false } });
         // A moderator-imposed deafen is not ours to lift; the server refuses
         // the undeafen, so don't spend the round-trip (same guard as
         // onDeafenToggle's localServerMuted check below).
         if (state.localDeafened && state.localServerDeafened !== true) {
           voiceSessionSetDeafened(false);
-          ws.send({ type: "voice_deafen", payload: { deafened: false } });
+          setMutedBeforeDeafen(false);
+          if (live) ws.send({ type: "voice_deafen", payload: { deafened: false } });
         }
       } else {
         voiceSessionSetMuted(true);
-        ws.send({ type: "voice_mute", payload: { muted: true } });
+        if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
       }
     },
     onDeafenToggle: () => {
       if (!limiters.voice.tryConsume()) return;
       const state = voiceStore.getState();
       if (state.localServerDeafened === true) return;
+      const live = socketLive();
       if (state.localDeafened) {
         voiceSessionSetDeafened(false);
-        ws.send({ type: "voice_deafen", payload: { deafened: false } });
+        if (live) ws.send({ type: "voice_deafen", payload: { deafened: false } });
         // A moderator-imposed mute is not ours to lift; the server refuses
         // the unmute, so don't spend the round-trip (same guard as
-        // onMuteToggle above).
-        if (state.localServerMuted !== true) {
+        // onMuteToggle above). A mute the member had before deafening is
+        // theirs to keep.
+        if (state.localServerMuted !== true && state.mutedBeforeDeafen !== true) {
           voiceSessionSetMuted(false);
-          ws.send({ type: "voice_mute", payload: { muted: false } });
+          if (live) ws.send({ type: "voice_mute", payload: { muted: false } });
         }
+        setMutedBeforeDeafen(false);
       } else {
+        setMutedBeforeDeafen(state.localMuted);
         voiceSessionSetDeafened(true);
-        ws.send({ type: "voice_deafen", payload: { deafened: true } });
+        if (live) ws.send({ type: "voice_deafen", payload: { deafened: true } });
         if (!state.localMuted) {
           voiceSessionSetMuted(true);
-          ws.send({ type: "voice_mute", payload: { muted: true } });
+          if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
         }
       }
     },

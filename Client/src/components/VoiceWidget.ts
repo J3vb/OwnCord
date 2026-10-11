@@ -294,13 +294,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   /** Freeze controls that need WS signaling, while keeping local hangup
-   *  available: the LiveKit call may still be live when chat is disconnected. */
+   *  available: the LiveKit call may still be live when chat is disconnected.
+   *  Mute and deafen stay live: they apply locally and the server is told when
+   *  the socket returns. */
   function updateFrozen(status: "connected" | "reconnecting" | "disconnected"): void {
     const frozen = status !== "connected";
     const reason =
       status === "reconnecting" ? t("status.reconnectingShort") : t("status.notConnected");
     controlsRow?.classList.toggle("vw-controls--frozen", frozen);
-    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, grantMicBtn]) {
+    for (const btn of [cameraBtn, shareBtn, grantMicBtn]) {
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : "";

@@ -5,6 +5,12 @@ import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
 import { messagesStore } from "../../stores/messages.store";
 import { uiStore } from "../../stores/ui.store";
+import {
+  voiceStore,
+  resetVoiceStore,
+  joinVoiceChannel,
+  setVoiceStatus,
+} from "../../stores/voice.store";
 import { expectConsole } from "../../../tests/helpers/console";
 
 vi.mock("../../lib/livekitSession", () => ({ leaveVoice: vi.fn() }));
@@ -44,6 +50,42 @@ describe("handleAuthOk", () => {
     expect(ws.send).toHaveBeenCalledWith({
       type: "channel_focus",
       payload: { channel_id: 42 },
+    });
+  });
+
+  describe("voice restate on a resumed socket", () => {
+    const resumed = { user, server_name: "s", motd: "", replay_source: "buffer" } as const;
+
+    beforeEach(() => {
+      resetVoiceStore();
+      joinVoiceChannel(4);
+      setVoiceStatus("connected");
+      voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    });
+
+    it("restates a mute toggled while the socket was down", () => {
+      const ws = socketStub();
+
+      handleAuthOk(ws, createReconnectClock(), resumed);
+
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    });
+
+    it("sends nothing on a fresh flow, where ready restates", () => {
+      const ws = socketStub();
+
+      handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
+
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing with no voice session", () => {
+      setVoiceStatus("idle");
+      const ws = socketStub();
+
+      handleAuthOk(ws, createReconnectClock(), resumed);
+
+      expect(ws.send).not.toHaveBeenCalled();
     });
   });
 });

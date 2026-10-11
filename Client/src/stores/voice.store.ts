@@ -90,6 +90,11 @@ export interface VoiceState {
    *  member chose survives the lift. Follows localDeafened, so it outlives a
    *  leave (a moderator move) and clears on any undeafen. */
   readonly moderatorDeafened?: boolean;
+  /** The member was already muted when they deafened, so undeafening restores
+   *  that mute instead of lifting it. Written by the widget's deafen toggle and
+   *  cleared by any undeafen. Like localDeafened it outlives a leave, so a
+   *  re-join restates the same pair. Optional for the fixture reason above. */
+  readonly mutedBeforeDeafen?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
    *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
    *  separate flag from localMuted: PTT never writes the flag that represents
@@ -141,6 +146,7 @@ const INITIAL_STATE: VoiceState = {
   localServerMuted: false,
   localServerDeafened: false,
   moderatorDeafened: false,
+  mutedBeforeDeafen: false,
   pttGated: false,
   localCamera: false,
   localScreenshare: false,
@@ -187,6 +193,7 @@ export function resetVoiceStore(): void {
     localServerMuted: false,
     localServerDeafened: false,
     moderatorDeafened: false,
+    mutedBeforeDeafen: false,
     pttGated: false,
     localGateSpeaking: null,
     localCamera: false,
@@ -430,6 +437,13 @@ export function setEncryptionDegraded(degraded: boolean): void {
 export function setModeratorDeafened(applied: boolean): void {
   voiceStore.setState((prev) =>
     prev.moderatorDeafened === applied ? prev : { ...prev, moderatorDeafened: applied },
+  );
+}
+
+/** Remember whether the member was muted at the moment they deafened. */
+export function setMutedBeforeDeafen(muted: boolean): void {
+  voiceStore.setState((prev) =>
+    prev.mutedBeforeDeafen === muted ? prev : { ...prev, mutedBeforeDeafen: muted },
   );
 }
 
