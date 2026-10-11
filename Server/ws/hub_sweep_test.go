@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,13 +14,13 @@ import (
 // shut: while one sweep is still running, further startSweep calls for the
 // same guard must be dropped, and once it finishes the next call runs again.
 func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
-	h := &Hub{}
+	h := &Hub{life: context.Background()}
 
 	var inFlight atomic.Bool
 	var active, maxActive, runs atomic.Int64
 	release := make(chan struct{})
 
-	sweep := func() {
+	sweep := func(context.Context) {
 		// runs first, then active: the test waits on active, so by the time
 		// it sees the sweep in flight the run is already counted — counting
 		// after would let a preemption between the two stores read runs = 0.
@@ -54,7 +55,7 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 
 	// Guard released — the next tick runs a fresh sweep.
 	done := make(chan struct{})
-	h.startSweep(&inFlight, func() { close(done) })
+	h.startSweep(&inFlight, func(context.Context) { close(done) })
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -133,7 +134,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 		t.Fatalf("rename channel_overrides: %v", err)
 	}
 
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 
 	if got := c.getVoiceChID(); got != chID {
 		t.Fatalf("client voice channel = %d after a transient permission-read error, want it to stay at %d (not evicted)", got, chID)
@@ -186,7 +187,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 	h.voiceKeyHolders[chID] = ghostUID
 	h.keyHolderMu.Unlock()
 
-	h.sweepStaleVoiceStates()
+	h.sweepStaleVoiceStates(context.Background())
 
 	if h.IsVoiceKeyHolder(chID, ghostUID) {
 		t.Error("ghost user is still recorded as key holder after the sweep removed its ghost voice state")
@@ -252,5 +253,55 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 	}
 	if !h.SubscribedToVoiceTopicForTest(c, chB) {
 		t.Error("client lost its new channel's voice-topic subscription to a concurrent CleanupVoiceForChannel clear")
+	}
+}
+
+type cancelAfterLeaveStore struct {
+	VoiceStore
+	cancel context.CancelFunc
+}
+
+func (s cancelAfterLeaveStore) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
+	deleted, err := s.VoiceStore.LeaveIfMatch(ctx, userID, channelID, joinedAt)
+	s.cancel()
+	return deleted, err
+}
+
+// A sweep whose ctx ends right after the ghost delete commits must still
+// announce the voice_leave: the row is gone, so no later sweep would.
+func TestSweepStaleVoiceStates_CommittedGhostDeleteStillBroadcastsAfterCancel(t *testing.T) {
+	database := newHarvestVoiceDB(t)
+	ghostUID := seedHarvestVoiceUser(t, database, "sweep-cancel-ghost")
+	survivorUID := seedHarvestVoiceUser(t, database, "sweep-cancel-survivor")
+	chID := mustCreateVoiceChannel(t, database, "voice-cancel-ghost")
+	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
+	}
+
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	send := make(chan []byte, 8)
+	survivor := NewTestClient(h, survivorUID, send)
+	survivor.setVoiceState(chID, "tok-survivor")
+	h.clients[survivorUID] = survivor
+	h.pubsub.Subscribe(survivor, VoiceTopic(chID))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.voice = cancelAfterLeaveStore{VoiceStore: h.voice, cancel: cancel}
+	go h.Run()
+	defer h.Stop()
+
+	h.sweepStaleVoiceStates(ctx)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case m := <-send:
+			if strings.Contains(string(m), "voice_leave") {
+				return
+			}
+		case <-deadline:
+			t.Fatal("voice_leave was not delivered after the sweep ctx ended post-commit")
+		}
 	}
 }

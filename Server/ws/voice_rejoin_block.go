@@ -5,8 +5,10 @@ package ws
 // A client whose voice was reconnecting when a moderator kicked or moved it
 // can miss the unsequenced voice_disconnected or voice_moved, and its
 // reconnect loop answers the released membership with voice_join (P2-T5). For
-// voiceRejoinBlockWindow after any moderator kick or move, voice_join from
-// that user to the channel it was removed from is refused.
+// voiceRejoinBlockWindow after any moderator kick or move, an automatic
+// voice_join from that user to the channel it was removed from is refused.
+// The user's own join (payload user_initiated) is not, and clears the block:
+// a removed user may always click back into a channel they can still join.
 
 import (
 	"time"
@@ -54,6 +56,12 @@ func (s *voiceRejoinBlockState) blocked(userID, channelID int64) bool {
 		return false
 	}
 	return e.channelID == channelID
+}
+
+func (s *voiceRejoinBlockState) clear(userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, userID)
 }
 
 // BlockVoiceRejoin records a moderator removal of userID from channelID.

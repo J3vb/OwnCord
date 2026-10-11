@@ -58,7 +58,7 @@ func TestSweepRevokedSessions_MissingVerdictFailsClosed(t *testing.T) {
 	h.clients[answered.userID] = answered
 	h.clients[unanswered.userID] = unanswered
 
-	h.sweepRevokedSessions()
+	h.sweepRevokedSessions(context.Background())
 
 	h.mu.RLock()
 	_, answeredStays := h.clients[answered.userID]

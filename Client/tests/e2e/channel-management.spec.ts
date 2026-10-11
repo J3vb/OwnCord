@@ -13,9 +13,9 @@
  * that wraps window.__TAURI_INTERNALS__.invoke (run inside the base Tauri
  * mock's init script), recording every plugin:http|fetch call with its method, URL and JSON
  * body. Tests assert those exact requests, not mock internals:
- *   - create: POST   /admin/api/channels
- *   - edit:   PATCH  /admin/api/channels/{id}
- *   - delete: DELETE /admin/api/channels/{id}
+ *   - create: POST   /api/v1/moderation/channels
+ *   - edit:   PATCH  /api/v1/moderation/channels/{id}
+ *   - delete: DELETE /api/v1/moderation/channels/{id}
  *   - purge:  POST   /api/v1/channels/{id}/messages/purge
  */
 
@@ -91,7 +91,7 @@ async function waitForCapturedCall(
 }
 
 function adminCalls(calls: readonly CapturedCall[]): CapturedCall[] {
-  return calls.filter((c) => (c.url ?? "").includes("/admin/api/channels"));
+  return calls.filter((c) => (c.url ?? "").includes("/api/v1/moderation/channels"));
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ const UNCATEGORIZED = [
 
 interface MockOpts {
   channels?: unknown[];
-  /** Status/body for /admin/api/channels* (create, update, delete). */
+  /** Status/body for /api/v1/moderation/channels* (create, update, delete). */
   admin?: { status: number; body: unknown };
   /** Status/body for POST /channels/{id}/messages/purge. */
   purge?: { status: number; body: unknown };
@@ -157,7 +157,7 @@ async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
         { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         {
-          pattern: "/admin/api/channels",
+          pattern: "/api/v1/moderation/channels",
           status: opts.admin?.status ?? 200,
           body: opts.admin?.body ?? {},
         },
@@ -212,7 +212,7 @@ test.describe("Create Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/admin/api/channels"),
+      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels"),
     );
     expect(call.method).toBe("POST");
     expect(JSON.parse(call.body ?? "{}")).toEqual({
@@ -309,7 +309,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/admin/api/channels/1"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
     );
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
@@ -352,7 +353,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/admin/api/channels/10"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
     );
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
@@ -370,7 +372,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/admin/api/channels/10"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
     );
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
     expect(body["voice_max_users"]).toBe(99);
@@ -398,7 +401,8 @@ test.describe("Delete Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/admin/api/channels/1"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
     );
     expect(call.method).toBe("DELETE");
     await expect(page.locator("[data-testid='delete-channel-modal']")).not.toBeVisible();

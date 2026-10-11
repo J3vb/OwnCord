@@ -17,6 +17,7 @@ vi.mock("livekit-client", () => ({
     TrackUnsubscribed: "trackUnsubscribed",
     TrackPublished: "trackPublished",
     TrackUnpublished: "trackUnpublished",
+    TrackMuted: "trackMuted",
   },
   Track: {
     Kind: { Audio: "audio", Video: "video" },
@@ -655,6 +656,34 @@ describe("NativeRoom room surface", () => {
     room.removeAllListeners();
     emit({ session: 1, event: { type: "disconnected", reason: "ClientInitiated" } });
     expect(disconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises TrackMuted when a remote microphone mutes, so its speaking ring clears at once", async () => {
+    const room = createNativeRoom(audio);
+    const muted = vi.fn();
+    room.on("trackMuted", muted);
+    await room.connect("u", "t");
+    const mic = {
+      sid: "TR_mic",
+      kind: "audio" as const,
+      source: "microphone" as const,
+      muted: false,
+    };
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: mic } });
+
+    emit({
+      session: 1,
+      event: { type: "trackMuted", identity: "user-2", sid: "TR_mic", muted: true },
+    });
+
+    const p = room.remoteParticipants.get("user-2");
+    expect(muted).toHaveBeenCalledWith(p?.trackPublications.get("TR_mic"), p);
+    expect(p?.getTrackPublication("microphone")?.isMuted).toBe(true);
+    emit({
+      session: 1,
+      event: { type: "trackMuted", identity: "user-2", sid: "TR_mic", muted: false },
+    });
+    expect(muted).toHaveBeenCalledTimes(1);
   });
 
   it("OC-0473: re-reports a remote decrypt failure the way the web worker does until it clears", async () => {

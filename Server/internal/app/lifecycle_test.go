@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -59,6 +60,8 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 	// hub.Run's dispatch goroutine only exits once hub.stop is closed, which
 	// only happens inside hub.GracefulStop(). If Run returned without
 	// calling it, this goroutine is still alive here.
+	// Pooled keep-alive connections of outbound clients sit on the shared default transport.
+	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
 	if err := goleak.Find(leakOpt); err != nil {
 		t.Fatalf("hub dispatch goroutine (and, in production, its LiveKit process) leaked after Run returned early: %v", err)
 	}

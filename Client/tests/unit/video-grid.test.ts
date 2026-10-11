@@ -2462,4 +2462,129 @@ describe("VideoGrid", () => {
       expect(enabled(2)).toBe(false);
     });
   });
+
+  describe("mini-player", () => {
+    const mini = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>("[data-testid='stream-mini-player']");
+    /** The mini-player module loads on first use. */
+    const opened = (): Promise<void> => vi.waitFor(() => expect(mini()).not.toBeNull());
+
+    afterEach(() => {
+      grid.hideMiniPlayer();
+    });
+
+    it("takes the focused remote stream's video along, and gives it back", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7, name: "Otto" }));
+      grid.setFocusedTile(7);
+      const video = container.querySelector(".video-cell[data-user-id='7'] video")!;
+
+      grid.showMiniPlayer();
+      await opened();
+
+      expect(mini()!.contains(video)).toBe(true);
+      expect(mini()!.textContent).toContain("Otto");
+      grid.hideMiniPlayer();
+      expect(mini()).toBeNull();
+      expect(container.querySelector(".video-cell[data-user-id='7']")!.contains(video)).toBe(true);
+    });
+
+    it("opens nothing for your own preview or an unwatched stream", async () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true, audioUserId: 1 }));
+      grid.addStream(7, "Otto", null, makeTileConfig({ audioUserId: 7 }));
+
+      grid.showMiniPlayer();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mini()).toBeNull();
+    });
+
+    it("a hide before it has loaded cancels it", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+
+      grid.showMiniPlayer();
+      grid.hideMiniPlayer();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mini()).toBeNull();
+    });
+
+    it("closes when the stream ends", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      grid.removeStream(7);
+
+      expect(mini()).toBeNull();
+    });
+
+    it("Return asks the host for the full view of that stream", async () => {
+      const onReturnToStream = vi.fn();
+      grid.setCallbacks({ onReturnToStream });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      mini()!.querySelector<HTMLButtonElement>("[data-testid='stream-mini-return']")!.click();
+
+      expect(onReturnToStream).toHaveBeenCalledWith(7);
+    });
+
+    it("stops the stream's video while the app is hidden, and resumes it when shown", async () => {
+      const setStreamView = vi.fn();
+      let hidden = false;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      try {
+        grid.setCallbacks({ setStreamView });
+        grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+        grid.showMiniPlayer();
+        await opened();
+
+        hidden = true;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(7, { enabled: false });
+
+        hidden = false;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(
+          7,
+          expect.objectContaining({ enabled: true }),
+        );
+      } finally {
+        delete (document as { hidden?: boolean }).hidden;
+      }
+    });
+
+    it("moves focus off the closing mini-player, but not when focus was elsewhere", async () => {
+      const focusFallback = vi.fn();
+      grid.setCallbacks({ focusFallback });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      mini()!.focus();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+
+      grid.showMiniPlayer();
+      await opened();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("Return from the keyboard lands focus in the grid, not on the page", async () => {
+      const focusFallback = vi.fn();
+      document.body.appendChild(container);
+      grid.setCallbacks({ focusFallback, onReturnToStream: () => grid.hideMiniPlayer() });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      const btn = mini()!.querySelector<HTMLButtonElement>("[data-testid='stream-mini-return']")!;
+      btn.focus();
+      btn.click();
+
+      expect(container.contains(document.activeElement)).toBe(true);
+    });
+  });
 });

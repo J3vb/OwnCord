@@ -47,7 +47,7 @@ func (h *vmHarness) rowOf(m *vmMember) *db.VoiceState {
 func (h *vmHarness) reconcile() {
 	h.step++
 	h.t.Helper()
-	h.hub.reconcileVoiceMembership()
+	h.hub.reconcileVoiceMembership(context.Background())
 	h.note("reconcile")
 }
 
