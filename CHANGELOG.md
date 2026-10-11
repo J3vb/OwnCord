@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 **Messages**
 
 - A link wrapped in `||spoiler||` no longer shows a link preview or inline image before you reveal it.
+- Scrolling through history no longer jumps. Loading an older page could throw the view off by several rows, and scrolling up or down through a long channel jerked the text by a few pixels at every row: the list sized rows it had not drawn yet by estimate, and sized the top row of the drawn window without its spacing. The row you are reading now stays exactly where it was.
 
 **Desktop UI**
 
