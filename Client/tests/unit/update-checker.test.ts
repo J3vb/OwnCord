@@ -147,6 +147,19 @@ describe("createUpdateChecker", () => {
       expect(mockCheckForUpdate).toHaveBeenCalledTimes(1 + MAX_RETRIES);
     });
 
+    it("gives a fresh trigger its own retry budget after an earlier chain ran out", async () => {
+      checker.start();
+      mockCheckForUpdate.mockResolvedValue(FAILED);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync((RETRY_MIN_MS + RETRY_SPREAD_MS) * (MAX_RETRIES + 1));
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1 + MAX_RETRIES);
+
+      await vi.advanceTimersByTimeAsync(MIN_BACKGROUND_GAP_MS);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(1 + MAX_RETRIES + 2);
+    });
+
     it("is not retried for a manual check, which answers the user directly", async () => {
       checker.start();
       mockCheckForUpdate.mockResolvedValue(FAILED);

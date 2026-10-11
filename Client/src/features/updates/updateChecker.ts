@@ -69,6 +69,7 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retries = 0;
+  let retrying = false;
 
   function scheduleNext(): void {
     timer = setTimeout(() => {
@@ -99,6 +100,7 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
         retryTimer = setTimeout(
           () => {
             retryTimer = null;
+            retrying = true;
             void checkNow(reason);
           },
           RETRY_MIN_MS + random() * RETRY_SPREAD_MS,
@@ -113,6 +115,9 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   }
 
   function checkNow(reason: UpdateCheckReason): Promise<UpdateOutcome> {
+    const isRetry = retrying;
+    retrying = false;
+    if (reason !== "manual" && !isRetry) retries = 0;
     if (inFlight !== null) {
       if (reason === "manual") inFlightReason = reason;
       return inFlight;
