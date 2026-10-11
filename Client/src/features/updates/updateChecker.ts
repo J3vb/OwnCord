@@ -11,7 +11,7 @@ const log = createLogger("update-checker");
 
 /** Gap between background checks. */
 export const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60_000;
-/** Floor between background checks, so a flapping socket cannot hammer the feed. */
+/** Floor between fresh background checks, so a flapping socket cannot hammer the feed. A scheduled retry is exempt: it already waits RETRY_MIN_MS. */
 export const MIN_BACKGROUND_GAP_MS = 60_000;
 
 /** A reconnect check waits a random 0..this, so clients behind one IP that all
@@ -39,7 +39,7 @@ export interface UpdateChecker {
   /** Begin the periodic checks and become the active checker. */
   start(): void;
   stop(): void;
-  /** Run a check now. `manual` always runs; any other reason respects the gap floor. */
+  /** Run a check now. `manual` always runs; any other reason respects the gap floor, except a scheduled retry. */
   checkNow(reason: UpdateCheckReason): Promise<UpdateOutcome>;
   /** The socket came back (possibly to an updated server): check again. */
   notifyReconnected(): void;
