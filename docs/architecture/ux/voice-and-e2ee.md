@@ -156,7 +156,15 @@ the pop-out has none, and the main window drives its full screen by label), and 
 popup inherits the app's CSP. The stream's volume and mute go along into the window, shown over the video.
 The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
 no window opens the video stays in the grid. Full screen on a
-popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
+popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it).
+Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
+`lib/channel-navigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
+a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video
+moves in, as with Pop out). It shows the streamer's name, drags (or moves with the arrow keys) anywhere
+inside the window and keeps that spot for the session; **Return to stream** (or a double-click or
+Enter) reopens the stream view, Pop out moves it to its window, Stop watching ends the watch, and it
+closes when the stream ends. The grid's own **Show chat** control still closes the stream view
+without a mini-player, so the stream stops receiving video as before. The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
@@ -164,8 +172,8 @@ stats, so it shows the resolution only.
 Each remote tile asks only for what it shows (`setRemoteVideoView`, since
 `adaptiveStream` stays off for OC-0455): a tile no one can see (grid closed,
 app hidden or minimised, Stop watching) receives no video, a small tile gets
-the lower simulcast layer that fits it, and the stream you watch (focused,
-full screen or popped out) gets the top one.
+the lower simulcast layer that fits it, the mini-player gets the layer for its
+size, and the stream you watch (focused, full screen or popped out) gets the top one.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /

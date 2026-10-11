@@ -66,7 +66,7 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
-import { stepChannel } from "@lib/channel-navigation";
+import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
@@ -1439,6 +1439,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           : setRemoteVideoWatched(tileId, "camera", on),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
+      // The mini-player's way back to the full stream view.
+      focusFallback: () => void focusReachable(),
+      onReturnToStream: (tileId) => {
+        videoModeCtrl?.showVideoGrid();
+        videoModeCtrl?.setFocus(tileId);
+      },
     });
 
     let prevVideoSignature = "";
@@ -1555,6 +1561,25 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     container.appendChild(root);
 
+    // Voice is the only channel type that should keep the grid up; text, dm
+    // and announcement all mount a chat surface and must dismiss it, not just
+    // "text" (a dm/announcement switch used to leave the grid covering an
+    // unrelated channel's chat). The DM that owns the current call is the
+    // exception: its call panel shows the video above the chat (its own
+    // update re-seats the grid through onVideoHostChange).
+    const showChatFor = (active: { id: number; type: string }): void => {
+      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
+      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+    };
+    // A click on the channel already open under the stream view changes no
+    // store, so the subscriber below never sees it.
+    unsubscribers.push(
+      onChannelReselect(() => {
+        const active = getActiveChannel();
+        if (active !== null) showChatFor(active);
+      }),
+    );
+
     // --- Subscribe to channel changes ---
     const unsubChannels = channelsStore.subscribeSelector(
       (s) => s.activeChannelId,
@@ -1562,18 +1587,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const active = getActiveChannel();
           if (active !== null) {
-            // Voice is the only channel type that should keep the grid up;
-            // text, dm and announcement all mount a chat surface and must
-            // dismiss it, not just "text" (a dm/announcement switch used to
-            // leave the grid covering an unrelated channel's chat).
-            // The DM that owns the current call is the exception: its call
-            // panel shows the video above the chat (its own update re-seats
-            // the grid through onVideoHostChange).
-            const ownsCall =
-              active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-            if (active.type !== "voice" && !ownsCall) {
-              videoModeCtrl?.showChat();
-            }
+            showChatFor(active);
             // Close DM profile sidebar when switching channels
             if (active.type !== "dm") {
               closeDmProfile();
