@@ -65,6 +65,16 @@ and only when it changes something a contributor or fork holder must do
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
 
+**Login & connection**
+
+- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
+- Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
+- A failed link open or native event registration is logged instead of raising an unhandled error.
+
+**Voice**
+
+- A voice reconnect you already left or replaced no longer asks for a new voice token, which could delay the live call's own refresh.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
