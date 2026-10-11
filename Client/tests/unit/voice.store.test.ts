@@ -275,6 +275,7 @@ describe("voice store", () => {
       // mute. The server's voice_state always ships speaking:false, so writing
       // it verbatim cleared the speaking ring mid-speech (OC clobber).
       updateVoiceState({ ...FULL_VOICE_PAYLOAD, speaking: false });
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
       setSpeakers({ channel_id: 10, speakers: [5] });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(5)?.speaking).toBe(true);
 
@@ -677,6 +678,13 @@ describe("voice store", () => {
       expect(localSpeaking()).toBe(true);
       setLocalGateSpeaking(false);
       expect(localSpeaking()).toBe(false);
+    });
+
+    it("ignores speakers for a channel the client is not in", () => {
+      setSpeakers({ channel_id: 10, speakers: [2] });
+      joinVoiceChannel(99);
+      setSpeakers({ channel_id: 10, speakers: [2] });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
     });
 
     it("keeps the ring dark for speech below the gate even when LiveKit reports it", () => {

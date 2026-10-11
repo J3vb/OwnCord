@@ -24,7 +24,7 @@ import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
-import { voiceStore, setEncryptionDegraded } from "@stores/voice.store";
+import { voiceStore, setEncryptionDegraded, joinVoiceChannel } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
 import { expectConsole } from "../helpers/console";
@@ -615,7 +615,7 @@ describe("handleActiveSpeakersChanged", () => {
           },
         ]),
       );
-      return { ...prev, voiceUsers: new Map([[channelId, users]]) };
+      return { ...prev, currentChannelId: channelId, voiceUsers: new Map([[channelId, users]]) };
     });
   }
 
@@ -669,25 +669,18 @@ describe("handleActiveSpeakersChanged", () => {
 
     it("does not relight a channel the client has left", () => {
       seedVoiceUsers(12, [3, 7]);
-      let channel: number | null = 12;
-      const h = build({ getCurrentChannelId: () => channel });
+      const h = build();
       const u3 = join(h, "user-3:tok");
       const u7 = join(h, "user-7:tok");
       h.handlers.handleActiveSpeakersChanged([u3, u7]);
       h.handlers.handleActiveSpeakersChanged([u7]);
 
-      channel = 99;
-      voiceStore.setState((prev) => {
-        const voiceUsers = new Map(prev.voiceUsers);
-        const users = new Map(voiceUsers.get(12));
-        for (const [id, u] of users) users.set(id, { ...u, speaking: false });
-        voiceUsers.set(12, users);
-        return { ...prev, voiceUsers };
-      });
+      joinVoiceChannel(99);
       vi.advanceTimersByTime(500);
-
       expect(speaking()).toBe(false);
-      expect(vi.getTimerCount()).toBe(0);
+
+      h.handlers.handleActiveSpeakersChanged([u7]);
+      expect(speaking()).toBe(false);
     });
 
     it("drops the pending hold when the session resets", () => {

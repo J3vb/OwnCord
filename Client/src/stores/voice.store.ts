@@ -591,6 +591,7 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
  *  gate runs: then the gate decides (see setLocalGateSpeaking). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
+    if (payload.channel_id !== prev.currentChannelId) return prev;
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     if (!existingChannel) return prev;
 

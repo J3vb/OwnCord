@@ -982,6 +982,7 @@ describe("ChannelSidebar", () => {
     // Update only speaking flag (structural signature stays the same).
     // setSpeakers is the only writer of speaking now (a voice_state no longer
     // clobbers the LiveKit-authoritative flag).
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     setSpeakers({ channel_id: 3, speakers: [60] });
     voiceStore.flush();
 
@@ -1009,6 +1010,7 @@ describe("ChannelSidebar", () => {
     expect(rowBefore).not.toBeNull();
 
     // speaking-only flip → patched via the cached row map, not re-rendered
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     setSpeakers({ channel_id: 3, speakers: [61] });
     voiceStore.flush();
 

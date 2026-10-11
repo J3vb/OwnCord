@@ -243,10 +243,6 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     speakerHoldTimer = setTimeout(
       () => {
         speakerHoldTimer = null;
-        if (deps.getCurrentChannelId() !== channelId) {
-          clearSpeakerHold();
-          return;
-        }
         publishSpeakers(channelId);
       },
       Math.min(...speakerHoldUntil.values()) - now,
