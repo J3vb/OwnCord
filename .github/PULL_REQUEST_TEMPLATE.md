@@ -25,9 +25,8 @@
 
 - Affected files:
 - State mutations:
-- Two edge cases handled and tested:
-  1.
-  2.
+- Edge case 1, handled and tested:
+- Edge case 2, handled and tested:
 
 ## Test Plan
 
