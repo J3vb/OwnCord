@@ -34,6 +34,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -210,7 +211,11 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 			// (a no-op on an open module) drops it.
 			_ = module.Close(ctx)
 			r.releaseClosedModule(inst, module)
-			return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %v", inst.Manifest.Name, err)
+			if err == nil {
+				// Only module.IsClosed() held, so there is no cause to wrap.
+				err = errors.New("module closed")
+			}
+			return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %w", inst.Manifest.Name, err)
 		}
 		for _, cmd := range cmds {
 			if err := r.RegisterCommand(cmd, inst); err != nil {

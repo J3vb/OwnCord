@@ -1,4 +1,4 @@
-// Custom ESLint rules that turn three of the invariants documented in prose in
+// Custom ESLint rules that turn some of the invariants documented in prose in
 // CLAUDE.md into enforced, test-covered lint rules. Each rule is scoped (via
 // `files:` in eslint.config.js) to only the module(s) its invariant governs —
 // see the per-rule `meta.docs.description` for the invariant it encodes and
@@ -353,19 +353,92 @@ function isStoreModuleSource(source, filename) {
   return /\/src\/stores\//.test(resolved) || /\/src\/features\/[^/]+\/store$/.test(resolved);
 }
 
-function isWsOnCall(node) {
+// Receivers the WebSocket client is held under: `ws` (main.ts, dispatcher.ts),
+// `wsClient`, and a property of either name (`this.ws`, `deps.ws`).
+const WS_RECEIVER_NAMES = new Set(["ws", "wsClient"]);
+
+// Subscriptions whose callbacks run on server-driven events, mapped to the
+// index of the callback argument. The native certificate listeners
+// (`onCertFirstUse`, `onCertMismatch`) are deliberately absent: they carry
+// local TLS prompts rather than server frames, and main.ts writes a transient
+// error from them on purpose.
+const WS_SUBSCRIPTIONS = new Map([
+  ["on", 1],
+  ["onStateChange", 0],
+  ["onSendFailure", 0],
+]);
+
+function isWsReceiver(node) {
+  if (node.type === "Identifier") return WS_RECEIVER_NAMES.has(node.name);
   return (
-    node !== null &&
-    node !== undefined &&
-    node.type === "CallExpression" &&
-    node.callee.type === "MemberExpression" &&
-    !node.callee.computed &&
-    node.callee.object.type === "Identifier" &&
-    node.callee.object.name === "ws" &&
-    node.callee.property.type === "Identifier" &&
-    node.callee.property.name === "on" &&
-    node.arguments.length >= 2
+    node.type === "MemberExpression" &&
+    !node.computed &&
+    node.property.type === "Identifier" &&
+    WS_RECEIVER_NAMES.has(node.property.name)
   );
+}
+
+/** The callback argument of a `<ws>.on(...)`-style subscription, else null. */
+function wsSubscriptionCallback(node) {
+  if (node.callee.type !== "MemberExpression" || node.callee.computed) return null;
+  if (node.callee.property.type !== "Identifier") return null;
+  const index = WS_SUBSCRIPTIONS.get(node.callee.property.name);
+  if (index === undefined || !isWsReceiver(node.callee.object)) return null;
+  return node.arguments[index] ?? null;
+}
+
+/** The function a local binding resolves to: `function f(){}` or
+ *  `const f = () => {}`; null for imports and anything else. */
+function resolveLocalFunction(scope, name) {
+  for (let s = scope; s; s = s.upper) {
+    const variable = s.set.get(name);
+    if (variable === undefined) continue;
+    const def = variable.defs[0];
+    if (def?.node.type === "FunctionDeclaration") return def.node;
+    if (def?.node.type === "VariableDeclarator") return def.node.init;
+    return null;
+  }
+  return null;
+}
+
+/** The ReturnStatement arguments of `fn` itself, not of functions nested in it. */
+function returnedExpressions(fn, visitorKeys) {
+  if (fn.body.type !== "BlockStatement") return [fn.body];
+  const found = [];
+  const walk = (node) => {
+    if (node.type === "ReturnStatement") {
+      if (node.argument) found.push(node.argument);
+      return;
+    }
+    if (isFunctionNode(node)) return;
+    for (const key of visitorKeys[node.type] ?? []) {
+      for (const child of [node[key]].flat()) {
+        if (child && typeof child.type === "string") walk(child);
+      }
+    }
+  };
+  walk(fn.body);
+  return found;
+}
+
+/** Every function that `expr` can hand to a subscription as its callback: an
+ *  inline function, a local function or const it names, or what a local
+ *  factory returns. An imported factory cannot be followed (known limit). */
+function handlerFunctions(expr, scope, visitorKeys, seen = new Set()) {
+  if (!expr || seen.has(expr)) return [];
+  seen.add(expr);
+  if (isFunctionNode(expr)) return [expr];
+  if (expr.type === "Identifier") {
+    return handlerFunctions(resolveLocalFunction(scope, expr.name), scope, visitorKeys, seen);
+  }
+  if (expr.type === "CallExpression" && expr.callee.type === "Identifier") {
+    const factory = resolveLocalFunction(scope, expr.callee.name);
+    if (!factory || !isFunctionNode(factory)) return [];
+    return returnedExpressions(factory, visitorKeys).flatMap((returned) =>
+      handlerFunctions(returned, scope, visitorKeys, seen),
+    );
+  }
+  return [];
 }
 
 const noStoreWriteInWsOn = {
@@ -373,50 +446,179 @@ const noStoreWriteInWsOn = {
     type: "problem",
     docs: {
       description:
-        "Disallow calling an imported store-mutator (set*/add*/update*/... from a stores/ or features/*/store module) from " +
-        "inside a ws.on(...) callback outside dispatcher.ts. dispatcher.ts is the single place server " +
-        "events are allowed to write into domain stores; a page-local ws.on(...) handler may read store " +
-        "state and drive its own local UI, but must not mutate a domain store itself.",
+        "Disallow writing a domain store (an imported set*/add*/update*/... mutator, `<store>.setState(...)`, " +
+        "or `<store>.getState().<mutator>(...)`, from a stores/ or features/*/store module) from inside a " +
+        "callback registered with ws.on / onStateChange / onSendFailure outside dispatcher.ts, whether the " +
+        "callback is inline, a named local function, or returned by a local factory. dispatcher.ts is the " +
+        "single place server events are allowed to write into domain stores; a page-local handler may read " +
+        "store state and drive its own local UI, but must not mutate a domain store itself.",
     },
     schema: [],
     messages: {
       storeWriteOutsideDispatcher:
-        "'{{name}}' is a store mutator called from a ws.on(...) handler outside dispatcher.ts. " +
+        "'{{name}}' writes a domain store from a ws subscription handler outside dispatcher.ts. " +
         "dispatcher.ts is the single WS-event entry point that may write to stores — move this update " +
         "into a dispatcher.ts handler for this message type, or have this handler read the store instead " +
         "of writing it.",
     },
   },
   create(context) {
+    const sourceCode = context.sourceCode;
     const storeMutatorImports = new Set();
+    const storeInstanceImports = new Set();
+    const handlers = new Set();
+    const writes = [];
+
+    /** `<store>.setState` / `<store>.getState().<mutator>`: the written name, else null. */
+    function storeInstanceWrite(callee) {
+      if (callee.type !== "MemberExpression" || callee.computed) return null;
+      if (callee.property.type !== "Identifier") return null;
+      const method = callee.property.name;
+      const target = callee.object;
+      if (method === "setState" && target.type === "Identifier") {
+        return storeInstanceImports.has(target.name) ? `${target.name}.setState` : null;
+      }
+      if (
+        STORE_MUTATOR_PREFIX.test(method) &&
+        target.type === "CallExpression" &&
+        target.callee.type === "MemberExpression" &&
+        !target.callee.computed &&
+        target.callee.property.type === "Identifier" &&
+        target.callee.property.name === "getState" &&
+        target.callee.object.type === "Identifier" &&
+        storeInstanceImports.has(target.callee.object.name)
+      ) {
+        return `${target.callee.object.name}.getState().${method}`;
+      }
+      return null;
+    }
 
     return {
       ImportDeclaration(node) {
         if (!isStoreModuleSource(node.source.value, context.filename)) return;
         for (const spec of node.specifiers) {
-          if (spec.type === "ImportSpecifier" && STORE_MUTATOR_PREFIX.test(spec.local.name)) {
-            storeMutatorImports.add(spec.local.name);
-          }
+          if (spec.type !== "ImportSpecifier") continue;
+          (STORE_MUTATOR_PREFIX.test(spec.local.name)
+            ? storeMutatorImports
+            : storeInstanceImports
+          ).add(spec.local.name);
         }
       },
       CallExpression(node) {
-        if (node.callee.type !== "Identifier" || !storeMutatorImports.has(node.callee.name)) return;
-        let parent = node.parent;
-        while (parent) {
-          if (
-            isFunctionNode(parent) &&
-            isWsOnCall(parent.parent) &&
-            parent.parent.arguments[1] === parent
-          ) {
-            context.report({
-              node,
-              messageId: "storeWriteOutsideDispatcher",
-              data: { name: node.callee.name },
-            });
-            return;
+        const callback = wsSubscriptionCallback(node);
+        if (callback !== null) {
+          for (const fn of handlerFunctions(
+            callback,
+            sourceCode.getScope(node),
+            sourceCode.visitorKeys,
+          )) {
+            handlers.add(fn);
           }
-          parent = parent.parent;
         }
+        const name =
+          node.callee.type === "Identifier" && storeMutatorImports.has(node.callee.name)
+            ? node.callee.name
+            : storeInstanceWrite(node.callee);
+        if (name !== null) writes.push({ node, name });
+      },
+      // A named callback may be declared after the subscription, so decide once
+      // every handler is known.
+      "Program:exit"() {
+        for (const { node, name } of writes) {
+          for (let parent = node.parent; parent; parent = parent.parent) {
+            if (handlers.has(parent)) {
+              context.report({ node, messageId: "storeWriteOutsideDispatcher", data: { name } });
+              break;
+            }
+          }
+        }
+      },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule: invoke-needs-try-catch
+//
+// Invariant (CLAUDE.md): "Every Tauri invoke() is wrapped in try/catch where it
+// is called, in src/platform/desktop/ ... The catch turns the rejection into a
+// typed result or a user-visible error; never let it reach the caller
+// unhandled or void it away."
+//
+// Tauri rejects with the Rust side's raw string, so an invoke that is not
+// guarded where it is called hands that string to whoever awaits it. A call is
+// guarded when it sits in the `block` of a try statement that has a catch
+// clause (and is awaited there: `return invoke(...)` hands the promise out of
+// the try), or when its promise chain ends in `.catch(fn)` / `.then(ok, fn)`.
+// A call through a wrapper-supplied parameter named `invoke` is the wrapper's
+// to guard (externalContent.ts's call()), so it is not reported.
+//
+// Shipped at `warn`: the audit counted 46 bare sites that predate the rule, and
+// they are fixed as their files are touched.
+// ─────────────────────────────────────────────────────────────────────────
+
+// socket.ts keeps the resolved command function in `tauriInvoke`.
+const INVOKE_NAMES = new Set(["invoke", "tauriInvoke"]);
+
+/** True when the identifier `name` in scope is a function parameter. */
+function isInjectedInvoke(scope, name) {
+  for (let s = scope; s; s = s.upper) {
+    const variable = s.set.get(name);
+    if (variable !== undefined) return variable.defs[0]?.type === "Parameter";
+  }
+  return false;
+}
+
+/** True when the rejection of the `invoke(...)` call `node` is handled in the
+ *  function that makes the call. */
+function invokeIsGuarded(node) {
+  let awaited = false;
+  let returned = false;
+  let child = node;
+  for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (isFunctionNode(parent)) return false;
+    if (parent.type === "AwaitExpression") awaited = true;
+    else if (parent.type === "ReturnStatement" && !awaited) returned = true;
+    else if (
+      parent.type === "MemberExpression" &&
+      parent.object === child &&
+      !parent.computed &&
+      parent.property.type === "Identifier" &&
+      parent.parent.type === "CallExpression" &&
+      parent.parent.callee === parent
+    ) {
+      const { name } = parent.property;
+      if (name === "catch" || (name === "then" && parent.parent.arguments.length >= 2)) return true;
+    } else if (parent.type === "TryStatement" && child === parent.block) {
+      return parent.handler !== null && !returned;
+    }
+  }
+  return false;
+}
+
+const invokeNeedsTryCatch = {
+  meta: {
+    type: "suggestion",
+    docs: {
+      description:
+        "Require a Tauri invoke(...) to sit inside a try block with a catch clause, or to end in " +
+        ".catch(fn) / .then(ok, fn). A bare invoke leaks the raw Rust-side rejection string to its " +
+        "caller; the catch turns it into a typed result or a user-visible error.",
+    },
+    schema: [],
+    messages: {
+      bareInvoke:
+        "invoke() must be wrapped in try/catch where it is called (awaited inside the try; `return " +
+        "invoke(...)` leaves it), or end in .catch(...). The catch turns the Rust-side rejection " +
+        "into a typed result or a user-visible error; do not let it reach the caller unhandled.",
+    },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (node.callee.type !== "Identifier" || !INVOKE_NAMES.has(node.callee.name)) return;
+        if (isInjectedInvoke(context.sourceCode.getScope(node), node.callee.name)) return;
+        if (!invokeIsGuarded(node)) context.report({ node, messageId: "bareInvoke" });
       },
     };
   },
@@ -429,5 +631,6 @@ export default {
     "e2ee-verified-status-literal": e2eeVerifiedStatusLiteral,
     "no-identity-scope-fallback": noIdentityScopeFallback,
     "no-store-write-in-ws-on": noStoreWriteInWsOn,
+    "invoke-needs-try-catch": invokeNeedsTryCatch,
   },
 };
