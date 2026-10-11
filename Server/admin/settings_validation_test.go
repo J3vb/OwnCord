@@ -57,50 +57,33 @@ func TestPatchSettings_MaxUploadBytes(t *testing.T) {
 			t.Errorf("max_upload_bytes=%q was stored despite the 400", bad)
 		}
 	}
-	for _, tc := range []struct{ value, want string }{
-		{"1048576", "1048576"},
-		{"104857600", "104857600"},
-		{" 5242880 ", "5242880"},
-		{"10737418240", "10737418240"},
-	} {
-		value, want := tc.value, tc.want
-		code, _, body, database := patchSetting(t, "max_upload_bytes", value)
-		if code != http.StatusOK {
-			t.Errorf("max_upload_bytes=%q = %d, want 200; body: %s", value, code, body)
-			continue
-		}
-		if got := storedSetting(t, database, "max_upload_bytes"); got != want {
-			t.Errorf("max_upload_bytes=%q stored %q, want %q", value, got, want)
-		}
+	for _, value := range []string{"1048576", "104857600", " 5242880 "} {
+		assertInertSetting(t, "max_upload_bytes", value)
 	}
 }
 
-// TestPatchSettings_VoiceQuality: only a preset the voice code accepts is
-// stored, normalised to lower case like the setup wizard does.
-func TestPatchSettings_VoiceQuality(t *testing.T) {
-	for _, bad := range []string{"ultra", "", "best", "medium-high"} {
-		code, msg, body, database := patchSetting(t, "voice_quality", bad)
-		if code != http.StatusBadRequest {
-			t.Errorf("voice_quality=%q = %d, want 400; body: %s", bad, code, body)
-			continue
-		}
-		if msg != "voice_quality must be one of: low, medium, high" {
-			t.Errorf("voice_quality=%q: message = %q", bad, msg)
-		}
-		if got := storedSetting(t, database, "voice_quality"); got == bad {
-			t.Errorf("voice_quality=%q was stored despite the 400", bad)
-		}
+// assertInertSetting checks that a PATCH of a config.yaml-owned key is refused
+// with the inert message and leaves the stored row untouched (ARCH-024).
+func assertInertSetting(t *testing.T, key, value string) {
+	t.Helper()
+	code, msg, body, database := patchSetting(t, key, value)
+	if code != http.StatusBadRequest {
+		t.Errorf("%s=%q = %d, want 400; body: %s", key, value, code, body)
+		return
 	}
-	for _, tc := range []struct{ value, want string }{{"low", "low"}, {"medium", "medium"}, {" HIGH ", "high"}} {
-		value, want := tc.value, tc.want
-		code, _, body, database := patchSetting(t, "voice_quality", value)
-		if code != http.StatusOK {
-			t.Errorf("voice_quality=%q = %d, want 200; body: %s", value, code, body)
-			continue
-		}
-		if got := storedSetting(t, database, "voice_quality"); got != want {
-			t.Errorf("voice_quality=%q stored %q, want %q", value, got, want)
-		}
+	if want := key + " is set in config.yaml, not here"; msg != want {
+		t.Errorf("%s=%q: message = %q, want %q", key, value, msg, want)
+	}
+	if got := storedSetting(t, database, key); got == value {
+		t.Errorf("%s=%q was stored despite the 400", key, value)
+	}
+}
+
+// TestPatchSettings_VoiceQuality: voice_quality is owned by config.yaml
+// (voice.quality), so the settings PATCH refuses every value, valid or not.
+func TestPatchSettings_VoiceQuality(t *testing.T) {
+	for _, value := range []string{"ultra", "", "low", "medium", " HIGH "} {
+		assertInertSetting(t, "voice_quality", value)
 	}
 }
 
@@ -148,11 +131,27 @@ func TestPatchSettings_InvalidValueWritesNothing(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token,
-		map[string]string{"motd": "fresh", "voice_quality": "ultra"})
+		map[string]string{"motd": "fresh", "registration_mode": "bogus"})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 	}
 	if got := storedSetting(t, database, "motd"); got == "fresh" {
-		t.Error("motd was applied alongside an invalid voice_quality")
+		t.Error("motd was applied alongside an invalid registration_mode")
+	}
+}
+
+// TestPatchSettings_InertKeyWritesNothing: an inert key refuses the whole
+// patch, so the valid key beside it is not applied either.
+func TestPatchSettings_InertKeyWritesNothing(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token,
+		map[string]string{"motd": "fresh", "voice_quality": "low"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if got := storedSetting(t, database, "motd"); got == "fresh" {
+		t.Error("motd was applied alongside an inert voice_quality")
 	}
 }

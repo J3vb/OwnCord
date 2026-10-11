@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,5 +114,68 @@ func TestCleanup_StoreErrorIsLogged(t *testing.T) {
 
 	if !strings.Contains(out, "cleanup: disk I/O error") {
 		t.Errorf("expected log output to mention the cleanup error, got: %q", out)
+	}
+}
+
+// countingLockoutStore counts store calls so a test can assert that a
+// successful login does no persistence I/O.
+type countingLockoutStore struct {
+	mu      sync.Mutex
+	upserts int
+	deletes int
+}
+
+func (c *countingLockoutStore) UpsertLockout(context.Context, string, time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.upserts++
+	return nil
+}
+func (c *countingLockoutStore) DeleteLockout(context.Context, string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deletes++
+	return nil
+}
+func (c *countingLockoutStore) CleanupExpiredLockouts(context.Context) error { return nil }
+func (c *countingLockoutStore) LoadActiveLockouts(context.Context) ([]string, []time.Time, error) {
+	return nil, nil, nil
+}
+func (c *countingLockoutStore) counts() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.upserts, c.deletes
+}
+
+// TestReset_NoLockoutMakesNoStoreCall pins ARCH-011: a successful login Resets
+// keys that were never locked out, and that must not hit the store.
+func TestReset_NoLockoutMakesNoStoreCall(t *testing.T) {
+	store := &countingLockoutStore{}
+	rl := auth.NewPersistentRateLimiter(store)
+
+	for range 3 {
+		rl.Reset(context.Background(), "login:198.51.100.9")
+	}
+
+	if _, deletes := store.counts(); deletes != 0 {
+		t.Errorf("Reset on an unlocked key made %d store deletes, want 0", deletes)
+	}
+}
+
+// TestReset_ActiveLockoutIsDeletedFromStore keeps the other half of the
+// contract: a real lockout is still removed from the store.
+func TestReset_ActiveLockoutIsDeletedFromStore(t *testing.T) {
+	store := &countingLockoutStore{}
+	rl := auth.NewPersistentRateLimiter(store)
+	rl.Lockout(context.Background(), "login:198.51.100.9", time.Minute)
+
+	rl.Reset(context.Background(), "login:198.51.100.9")
+
+	upserts, deletes := store.counts()
+	if upserts != 1 || deletes != 1 {
+		t.Errorf("upserts=%d deletes=%d, want 1 and 1", upserts, deletes)
+	}
+	if rl.IsLockedOut("login:198.51.100.9") {
+		t.Error("lockout must be cleared after Reset")
 	}
 }

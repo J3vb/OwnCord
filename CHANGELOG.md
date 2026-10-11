@@ -47,6 +47,18 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+**Accounts & admin**
+
+- The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
+- The settings API now refuses `max_upload_bytes` and `voice_quality` with a 400: they never had an effect. Set `upload.max_size_mb` and `voice.quality` in config.yaml.
+- Two simultaneous config changes in the admin page can no longer combine into a setting the safety checks would have refused.
+
+**Updates**
+
+- A server update shows one restart countdown instead of two.
+
 ### Added
 
 **Desktop UI**
@@ -785,7 +797,7 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  administrator, including one holding `MANAGE_SERVER` or `ADMINISTRATOR`, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7

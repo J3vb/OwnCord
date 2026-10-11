@@ -648,7 +648,7 @@ const (
 func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, infoDeps serverInfoDeps) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler)
-		r.Get("/info", handleInfo(cfg))
+		r.Get("/info", handleInfo(cfg, infoDeps))
 		r.Get("/server-info", handleServerInfo(cfg, infoDeps))
 	})
 }
@@ -721,12 +721,26 @@ func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason strin
 	return "ok", ""
 }
 
-func handleInfo(cfg *config.Config) http.HandlerFunc {
+func handleInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
+	var mu syncutil.Mutex
+	var cachedAt time.Time
+	cachedName := cfg.Server.Name
 	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if time.Since(cachedAt) >= serverInfoCacheTTL {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), serverInfoReadTimeout)
+			name, err := liveServerName(ctx, cfg, deps)
+			cancel()
+			if err != nil {
+				slog.Error("failed to read server info", "error", err)
+				name = cfg.Server.Name
+			}
+			cachedName, cachedAt = name, time.Now()
+		}
+		name := cachedName
+		mu.Unlock()
 		// C-2: Version removed from unauthenticated info endpoint.
-		writeJSON(w, http.StatusOK, infoResponse{
-			Name: cfg.Server.Name,
-		})
+		writeJSON(w, http.StatusOK, infoResponse{Name: name})
 	}
 }
 
