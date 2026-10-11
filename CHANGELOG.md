@@ -65,7 +65,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 
 **Voice and video**
 
-- Stream audio controls: a watched screen share has its own volume and mute, in the grid and in the pop-out window.
+- Stream audio controls: a watched screen share has its own volume and mute on its tile.
 - Your own avatar in the user panel at the bottom left shows the green speaking ring while you talk in voice.
 
 **Messages & files**
@@ -137,6 +137,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 ### Known issues
 
 - **Not yet tested on a real machine:** the speaking ring across two machines; 120 fps screen share, which needs a 120 Hz or faster monitor on Windows; the restart dialog on a real server; `.mov` playback on Windows without the HEVC codec; and click-to-watch with two clients.
+- **Linux camera with screen share:** the crash seen in beta 1 when both are on has not been retested. If the app closes without warning, send the support bundle.
 - **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
