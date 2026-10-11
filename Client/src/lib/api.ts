@@ -646,7 +646,17 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         });
         owner.addCleanup(unsubscribe);
       }
-      const origin = await owner.run(ensureHttpProxy(snapshot.host));
+      let origin: string;
+      try {
+        origin = await owner.run(ensureHttpProxy(snapshot.host));
+      } catch (proxyErr) {
+        owner.assertCurrent();
+        // start_http_proxy rejects with a bare string; type it like a failed fetch.
+        log.error(`${label} proxy start failed`, { method, path, error: String(proxyErr) });
+        throw new TransportError(proxyErr instanceof Error ? proxyErr.message : String(proxyErr), {
+          cause: proxyErr,
+        });
+      }
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
       let res: Response;

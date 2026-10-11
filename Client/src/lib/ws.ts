@@ -896,8 +896,11 @@ export function createWsClient({
   }
 
   async function disconnectProxy(): Promise<void> {
+    const gen = wsGeneration;
     await transport.disconnect();
-    proxyOpen = false;
+    // A connect() that opened its own proxy while this disconnect was pending
+    // owns proxyOpen now; closing it here would wedge the live attempt.
+    if (gen === wsGeneration) proxyOpen = false;
   }
 
   function disconnect(): void {
