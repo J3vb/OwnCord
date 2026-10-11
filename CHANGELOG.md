@@ -758,11 +758,11 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE*SERVER or ADMINISTRATOR, is
+  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7
-  and 3650 days, and the `pre_restore*\*` safety copies are never pruned.
+  and 3650 days, and the `pre_restore_*` safety copies are never pruned.
 - The connectivity diagnostics now name the kind of address a client connected
   from (`address_class`), so a Tailscale peer is no longer reported as coming
   from the public internet. Addresses in `100.64.0.0/10` were previously counted
