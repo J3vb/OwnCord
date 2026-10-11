@@ -47,6 +47,16 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+**Accounts & admin**
+
+- The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
+- The settings API now refuses `max_upload_bytes` and `voice_quality` with a 400: they never had an effect. Set `upload.max_size_mb` and `voice.quality` in config.yaml.
+- Two simultaneous config changes in the admin page can no longer combine into a setting the safety checks would have refused.
+
+**Updates**
+
+- A server update shows one restart countdown instead of two.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
@@ -748,11 +758,11 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  administrator, including one holding MANAGE*SERVER or ADMINISTRATOR, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7
-  and 3650 days, and the `pre_restore_*` safety copies are never pruned.
+  and 3650 days, and the `pre_restore*\*` safety copies are never pruned.
 - The connectivity diagnostics now name the kind of address a client connected
   from (`address_class`), so a Tailscale peer is no longer reported as coming
   from the public internet. Addresses in `100.64.0.0/10` were previously counted

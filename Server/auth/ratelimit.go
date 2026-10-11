@@ -52,6 +52,11 @@ const rateLimiterShards = 32
 // rateLimiterShard holds one bucket's windows/lockouts maps under its own
 // mutex, so contention on one key never serializes unrelated keys.
 type rateLimiterShard struct {
+	// ioMu orders a lockout's in-memory change and its store write against
+	// the next one on the same shard, so Lockout and Reset reach the store in
+	// the order they changed memory. It is taken before mu and never held by
+	// Allow/Check, which only need mu.
+	ioMu     syncutil.Mutex
 	mu       syncutil.Mutex
 	windows  map[string]*entry
 	lockouts map[string]*lockoutEntry
@@ -243,6 +248,8 @@ func (r *RateLimiter) RetryAfter(key string, limit int, window time.Duration) ti
 // (WithoutCancel) rather than aborting the write mid-request.
 func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Duration) {
 	s := r.shardFor(key)
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
 	expiresAt := time.Now().Add(duration)
 	s.mu.Lock()
 	s.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
@@ -310,6 +317,8 @@ func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
 // while the shard lock is held.
 func (r *RateLimiter) Reset(ctx context.Context, key string) {
 	s := r.shardFor(key)
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
 	s.mu.Lock()
 	delete(s.windows, key)
 	_, hadLockout := s.lockouts[key]
