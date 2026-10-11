@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,9 @@ func assertReleased(t *testing.T, a *App, port int, leakOpt goleak.Option) {
 		t.Error("hub dispatch is still alive after Run returned — GracefulStop was skipped, so a supervised LiveKit process would be orphaned")
 	}
 	assertPortFree(t, port)
+	// Pooled keep-alive connections of the server's own outbound clients (the
+	// LiveKit SDK) sit on the shared default transport, not in Run's goroutines.
+	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
 	if err := goleak.Find(leakOpt); err != nil {
 		t.Errorf("goroutine leaked after Run returned: %v", err)
 	}
@@ -219,10 +223,13 @@ func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 func waitForHealth(t *testing.T, port int, runErr <-chan error) {
 	t.Helper()
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	// No keep-alive: a pooled connection outlives the probe, and the goleak
+	// check that follows would count its goroutines against the server's drain.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 	// Startup migrates a fresh DB; under -race on a loaded Windows CI runner that
 	// alone has taken 15s, so the deadline leaves generous headroom.
 	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); {
-		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
+		resp, healthErr := client.Get(healthURL) //nolint:gosec,noctx // G107: loopback URL built from the test's own port
 		if healthErr == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -235,6 +242,26 @@ func waitForHealth(t *testing.T, port int, runErr <-chan error) {
 		}
 	}
 	t.Fatal("server never became reachable on /health")
+}
+
+// TestWaitForHealth_LeavesNoClientConnection pins the probe's side of every
+// goleak assertion that follows it: the probe must not park a keep-alive
+// connection (and its read/write goroutines) in a client pool, because the
+// server's drain can close the other end late or not at all (a connection the
+// client dialled but never used is only reaped after Shutdown's five second
+// grace), and goleak then reports the test's own client as a leak.
+func TestWaitForHealth_LeavesNoClientConnection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+
+	leakOpt := goleak.IgnoreCurrent()
+	waitForHealth(t, port, make(chan error))
+	if err := goleak.Find(leakOpt); err != nil {
+		t.Errorf("health probe left a client connection behind: %v", err)
+	}
 }
 
 // TestAppRun_ContextCancel_DrainsAndReleases is the control the injected rows
