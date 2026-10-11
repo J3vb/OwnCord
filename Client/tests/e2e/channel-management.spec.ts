@@ -309,7 +309,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
     );
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
@@ -352,7 +353,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
     );
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
@@ -370,7 +372,8 @@ test.describe("Edit Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
     );
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
     expect(body["voice_max_users"]).toBe(99);
@@ -398,7 +401,8 @@ test.describe("Delete Channel modal", () => {
 
     const call = await waitForCapturedCall(
       page,
-      (c) => c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
+      (c) =>
+        c.cmd === "plugin:http|fetch" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
     );
     expect(call.method).toBe("DELETE");
     await expect(page.locator("[data-testid='delete-channel-modal']")).not.toBeVisible();
