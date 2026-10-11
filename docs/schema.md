@@ -472,7 +472,7 @@ because that count changes underneath you:
 `name` carries the optional group name; it is `''` for every 1:1 DM (a
 two-person DM is named by who is in it) and for an unnamed group.
 
-`PATCH /admin/api/channels/{id}` (`MANAGE_CHANNELS`) is the write path for
+`PATCH /admin/api/channels/{id}` or `PATCH /api/v1/moderation/channels/{id}` (`MANAGE_CHANNELS`) is the write path for
 `slow_mode` (0…21600), `nsfw` and both voice limits (0…99 each); values outside
 those ranges are refused rather than clamped.
 
@@ -970,7 +970,7 @@ Permissions are stored as an integer bitfield (31 bits used) in
 | 11  | `0x800`      | `USE_VIDEO`        | Enable camera in voice channels                                                                                                                                                                                               |
 | 12  | `0x1000`     | `SHARE_SCREEN`     | Share screen in voice channels                                                                                                                                                                                                |
 | 16  | `0x10000`    | `MANAGE_MESSAGES`  | Delete others' messages, pin/unpin                                                                                                                                                                                            |
-| 17  | `0x20000`    | `MANAGE_CHANNELS`  | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`)                                                                                                                                     |
+| 17  | `0x20000`    | `MANAGE_CHANNELS`  | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`, or `/api/v1/moderation/channels*`)                                                                                                                                     |
 | 18  | `0x40000`    | `KICK_MEMBERS`     | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`, or `DELETE /api/v1/moderation/members/{id}/sessions`)                                                                                              |
 | 19  | `0x80000`    | `BAN_MEMBERS`      | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`, or `PATCH /api/v1/moderation/members/{id}`)                                                                                                                     |
 | 20  | `0x100000`   | `MUTE_MEMBERS`     | Server-side mute/deafen, move and disconnect in voice (`voice_mod_mute`/`_deafen`/`_move`/`_kick`), via the channel-scoped `permissions.AuthorizeVoiceModerator`; also admits to the admin perimeter                          |
