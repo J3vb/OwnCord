@@ -129,7 +129,9 @@
   transition: background 0.1s ease;
   border-left: 2px solid transparent;
 }
-.message:first-child,
+/* The list is virtualized: its first child is whichever row the window
+   starts at, so a :first-child rule would size rows by scroll position. The
+   first message of a day always follows its divider. */
 .msg-day-divider + .message {
   margin-top: 0;
 }
