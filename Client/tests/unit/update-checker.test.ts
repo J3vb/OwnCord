@@ -174,6 +174,24 @@ describe("createUpdateChecker", () => {
       expect(mockCheckForUpdate).toHaveBeenCalledTimes(3);
     });
 
+    it("re-arms the retry when it lands on a manual check that then fails", async () => {
+      checker.start();
+      let resolveManual!: (v: typeof FAILED) => void;
+      mockCheckForUpdate
+        .mockResolvedValueOnce(FAILED)
+        .mockReturnValueOnce(new Promise((r) => (resolveManual = r)))
+        .mockResolvedValue(FAILED);
+      void checker.checkNow("reconnect");
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS * 0.5 - 30_000);
+      void checker.checkNow("manual");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(2);
+
+      resolveManual(FAILED);
+      await vi.advanceTimersByTimeAsync(RETRY_MIN_MS + RETRY_SPREAD_MS);
+      expect(mockCheckForUpdate).toHaveBeenCalledTimes(3);
+    });
+
     it("is not retried for a manual check, which answers the user directly", async () => {
       checker.start();
       mockCheckForUpdate.mockResolvedValue(FAILED);
