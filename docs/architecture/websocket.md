@@ -128,6 +128,8 @@ check, `DisconnectIfSessionRevoked`, after a password or 2FA change or a
 session revoke), stale-voice-state sweep (60s),
 LiveKit membership reconciler (60s, `voice_reconcile.go`; see
 [livekit-setup.md](../livekit-setup.md)),
+removed-participant watch (2s, only while an SFU identity the server removed
+is still within its token lifetime, `voice_removed_watch.go`),
 panic containment on the run loop (3 panics/60s, or one Windows memory fault
 (SRE-08) → stop and exit), LiveKit client and
 optional managed subprocess, and the voice E2EE key-holder map
