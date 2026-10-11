@@ -144,8 +144,9 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 	if h.livekit == nil {
 		return
 	}
-	lkCtx := context.WithoutCancel(ctx)
+	lkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lkTimeout)
 	go func() {
+		defer cancel()
 		select {
 		case <-h.stop:
 			return
@@ -157,6 +158,11 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 		}
 	}()
 }
+
+// voiceLeaveRetryTimeout bounds each background retry of the voice-state
+// delete, so a wedged DB cannot hold the retry goroutine forever. A var so
+// tests can shorten it.
+var voiceLeaveRetryTimeout = 5 * time.Second
 
 // leaveVoiceChannelWithRetry attempts to remove the voice state from the DB
 // using a channel-conditional delete. Only the row matching (userID, channelID)
@@ -188,6 +194,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 		// returns, and on the voice_leave path it dies with the connection —
 		// either would kill retry 2 before it ever ran, leaving a ghost
 		// voice_states row holding a capacity slot until the 60s sweep.
+		attemptTimeout := voiceLeaveRetryTimeout
 		go func() {
 			retryCtx := context.WithoutCancel(ctx)
 			const maxRetries = 3
@@ -203,7 +210,10 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 				}
 				delay *= 2
 
-				if _, retryErr := h.voice.LeaveIfMatch(retryCtx, userID, channelID, joinToken); retryErr != nil {
+				attemptCtx, cancel := context.WithTimeout(retryCtx, attemptTimeout)
+				_, retryErr := h.voice.LeaveIfMatch(attemptCtx, userID, channelID, joinToken)
+				cancel()
+				if retryErr != nil {
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",
 						"err", retryErr, "user_id", userID, "channel_id", channelID,
 						"attempt", attempt, "max_retries", maxRetries)

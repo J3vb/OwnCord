@@ -97,6 +97,11 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	return user, true
 }
 
+// backgroundWriteTimeout bounds AuthMiddleware's detached session writes
+// (the expired-session delete and the API-token touch), so a wedged DB cannot
+// park one goroutine per request forever. A var so tests can shorten it.
+var backgroundWriteTimeout = 5 * time.Second
+
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
 // the session, and injects the user and session into the request context.
 // Returns 401 if the token is missing, invalid, or the session is expired.
@@ -118,8 +123,9 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 			case errors.Is(err, auth.ErrTokenExpired):
 				// Clean up the expired login session in the background. The request
 				// ctx is cancelled once the 401 is written, so detach cancellation.
-				cleanupCtx := context.WithoutCancel(r.Context())
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
 				go func(h string) {
+					defer cancel()
 					if err := sessions.DiscardSession(cleanupCtx, h); err != nil {
 						slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
 					}
@@ -164,8 +170,9 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 					}
 				}
 			} else {
-				touchCtx := context.WithoutCancel(r.Context())
+				touchCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
 				go func(h string) {
+					defer cancel()
 					if err := sessions.TouchAPIToken(touchCtx, h); err != nil {
 						slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
 					}
