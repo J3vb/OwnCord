@@ -49,6 +49,11 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Desktop UI**
+
+- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
+- Settings → Logs has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
+
 **Voice**
 
 - While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.

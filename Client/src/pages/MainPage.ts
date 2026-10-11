@@ -1554,7 +1554,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // the updater silently reports "no update available" forever (OC-0332).
       // Same helper as ws.ts, admin-panel.ts and attachments.ts.
       const serverUrl = `https://${bracketBareIPv6Host(apiConfig.host)}`;
-      const updateNotifier = createUpdateNotifier({ serverUrl });
+      const updateNotifier = createUpdateNotifier({ serverUrl, keepChecking: true });
       updateNotifier.mount(root);
       children.push(updateNotifier);
     }
