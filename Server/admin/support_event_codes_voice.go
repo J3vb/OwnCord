@@ -1,7 +1,7 @@
 package admin
 
 // support_event_codes_voice.go — the event codes for the voice-join handler
-// and the voice reconciler.
+// the voice reconciler and the removed-identity watch.
 // Split out of support_event_codes.go so that file stays under the file-size
 // limit; merged into the same table at init so the canary test and
 // supportEvents see one map.
@@ -16,5 +16,8 @@ func init() {
 		"handleVoiceJoin: nil user on client":                                      "handlevoicejoin_nil_user_on_client",
 		"handleVoiceJoin: stale voice state persists after leave, aborting switch": "handlevoicejoin_stale_voice_state_persists_after_leave",
 		"voice reconcile: ListRooms failed, checking rooms with rows only":         "voice_reconcile_listrooms_failed",
+		"voice removed watch: ListParticipants failed, retrying next tick":         "voice_removed_watch_listparticipants_failed",
+		"voice removed watch: reading voice state failed, retrying next tick":      "voice_removed_watch_read_voice_state_failed",
+		"voice removed watch: removing participant failed, retrying next tick":     "voice_removed_watch_remove_participant_failed",
 	})
 }
