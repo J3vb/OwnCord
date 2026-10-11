@@ -10,7 +10,8 @@ import "maps"
 
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
-		"connection stamps flush failed, retrying next interval": "connection_stamps_flush_failed",
-		"session touches flush failed, retrying next interval":   "session_touches_flush_failed",
+		"connection stamps flush failed, retrying next interval":                                       "connection_stamps_flush_failed",
+		"session touches flush failed, retrying next interval":                                         "session_touches_flush_failed",
+		"conn-writes: database already closed, dropping pending session touches and connection stamps": "conn_writes_database_closed_dropping_pending",
 	})
 }
