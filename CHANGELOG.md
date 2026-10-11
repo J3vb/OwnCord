@@ -61,6 +61,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Voice**
+
+- Someone's green speaking ring could stay lit after they stopped talking: in a channel you had left or switched away from, after they left or rejoined, or after your connection dropped. Rings now clear in those cases, and go dark as soon as the speaker mutes.
+
 **Server**
 
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
