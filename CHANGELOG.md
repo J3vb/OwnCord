@@ -58,6 +58,7 @@ and only when it changes something a contributor or fork holder must do
 **Updates**
 
 - A server update shows one restart countdown instead of two.
+
 ### Added
 
 **Desktop UI**
@@ -796,7 +797,7 @@ text was moved behind English catalogs ready for translation.
 ### Accounts & admin
 
 - **The backup schedule and retention window are now owner-only.** Any other
-  administrator, including one holding MANAGE_SERVER or ADMINISTRATOR, is
+  administrator, including one holding `MANAGE_SERVER` or `ADMINISTRATOR`, is
   refused when they try to change them, matching the owner-only backup and
   restore buttons they already could not use. The panel shows both fields
   read-only to a non-owner. Retention must be `0` (keep forever) or between 7
