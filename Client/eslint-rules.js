@@ -429,7 +429,11 @@ function handlerFunctions(expr, sourceCode, seen = new Set()) {
   seen.add(expr);
   if (isFunctionNode(expr)) return [expr];
   if (expr.type === "Identifier") {
-    return handlerFunctions(resolveLocalFunction(sourceCode.getScope(expr), expr.name), sourceCode, seen);
+    return handlerFunctions(
+      resolveLocalFunction(sourceCode.getScope(expr), expr.name),
+      sourceCode,
+      seen,
+    );
   }
   if (expr.type === "CallExpression" && expr.callee.type === "Identifier") {
     const factory = resolveLocalFunction(sourceCode.getScope(expr), expr.callee.name);
