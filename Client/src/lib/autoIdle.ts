@@ -219,6 +219,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   for (const evt of ACTIVITY_EVENTS) {
     target.addEventListener(evt, onActivity, { passive: true, signal: disposable.signal });
   }
+  if (inCall && idleByTimer) apply(false);
   arm();
 
   return {
@@ -228,7 +229,13 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     setInCall(next: boolean): void {
       if (next === inCall) return;
       inCall = next;
-      if (destroyed || next) return;
+      if (destroyed) return;
+      if (next) {
+        // Joining a call (even an automatic rejoin with no input) undoes an
+        // Idle the timer set.
+        if (idleByTimer) apply(false);
+        return;
+      }
       callEndedAt = Date.now();
       arm();
     },

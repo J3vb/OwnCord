@@ -550,6 +550,35 @@ describe("startAutoIdle in a voice call", () => {
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
   });
 
+  it("joining a call with no input undoes an automatic Idle", () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({ onStatusChange, target: createTarget() });
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).toHaveBeenLastCalledWith("idle");
+
+    controller.setInCall(true);
+    expect(onStatusChange).toHaveBeenLastCalledWith("online");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadUserStatusOrigin()).toBe("manual");
+  });
+
+  it("starting in a call from a persisted automatic Idle returns to Online", () => {
+    saveUserStatus("idle", "auto");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({ onStatusChange, target: createTarget(), inCall: true });
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("online");
+  });
+
+  it("joining a call leaves a manually chosen Idle alone", () => {
+    saveUserStatus("idle", "manual");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({ onStatusChange, target: createTarget() });
+    controller.setInCall(true);
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("idle");
+  });
+
   it("still returns to Online on activity while in a call", () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();
