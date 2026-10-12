@@ -665,6 +665,57 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     );
   });
 
+  it("opens the call view from the joined channel, and keeps its avatar tiles in step with who joins (1B-1)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    const user = (userId: number) => ({
+      userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map([[100, user(100)]])]]),
+    }));
+    voiceStore.flush();
+
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+
+    const { slots, videoGrid } = capturedChatAreaRef.current!;
+    expect(slots.messagesSlot.style.display).toBe("none");
+    const ids = () =>
+      (videoGrid.setPeople.mock.calls.at(-1)![0] as { userId: number }[]).map((p) => p.userId);
+    expect(ids()).toEqual([100]);
+
+    // A join with no video changes no camera/share flag.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [100, user(100)],
+            [101, user(101)],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+    expect(ids()).toEqual([100, 101]);
+    expect(slots.messagesSlot.style.display).toBe("none");
+  });
+
   it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);

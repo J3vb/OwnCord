@@ -28,7 +28,7 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
@@ -82,16 +82,6 @@ export interface ChannelSidebarOptions {
   readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
-}
-
-const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
-
-function pickAvatarColor(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = (hash * 31 + username.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
 /**

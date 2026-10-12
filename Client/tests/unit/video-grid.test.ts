@@ -1049,6 +1049,47 @@ describe("VideoGrid", () => {
       grid.setPeople([]);
       expect(avatarTiles()).toHaveLength(0);
     });
+
+    it("rings the avatar tile of a person speaking, and only theirs", () => {
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      grid.setSpeaking(new Set([2]));
+
+      const [otto, sam] = avatarTiles();
+      expect(otto!.classList.contains("video-cell--speaking")).toBe(true);
+      expect(sam!.classList.contains("video-cell--speaking")).toBe(false);
+
+      grid.setSpeaking(new Set());
+      expect(otto!.classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("rings a person's avatar tile drawn after they started speaking", () => {
+      grid.setSpeaking(new Set([2]));
+      grid.setPeople([person(2, "Otto")]);
+      expect(avatarTiles()[0]!.classList.contains("video-cell--speaking")).toBe(true);
+    });
+
+    it("badges a muted or deafened person's avatar tile", () => {
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      grid.setUserAudioState(new Map([[3, { muted: true, deafened: true }]]));
+
+      const [otto, sam] = avatarTiles();
+      expect(otto!.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+      const badge = sam!.querySelector("[data-testid='tile-audio-state']");
+      expect(badge!.classList.contains("video-cell__audio--deafened")).toBe(true);
+
+      grid.setUserAudioState(new Map());
+      expect(sam!.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+    });
+
+    it("adds no ring or badge to a person whose host marks their state itself", () => {
+      grid.setPeople([{ ...person(2, "Otto"), marksOwnState: true }]);
+      grid.setSpeaking(new Set([2]));
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: false }]]));
+
+      const tile = avatarTiles()[0]!;
+      expect(tile.classList.contains("video-cell--speaking")).toBe(false);
+      expect(tile.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+    });
   });
 
   describe("tile interaction and labelling (PR 3)", () => {
