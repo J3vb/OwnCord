@@ -9,6 +9,7 @@ import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -1006,6 +1007,7 @@ export function createVideoGrid(): VideoGridComponent {
     });
     if (popout === null) {
       log.warn("Pop out window refused", { tileId });
+      showToast(voiceText("tile.popoutFailed"), "error");
       return;
     }
     entry.popout = popout;
