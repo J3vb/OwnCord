@@ -23,6 +23,11 @@ on:
         description: "Version the tag will carry, without the v (e.g. 2.0.0-beta.1); must match the client manifests"
         required: true
         type: string
+      allow_red_nightly:
+        description: "Go ahead although the latest nightly upgrade rehearsal is red (emergency only; prints a warning)"
+        required: false
+        type: boolean
+        default: false
 
 # A deleted-and-re-pushed tag (it has happened — see the checksum note in the
 # publish job) must not race two publish runs: `gh release create` fails
@@ -84,6 +89,34 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/verify-gate-evidence.mjs "${{ github.sha }}"
 
+  # The release rehearsal (upgrade-rehearsal job below) skips the failure and
+  # recovery drills, so the nightly is their only run — and from 2026-10-02 it
+  # failed every night while two betas shipped, because nothing here read it.
+  # The latest scheduled run must be green. The override is the dry run's
+  # allow_red_nightly input or, for a tag push (which has no inputs), the
+  # RELEASE_ALLOW_RED_NIGHTLY repository variable; both print a warning. The
+  # decision logic is a script ci.yml self-tests on every PR.
+  nightly-drills:
+    name: Latest nightly drills must be green
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+      - name: The latest scheduled upgrade rehearsal must be green
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ALLOW_RED_NIGHTLY: ${{ inputs.allow_red_nightly == true || vars.RELEASE_ALLOW_RED_NIGHTLY == 'true' }}
+        run: node scripts/verify-nightly-drills.mjs
+
   # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
   # because the client manifests weren't bumped before tagging — deployed
   # clients then never saw the update. Fail fast on that mismatch, before any
@@ -93,7 +126,7 @@ jobs:
     # Every build job needs verify-versions, and both publishers need those, so
     # one edge here gates the whole graph — nothing builds, pushes to GHCR, or
     # creates a Release on a commit that did not pass.
-    needs: gate-evidence
+    needs: [gate-evidence, nightly-drills]
     runs-on: ubuntu-latest
     permissions:
       contents: read

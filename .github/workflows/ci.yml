@@ -812,6 +812,11 @@ jobs:
       - name: Self-test the release gate
         run: node --test scripts/verify-gate-evidence.test.mjs
 
+      # The nightly-drills gate in release.yml, exercised on a recorded API
+      # response for the same reason as the step above.
+      - name: Self-test the nightly drills release gate
+        run: node --test scripts/verify-nightly-drills.test.mjs
+
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
