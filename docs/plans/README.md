@@ -1,5 +1,10 @@
 # Plan index
 
+**Where the project is now — current release, nightly health and the roadmap
+phases — is in [STATUS.md](../STATUS.md), not here.** The B0–B10 phase chain
+below is history: B9 exited 2026-09-25 and was the last phase run, and the
+betas shipped after it. This index still records each plan's state.
+
 Closes G-04. Historical plans are kept at their existing paths — links from
 audits and commit messages must keep resolving — so status is recorded **here**
 rather than by moving or rewriting them.
@@ -21,7 +26,7 @@ phase gate.
 | --- | --- |
 | [reliability-ideas-2026-09-08](reliability-ideas-2026-09-08.md) | Owner approved 2026-09-08: RI-01–RI-04 merged (PR #1573); RI-05–RI-08 implemented 2026-09-23. Implementation supplements existing phase gates. |
 | [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md) | Approved beta scope, frozen. 57 `BPR-*` requirements. **Amended 2026-08-31:** BPR-032 reworded to the slim single-current-epoch policy (owner decision; the scope HP-2 accepted). |
-| [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md) | Phase order and gates, B0–B10. **B0–B4 complete** (HP-0 through HP-4 accepted; B3 exit signed 2026-09-01 and B4 exit accepted 2026-09-03 — the plan rows below carry the trails). **B5 is built and its exit was accepted by the owner 2026-09-24** at exit SHA `458301fd` — its execution plan is [b5-community-content-moderation-2026-09-04](b5-community-content-moderation-2026-09-04.md) (drafted 2026-09-04, pattern rule 1), and **HP-5 is B5's mid-phase hold point**, scheduled by that plan between B5-7 and B5-8; B6 is built with its exit open at HP-6, B7 is built with HP-7 signed and its exit open on `tauri-build` for PRs into `dev`, B8 is deferred post-beta, **B9 is complete through B9-27**, and B10/B11 follow. **Amended 2026-08-28:** dated lines in B3–B10, a "Phase execution pattern" section, and a truthful status header. **Amended 2026-08-29:** B3/B7/B9 lines binding the layout-refactor supplement below; current slice updated for B2-2. **Amended 2026-08-31:** B1 exit reworded to identical-tree integration evidence; B6/B8/B10 `server-info` and epoch-window lines aligned with the B2-2 slim decision; B10 gains the BPR-051 comprehension-read row (owner decisions 2026-08-31). **Amended 2026-09-23 (B7-18):** the header and the B7 section now give B7's reconciled state. The B7 row below is the status authority. |
+| [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md) | Phase order and gates, B0–B10. **B0–B4 complete** (HP-0 through HP-4 accepted; B3 exit signed 2026-09-01 and B4 exit accepted 2026-09-03 — the plan rows below carry the trails). **B5 is built and its exit was accepted by the owner 2026-09-24** at exit SHA `458301fd` — its execution plan is [b5-community-content-moderation-2026-09-04](b5-community-content-moderation-2026-09-04.md) (drafted 2026-09-04, pattern rule 1), and **HP-5 is B5's mid-phase hold point**, scheduled by that plan between B5-7 and B5-8; B6 is built with its exit open at HP-6, B7 is built with HP-7 signed and its exit open on `tauri-build` for PRs into `dev`, B8 is deferred post-beta, **B9 is complete through B9-27**; B10/B11 were not run as phases — the betas shipped after B9, and current status is in [STATUS.md](../STATUS.md). **Amended 2026-08-28:** dated lines in B3–B10, a "Phase execution pattern" section, and a truthful status header. **Amended 2026-08-29:** B3/B7/B9 lines binding the layout-refactor supplement below; current slice updated for B2-2. **Amended 2026-08-31:** B1 exit reworded to identical-tree integration evidence; B6/B8/B10 `server-info` and epoch-window lines aligned with the B2-2 slim decision; B10 gains the BPR-051 comprehension-read row (owner decisions 2026-08-31). **Amended 2026-09-23 (B7-18):** the header and the B7 section now give B7's reconciled state. The B7 row below is the status authority. |
 | [repo-health-issue-register-2026-08-23](repo-health-issue-register-2026-08-23.md) | 116 planning rows. Public-safe; not a replacement for the ledger. **Amended 2026-08-31:** OC-0349–0375 and OC-0379 enumerated with owner-approved phases; G-03 closure evidence reworded to identical-tree integration evidence; BG-07 re-scoped to BPR-032 as amended. |
 | [beta-requirements-traceability-2026-08-23](beta-requirements-traceability-2026-08-23.md) | Requirement → phase → evidence map. No row is release-qualified. |
 | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md) | **Supersedes the roadmap's "current evidence snapshot."** B0 measurements and dispositions. |
@@ -48,7 +53,7 @@ re-entry conditions. _(Owner direction 2026-09-18, to be confirmed at HP-9:
 B10 is also shortened to a release checklist so the beta ships after B9; the
 thirty-run count, the 14-day soak, and part of the documentation list move to
 a later beta-to-stable gate with no phase id assigned yet — see B10's opening
-block in the same roadmap.)_
+block in the same roadmap.) Superseded: the betas shipped without a B10 phase; see [STATUS.md](../STATUS.md)._
 
 ## Partially implemented
 

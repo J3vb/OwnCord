@@ -1,0 +1,61 @@
+# Project status
+
+The one place that says where OwnCord is now. It is short on purpose: details
+live in the [changelog](../CHANGELOG.md) and the linked pages.
+
+**A release cannot be tagged until its version has a row in the
+[Releases](#releases) table below.** `release.yml` checks this before anything
+builds (`scripts/verify-release-status.mjs`), so add the row in the release PR,
+together with the changelog section.
+
+_Last updated 2026-10-12._
+
+## Current release
+
+**v2.2.0-beta.3**, published 2026-10-11. It is still a beta and a hobby
+project: desktop only (Windows and Linux, x64 and ARM64). Update the server and
+the desktop app together.
+
+## Releases
+
+Newest first, one line each. The full notes are the matching section of
+[CHANGELOG.md](../CHANGELOG.md).
+
+<!-- prettier-ignore -->
+| Version | Date | What it brought |
+| --- | --- | --- |
+| v2.2.0-beta.3 | 2026-10-11 | Click-to-watch streams, GIF favorites, inline video, member actions behind a reverse proxy, steadier scrolling and speaking rings. |
+| v2.2.0-beta.2 | 2026-10-10 | Clearer voice, steadier DM calls, a pop-out window for streams and cameras, a screen-share source picker, Linux voice fixes. |
+| v2.2.0-beta.1 | 2026-10-07 | Channels open at the unread line, a Linux camera that survives a hidden window, call sounds, a fuller admin panel, one Docker container for chat and voice. |
+| v2.1.0-beta.2 | 2026-10-02 | The full emoji set, server-wide search, unread count on the taskbar and tray, incoming calls noticed while hidden, a faster message list. (`v2.1.0-beta.1` was tagged but never published.) |
+| v2.0.1-beta.1 | 2026-09-30 | Updates, restores and restarts no longer sign you out; voice recovers instead of dropping; rebindable global mute and deafen. |
+| v2.0.0-beta.1 | 2026-09-26 | The first public beta. |
+
+## Nightly health
+
+- **Upgrade rehearsal and drills** (`upgrade-rehearsal.yml`): red every night
+  from 2026-10-02 to 2026-10-11 in the restore drill, fixed on `dev` by #2290.
+  Since #2307 every drill phase runs and a release is refused while the latest
+  nightly is red or older than 72 hours.
+- **Test depth** (`nightly-test-depth.yml`): fuzzing, the hub simulation, the
+  long-session soak and permission mutation testing pass. The full-client
+  mutation baseline does not complete yet; its `lib-rest` shard is marked
+  informational until it is fixed.
+
+## Roadmap
+
+Work follows a phased roadmap set on 2026-10-10. In plain words:
+
+| Phase | Goal                                                            | State                    |
+| ----- | --------------------------------------------------------------- | ------------------------ |
+| 0     | Releases gated on real signals; small defects cleared           | In progress              |
+| 1     | Voice that feels like Discord, without state bugs               | In progress              |
+| 2     | Nothing disappears without an error; notifications that work    | Next                     |
+| 3     | Chat, DMs, members, navigation and settings on par with Discord | Planned                  |
+| 4     | Larger servers and sturdier self-hosting                        | Later                    |
+| 5     | One owner for each piece of shared state                        | Later                    |
+| 6     | New features                                                    | After the stable release |
+| 7     | Docs that cannot drift; safe protocol changes                   | Ongoing                  |
+
+The older B0–B10 phase plans in [plans/](plans/README.md) are history: B9 was
+the last of them, and the betas above shipped after it.

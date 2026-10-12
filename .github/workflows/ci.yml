@@ -817,6 +817,11 @@ jobs:
       - name: Self-test the nightly drills release gate
         run: node --test scripts/verify-nightly-drills.test.mjs
 
+      # The release-status gate in release.yml, on fixtures and on the real
+      # docs/STATUS.md, for the same reason.
+      - name: Self-test the release status gate
+        run: node --test scripts/verify-release-status.test.mjs
+
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
