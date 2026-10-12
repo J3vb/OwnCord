@@ -70,7 +70,7 @@
 .sidebar-dm-list:not(:empty) {
   min-height: calc(var(--font-size, 16px) * 2);
 }
-.sidebar-dm-section .category.collapsed + .sidebar-dm-list {
+.sidebar-dm-section .category.collapsed ~ .sidebar-dm-list {
   max-height: 0 !important;
   min-height: 0;
   overflow: hidden;
