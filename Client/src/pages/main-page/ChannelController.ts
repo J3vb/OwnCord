@@ -615,9 +615,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         showToast(messagingText("toast.retryUnsupported"), "error");
         return;
       }
+      // A refused reply may point at a message deleted outside the loaded
+      // window. Nothing was stored, so it goes again as a plain message under
+      // a fresh id.
+      const refusedReply =
+        draft.replyTo !== null &&
+        getChannelMessages(channelId).find((m) => m.correlationId === correlationId)?.errorCode ===
+          "BAD_REQUEST";
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
       removeOptimistic(correlationId);
+      if (refusedReply) {
+        performSend(draft.content, null, draft.attachments);
+        return;
+      }
       performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
     }
 
@@ -965,7 +976,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelName,
       gifApi: api,
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        performSend(content, replyTo, attachments);
+        // A reply whose target was deleted while composing sends as a plain
+        // message.
+        const target =
+          replyTo === null
+            ? undefined
+            : getChannelMessages(channelId).find((m) => m.id === replyTo);
+        performSend(content, target?.deleted === true ? null : replyTo, attachments);
       },
       onUploadFile: async (
         file: File,

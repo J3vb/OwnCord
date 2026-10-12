@@ -399,6 +399,12 @@
 .msg-reply-ref:hover .rr-text {
   color: var(--text-normal);
 }
+.msg-reply-ref--deleted {
+  cursor: default;
+}
+.msg-reply-ref--deleted:hover .rr-text {
+  color: inherit;
+}
 /* The bar is a jump control, so it needs a visible keyboard focus ring. */
 .msg-reply-ref:focus-visible {
   outline: 2px solid var(--focus-ring);

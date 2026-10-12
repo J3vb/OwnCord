@@ -178,7 +178,8 @@ export function refreshConnectionControls(root: ParentNode): void {
  * The quoted bar above a reply. Clicking it jumps to the replied-to message —
  * including when that message is outside the loaded window, which is why the
  * bar stays clickable even in the "unknown message" case: the id is known, and
- * the jump path can fetch the window around it.
+ * the jump path can fetch the window around it. A deleted target has nothing
+ * to jump to, so its bar is plain text.
  */
 function renderReplyRef(
   replyToId: number,
@@ -188,25 +189,33 @@ function renderReplyRef(
   signal: AbortSignal,
 ): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
-  const bar = createElement("div", {
-    class: "msg-reply-ref",
-    role: "button",
-    tabindex: "0",
-    "data-reply-to": String(replyToId),
-    title: messagingText("reply.jumpTitle"),
-  });
-  const jump = (): void => opts.onJumpToMessage?.(replyToId);
-  bar.addEventListener("click", jump, { signal });
-  bar.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        jump();
-      }
-    },
-    { signal },
-  );
+  const deleted = ref ? ref.deleted : referenced?.deleted === true;
+  const bar = deleted
+    ? createElement("div", {
+        class: "msg-reply-ref msg-reply-ref--deleted",
+        "data-reply-to": String(replyToId),
+      })
+    : createElement("div", {
+        class: "msg-reply-ref",
+        role: "button",
+        tabindex: "0",
+        "data-reply-to": String(replyToId),
+        title: messagingText("reply.jumpTitle"),
+      });
+  if (!deleted) {
+    const jump = (): void => opts.onJumpToMessage?.(replyToId);
+    bar.addEventListener("click", jump, { signal });
+    bar.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          jump();
+        }
+      },
+      { signal },
+    );
+  }
   if (ref) {
     const plain = ref.deleted
       ? messagingText("message.deleted")

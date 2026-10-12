@@ -42,6 +42,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
 		}
 	}
+	if err := s.checkReplyTarget(ctx, p); err != nil {
+		return nil, err
+	}
 	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
 		return nil, err
 	}

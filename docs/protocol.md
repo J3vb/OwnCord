@@ -534,7 +534,7 @@ to reconstruct them:
 | ------------------- | -------------- | -------- | ----------------------------------------------------------------------------- |
 | `channel_id`        | number         | Yes      | Positive integer                                                              |
 | `content`           | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty.  |
-| `reply_to`          | number or null | No       | Message ID being replied to                                                   |
+| `reply_to`          | number or null | No       | ID of a message in the same channel that is not deleted, else `BAD_REQUEST`.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
 
