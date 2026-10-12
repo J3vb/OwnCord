@@ -529,6 +529,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       userId: id,
       label: resolvePerson(id, dm, voice, me).name,
       content: avatar(id, dm, "lg", ringing.includes(id) ? "dcp-avatar--ringing" : ""),
+      // Its avatars draw their own speaking ring and mute badge.
+      marksOwnState: true as const,
     }));
     return videoEl;
   }

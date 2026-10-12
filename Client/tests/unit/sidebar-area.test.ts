@@ -2088,6 +2088,33 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("the voice widget's call name opens a guild call only after leaving DM mode has shown the channel (1B-1)", async () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      // The page's channel subscriber shows that channel's chat; the call
+      // view must open after it, not before.
+      const order: string[] = [];
+      const unsub = channelsStore.subscribe(() => order.push("channel shown"));
+      onOpenCall.mockImplementation(() => order.push("call opened"));
+      try {
+        const widgetArgs = (createVoiceWidget as MockedFn).mock.calls.at(-1)![0];
+        widgetArgs.onOpenCall(4242);
+        expect(onOpenCall).not.toHaveBeenCalled();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(uiStore.getState().sidebarMode).toBe("channels");
+        expect(onOpenCall).toHaveBeenCalledOnce();
+        expect(order.at(-1)).toBe("call opened");
+      } finally {
+        unsub();
+        cleanup(result);
+      }
+    });
+
     it("onOpenCall forwards to the page's call opener", () => {
       const onOpenCall = vi.fn();
       const result = createSidebarArea({ ...defaultOpts(), onOpenCall });

@@ -771,8 +771,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
-      // 1B-1 replaces this with the call view.
-      onOpenCall: () => videoModeCtrl?.showVideoGrid(),
+      onOpenCall: () => videoModeCtrl?.openCall(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
@@ -1515,6 +1514,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             const users = state.voiceUsers.get(channelId);
             if (users) {
               for (const [uid, u] of users) {
+                // Everyone in the call: the call view draws an avatar tile each.
+                sig += `:u${uid}`;
                 if (u.camera) sig += `:c${uid}`;
                 if (u.screenshare) sig += `:s${uid}`;
                 // Relabel an already-open remote tile whose display name

@@ -69,6 +69,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- Clicking the voice channel you are in, or its name in the voice panel, opens the call: a tile for everyone in it, with their picture, a ring while they speak and a mute or deafen badge. It stays open with no cameras on until you leave or go back to chat.
 - While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 

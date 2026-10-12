@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -33,6 +33,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import { createVideoModeController } from "../../src/pages/main-page/VideoModeController";
 import type { VideoModeControllerOptions } from "../../src/pages/main-page/VideoModeController";
+import { createVideoGrid } from "../../src/components/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +61,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     setExitVisible: vi.fn(),
     showMiniPlayer: vi.fn(),
     hideMiniPlayer: vi.fn(),
+    setPeople: vi.fn(),
   } as unknown as VideoModeControllerOptions["videoGrid"];
 }
 
@@ -1022,6 +1024,221 @@ describe("createVideoModeController", () => {
 
       expect(chatArea.contains(slots.videoGridSlot)).toBe(true);
       expect(host.setActive).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  describe("call view (1B-1)", () => {
+    const user = (userId: number, username: string, video: Partial<{ camera: boolean }> = {}) => ({
+      userId,
+      username,
+      camera: video.camera ?? false,
+      screenshare: false,
+    });
+    let container: HTMLDivElement;
+    let grid: ReturnType<typeof createVideoGrid>;
+    let slots: ReturnType<typeof makeSlots>;
+    let users: Map<number, ReturnType<typeof user>>;
+
+    function setVoice(overrides: Partial<VoiceStateStub> = {}): void {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]), ...overrides }),
+      );
+    }
+    function makeCtrl() {
+      return createVideoModeController({ slots, videoGrid: grid, getCurrentUserId: () => 1 });
+    }
+    const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
+    const tileIds = () => avatarTiles().map((t) => t.dataset.personId);
+
+    beforeEach(() => {
+      // ResizeObserver is not available in JSDOM
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      grid = createVideoGrid();
+      grid.mount(container);
+      slots = makeSlots();
+      users = new Map([
+        [1, user(1, "me")],
+        [2, user(2, "bob")],
+      ]);
+      setVoice();
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.unstubAllGlobals();
+    });
+
+    it("opens with an avatar tile for each person in a call with no video", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(slots.messagesSlot.style.display).toBe("none");
+      expect(tileIds()).toEqual(["1", "2"]);
+      expect(avatarTiles()[1]!.querySelector(".video-username")!.textContent).toBe("bob");
+    });
+
+    it("rings the tile of the person who starts speaking", () => {
+      makeCtrl().openCall();
+      grid.setSpeaking(new Set([2]));
+
+      const [me, bob] = avatarTiles();
+      expect(bob!.classList.contains("video-cell--speaking")).toBe(true);
+      expect(me!.classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("stays open while nobody has video, and follows the roster", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "2", "3"]);
+
+      users.delete(2);
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "3"]);
+    });
+
+    it("closes and drops the avatar tiles on leave", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      setVoice({ currentChannelId: null, voiceUsers: new Map() });
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(avatarTiles()).toHaveLength(0);
+    });
+
+    it("goes back to chat on Show chat, and Open call brings the call view back", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(avatarTiles()).toHaveLength(0);
+
+      ctrl.openCall();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("stays in chat after Show chat when the roster changes", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat();
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("going to a text channel ends the call view, so no-video closes it after", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat({ keepWatching: true });
+      ctrl.showVideoGrid();
+
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("moves with a direct channel switch, showing the new channel's people", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      users = new Map([
+        [1, user(1, "me")],
+        [5, user(5, "eve")],
+      ]);
+      setVoice({ currentChannelId: 11, voiceUsers: new Map([[11, users]]) });
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "5"]);
+    });
+
+    it("stays open while a reconnect's resync briefly drops the channel's roster", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      setVoice({ voiceUsers: new Map() });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(avatarTiles()).toHaveLength(0);
+
+      setVoice();
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("a grid opened for a stream still closes once the video stops", () => {
+      users.set(2, user(2, "bob", { camera: true }));
+      const ctrl = makeCtrl();
+      ctrl.showVideoGrid();
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "2"]);
+
+      users.set(2, user(2, "bob"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(avatarTiles()).toHaveLength(0);
+    });
+
+    it("draws everyone in the call as soon as the grid opens for a stream", () => {
+      users.set(2, user(2, "bob", { camera: true }));
+      const ctrl = makeCtrl();
+      ctrl.checkVideoMode();
+      ctrl.showVideoGrid();
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("keeps each avatar element while the person's name and picture are unchanged", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      const before = avatarTiles()[1]!.firstElementChild;
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(avatarTiles()[1]!.firstElementChild).toBe(before);
+    });
+
+    it("leaves the people to the DM call panel while it hosts the call", () => {
+      const vg = makeVideoGrid();
+      const host = {
+        ownsCall: () => true,
+        element: () => null,
+        setActive: vi.fn(),
+      };
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+      ctrl.openCall();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(vg.setPeople).not.toHaveBeenCalled();
+    });
+
+    it("takes the avatar tiles back on destroy", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.destroy();
+      expect(avatarTiles()).toHaveLength(0);
     });
   });
 });

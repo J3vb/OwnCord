@@ -85,6 +85,9 @@ export interface GridPerson {
   readonly userId: number;
   readonly label: string;
   readonly content: HTMLElement;
+  /** The host draws this person's speaking and mute state itself (the DM
+   *  call panel's avatars), so the tile adds no ring or badge. */
+  readonly marksOwnState?: true;
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -113,10 +116,10 @@ export interface VideoGridComponent extends MountableComponent {
   /** The people to draw as avatar tiles, after the streams. A person's tile
    *  steps aside while their camera tile is up. Not counted by hasStreams. */
   setPeople(people: readonly GridPerson[]): void;
-  /** Ring the camera tiles of the users speaking now. */
+  /** Ring the camera and avatar tiles of the users speaking now. */
   setSpeaking(userIds: ReadonlySet<number>): void;
-  /** Mute/deafen state by userId, shown as a badge on the camera tile
-   *  (the UX spec's roster parity for tiles; not drawn on screen-share tiles). */
+  /** Mute/deafen state by userId, shown as a badge on the camera and avatar
+   *  tiles (the UX spec's roster parity for tiles; not on screen-share tiles). */
   setUserAudioState(state: ReadonlyMap<number, { muted: boolean; deafened: boolean }>): void;
   setCallbacks(callbacks: VideoGridCallbacks): void;
   /** Your mute and deafen state, for a full-screen tile's call controls. */
@@ -492,6 +495,8 @@ export function createVideoGrid(): VideoGridComponent {
   /** Re-seat the tiles after a change: people follow the streams. */
   function relayout(): void {
     syncPeople();
+    applySpeaking();
+    applyUserAudioState();
     if (root === null) return;
     if (focusedTileId !== null) {
       rebuildFocusLayout();
@@ -1554,11 +1559,26 @@ export function createVideoGrid(): VideoGridComponent {
     relayout();
   }
 
-  function applySpeaking(): void {
+  /** Every camera and avatar tile with whose state it marks, or null for a
+   *  tile that marks none (a screen share, or a host-drawn avatar). */
+  function stateTiles(): [HTMLDivElement, number | null][] {
+    const tiles: [HTMLDivElement, number | null][] = [];
     for (const [id, entry] of cells) {
       const cfg = entry.config;
-      const on = cfg?.isScreenshare !== true && speaking.has(cfg?.audioUserId ?? id);
-      entry.el.classList.toggle("video-cell--speaking", on);
+      tiles.push([entry.el, cfg?.isScreenshare === true ? null : (cfg?.audioUserId ?? id)]);
+    }
+    for (const person of people) {
+      const cell = personCells.get(person.userId);
+      if (cell !== undefined) {
+        tiles.push([cell, person.marksOwnState === true ? null : person.userId]);
+      }
+    }
+    return tiles;
+  }
+
+  function applySpeaking(): void {
+    for (const [el, userId] of stateTiles()) {
+      el.classList.toggle("video-cell--speaking", userId !== null && speaking.has(userId));
     }
   }
 
@@ -1567,13 +1587,12 @@ export function createVideoGrid(): VideoGridComponent {
     applySpeaking();
   }
 
-  /** Draw each camera tile's mute/deafen badge from the roster state. */
+  /** Draw each camera and avatar tile's mute/deafen badge from the roster
+   *  state. */
   function applyUserAudioState(): void {
-    for (const [id, entry] of cells) {
-      const cfg = entry.config;
-      if (cfg?.isScreenshare === true) continue;
-      const state = userAudioState.get(cfg?.audioUserId ?? id);
-      let badge = entry.el.querySelector<HTMLElement>("[data-testid='tile-audio-state']");
+    for (const [el, userId] of stateTiles()) {
+      const state = userId === null ? undefined : userAudioState.get(userId);
+      let badge = el.querySelector<HTMLElement>("[data-testid='tile-audio-state']");
       if (state === undefined || (!state.muted && !state.deafened)) {
         badge?.remove();
         continue;
@@ -1584,7 +1603,7 @@ export function createVideoGrid(): VideoGridComponent {
           "data-testid": "tile-audio-state",
           "aria-hidden": "true",
         });
-        entry.el.appendChild(badge);
+        el.appendChild(badge);
       }
       badge.classList.toggle("video-cell__audio--muted", !state.deafened);
       badge.classList.toggle("video-cell__audio--deafened", state.deafened);
