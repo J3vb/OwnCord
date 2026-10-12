@@ -26,6 +26,10 @@
  * being away. The DOM listeners stay: they are the fallback whenever the OS
  * cannot say, and they still bring the status back the instant the user
  * touches the window rather than at the next poll.
+ *
+ * Sitting in a voice call without touching anything is not being away
+ * (Discord's rule), so while the caller reports a call the timer never goes
+ * idle, and leaving the call starts a fresh full delay.
  */
 
 import { Disposable } from "./disposable";
@@ -58,11 +62,16 @@ export interface AutoIdleOptions {
    *  system, or null where the OS cannot say. Omitted, or answering null,
    *  leaves the DOM listeners in sole charge. */
   readonly systemIdleMs?: () => Promise<number | null>;
+  /** Whether the user is in a voice call when the watcher starts. */
+  readonly inCall?: boolean;
 }
 
 export interface AutoIdleController {
   /** Report activity explicitly (e.g. after sending a message). */
   notifyActivity(): void;
+  /** Report joining or leaving a voice call. No idle while in one; leaving
+   *  restarts the full delay. */
+  setInCall(inCall: boolean): void;
   /** Stop listening and cancel the pending timer. */
   destroy(): void;
 }
@@ -104,6 +113,9 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   let osKnowsIdle = false;
   let lastActivityRun = 0;
   let destroyed = false;
+  let inCall = options.inCall === true;
+  /** When the last call ended: OS idle time from before it does not count. */
+  let callEndedAt = 0;
   /** True while the timer is the reason the status is idle. Kept in memory so
    *  the hot path (one mousemove per pixel) is a boolean check rather than a
    *  preference read. Seeded from the persisted status/origin so a session
@@ -129,7 +141,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
       if (destroyed) return;
       // The DOM only sees input to this window; while the OS can see all of
       // it, ten quiet minutes here may just mean the user is in another app.
-      if (!osKnowsIdle) apply(true);
+      if (!osKnowsIdle && !inCall) apply(true);
       // Re-check: apply() invokes options.onStatusChange synchronously, and a
       // caller reacting to that (e.g. tearing down the page) may call
       // destroy() from inside it. `timer` is already null at this point, so
@@ -192,7 +204,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     // stream of polls cannot flap the status. Coming back goes through the
     // same onStatusChange as the DOM path, and so through the caller's
     // shared presence limiter.
-    apply(idleMs >= delayMs);
+    if (idleMs < delayMs) {
+      apply(false);
+    } else if (!inCall && Date.now() - callEndedAt >= delayMs) {
+      apply(true);
+    }
   }
 
   if (options.systemIdleMs !== undefined) {
@@ -208,6 +224,13 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   return {
     notifyActivity(): void {
       onActivity();
+    },
+    setInCall(next: boolean): void {
+      if (next === inCall) return;
+      inCall = next;
+      if (destroyed || next) return;
+      callEndedAt = Date.now();
+      arm();
     },
     destroy(): void {
       destroyed = true;
