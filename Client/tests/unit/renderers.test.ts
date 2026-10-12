@@ -1137,7 +1137,9 @@ describe("renderers", () => {
       const ac = new AbortController();
       const all = [loaded, replyToLoaded, replyToSnippet];
       for (const msg of [replyToLoaded, replyToSnippet]) {
-        container.appendChild(renderMessage(msg, false, all, makeOpts({ onJumpToMessage }), ac.signal));
+        container.appendChild(
+          renderMessage(msg, false, all, makeOpts({ onJumpToMessage }), ac.signal),
+        );
       }
 
       const bars = container.querySelectorAll<HTMLElement>(".msg-reply-ref");
@@ -1156,7 +1158,9 @@ describe("renderers", () => {
       const onJumpToMessage = vi.fn();
       const reply = makeMessage({ id: 2, replyTo: 999, content: "replying" });
       const ac = new AbortController();
-      container.appendChild(renderMessage(reply, false, [reply], makeOpts({ onJumpToMessage }), ac.signal));
+      container.appendChild(
+        renderMessage(reply, false, [reply], makeOpts({ onJumpToMessage }), ac.signal),
+      );
 
       const bar = container.querySelector<HTMLElement>(".msg-reply-ref")!;
       expect(bar.getAttribute("role")).toBe("button");

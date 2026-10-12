@@ -1116,6 +1116,38 @@ describe("createChannelController", () => {
       });
     });
 
+    it("onSend drops the reply when its target was deleted", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "", deleted: true }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", 7, []);
+
+      expect(opts.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: null }),
+        }),
+      );
+    });
+
+    it("onSend keeps the reply when its target is live", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "original", deleted: false }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", 7, []);
+
+      expect(opts.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: 7 }),
+        }),
+      );
+    });
+
     it("onSend from a detached window reattaches to present before sending", () => {
       // After a jump into history the composer stays enabled; sending must
       // land the optimistic row in the live tail, not mid-history.

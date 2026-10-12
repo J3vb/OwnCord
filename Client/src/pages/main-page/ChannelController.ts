@@ -965,7 +965,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelName,
       gifApi: api,
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        performSend(content, replyTo, attachments);
+        // A reply whose target was deleted while composing sends as a plain
+        // message.
+        const target =
+          replyTo === null
+            ? undefined
+            : getChannelMessages(channelId).find((m) => m.id === replyTo);
+        performSend(content, target?.deleted === true ? null : replyTo, attachments);
       },
       onUploadFile: async (
         file: File,

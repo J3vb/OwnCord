@@ -141,10 +141,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	return result, nil
 }
 
-// sendMessagePrecheck runs every gate a send must clear before anything is
-// written: rate limit, channel lookup, send permission, content sanitization,
-// and attachment permission. It returns the resolved channel and the
-// sanitized content for the caller to persist.
 // checkReplyTarget requires a reply's target to be a message in the same
 // channel that is not deleted. Every way of failing that gives one answer.
 func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessageParams) error {
@@ -161,6 +157,10 @@ func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessagePara
 	return nil
 }
 
+// sendMessagePrecheck runs every gate a send must clear before anything is
+// written: rate limit, channel lookup, send permission, content sanitization,
+// and attachment permission. It returns the resolved channel and the
+// sanitized content for the caller to persist.
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	// Rate limit.
 	ratKey := auth.Key("chat", p.UserID)
