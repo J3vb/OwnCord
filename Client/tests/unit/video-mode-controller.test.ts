@@ -1073,7 +1073,7 @@ describe("createVideoModeController", () => {
     });
 
     afterEach(() => {
-      grid.destroy();
+      grid.destroy?.();
       container.remove();
       vi.unstubAllGlobals();
     });
@@ -1195,6 +1195,14 @@ describe("createVideoModeController", () => {
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(false);
       expect(avatarTiles()).toHaveLength(0);
+    });
+
+    it("draws everyone in the call as soon as the grid opens for a stream", () => {
+      users.set(2, user(2, "bob", { camera: true }));
+      const ctrl = makeCtrl();
+      ctrl.checkVideoMode();
+      ctrl.showVideoGrid();
+      expect(tileIds()).toEqual(["1", "2"]);
     });
 
     it("keeps each avatar element while the person's name and picture are unchanged", () => {

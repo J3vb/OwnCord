@@ -153,6 +153,19 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.inputSlot.style.display = "none";
     slots.videoGridSlot.style.display = "block";
     videoGrid.setExitVisible(true);
+    // Opened for a stream (Watch, back from the mini-player): everyone in
+    // the call is drawn too, before the next roster change.
+    const { currentChannelId, voiceUsers } = voiceStore.getState();
+    const users = currentChannelId === null ? undefined : voiceUsers.get(currentChannelId);
+    // The DM call panel draws its own call's people.
+    if (users !== undefined && opts.panelHost?.()?.ownsCall(currentChannelId!) !== true) {
+      givePeople(users);
+    }
+  }
+
+  function givePeople(users: ReadonlyMap<number, VoiceUser>): void {
+    videoGrid.setPeople(buildCallPeople(users.values(), avatarCache));
+    peopleGiven = true;
   }
 
   /** Close the grid without recording a dismissal. Used by the paths that
@@ -276,10 +289,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       showVideoGrid();
     }
 
-    if (videoMode) {
-      videoGrid.setPeople(buildCallPeople(channelUsers.values(), avatarCache));
-      peopleGiven = true;
-    }
+    if (videoMode) givePeople(channelUsers);
 
     // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
