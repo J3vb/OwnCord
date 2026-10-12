@@ -94,6 +94,26 @@ describe("KeybindsTab", () => {
     expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBe("75");
   });
 
+  it("lists in-app mute and deafen on the global binding and follows a rebind", async () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const commRow = (label: string): HTMLElement =>
+      [...el.querySelectorAll<HTMLElement>(".keybind-row")].find(
+        (row) =>
+          row.querySelector(".setting-label")?.textContent === label &&
+          row.querySelector("span.kbd") !== null,
+      )!;
+    expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
+    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + D");
+    expect(commRow("Toggle Camera").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + V");
+
+    await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
+    (el.querySelector("[data-testid='keybind-global-deafen']") as HTMLButtonElement).click();
+    capture(document, "KeyJ");
+
+    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + J");
+    expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
+  });
+
   it("rejects rebinding to a key the other global shortcut already uses", async () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;

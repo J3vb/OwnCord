@@ -60,6 +60,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A server update shows one restart countdown instead of two.
 
+**Voice**
+
+- Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Before, the app used Ctrl+M / Ctrl+D while focused, so a rebind changed only the unfocused keys. Ctrl+M and Ctrl+D still work for now. A focused press toggles once, never twice.
+
 ### Added
 
 **Desktop UI**

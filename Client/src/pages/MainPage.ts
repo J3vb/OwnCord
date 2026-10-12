@@ -103,6 +103,10 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
+
+/** Whether the native voice-shortcut poller runs. App-wide, not per page: the
+ *  poller outlives a logout or server switch, so a remount keeps standing down. */
+let globalPollerActive = false;
 /**
  * DP-24's call notification and missed-call notice. They are re-exported by the
  * DM call panel, which the page already loads at mount, so the ring's OS alert
@@ -1035,6 +1039,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
+        isGlobalPollerActive: () => globalPollerActive,
       }),
     );
 
@@ -1049,10 +1054,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         else voiceKeybindActions.onDeafenToggle();
       }),
     );
-    void desktop.globalShortcuts.start().catch(() => {
-      // Not a Tauri host, or the command was refused: the tray and the in-app
-      // shortcuts still work; the global key path simply is not live.
-    });
+    // Once the poller runs it also sees the keys while the window is focused,
+    // so the in-app handler stands down to avoid a double toggle. The flag is
+    // set before start() so a press during startup is missed, never doubled.
+    void desktop.globalShortcuts
+      .supported()
+      .then(async (supported) => {
+        if (tornDown) return;
+        globalPollerActive = supported;
+        if (!supported) return;
+        await desktop.globalShortcuts.start();
+      })
+      .catch(() => {
+        // Not a Tauri host, or the command was refused: the tray and the in-app
+        // shortcuts still work; the global key path simply is not live.
+        globalPollerActive = false;
+      });
     // Push the persisted rebind onto the running poller at startup, so a
     // choice made in Settings survives a restart (the native default is
     // Ctrl+Shift+M / Ctrl+Shift+D).

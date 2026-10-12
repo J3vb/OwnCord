@@ -2,8 +2,8 @@
 //! OwnCord is focused. The combination is Ctrl+Shift plus a key that Settings
 //! (Keybinds) can rebind; both default to Ctrl+Shift+M / Ctrl+Shift+D, and a
 //! rebind is live on the running poller (the keys are read each tick). The
-//! in-app keydown handler does not claim these combinations, so there is no
-//! double toggle to guard against.
+//! in-app keydown handler fires on the same combinations only where this
+//! poller is not running, so a focused press toggles exactly once.
 //!
 //! Reuses the same global key-state machinery as push-to-talk (`ptt.rs`'s
 //! `combo_state`): a 20 ms polling loop that OBSERVES the combination without

@@ -211,18 +211,22 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(commHeader);
 
-  const commBinds: [string, string][] = [
-    [t("keybinds.action.toggleMute"), t("keybinds.key.ctrlM")],
-    [t("keybinds.action.toggleDeafen"), t("keybinds.key.ctrlD")],
-    [t("keybinds.action.toggleCamera"), t("keybinds.key.ctrlShiftV")],
+  // In-app mute and deafen fire on the global shortcut's own binding, so
+  // these rows show it and follow a rebind below.
+  const globalKeys = loadGlobalShortcutVks();
+  const comboText = (action: GlobalShortcutAction): string =>
+    t("keybinds.globalKey", { key: vkName(globalKeys[action]) });
+  const commKbd: Partial<Record<GlobalShortcutAction, HTMLElement>> = {};
+  const commBinds: [string, string, GlobalShortcutAction | null][] = [
+    [t("keybinds.action.toggleMute"), comboText("mute"), "mute"],
+    [t("keybinds.action.toggleDeafen"), comboText("deafen"), "deafen"],
+    [t("keybinds.action.toggleCamera"), t("keybinds.key.ctrlShiftV"), null],
   ];
-  for (const [label, shortcut] of commBinds) {
+  for (const [label, shortcut, action] of commBinds) {
     const row = createElement("div", { class: "keybind-row" });
-    appendChildren(
-      row,
-      createElement("span", { class: "setting-label" }, label),
-      createElement("span", { class: "kbd" }, shortcut),
-    );
+    const kbd = createElement("span", { class: "kbd" }, shortcut);
+    if (action !== null) commKbd[action] = kbd;
+    appendChildren(row, createElement("span", { class: "setting-label" }, label), kbd);
     section.appendChild(row);
   }
 
@@ -249,7 +253,6 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
   );
 
-  const globalKeys = loadGlobalShortcutVks();
   const captureState: {
     binding: GlobalShortcutAction | null;
     onKey: ((e: KeyboardEvent) => void) | null;
@@ -284,7 +287,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         "aria-label": aria,
         "data-testid": testId,
       },
-      t("keybinds.globalKey", { key: vkName(globalKeys[action]) }),
+      comboText(action),
     );
     button.addEventListener(
       "click",
@@ -298,7 +301,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         const finish = (): void => {
           stopCapture();
           button.style.borderColor = "";
-          setText(button, t("keybinds.globalKey", { key: vkName(globalKeys[action]) }));
+          setText(button, comboText(action));
         };
 
         const onKey = (e: KeyboardEvent): void => {
@@ -324,6 +327,8 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           }
           globalKeys[action] = vk;
           saveGlobalShortcutVk(action, vk);
+          const kbd = commKbd[action];
+          if (kbd !== undefined) setText(kbd, comboText(action));
           finish();
           void desktop.globalShortcuts
             .setKeys({ muteVk: globalKeys.mute, deafenVk: globalKeys.deafen })
