@@ -1022,6 +1022,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The rest of the shortcuts listed on the settings Keybinds tab.
     const voiceKeybindActions = createVoiceWidgetCallbacks(ws, limiters);
+    let globalPollerActive = false;
     unsubscribers.push(
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
@@ -1035,6 +1036,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
+        isGlobalPollerActive: () => globalPollerActive,
       }),
     );
 
@@ -1049,10 +1051,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         else voiceKeybindActions.onDeafenToggle();
       }),
     );
-    void desktop.globalShortcuts.start().catch(() => {
-      // Not a Tauri host, or the command was refused: the tray and the in-app
-      // shortcuts still work; the global key path simply is not live.
-    });
+    // Once the poller runs it also sees the keys while the window is focused,
+    // so the in-app handler stands down to avoid a double toggle. The flag is
+    // set before start() so a press during startup is missed, never doubled.
+    void desktop.globalShortcuts
+      .supported()
+      .then(async (supported) => {
+        if (!supported || tornDown) return;
+        globalPollerActive = true;
+        await desktop.globalShortcuts.start();
+      })
+      .catch(() => {
+        // Not a Tauri host, or the command was refused: the tray and the in-app
+        // shortcuts still work; the global key path simply is not live.
+        globalPollerActive = false;
+      });
     // Push the persisted rebind onto the running poller at startup, so a
     // choice made in Settings survives a restart (the native default is
     // Ctrl+Shift+M / Ctrl+Shift+D).

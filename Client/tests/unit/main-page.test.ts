@@ -1276,12 +1276,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         return () => shortcutHandlers.delete(handler);
       });
     const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
 
-    expect(start).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     for (const handler of shortcutHandlers) handler("mute");
 
     // The same toggle the in-app Ctrl+M runs: muting sends voice_mute(true).
@@ -1289,6 +1290,58 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     onShortcut.mockRestore();
     start.mockRestore();
+    supported.mockRestore();
+  });
+
+  it("toggles once on a focused Ctrl+Shift+M while the global poller runs (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    // jsdom loads no CSS, so the closed Settings panel would read as an open dialog.
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+
+    // The poller sees the press and emits the shortcut; the in-app handler must not also toggle.
+    const event = new KeyboardEvent("keydown", {
+      key: "M",
+      code: "KeyM",
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    expect(voiceStore.getState().localMuted).toBe(false);
+
+    start.mockRestore();
+    supported.mockRestore();
+  });
+
+  it("toggles mute in-app on Ctrl+Shift+M where global keys are unsupported (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(supported).toHaveBeenCalled());
+    await Promise.resolve();
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+    );
+
+    expect(start).not.toHaveBeenCalled();
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+
+    start.mockRestore();
+    supported.mockRestore();
   });
 
   it("ignores a global shortcut outside a voice channel (U6)", async () => {
