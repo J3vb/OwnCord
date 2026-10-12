@@ -410,7 +410,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 - **Your unread count on the taskbar and tray**, so a mention or direct message is visible even when the window is not.
 - **Incoming calls are noticed when the app is hidden**, and an unanswered ring reports a missed call.
 - **A faster, steadier message list**: sending, reacting, editing, deleting, reconnecting or scrolling no longer redraws the whole channel.
-- **A server built for a crowd**: 1,000–2,000 people online reconnect after a restart without thrashing the database.
+- **A server built for a crowd**: after a restart, a large community reconnects without thrashing the database. The 1,000–2,000 online sizing is an estimate, not yet measured (see [Capacity](docs/capacity.md#sizing-for-10002000-online)).
 - **Hardened by default**: the desktop can no longer read its own credential and pin files from the web page, and login bursts queue instead of failing.
 
 ### Added

@@ -1236,8 +1236,8 @@ than none:
 
 ## Capacity limits
 
-What one server carries on which hardware, and the size to buy for a
-community of 1,000–2,000 online, is in [Capacity](capacity.md#sizing-for-10002000-online).
+What one server carries on which hardware, and the estimated size for a
+community of 1,000–2,000 online (not yet measured), is in [Capacity](capacity.md#sizing-for-10002000-online).
 The qualified profile is **250 registered users, 100 simultaneous connections
 and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
 [The profile](capacity.md#the-profile) and
