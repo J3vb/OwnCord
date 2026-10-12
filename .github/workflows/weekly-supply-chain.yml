@@ -1,10 +1,9 @@
-# Weekly dependency scan of dev and main (WP 0-5).
+# Weekly dependency scan of the released code on main (WP 0-5).
 #
 # ci.yml's Supply-chain Scan runs only when a manifest, a lockfile or a
 # scanner baseline changes, because a source-only change cannot move a
 # version. A new advisory against a dependency nobody touched would otherwise
-# go unseen until the next lockfile change. This re-scans both branches once a
-# week. A failure shows as a red run in the Actions tab and raises nothing
+# go unseen until the next lockfile change. This re-scans once a week. A failure shows as a red run in the Actions tab and raises nothing
 # else, so someone has to look.
 #
 # Its own file rather than a schedule on ci.yml, for the reason
@@ -17,11 +16,11 @@
 # check-supply-chain-sync.test.mjs fails Repository Hygiene if the pinned
 # versions, digests or lockfile list drift apart.
 #
-# A schedule only ever runs from the default branch: this file does nothing on
-# a timer until it reaches main. Dispatch it by hand before then. The dev leg
-# therefore runs main's copy of these steps against dev's lockfiles: a lockfile
-# added to ci.yml's list on dev is scanned weekly only after the next release
-# merge.
+# A schedule only ever runs from the default branch, so the weekly run scans
+# main and does nothing on a timer until this file reaches main. To scan dev,
+# dispatch it on dev (`gh workflow run weekly-supply-chain.yml --ref dev`).
+# It checks out only the ref it was started on: checking out another branch
+# from a scheduled run is what CodeQL flags as cache poisoning.
 name: Weekly Supply-chain Scan
 
 on:
@@ -39,17 +38,12 @@ permissions:
 
 jobs:
   weekly-supply-chain:
-    name: Weekly Supply-chain Scan (${{ matrix.ref }})
+    name: Weekly Supply-chain Scan
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        ref: [dev, main]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ matrix.ref }}
           persist-credentials: false
 
       - name: Print checked-out revision

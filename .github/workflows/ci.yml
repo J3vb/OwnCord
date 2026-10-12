@@ -958,7 +958,7 @@ jobs:
   # manifest, a lockfile, osv-scanner.toml or deny.toml. A source-only change
   # cannot move a version, so it does not pay for this. A new advisory against
   # an untouched lockfile is caught by weekly-supply-chain.yml, which repeats
-  # these steps on dev and main every Monday; keep the two in sync
+  # these steps on main every Monday; keep the two in sync
   # (scripts/check-supply-chain-sync.test.mjs fails Repository Hygiene if not).
   #
   # Both this job and workflow-lint are required checks on dev. Skipped by the
