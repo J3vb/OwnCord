@@ -258,8 +258,9 @@ test.describe("Settings — Voice & Audio Tab", () => {
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {
-    const slider = page.locator(".settings-slider");
-    await expect(slider.first()).toBeVisible();
+    // Voice Activity is the default input mode, so the sensitivity gate shows.
+    const slider = page.getByRole("slider", { name: "Input Sensitivity" });
+    await expect(slider).toBeVisible();
   });
 
   test("shows audio processing toggles", async ({ page }) => {
