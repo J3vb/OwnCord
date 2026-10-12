@@ -108,6 +108,10 @@ and only when it changes something a contributor or fork holder must do
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
 
+**Messages & files**
+
+- The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
+
 ## v2.2.0-beta.3
 
 **OwnCord 2.2 beta 3** is the next step for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds click-to-watch for streams, GIF favorites and inline video playback, and fixes a long list of voice, scrolling and member-list problems.
