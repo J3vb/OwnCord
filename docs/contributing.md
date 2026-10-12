@@ -372,7 +372,9 @@ fails closed on any missing input.
    the nightly is their only run. For an emergency release, set the
    `RELEASE_ALLOW_RED_NIGHTLY` repository variable to `true` before tagging
    (the dry run takes the `allow_red_nightly` input instead) and remove it
-   afterwards; the job then passes with a warning.
+   afterwards; the job then passes with a warning. Only scheduled runs count:
+   after a fix for a red nightly merges, wait for the next nightly rather than
+   reaching for the override.
 
 8. **Approve the two `environment: release` stops.** The `release-server-docker`
    and `publish` jobs each wait on the required reviewer; record who approved

@@ -53,13 +53,17 @@ export function evaluate(runs, { now = new Date(), allowRed = false } = {}) {
   if (!problem) {
     return {
       ok: true,
-      lines: [`nightly ${WORKFLOW} is green (${latest.created_at}): ${latest.html_url}`],
+      lines: [
+        `nightly ${WORKFLOW} is green (${latest.created_at}, workflow revision ${latest.head_sha}): ${latest.html_url}`,
+      ],
     };
   }
   if (allowRed) {
     return {
       ok: true,
-      lines: [`::warning::releasing past a red nightly (ALLOW_RED_NIGHTLY): ${problem}`],
+      lines: [
+        `::warning::releasing past a red nightly (allow_red_nightly input or RELEASE_ALLOW_RED_NIGHTLY repository variable; remove the variable after this release): ${problem}`,
+      ],
     };
   }
   return {

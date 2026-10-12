@@ -413,7 +413,7 @@ func (d *drill) reclaimPort() {
 			time.Sleep(pollEvery)
 		}
 	}
-	fmt.Printf("%s: the failed phase's leftover processes %v did not stop\n", d.phase, pids)
+	fmt.Printf("%s: %s is still served after stopping this run's leftover processes %v\n", d.phase, d.baseURL(), pids)
 }
 
 // summary is the run's last line. It exists as a function for the same reason
