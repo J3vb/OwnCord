@@ -399,7 +399,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.
 
-**OwnCord 2.1 beta 2** is the third public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It is the largest release since the beta began: the full Unicode emoji set with remembered skin tones, whole-server search that pages through older results, an unread count on the taskbar and tray, notifications for incoming calls, a message list that updates in place instead of redrawing, and a server that carries a thousand or more people through a restart. Existing `2.0.1-beta.1` servers and clients upgrade in place.
+**OwnCord 2.1 beta 2** is the third public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It is the largest release since the beta began: the full Unicode emoji set with remembered skin tones, whole-server search that pages through older results, an unread count on the taskbar and tray, notifications for incoming calls, a message list that updates in place instead of redrawing, and a server built to carry a large community through a restart. Existing `2.0.1-beta.1` servers and clients upgrade in place.
 
 It is still a **beta and a hobby project** — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.
 
@@ -410,7 +410,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 - **Your unread count on the taskbar and tray**, so a mention or direct message is visible even when the window is not.
 - **Incoming calls are noticed when the app is hidden**, and an unanswered ring reports a missed call.
 - **A faster, steadier message list**: sending, reacting, editing, deleting, reconnecting or scrolling no longer redraws the whole channel.
-- **A server built for a crowd**: 1,000–2,000 people online reconnect after a restart without thrashing the database.
+- **A server built for a crowd**: after a restart, a large community reconnects without thrashing the database. The 1,000–2,000 online sizing is an estimate, not yet measured (see [Capacity](docs/capacity.md#sizing-for-10002000-online)).
 - **Hardened by default**: the desktop can no longer read its own credential and pin files from the web page, and login bursts queue instead of failing.
 
 ### Added
@@ -571,7 +571,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 ### Under the hood
 
-- **A restart with thousands online no longer thrashes the server.** Presence is coalesced into one update per 0.3 s, session keep-alives and connect/disconnect stamps are batched, reconnects are spread over up to 30 s, and concurrent clients share one member-list read, so a reconnect herd no longer overflows queues or blocks message sends. `GET /api/v1/metrics` gains `backpressure_presence_drops`.
+- **A restart with a large community online no longer thrashes the server.** Presence is coalesced into one update per 0.3 s, session keep-alives and connect/disconnect stamps are batched, reconnects are spread over up to 30 s, and concurrent clients share one member-list read, so a reconnect herd no longer overflows queues or blocks message sends. `GET /api/v1/metrics` gains `backpressure_presence_drops`.
 - **A burst of mentions no longer spawns a goroutine and a write per message.** One bounded worker collects a short window and writes them per channel in one transaction.
 - **The hourly replay-event cleanup now deletes in 5,000-row chunks**, the read pool defaults to `max(8, 2× CPU)`, and a 1,000–2,000 online scale load profile was added to the capacity harness.
 - **WebSocket upgrades are limited per address before sign-in**, and pre-auth frames are capped at 8 KiB.

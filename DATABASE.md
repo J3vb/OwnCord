@@ -18,10 +18,17 @@ OwnCord stores all durable state in a single SQLite file. This page is the map f
 | `journal_mode` | `WAL`       | Write-Ahead Logging for concurrent readers |
 | `foreign_keys` | `ON`        | Enforces all `REFERENCES` constraints      |
 | `busy_timeout` | `5000`      | Waits up to 5 seconds for the write lock   |
-| `synchronous`  | `NORMAL`    | Safe with WAL mode, reduces fsync calls    |
+| `synchronous`  | `NORMAL`    | Fewer fsyncs; see durability note below    |
 | `temp_store`   | `MEMORY`    | Temporary tables stored in RAM             |
 | `mmap_size`    | `268435456` | 256 MB memory-mapped I/O                   |
 | `cache_size`   | `-64000`    | 64 MB page cache                           |
+
+**Durability with `synchronous=NORMAL`.** In WAL mode this setting never
+corrupts the database, and an application crash or kill loses nothing that was
+committed. An OS crash or power loss can lose the last few committed
+transactions (those since the last sync of the WAL file); the database
+reopens consistent, just without them. A UPS or a host that survives power
+cuts is what protects those last writes.
 
 Every file-backed connection gets these through `_pragma=` DSN parameters (`filePragmas` in `Server/db/db.go`). Never add a per-connection PRAGMA with `Exec` after `Open`: it lands on one arbitrary pooled connection. The account-erasure transaction (below) temporarily sets `secure_delete = ON` and runs `wal_checkpoint(TRUNCATE)` after commit, restoring the normal pragma afterwards.
 
