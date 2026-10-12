@@ -302,6 +302,9 @@ const CHECK_HYGIENE = [
   // on every PR rather than only at release. `ci-select.mjs` cannot check
   // itself: its own path selects every capability, so this step always runs.
   step("node", ["--test", "scripts/ci-select.test.mjs"], "."),
+  // WP 0-5. weekly-supply-chain.yml repeats ci.yml's supply-chain steps; this
+  // fails when their pins or lockfile list drift apart.
+  step("node", ["--test", "scripts/check-supply-chain-sync.test.mjs"], "."),
 ];
 
 // Every check, in the order `check` has always run them. release:preflight
