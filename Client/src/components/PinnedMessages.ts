@@ -9,11 +9,14 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { parseTimestamp } from "@lib/formatting";
 import { messagingText } from "../i18n/messaging";
+import { createAvatarElement } from "./message-list/avatar";
 
 export interface PinnedMessage {
   readonly id: number;
   readonly content: string;
   readonly author: string;
+  /** Author's avatar URL; the letter on `avatarColor` shows when absent or until it loads. */
+  readonly avatar: string | null;
   readonly timestamp: string;
   readonly avatarColor: string;
 }
@@ -37,10 +40,6 @@ function formatPinTime(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function getInitial(name: string): string {
-  return name.length > 0 ? name.charAt(0).toUpperCase() : "?";
-}
-
 function renderPinnedItem(
   msg: PinnedMessage,
   options: PinnedMessagesOptions,
@@ -52,9 +51,10 @@ function renderPinnedItem(
   // Row: avatar + body
   const row = createElement("div", { class: "pinned-msg__row" });
 
-  const avatar = createElement("div", { class: "pinned-msg__avatar" });
-  avatar.style.backgroundColor = msg.avatarColor;
-  avatar.textContent = getInitial(msg.author);
+  const avatar = createAvatarElement(
+    { username: msg.author, avatar: msg.avatar },
+    { className: "pinned-msg__avatar", background: msg.avatarColor },
+  );
 
   const body = createElement("div", { class: "pinned-msg__body" });
 
