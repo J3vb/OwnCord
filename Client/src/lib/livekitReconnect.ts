@@ -89,6 +89,9 @@ export interface ReconnectDeps {
   reapplyMuteGain: () => void;
   /** Clear the pending-reconnect fields now the tail has completed. */
   clearPendingReconnectFields: () => void;
+  /** Tell the user about a camera or screen share the drop stopped. Only a
+   *  reconnect that got all the way through calls it. */
+  noticeLostMedia: () => void;
 }
 
 /** Auto-reconnect budget, sized to outlast a companion LiveKit restart.
@@ -349,6 +352,7 @@ export async function attemptAutoReconnect(
       deps.clearPendingReconnectFields();
       // Request a fresh token since the stored one may be close to expiry.
       deps.requestTokenRefresh();
+      deps.noticeLostMedia();
       return;
     } catch (err) {
       log.warn("Auto-reconnect failed", { attempt, url, error: err });

@@ -16,6 +16,13 @@ import { shellText } from "../i18n/shell";
 
 export type ToastType = "info" | "error" | "success" | "warning";
 
+/** A button on the toast that does something about the message. Clicking it
+ *  runs `run` and dismisses the toast. */
+export interface ToastAction {
+  readonly label: string;
+  readonly run: () => void;
+}
+
 const MAX_TOASTS = 5;
 const DEFAULT_DURATION_MS = 5000;
 
@@ -40,7 +47,7 @@ interface ToastEntry {
 }
 
 export interface ToastContainer extends MountableComponent {
-  show(message: string, type?: ToastType, durationMs?: number): void;
+  show(message: string, type?: ToastType, durationMs?: number, action?: ToastAction): void;
   clear(): void;
 }
 
@@ -84,6 +91,7 @@ export function createToastContainer(): ToastContainer {
     message: string,
     type: ToastType = "info",
     durationMs: number = DEFAULT_DURATION_MS,
+    action?: ToastAction,
   ): void {
     if (root === null) return;
     const sticky = type === "error" || durationMs === Infinity;
@@ -125,6 +133,15 @@ export function createToastContainer(): ToastContainer {
     // A coalesced duplicate fills this in; CSS hides it while empty.
     const countEl = createElement("span", { class: "toast-count" });
     el.appendChild(countEl);
+
+    if (action !== undefined) {
+      const btn = createElement("button", { class: "toast-action", type: "button" }, action.label);
+      btn.addEventListener("click", () => {
+        removeToast(entry);
+        action.run();
+      });
+      el.appendChild(btn);
+    }
 
     // Sticky toasts get a close button so they can be dismissed by hand.
     // Others clear themselves, so a button there would only add noise.

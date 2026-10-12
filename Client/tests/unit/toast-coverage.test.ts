@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "../../src/lib/toast";
+import {
+  initToast,
+  teardownToast,
+  showToast,
+  showActionToast,
+  showChangeOutcomeToast,
+} from "../../src/lib/toast";
 import type { ToastContainer } from "../../src/components/Toast";
 
 /**
@@ -44,6 +50,24 @@ describe("toast global helper", () => {
       showToast("message");
       expect(first.show).not.toHaveBeenCalled();
       expect(second.show).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── showActionToast ──────────────────────────────────────
+
+  describe("showActionToast", () => {
+    it("forwards the action and duration to the container", () => {
+      const container = createMockContainer();
+      initToast(container);
+      const action = { label: "Retry", run: vi.fn() };
+
+      showActionToast("Lost it", "warning", action, Infinity);
+
+      expect(container.show).toHaveBeenCalledWith("Lost it", "warning", Infinity, action);
+    });
+
+    it("no-ops before init", () => {
+      expect(() => showActionToast("x", "info", { label: "y", run: vi.fn() })).not.toThrow();
     });
   });
 
