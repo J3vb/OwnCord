@@ -14,7 +14,14 @@
  *        │
  *        └─► subscribeSelector()      ← fire only when selected
  *            listeners                   slice changes (via ===)
+ *
+ * Each listener runs in its own try/catch: one that throws is logged and the
+ * rest still run, so a bad subscriber cannot reorder or drop later updates.
  */
+
+import { createLogger } from "./logger";
+
+const log = createLogger("store");
 
 export interface Store<T> {
   /** Returns the current state (immutable reference). */
@@ -24,6 +31,11 @@ export interface Store<T> {
    * Update state via an updater function. Subscriber notifications are
    * batched via queueMicrotask — multiple rapid setState calls result
    * in a single notification with the final state.
+   *
+   * Called from inside a listener during the batched notification, the
+   * update is deferred until every listener has seen the current state, so
+   * getState() in that listener still returns the state being notified.
+   * flush() does not defer: there the update applies at once.
    */
   setState(updater: (prev: T) => T): void;
 
@@ -118,6 +130,16 @@ export function createStore<T>(initialState: T): Store<T> {
     return state;
   }
 
+  function notify(): void {
+    for (const listener of listeners) {
+      try {
+        listener(state);
+      } catch (err) {
+        log.error("Store listener threw", err);
+      }
+    }
+  }
+
   function setState(updater: (prev: T) => T): void {
     if (updating) {
       // Re-entrant call from within a subscriber — coalesce into a single
@@ -135,9 +157,7 @@ export function createStore<T>(initialState: T): Store<T> {
         notifyScheduled = false;
         updating = true;
         try {
-          for (const listener of listeners) {
-            listener(state);
-          }
+          notify();
           // Drain any update coalesced by re-entrant setState during notification.
           // Loop to handle further re-entrant calls that may occur within listeners
           // invoked during the drain itself.
@@ -145,9 +165,7 @@ export function createStore<T>(initialState: T): Store<T> {
             const queued = pendingUpdater;
             pendingUpdater = null;
             state = queued(state);
-            for (const listener of listeners) {
-              listener(state);
-            }
+            notify();
           }
         } finally {
           updating = false;
@@ -185,9 +203,7 @@ export function createStore<T>(initialState: T): Store<T> {
   function flush(): void {
     if (notifyScheduled) {
       notifyScheduled = false;
-      for (const listener of listeners) {
-        listener(state);
-      }
+      notify();
     }
   }
 

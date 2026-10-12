@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createStore, shallowEqual } from "../../src/lib/store";
+import { expectConsole } from "../helpers/console";
 
 interface TestState {
   count: number;
@@ -456,5 +457,52 @@ describe("flush edge cases", () => {
     store.setState(() => ({ items: new Map([["a", 2]]) }));
     store.flush();
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listener isolation
+// ---------------------------------------------------------------------------
+
+describe("listener isolation", () => {
+  it("a throwing listener does not stop the others or strand a re-entrant update", async () => {
+    const store = createStore({ value: 100 });
+    const seen: number[] = [];
+    let thrown = false;
+    store.subscribe(() => {
+      if (thrown) return;
+      thrown = true;
+      store.setState((s) => ({ value: s.value + 10 }));
+      throw new Error("listener failed");
+    });
+    store.subscribe((s) => {
+      seen.push(s.value);
+    });
+
+    store.setState((s) => ({ value: s.value * 10 }));
+    await Promise.resolve();
+    store.setState((s) => ({ value: s.value * 10 }));
+    await Promise.resolve();
+
+    expect(store.getState().value).toBe((100 * 10 + 10) * 10);
+    expect(seen).toEqual([1000, 1010, 10100]);
+    expectConsole("error", /\[store\] Store listener threw/);
+  });
+
+  it("flush also isolates a throwing listener", () => {
+    const store = freshStore();
+    const after = vi.fn();
+    let thrown = false;
+    store.subscribe(() => {
+      if (thrown) return;
+      thrown = true;
+      throw new Error("listener failed");
+    });
+    store.subscribe(after);
+
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    expect(() => store.flush()).not.toThrow();
+    expect(after).toHaveBeenCalledWith({ count: 1, name: "test" });
+    expectConsole("error", /\[store\] Store listener threw/);
   });
 });
