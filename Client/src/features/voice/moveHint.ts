@@ -12,6 +12,11 @@ export function noteVoiceMoved(channelId: number): void {
   pendingMoveChannelId = channelId;
 }
 
+/** Whether a move is noted and not yet settled. */
+export function isVoiceMovePending(): boolean {
+  return pendingMoveChannelId !== null;
+}
+
 /** Whether the connect to `channelId` is the move noted above; clears the note
  *  either way, since any connect or teardown settles it. */
 export function takeVoiceMoved(channelId: number | null): boolean {

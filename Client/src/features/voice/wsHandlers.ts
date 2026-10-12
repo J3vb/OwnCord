@@ -252,10 +252,12 @@ export function handleVoiceMoved(
   // RT-12: a move is a deliberate membership change, so a pending
   // restart-rejoin for the old channel must not fire.
   cancelVoiceRejoin(clock);
+  // Noted at once, so the leave sound queued by the voice_leave just before
+  // this frame sees the move and stays silent.
+  noteVoiceMoved(payload.to_channel_id);
   void livekitSession().then(({ leaveVoice }) => {
     leaveVoice(false);
     leaveVoiceChannel();
-    noteVoiceMoved(payload.to_channel_id);
     joinVoiceChannel(payload.to_channel_id);
     ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } });
   });

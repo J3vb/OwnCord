@@ -29,7 +29,7 @@ import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/preferences";
 import { loadUserStatus } from "@lib/userStatus";
 import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
-import { takeVoiceMoved } from "./moveHint";
+import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */
 interface SoundState {
@@ -63,6 +63,11 @@ function snapshot(channelId: number | null): SoundState {
   };
 }
 
+/** How long your own leave waits before it sounds. The server sends a
+ *  moderator move as voice_leave and then voice_moved, two frames apart; the
+ *  leave must not chime when the move is right behind it. */
+const LEAVE_GRACE_MS = 250;
+
 function canPlay(): boolean {
   if (loadUserStatus() === "dnd") return false;
   return loadPref<boolean>("voiceSounds", true);
@@ -83,13 +88,30 @@ export function startVoiceUiSounds(): () => void {
       ? prev.channelId
       : null;
 
+  let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelLeave = (): void => {
+    if (leaveTimer !== null) clearTimeout(leaveTimer);
+    leaveTimer = null;
+  };
+  /** Your own leave, unless a moderator move turns out to be behind it. */
+  const scheduleLeave = (): void => {
+    cancelLeave();
+    leaveTimer = setTimeout(() => {
+      leaveTimer = null;
+      if (!isVoiceMovePending()) playVoiceSound("leave");
+    }, LEAVE_GRACE_MS);
+  };
+
   /** Your own join/move/leave edge, if this state has one. Runs on every
    *  update (deafened or not), so `announced` always tracks the session. */
   const selfEdge = (next: SoundState): VoiceSound | null => {
     if (next.channelId === null) {
       const wasIn = announced !== null;
       announced = null;
-      takeVoiceMoved(null);
+      // A join that ended before it connected (a move's included) spends the
+      // move note; a leave from a live call keeps it for the voice_moved
+      // that may follow.
+      if (!wasIn && prev.channelId !== null) takeVoiceMoved(null);
       return wasIn ? "leave" : null;
     }
     if (next.voiceStatus !== "connected" || next.channelId === announced) return null;
@@ -109,6 +131,7 @@ export function startVoiceUiSounds(): () => void {
     // flags read as leave/undeafen/mute over the logout screen.
     if (!authStore.getState().isAuthenticated) {
       announced = null;
+      cancelLeave();
       takeVoiceMoved(null);
       finish();
       return;
@@ -137,7 +160,8 @@ export function startVoiceUiSounds(): () => void {
     // Self join/leave/move. A switch plays nothing until the new channel
     // connects, and then only the join: never a leave and a join back to back.
     if (self !== null || next.channelId !== prev.channelId) {
-      if (self !== null) playVoiceSound(self);
+      if (self === "leave") scheduleLeave();
+      else if (self !== null) playVoiceSound(self);
       finish();
       return;
     }
@@ -164,6 +188,7 @@ export function startVoiceUiSounds(): () => void {
   });
   return () => {
     unsubscribe();
+    cancelLeave();
     takeVoiceMoved(null);
   };
 }
