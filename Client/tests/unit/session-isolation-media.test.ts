@@ -155,6 +155,7 @@ vi.mock("@stores/voice.store", () => ({
     mockPttPollingLive.value = live;
   }),
   isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+  onPttPollingLiveChange: vi.fn(() => () => {}),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),

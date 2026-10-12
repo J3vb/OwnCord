@@ -8,12 +8,14 @@ import {
   setLocalScreenshare,
   setPttGated as setPttGatedState,
   isPttPollingLive,
+  onPttPollingLiveChange,
   setListenOnly,
   setVoiceStatus,
   setLocalGateSpeaking,
   restateSelfVoiceState,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
+import { inputMode } from "@lib/inputMode";
 import { createLogger } from "@lib/logger";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
@@ -325,7 +327,7 @@ export class LiveKitSession {
     },
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
   });
-  private _audioPipeline = new AudioPipeline();
+  private _audioPipeline = new AudioPipeline(isPttPollingLive);
   private _audioElements = new AudioElements();
   private _deviceManager = new DeviceManager();
   private _eventHandlers: RoomEventHandlers;
@@ -596,7 +598,8 @@ export class LiveKitSession {
     if (room === null) return;
 
     const state = voiceStore.getState();
-    // A bound PTT key means transmission is gated by press/release, but the
+    // In Push to Talk mode a bound key means transmission is gated by
+    // press/release (a key bound in Voice Activity mode gates nothing), but the
     // Rust poller only emits ptt-state on a state TRANSITION — an idle key
     // produces no event at all, so without this the freshly published mic
     // would stay hot and transmitting until the user's first press+release.
@@ -616,7 +619,7 @@ export class LiveKitSession {
     // reconnect.
     const pttArmed =
       mode === "join"
-        ? isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0
+        ? isPttPollingLive() && inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0
         : state.pttGated === true;
     if (mode === "join") setPttGatedState(pttArmed);
     this._audioPipeline.setPttGated(pttArmed);
@@ -901,6 +904,12 @@ export class LiveKitSession {
     this._media.setVoiceSensitivity(sensitivity);
   }
 
+  /** Re-run the sensitivity gate for the saved input mode (Voice Activity
+   *  gates on sensitivity, Push to Talk does not). */
+  applyInputMode(): void {
+    this._media.applyInputMode();
+  }
+
   /** Push-to-talk: close (key up) or open (key down) the gate — the mic
    *  processor's, or the native room's own (AudioPipeline.setPttGated).
    *  Recorded in the store for the widget, applied to the live processor and
@@ -1042,6 +1051,9 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
+export const applyInputMode = session.applyInputMode.bind(session);
+// Push to Talk takes over from the sensitivity gate only once its poller is live.
+onPttPollingLiveChange(applyInputMode);
 export const setPttGated = session.setPttGated.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const reapplyEnhancedNoiseSuppression =

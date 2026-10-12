@@ -216,12 +216,20 @@
   border-color: var(--accent);
   color: var(--on-accent);
 }
+/* Input mode: the mode choice, then the Push to Talk key and delay. */
+.input-mode-options,
+.input-mode-ptt {
+  margin-top: 12px;
+}
 /* ── Mic Level Meter ── */
 .mic-meter-wrap {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   margin-bottom: 12px;
+}
+.mic-meter-wrap[hidden] {
+  display: none;
 }
 .mic-meter-bar {
   flex: 1;

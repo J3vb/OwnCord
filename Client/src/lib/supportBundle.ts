@@ -153,6 +153,7 @@ const SETTINGS_ALLOWLIST = [
   "outputVolume",
   "voiceSensitivity",
   "pttVk",
+  "inputMode",
   "pttReleaseDelayMs",
   "screenShareFps",
   "screenShareQuality",

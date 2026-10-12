@@ -514,6 +514,7 @@ export function isSelfMuted(state: VoiceState): boolean {
  *  Defaults to false so an un-wired or unsupported poller never causes a
  *  join-time mute that nothing can later lift. */
 let pttPollingLive = false;
+const pttPollingListeners = new Set<() => void>();
 
 /** Report whether the PTT key-polling backend can actually observe key state.
  *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
@@ -522,7 +523,16 @@ let pttPollingLive = false;
  *  `DeviceState::checked_new()` returns None, so no `ptt-state` event can ever
  *  arrive to lift a join-time mute. */
 export function setPttPollingLive(live: boolean): void {
+  if (pttPollingLive === live) return;
   pttPollingLive = live;
+  for (const listener of pttPollingListeners) listener();
+}
+
+/** Run `listener` whenever the poller goes live or stops, so the sensitivity
+ *  gate can hand over to Push to Talk only once a key can actually gate. */
+export function onPttPollingLiveChange(listener: () => void): () => void {
+  pttPollingListeners.add(listener);
+  return () => pttPollingListeners.delete(listener);
 }
 
 /** Whether the PTT poller is live (see `setPttPollingLive`). */

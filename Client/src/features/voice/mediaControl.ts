@@ -337,6 +337,10 @@ export class MediaControl {
     this._audioPipeline.setVoiceSensitivity(sensitivity);
   }
 
+  applyInputMode(): void {
+    this._audioPipeline.applyInputMode();
+  }
+
   /** Close or open the push-to-talk gate (AudioPipeline.setPttGated). */
   setPttGated(gated: boolean): void {
     this._audioPipeline.setPttGated(gated);

@@ -201,6 +201,16 @@ describe("KeybindsTab", () => {
     controller.abort();
   });
 
+  it("says the key does nothing while Input Mode is Voice Activity", () => {
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    const tab = buildKeybindsTab(new AbortController().signal);
+    expect(tab.querySelector('[data-testid="ptt-mode-note"]')).not.toBeNull();
+
+    localStorage.setItem("owncord:settings:inputMode", '"ptt"');
+    const ptt = buildKeybindsTab(new AbortController().signal);
+    expect(ptt.querySelector('[data-testid="ptt-mode-note"]')).toBeNull();
+  });
+
   it("returns a div with settings-pane class", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     expect(el.tagName).toBe("DIV");
