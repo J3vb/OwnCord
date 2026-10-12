@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 - The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
 - The settings API now refuses `max_upload_bytes` and `voice_quality` with a 400: they never had an effect. Set `upload.max_size_mb` and `voice.quality` in config.yaml.
 - Two simultaneous config changes in the admin page can no longer combine into a setting the safety checks would have refused.
+- The `admin_allowed_cidrs` warning no longer appears on every start. It now shows only when the server looks like it sits behind a reverse proxy or a container port relay, at startup or when a proxied request reaches /admin.
 
 **Updates**
 

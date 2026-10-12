@@ -931,11 +931,12 @@ func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
 	}
 }
 
-// TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies pins that the shipped
-// allowlist with no trusted_proxies warns too: behind a same-host reverse
-// proxy every request arrives from loopback, which the default admits, so the
-// default is the case the warning matters most for.
-func TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies(t *testing.T) {
+// TestLoadDoesNotWarnOnDefaultAdminCIDRs pins that a default config loads
+// without a trusted_proxies warning. The relay case is reported where it can
+// be told apart: at start-up for a container or TLS off (api's
+// warnOnAdminPeerAddress) and at runtime for a proxy sending X-Forwarded-For
+// (api.AdminIPRestrict).
+func TestLoadDoesNotWarnOnDefaultAdminCIDRs(t *testing.T) {
 	rec := &recordingHandler{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(rec))
@@ -944,7 +945,7 @@ func TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies(t *testing.T) {
 	if _, err := config.Load(filepath.Join(t.TempDir(), "config.yaml")); err != nil {
 		t.Fatalf("Load() with defaults returned error: %v", err)
 	}
-	if !rec.warned("trusted_proxies is empty") {
-		t.Error("Load() with the default admin_allowed_cidrs and no trusted_proxies did not warn")
+	if rec.warned("trusted_proxies is empty") {
+		t.Error("Load() with the default admin_allowed_cidrs warned about trusted_proxies on every boot")
 	}
 }

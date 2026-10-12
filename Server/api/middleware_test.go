@@ -1605,23 +1605,28 @@ func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
 // TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies pins the
 // runtime hint for a reverse proxy nobody declared: a loopback peer sending
 // X-Forwarded-For while trusted_proxies is empty means every client looks like
-// the proxy, so the allowlist admits them all. It warns once, not per request.
+// the proxy, so the allowlist admits them all. It warns once, not per request,
+// for either forwarding header the client-IP resolver reads.
 func TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	for _, header := range []string{"X-Forwarded-For", "X-Real-IP"} {
+		t.Run(header, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
 
-	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
-	for range 2 {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.RemoteAddr = "127.0.0.1:9999"
-		req.Header.Set("X-Forwarded-For", "198.51.100.7")
-		h.ServeHTTP(httptest.NewRecorder(), req)
-	}
+			h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+			for range 2 {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				req.RemoteAddr = "127.0.0.1:9999"
+				req.Header.Set(header, "198.51.100.7")
+				h.ServeHTTP(httptest.NewRecorder(), req)
+			}
 
-	if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
-		t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+			if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
+				t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+			}
+		})
 	}
 }
 
