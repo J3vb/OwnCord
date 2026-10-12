@@ -58,8 +58,9 @@ jobs:
     # markdown-parser.property.test.ts's wall-clock budget tests (3 s) take
     # ~8.6 s under perTest coverage instrumentation. The plain unit suite runs
     # the same tests green, so this is the harness, not a regression. Until the
-    # shard is fixed it is informational: it still runs and reports, but does
-    # not turn the nightly red.
+    # shard is fixed its own leg is informational. The run still ends red:
+    # mutation-score below fails while any shard's report is missing, and the
+    # other shards currently hit the 90-minute timeout (a Phase 3 work package).
     continue-on-error: ${{ matrix.shard == 'lib-rest' }}
     strategy:
       # One failing shard must not cancel the others: the baseline is only
@@ -99,9 +100,10 @@ jobs:
         run: |
           {
             echo "### lib-rest mutation shard is informational"
-            echo "It failed, as it has every night: the wall-clock budget tests in"
-            echo "markdown-parser.property.test.ts exceed 3 s under Stryker's coverage"
-            echo "instrumentation. This does not fail the nightly until the shard is fixed."
+            echo "It failed. The known cause is the wall-clock budget tests in"
+            echo "markdown-parser.property.test.ts exceeding 3 s under Stryker's coverage"
+            echo "instrumentation; check the log to confirm. This leg no longer fails on its"
+            echo "own, but the full-surface score still fails while its report is missing."
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

@@ -343,6 +343,11 @@ fails closed on any missing input.
    beta.1 release had to be rewritten after publishing because the section was
    internal prose, and this step is what stops that happening again.
 
+   **Record the release in [`docs/STATUS.md`](STATUS.md)** in the same PR:
+   update "Current release" and add a row to its Releases table. `release.yml`'s
+   `release-status` job refuses a version with no row there, and Docs & Ledger
+   Consistency fails the PR whose client version has none.
+
 4. **Flip the platform table and the alpha wording.** In `docs/quick-start.md`
    the "Server binary / Linux ARM64" row changes from "Not published yet" to the
    tag that publishes it. Flip the project-status wording (README badge and
