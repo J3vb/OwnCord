@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -184,6 +185,15 @@ func TestHandleRestoreBackup_RefusesWhenCheckpointBusy(t *testing.T) {
 	}
 	if want := restoreFixtureRows + 2; n != want {
 		t.Errorf("rows after a refused restore = %d, want %d (the live data must be untouched)", n, want)
+	}
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(f.dbPath), "backups"))
+	if err != nil {
+		t.Fatalf("ReadDir backups: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			t.Errorf("a refused restore left its safety copy %s behind; retries would pile them up", e.Name())
+		}
 	}
 }
 

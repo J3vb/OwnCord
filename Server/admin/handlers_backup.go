@@ -297,6 +297,12 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		ctx := context.WithoutCancel(r.Context())
 		if !checkpointForRestore(ctx, w, database) {
+			// Nothing was restored, so the safety copy protects nothing. It is
+			// kept from retention, so a retried refusal would otherwise leave
+			// one database-sized file per attempt.
+			if err := os.Remove(preRestore); err != nil {
+				slog.Warn("could not remove the unused pre-restore safety copy", "path", preRestore, "err", err)
+			}
 			return
 		}
 

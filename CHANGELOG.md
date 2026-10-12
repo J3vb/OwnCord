@@ -96,6 +96,7 @@ and only when it changes something a contributor or fork holder must do
 - A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
 - The periodic maintenance sweeps (signed-out session checks, stale voice cleanup, voice reconcile) could keep running into the database after the server began shutting down or restarting, and a stalled database could hold one forever — a sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it to finish. A delete that already went through is still announced, within its own short timeout.
 - Restoring a backup from the admin panel made the old server process exit with an error (exit code 1) while it restarted, even though the restore worked. The restart now exits cleanly.
+- A backup restored from the admin panel could come back with leftover changes from the database it replaced. The restore now finishes the database's pending writes and clears its write-ahead log before copying the backup in. If the database is too busy to do that, the restore is refused with "the database is busy" and you can retry.
 
 **Login & connection**
 
