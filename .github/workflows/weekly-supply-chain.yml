@@ -4,7 +4,8 @@
 # scanner baseline changes, because a source-only change cannot move a
 # version. A new advisory against a dependency nobody touched would otherwise
 # go unseen until the next lockfile change. This re-scans both branches once a
-# week so it shows up on its own.
+# week. A failure shows as a red run in the Actions tab and raises nothing
+# else, so someone has to look.
 #
 # Its own file rather than a schedule on ci.yml, for the reason
 # nightly-docker-smoke.yml's header gives: a scheduled run lands its checks on
@@ -17,7 +18,10 @@
 # versions, digests or lockfile list drift apart.
 #
 # A schedule only ever runs from the default branch: this file does nothing on
-# a timer until it reaches main. Dispatch it by hand before then.
+# a timer until it reaches main. Dispatch it by hand before then. The dev leg
+# therefore runs main's copy of these steps against dev's lockfiles: a lockfile
+# added to ci.yml's list on dev is scanned weekly only after the next release
+# merge.
 name: Weekly Supply-chain Scan
 
 on:
