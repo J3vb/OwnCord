@@ -364,8 +364,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const channel = channelsStore.getState().channels.get(channelId);
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     // The name is a link back to the call: the DM for a DM call, where the
-    // call panel is, or the guild voice channel's call view.
-    const asLink = options.onOpenCall !== undefined;
+    // call panel is, or the guild voice channel's call view. A call whose
+    // channel is not known yet stays plain text.
+    const asLink =
+      options.onOpenCall !== undefined && (dm !== undefined || channel?.type === "voice");
     if (asLink !== channelNameEl instanceof HTMLButtonElement) {
       const next = asLink ? createChannelLink() : createElement("span", { class: "vw-channel" });
       channelNameEl.replaceWith(next);

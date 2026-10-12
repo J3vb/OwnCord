@@ -545,13 +545,38 @@ describe("VoiceWidget", () => {
     link!.click();
     expect(onOpenCall).toHaveBeenCalledWith(100);
 
-    // A guild voice channel links too: it opens that channel's call view.
+    // A call whose channel is not known yet stays plain text.
     setVoiceChannel(999, []);
     voiceStore.flush();
+    expect(container.querySelector("[data-testid='vw-channel-link']")).toBeNull();
+
+    // A guild voice channel links too: it opens that channel's call view.
+    channelsStore.setState((prev) => {
+      const channels = new Map(prev.channels);
+      channels.set(5, {
+        id: 5,
+        name: "Voice Lobby",
+        type: "voice",
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels };
+    });
+    setVoiceChannel(5, []);
+    voiceStore.flush();
     const guildLink = container.querySelector<HTMLButtonElement>("[data-testid='vw-channel-link']");
-    expect(guildLink?.textContent).toBe("Voice Channel");
+    expect(guildLink?.textContent).toBe("Voice Lobby");
     guildLink!.click();
-    expect(onOpenCall).toHaveBeenLastCalledWith(999);
+    expect(onOpenCall).toHaveBeenLastCalledWith(5);
     expect(container.querySelectorAll(".vw-channel")).toHaveLength(1);
 
     widget.destroy?.();
