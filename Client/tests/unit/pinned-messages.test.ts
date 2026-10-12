@@ -172,6 +172,7 @@ describe("PinnedMessages", () => {
     const avatar = container.querySelector<HTMLElement>(".pinned-msg__avatar")!;
     expect(avatar.querySelector("img")).toBeNull();
     expect(avatar.textContent).toBe("A");
+    expect(avatar.style.background).toBe("rgb(88, 101, 242)");
     panel.destroy?.();
   });
 
