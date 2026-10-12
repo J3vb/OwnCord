@@ -9,13 +9,17 @@ import "maps"
 
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
-		"pre-migration backup written before applying migrations": "pre_migration_backup_written",
-		"backup archive build failed":                             "backup_archive_build_failed",
-		"backup archive downloaded":                               "backup_archive_downloaded",
-		"backup archive download interrupted":                     "backup_archive_download_interrupted",
-		"backup download interrupted":                             "backup_download_interrupted",
-		"setup: failed to generate the recovery kit":              "setup_recovery_kit_generate_failed",
-		"setup: failed to hash the recovery kit":                  "setup_recovery_kit_hash_failed",
-		"setup: failed to store the recovery kit":                 "setup_recovery_kit_store_failed",
+		"pre-migration backup written before applying migrations":                    "pre_migration_backup_written",
+		"backup archive build failed":                                                "backup_archive_build_failed",
+		"backup archive downloaded":                                                  "backup_archive_downloaded",
+		"backup archive download interrupted":                                        "backup_archive_download_interrupted",
+		"backup download interrupted":                                                "backup_download_interrupted",
+		"setup: failed to generate the recovery kit":                                 "setup_recovery_kit_generate_failed",
+		"setup: failed to hash the recovery kit":                                     "setup_recovery_kit_hash_failed",
+		"setup: failed to store the recovery kit":                                    "setup_recovery_kit_store_failed",
+		"restore refused: the database is busy, the WAL checkpoint could not finish": "restore_refused_database_busy",
+		"restore refused: database connections did not close":                        "restore_refused_conns_open",
+		"restore refused: could not remove the database's WAL files":                 "restore_refused_wal_files",
+		"could not remove the unused pre-restore safety copy":                        "pre_restore_unused_copy_remove_failed",
 	})
 }

@@ -114,6 +114,24 @@ func StubCloseError(msg string) (restore func()) {
 	}
 }
 
+// StubCloser swaps the restore path's database-close hook for fn, so a test
+// can act on the files between the pools closing and the backup being copied
+// in. CloseDatabaseForTest is the real close, for stubs that wrap it.
+func StubCloser(fn func(*db.DB) error) (restore func()) {
+	closeMu.Lock()
+	prev := dbCloser
+	dbCloser = fn
+	closeMu.Unlock()
+	return func() {
+		closeMu.Lock()
+		dbCloser = prev
+		closeMu.Unlock()
+	}
+}
+
+// CloseDatabaseForTest is the real close behind dbCloser.
+func CloseDatabaseForTest(database *db.DB) error { return database.Close() }
+
 // ApplyStagedUpdate exposes applyStagedUpdate (the on-disk swap behind
 // POST /updates/apply's background goroutine) so tests can drive it directly
 // with fake filesystem paths, instead of exercising the full HTTP handler —

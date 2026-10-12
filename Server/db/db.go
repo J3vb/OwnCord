@@ -503,9 +503,7 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 }
 
 // SQLDb returns the underlying writer *sql.DB for cases requiring direct
-// access. It is the escape hatch for statements the wrappers can't route —
-// notably PRAGMA wal_checkpoint(TRUNCATE) in the admin backup handler, which
-// must run on the writer to checkpoint the WAL it just stopped appending to.
+// access, such as the writer's pool statistics.
 func (d *DB) SQLDb() *sql.DB {
 	return d.writer
 }
