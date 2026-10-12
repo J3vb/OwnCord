@@ -2077,12 +2077,26 @@ describe("SidebarArea", () => {
       expect(createChannelSidebar).toHaveBeenCalled();
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       expect(typeof callArgs.onVoiceJoin).toBe("function");
-      expect(typeof callArgs.onVoiceLeave).toBe("function");
+      expect(typeof callArgs.onOpenCall).toBe("function");
+      expect(callArgs).not.toHaveProperty("onVoiceLeave");
       expect(typeof callArgs.onCreateChannel).toBe("function");
       expect(typeof callArgs.onEditChannel).toBe("function");
       expect(typeof callArgs.onDeleteChannel).toBe("function");
       expect(typeof callArgs.onReorderChannel).toBe("function");
       expect(typeof callArgs.onPurgeChannel).toBe("function");
+
+      cleanup(result);
+    });
+
+    it("onOpenCall forwards to the page's call opener", () => {
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      callArgs.onOpenCall();
+
+      expect(onOpenCall).toHaveBeenCalledOnce();
 
       cleanup(result);
     });

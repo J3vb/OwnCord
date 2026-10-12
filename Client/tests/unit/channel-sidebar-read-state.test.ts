@@ -58,7 +58,7 @@ describe("ChannelSidebar — mark as read", () => {
 
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
   });
 
   afterEach(() => {

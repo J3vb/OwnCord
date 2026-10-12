@@ -98,6 +98,8 @@ export interface SidebarAreaOptions {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly onWatchStream?: (userId: number) => void;
+  /** Open the call view for the voice channel the user is in. */
+  readonly onOpenCall?: () => void;
   /** B9-4: the destinations this build ships. An absent one gets no entry. */
   readonly destinations?: NavigationDestinations;
   /** Open a content view; `opener` gets focus back when it closes. */
@@ -383,7 +385,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const sidebarVoice = createSidebarVoiceCallbacks(ws);
     return createChannelSidebar({
       onVoiceJoin: sidebarVoice.onVoiceJoin,
-      onVoiceLeave: sidebarVoice.onVoiceLeave,
+      onOpenCall: () => opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(ws),
       onWatchStream: opts.onWatchStream,
       onCreateChannel: (category) => {
