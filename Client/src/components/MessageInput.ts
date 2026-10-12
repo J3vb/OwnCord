@@ -906,6 +906,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = content;
       autoResize();
       textarea.focus();
+      // Caret at the end, like Discord, so typing continues the message.
+      textarea.setSelectionRange(content.length, content.length);
     }
   }
 
@@ -1089,10 +1091,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
         if (
           e.key === "ArrowUp" &&
+          !e.shiftKey &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.isComposing &&
           disabledReason === null &&
           textarea !== null &&
           textarea.value.length === 0
         ) {
+          // The browser's own ArrowUp runs after this handler and would move
+          // the caret of the just-loaded edit text to the start.
+          e.preventDefault();
           root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
         }
       },
