@@ -736,7 +736,8 @@ export class NativeRoom {
   /** The backend auto-subscribes every track, so a voice track that appears
    *  while deafened is unsubscribed here — the native counterpart of
    *  AudioElements.handleTrackSubscribedAudio's guard, which never runs on
-   *  Linux because no TrackSubscribed is raised. Stream audio is exempt. */
+   *  Linux because no TrackSubscribed is raised. Stream audio stays
+   *  subscribed; deafen silences it through its gain instead. */
   private addPublication(identity: string, track: NativeVoiceTrack): void {
     const p = this.participant(identity);
     if (p.trackPublications.has(track.sid)) return;

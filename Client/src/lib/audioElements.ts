@@ -145,7 +145,13 @@ export class AudioElements {
   /** The gain a user's screen-share audio plays at: its effective volume, or
    *  0 while muted. */
   getScreenshareGain(userId: number): number {
-    return this.getScreenshareAudioMuted(userId) ? 0 : this.getEffectiveScreenshareVolume(userId);
+    return this.isScreenshareSilenced(userId) ? 0 : this.getEffectiveScreenshareVolume(userId);
+  }
+
+  /** Stream audio is silent while its own tile mute is on or while deafened.
+   *  Deafen leaves the tile mute untouched, so undeafen restores it as it was. */
+  private isScreenshareSilenced(userId: number): boolean {
+    return voiceStore.getState().localDeafened || this.getScreenshareAudioMuted(userId);
   }
 
   setScreenshareGainListener(listener: (() => void) | null): void {
@@ -162,9 +168,8 @@ export class AudioElements {
     // Guard: do not attach remote voice audio while locally deafened.
     // applyRemoteAudioSubscriptionState() only covers participants present at
     // the time of deafen — this guard catches participants who join afterward.
-    // Screen-share/stream audio is exempt: muting or deafening yourself gates
-    // voices, not the content someone is streaming — that stays under its own
-    // per-tile mute/volume controls.
+    // Stream audio stays subscribed and attaches muted instead (below), so
+    // undeafen brings it back without a resubscribe.
     if (
       voiceStore.getState().localDeafened &&
       publication.source !== Track.Source.ScreenShareAudio
@@ -189,7 +194,7 @@ export class AudioElements {
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
       audioEl.volume = this.getEffectiveScreenshareVolume(userId);
-      audioEl.muted = this.screenshareAudioMutedByUser.get(userId) ?? false;
+      audioEl.muted = this.isScreenshareSilenced(userId);
       if (audioEls === undefined) {
         audioEls = new Set();
         this.screenshareAudioElements.set(userId, audioEls);
@@ -254,12 +259,16 @@ export class AudioElements {
   // --- Remote audio subscription state (deafen) ---
 
   applyRemoteAudioSubscriptionState(deafened: boolean): void {
+    // Deafen silences stream audio too (Discord's rule) by muting its
+    // elements, not unsubscribing, so undeafen restores each tile's own mute.
+    for (const [userId, audioEls] of this.screenshareAudioElements) {
+      const muted = deafened || this.getScreenshareAudioMuted(userId);
+      for (const el of audioEls) el.muted = muted;
+    }
+    this.screenshareGainListener?.();
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
-        // Deafen gates voices only. Screen-share/stream audio keeps playing
-        // when the user mutes/deafens themselves — it has its own per-tile
-        // mute and volume controls.
         if (publication.source === Track.Source.ScreenShareAudio) continue;
         publication.setSubscribed(!deafened);
       }
@@ -333,16 +342,13 @@ export class AudioElements {
     this.screenshareGainListener?.();
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
-    for (const el of audioEls) el.muted = muted;
+    for (const el of audioEls) el.muted = muted || voiceStore.getState().localDeafened;
   }
 
+  /** The tile's own stream mute. Not the element's muted flag: deafen mutes
+   *  the element too, and must not read back as the user's choice. */
   getScreenshareAudioMuted(userId: number): boolean {
-    const storedMuted = this.screenshareAudioMutedByUser.get(userId);
-    if (storedMuted !== undefined) return storedMuted;
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return false;
-    for (const el of audioEls) return el.muted;
-    return false;
+    return this.screenshareAudioMutedByUser.get(userId) ?? false;
   }
 
   // --- Cleanup ---
