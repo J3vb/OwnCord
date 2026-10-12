@@ -3,6 +3,9 @@ import type { TestServer } from "./server";
 
 type TestEnvelope = { type: string; id?: string; payload?: Record<string, unknown> };
 
+/** The path token the test tunnel hands out, standing in for the native one. */
+export const TUNNEL_TOKEN = "e2e-tunnel";
+
 /** Test-only replacement for native IPC. HTTP/WS bytes go to the real server;
  * no responses, auth, messages, membership or E2EE offers are fabricated.
  * Windows native tests separately cover the Rust IPC/TLS boundary. */
@@ -64,12 +67,15 @@ export async function installRealTransport(page: Page, server: TestServer) {
       switch (command) {
         case "start_http_proxy":
         case "start_livekit_proxy":
-          return server.port;
+          return { port: server.port, token: TUNNEL_TOKEN };
         case "plugin:http|fetch": {
           const request = args.clientConfig;
           const url = new URL(request.url);
           if (url.origin !== server.origin)
             throw new Error(`Unexpected real-stack destination: ${url.origin}`);
+          // The native tunnel serves only paths under its token.
+          if (!url.pathname.startsWith(`/${TUNNEL_TOKEN}/`))
+            throw new Error(`Request without the tunnel token: ${url.pathname}`);
           const id = ++resource;
           requests.set(id, request);
           return id;
@@ -79,11 +85,14 @@ export async function installRealTransport(page: Page, server: TestServer) {
           if (!request) throw new Error(`Unknown HTTP resource ${args.rid}`);
           requests.delete(args.rid);
           if (!online) throw new Error("Test transport offline");
-          if (httpFailure?.({ path: new URL(request.url).pathname, method: request.method }))
+          // ...and strips it before forwarding, as the native tunnel does.
+          const forward = new URL(request.url);
+          forward.pathname = forward.pathname.slice(TUNNEL_TOKEN.length + 1);
+          if (httpFailure?.({ path: forward.pathname, method: request.method }))
             throw new Error("Test transport HTTP failure");
-          if (httpHold?.filter({ path: new URL(request.url).pathname, method: request.method }))
+          if (httpHold?.filter({ path: forward.pathname, method: request.method }))
             await httpHold.gate;
-          const response = await fetch(request.url, {
+          const response = await fetch(forward.href, {
             method: request.method,
             headers: request.headers,
             body: request.data === null ? undefined : new Uint8Array(request.data),

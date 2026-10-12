@@ -10,6 +10,7 @@ import { setJoinedVoiceStatus } from "@lib/roomEventHandlers";
 import { releaseRoom } from "../features/voice/releaseRoom";
 import { ROOM_CONNECT_OPTIONS } from "../features/voice/sessionState";
 import { voiceText } from "../i18n/voice";
+import { redactTunnelUrl } from "@lib/voiceJoinTrace";
 
 const log = createLogger("livekitReconnect");
 
@@ -265,7 +266,11 @@ export async function attemptAutoReconnect(
         return;
       }
 
-      log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
+      log.info("Auto-reconnect succeeded", {
+        attempt,
+        channelId,
+        url: redactTunnelUrl(resolvedUrl),
+      });
       // Transition to "connected" — this is the single atomic write.
       deps.setState({
         type: "connected",

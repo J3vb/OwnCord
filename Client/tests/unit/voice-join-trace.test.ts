@@ -12,6 +12,7 @@ import {
   advanceJoinStage,
   beginJoinAttempt,
   classifyJoinUrl,
+  redactTunnelUrl,
   countJoinRetry,
   failJoinAttempt,
   finishJoinAttempt,
@@ -45,6 +46,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("redactTunnelUrl", () => {
+  it("replaces the tunnel path token and keeps the rest", () => {
+    const token = "ab".repeat(32);
+    expect(redactTunnelUrl(`ws://127.0.0.1:5123/${token}/livekit`)).toBe(
+      "ws://127.0.0.1:5123/…/livekit",
+    );
+  });
+
+  it("leaves a URL without a tunnel token unchanged", () => {
+    expect(redactTunnelUrl("ws://127.0.0.1:7880")).toBe("ws://127.0.0.1:7880");
+    expect(redactTunnelUrl("wss://voice.example.com/livekit")).toBe(
+      "wss://voice.example.com/livekit",
+    );
+  });
 });
 
 describe("classifyJoinUrl", () => {

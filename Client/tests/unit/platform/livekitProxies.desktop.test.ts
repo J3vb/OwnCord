@@ -26,7 +26,9 @@ describeLiveKitProxiesSuite(async () => {
     native: {
       succeedWith(port: number) {
         invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy" ? Promise.resolve(port) : Promise.resolve(undefined),
+          cmd === "start_livekit_proxy"
+            ? Promise.resolve({ port, token: "tun" })
+            : Promise.resolve(undefined),
         );
       },
       failWith(error: unknown) {
@@ -52,7 +54,7 @@ describe("nativeProxies on the Linux desktop (native voice)", () => {
     vi.doMock("../../../src/features/voice/native/platform", () => ({
       isLinuxDesktop: () => true,
     }));
-    invoke.mockReset().mockResolvedValue(40123);
+    invoke.mockReset().mockResolvedValue({ port: 40123, token: "tun" });
     const { nativeProxies } = await import("../../../src/platform/desktop/nativeProxies");
     nativeProxies.setLiveKitServerHost("localhost:8443");
     return nativeProxies.resolveLiveKitUrl("/livekit/rtc", directUrl);
@@ -74,7 +76,7 @@ describe("nativeProxies on the Linux desktop (native voice)", () => {
     "ws://my-host:7880",
   ]) {
     test(`tunnels a direct URL the shared rule rejects: ${directUrl}`, async () => {
-      await expect(resolveOnLinux(directUrl)).resolves.toBe("ws://127.0.0.1:40123/livekit/rtc");
+      await expect(resolveOnLinux(directUrl)).resolves.toBe("ws://127.0.0.1:40123/tun/livekit/rtc");
     });
   }
 });

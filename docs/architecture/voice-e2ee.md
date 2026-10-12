@@ -8,7 +8,9 @@ client, everything funnels through `src/lib/livekitSession.ts` (a facade over
 the `src/features/voice/` modules), and — because
 self-hosted servers commonly use self-signed certificates — the LiveKit
 connection is tunneled through a local Rust TLS proxy pinned to the same TOFU
-fingerprint as the main WebSocket.
+fingerprint as the main WebSocket. Like the REST tunnel (`http_proxy.rs`), it
+serves only request paths that start with its own random token, which the
+client puts in front of the LiveKit path.
 
 ## D6 — Voice join + E2EE key exchange
 

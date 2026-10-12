@@ -362,10 +362,105 @@ pub(crate) fn rewrite_headers(
     modified
 }
 
+/// A tunnel's loopback address and the path token every request through it
+/// must start with. Returned to the webview by `start_http_proxy` and
+/// `start_livekit_proxy`; the client puts `/{token}` in front of each path.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct TunnelEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+
+/// A fresh random 256-bit tunnel token, hex-encoded.
+pub(crate) fn random_tunnel_token() -> Result<String, String> {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let mut bytes = [0u8; 32];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| "no system randomness for the tunnel token".to_string())?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Check that a request's target starts with `/{token}/` and return the
+/// request head with that prefix removed. `None` when the request line is
+/// malformed or the token is missing or wrong.
+pub(crate) fn strip_tunnel_token(head: &[u8], token: &str) -> Option<Vec<u8>> {
+    let line_end = head.windows(2).position(|w| w == b"\r\n")?;
+    let line = &head[..line_end];
+    let method_end = line.iter().position(|&b| b == b' ')?;
+    let target_start = method_end + 1;
+    let target_len = line[target_start..].iter().position(|&b| b == b' ')?;
+    let target = &line[target_start..target_start + target_len];
+
+    let rest = target.strip_prefix(b"/")?;
+    let slash = rest.iter().position(|&b| b == b'/')?;
+    if !constant_time_eq(&rest[..slash], token.as_bytes()) {
+        return None;
+    }
+    let stripped = &rest[slash..];
+
+    let mut out = Vec::with_capacity(head.len());
+    out.extend_from_slice(&line[..target_start]);
+    out.extend_from_slice(stripped);
+    out.extend_from_slice(&line[target_start + target_len..]);
+    out.extend_from_slice(&head[line_end..]);
+    Some(out)
+}
+
+/// The response for a request that does not carry the tunnel's token.
+pub(crate) const FORBIDDEN_RESPONSE: &[u8] =
+    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn strip_tunnel_token_requires_the_exact_token() {
+        let token = "ab".repeat(32);
+        let req = format!("GET /{token}/api/v1/health?x=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert_eq!(
+            strip_tunnel_token(req.as_bytes(), &token).as_deref(),
+            Some(&b"GET /api/v1/health?x=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"[..])
+        );
+
+        for bad in [
+            "GET /api/v1/health HTTP/1.1\r\n\r\n".to_string(),
+            format!("GET /{}/api/v1/health HTTP/1.1\r\n\r\n", "ab".repeat(31)),
+            format!("GET /{token}x/api/v1/health HTTP/1.1\r\n\r\n"),
+            format!("GET /{token} HTTP/1.1\r\n\r\n"),
+            format!("GET http://127.0.0.1/{token}/api HTTP/1.1\r\n\r\n"),
+            format!("GET /{token}/api\r\n\r\n"),
+            "\r\n\r\n".to_string(),
+        ] {
+            assert_eq!(strip_tunnel_token(bad.as_bytes(), &token), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn strip_tunnel_token_keeps_websocket_upgrade_paths() {
+        let token = "cd".repeat(32);
+        let req = format!(
+            "GET /{token}/livekit/rtc/v1?access_token=t HTTP/1.1\r\nUpgrade: websocket\r\n\r\n"
+        );
+        let out = strip_tunnel_token(req.as_bytes(), &token).expect("valid");
+        assert!(out.starts_with(b"GET /livekit/rtc/v1?access_token=t HTTP/1.1\r\n"));
+        assert!(out.ends_with(b"Upgrade: websocket\r\n\r\n"));
+    }
+
+    #[test]
+    fn random_tunnel_tokens_are_distinct_hex() {
+        let a = random_tunnel_token().expect("token");
+        let b = random_tunnel_token().expect("token");
+        assert_eq!(a.len(), 64);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
 
     #[test]
     fn validate_rejects_crlf_and_null() {

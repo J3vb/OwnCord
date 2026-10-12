@@ -170,7 +170,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const mockInvoke = vi.hoisted(() =>
   vi.fn((cmd: string, _payload?: unknown) => {
-    if (cmd === "start_livekit_proxy") return Promise.resolve(7881);
+    if (cmd === "start_livekit_proxy") return Promise.resolve({ port: 7881, token: "tun" });
     if (cmd === "stop_livekit_proxy") return Promise.resolve();
     return Promise.resolve();
   }),
