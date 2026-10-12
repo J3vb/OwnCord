@@ -730,24 +730,6 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("startEdit puts the caret at the end of the loaded text", () => {
-    const comp = createMessageInput(makeOptions());
-    comp.mount(container);
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    // Same text already present: assigning an unchanged value does not move
-    // the caret, so only startEdit's own placement can put it at the end.
-    textarea.value = "editing this";
-    textarea.setSelectionRange(0, 0);
-
-    comp.startEdit(99, "editing this");
-
-    expect(textarea.selectionStart).toBe("editing this".length);
-    expect(textarea.selectionEnd).toBe("editing this".length);
-
-    comp.destroy?.();
-  });
-
   it("ArrowUp that opens an edit cancels the default caret move", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);

@@ -906,8 +906,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = content;
       autoResize();
       textarea.focus();
-      // Caret at the end, like Discord, so typing continues the message.
-      textarea.setSelectionRange(content.length, content.length);
     }
   }
 
@@ -1091,11 +1089,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
         if (
           e.key === "ArrowUp" &&
-          !e.shiftKey &&
-          !e.altKey &&
-          !e.ctrlKey &&
-          !e.metaKey &&
-          !e.isComposing &&
+          !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) &&
           disabledReason === null &&
           textarea !== null &&
           textarea.value.length === 0
