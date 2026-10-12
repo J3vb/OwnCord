@@ -765,6 +765,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- DM section (above channels, below server header) ---
       const dmSectionResult = createSidebarDmSection({
         pendingRequests: opts.destinations?.requests?.pending,
+        onOpenRequests: (opener) => opts.onOpenView?.("requests", opener),
         onSelectDm: (dm) => {
           selectDmConversation(dm, dmDeps);
         },
