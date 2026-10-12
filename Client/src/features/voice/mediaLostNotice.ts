@@ -2,7 +2,7 @@
 // dropped, with one button to turn them back on. teardownForReconnect stops
 // both tracks; nothing restores them yet (WP 1C-6).
 
-import { showActionToast } from "@lib/toast";
+import { showActionToast } from "../../lib/toast";
 import { voiceText } from "../../i18n/voice";
 
 export interface LostMedia {
