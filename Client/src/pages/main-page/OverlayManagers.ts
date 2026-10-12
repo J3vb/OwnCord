@@ -97,9 +97,11 @@ export function mapToPinnedMessage(msg: {
   readonly created_at?: string;
   readonly timestamp?: string;
 }): PinnedMessage {
+  const author = resolveAuthor(msg.user);
   return {
     id: msg.id,
-    author: resolveDisplayName(resolveAuthor(msg.user)),
+    author: resolveDisplayName(author),
+    avatar: author.avatar,
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
     // Hashed from the raw username (not the resolved display name) so the hue
