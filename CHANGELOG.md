@@ -86,6 +86,7 @@ and only when it changes something a contributor or fork holder must do
 - Undeafening no longer unmutes you if you were muted before you deafened.
 - After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
 - Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.
+- An error from the server about something else (a refused edit, a rate limit) no longer cancels a voice join that is still connecting; only the server refusing the join itself does. Older servers keep the old behaviour for refusals they send without the join's id.
   **Accounts & admin**
 
 - Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
