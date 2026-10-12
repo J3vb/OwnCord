@@ -937,7 +937,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     ...createVoiceWidgetCallbacks(ws, limiters),
     onOpenCall: (channelId) => {
       const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      if (dm !== undefined) selectDmConversation(dm, dmDeps);
+      if (dm !== undefined) {
+        selectDmConversation(dm, dmDeps);
+        return;
+      }
+      // A guild voice channel: back to the server view, then its call, the
+      // same as clicking the joined channel in the sidebar.
+      if (uiStore.getState().sidebarMode !== "channels") returnToChannel();
+      opts.onOpenCall?.();
     },
   });
   voiceWidget.mount(voiceWidgetSlot);

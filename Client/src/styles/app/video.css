@@ -68,6 +68,12 @@
   object-fit: contain;
 }
 
+/* Your own camera is mirrored, as every call app shows it; others see it
+   unmirrored. A screen share never carries this class. */
+.video-cell--self video {
+  transform: scaleX(-1);
+}
+
 .video-cell.track-muted video {
   visibility: hidden;
 }

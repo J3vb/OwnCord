@@ -31,9 +31,13 @@ import {
   setLocalDeafened,
   setPttGated,
   resetVoiceStore,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { startVoiceUiSounds } from "../../src/features/voice/uiSounds";
+import { noteVoiceMoved } from "../../src/features/voice/moveHint";
 import type { ReadyVoiceState, VoiceStatePayload } from "@lib/types";
 
 function voiceState(channelId: number, userId: number): VoiceStatePayload {
@@ -89,6 +93,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stop();
+  vi.useRealTimers();
 });
 
 describe("voice UI sounds", () => {
@@ -276,5 +281,131 @@ describe("voice UI sounds", () => {
     voiceStore.flush();
 
     expect(playVoiceSound).not.toHaveBeenCalled();
+  });
+
+  describe("your own join, leave and move", () => {
+    function connectTo(channelId: number): void {
+      joinVoiceChannel(channelId);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+    }
+
+    it("plays the join sound when the session connects, not on the click", () => {
+      joinVoiceChannel(10);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+    });
+
+    it("plays nothing for a join that fails before it connects", () => {
+      joinVoiceChannel(10);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      leaveVoiceChannel();
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays the leave sound when a connected session ends", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      // Held briefly, in case a moderator move is right behind it.
+      expect(playVoiceSound).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(250);
+
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+      vi.useRealTimers();
+    });
+
+    it("plays nothing for a reconnect inside the same channel", () => {
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      setVoiceStatus("reconnecting");
+      voiceStore.flush();
+      setVoiceStatus("idle");
+      setVoiceStatus("joining");
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays only the join, once the new channel connects, on a switch", () => {
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+    });
+
+    it("plays the moved tone, not the join one, when a moderator moves you", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      // The server's order: voice_leave (its own frame, so the store flushes
+      // before the next), then voice_moved, whose handler notes the move and
+      // joins the destination.
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["moved"]]);
+
+      // The note is spent: your own next switch is an ordinary join.
+      playVoiceSound.mockClear();
+      joinVoiceChannel(30);
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+      vi.useRealTimers();
+    });
+
+    it("spends the move note when the destination join fails", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+      playVoiceSound.mockClear();
+
+      // Joining that channel yourself later is an ordinary join.
+      connectTo(20);
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+      vi.useRealTimers();
+    });
   });
 });

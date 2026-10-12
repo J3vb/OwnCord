@@ -27,6 +27,9 @@ export interface VoiceModMenuOptions {
   readonly onServerDeafen: (deafened: boolean) => void;
   readonly onMove: (toChannelId: number) => void;
   readonly onDisconnect: () => void;
+  /** Set while the actions cannot reach the server (socket not connected): the
+   *  rows stay visible but greyed and inert, with this as the reason. */
+  readonly disabledReason?: string;
 }
 
 /**
@@ -196,65 +199,94 @@ function appendModerationSection(
   close: () => void,
 ): void {
   menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  const disabled = mod.disabledReason !== undefined;
 
-  const muteItem = createMenuItem(
-    mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
-    "context-menu-item",
-  );
-  muteItem.setAttribute("data-action", "server-mute");
-  muteItem.addEventListener("click", () => {
-    mod.onServerMute(!mod.serverMuted);
-    close();
-  });
-  menu.appendChild(muteItem);
+  /** One moderation row; inert and greyed while `disabled`. */
+  const modItem = (label: string, action: string, run: () => void, danger = false): HTMLElement => {
+    const cls = ["context-menu-item", danger ? "danger" : "", disabled ? "disabled" : ""]
+      .filter((c) => c !== "")
+      .join(" ");
+    const item = createMenuItem(label, cls);
+    item.setAttribute("data-action", action);
+    if (disabled) {
+      (item as HTMLButtonElement).disabled = true;
+      item.title = mod.disabledReason ?? "";
+      return item;
+    }
+    item.addEventListener("click", () => {
+      run();
+      close();
+    });
+    return item;
+  };
 
-  const deafenItem = createMenuItem(
-    mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
-    "context-menu-item",
+  if (mod.disabledReason !== undefined) {
+    menu.appendChild(
+      createElement(
+        "div",
+        {
+          class: "context-menu-item",
+          "aria-disabled": "true",
+          "data-action": "voice-mod-offline",
+          style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+        },
+        mod.disabledReason,
+      ),
+    );
+  }
+
+  menu.appendChild(
+    modItem(
+      mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
+      "server-mute",
+      () => mod.onServerMute(!mod.serverMuted),
+    ),
   );
-  deafenItem.setAttribute("data-action", "server-deafen");
-  deafenItem.addEventListener("click", () => {
-    mod.onServerDeafen(!mod.serverDeafened);
-    close();
-  });
-  menu.appendChild(deafenItem);
+  menu.appendChild(
+    modItem(
+      mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
+      "server-deafen",
+      () => mod.onServerDeafen(!mod.serverDeafened),
+    ),
+  );
 
   if (mod.moveTargets.length > 0) {
     // Hover-revealed flyout, same shape as the AdminActions role submenu. The
     // trigger is a role=menuitem so ArrowRight/Enter opens it from the keyboard.
     const moveWrap = createMenuItem(
       t("volume.moveTo"),
-      "context-menu-item context-menu-item--submenu",
+      disabled
+        ? "context-menu-item context-menu-item--submenu disabled"
+        : "context-menu-item context-menu-item--submenu",
       { submenu: true },
     );
     moveWrap.setAttribute("data-action", "move-to");
-    const sub = createElement("div", { class: "context-menu__submenu" });
-    sub.style.display = "none";
-    moveWrap.addEventListener("mouseenter", () => {
-      sub.style.display = "";
-    });
-    moveWrap.addEventListener("mouseleave", () => {
+    if (disabled) {
+      moveWrap.setAttribute("aria-disabled", "true");
+      moveWrap.title = mod.disabledReason ?? "";
+    } else {
+      const sub = createElement("div", { class: "context-menu__submenu" });
       sub.style.display = "none";
-    });
-    for (const ch of mod.moveTargets) {
-      const item = createMenuItem(ch.name, "context-menu-item");
-      item.setAttribute("data-move-channel", String(ch.id));
-      item.addEventListener("click", (e) => {
-        e.stopPropagation();
-        mod.onMove(ch.id);
-        close();
+      moveWrap.addEventListener("mouseenter", () => {
+        sub.style.display = "";
       });
-      sub.appendChild(item);
+      moveWrap.addEventListener("mouseleave", () => {
+        sub.style.display = "none";
+      });
+      for (const ch of mod.moveTargets) {
+        const item = createMenuItem(ch.name, "context-menu-item");
+        item.setAttribute("data-move-channel", String(ch.id));
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          mod.onMove(ch.id);
+          close();
+        });
+        sub.appendChild(item);
+      }
+      moveWrap.appendChild(sub);
     }
-    moveWrap.appendChild(sub);
     menu.appendChild(moveWrap);
   }
 
-  const kickItem = createMenuItem(t("volume.disconnect"), "context-menu-item danger");
-  kickItem.setAttribute("data-action", "voice-disconnect");
-  kickItem.addEventListener("click", () => {
-    mod.onDisconnect();
-    close();
-  });
-  menu.appendChild(kickItem);
+  menu.appendChild(modItem(t("volume.disconnect"), "voice-disconnect", mod.onDisconnect, true));
 }

@@ -17,6 +17,7 @@ import {
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
+import { noteVoiceMoved } from "./moveHint";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -251,6 +252,9 @@ export function handleVoiceMoved(
   // RT-12: a move is a deliberate membership change, so a pending
   // restart-rejoin for the old channel must not fire.
   cancelVoiceRejoin(clock);
+  // Noted at once, so the leave sound queued by the voice_leave just before
+  // this frame sees the move and stays silent.
+  noteVoiceMoved(payload.to_channel_id);
   void livekitSession().then(({ leaveVoice }) => {
     leaveVoice(false);
     leaveVoiceChannel();

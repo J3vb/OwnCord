@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { cascadedDeclaration, varToken } from "../helpers/app-css";
 
 // Mock livekitSession. rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
@@ -2002,6 +2003,48 @@ describe("ChannelSidebar", () => {
     expect(cb.onDisconnect).toHaveBeenCalledWith(80);
   });
 
+  it("greys the moderation rows with a reason while the socket is not connected", () => {
+    const cb = voiceModCallbacks();
+    const channels: ReadyChannel[] = [
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ];
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+
+    const why = menu!.querySelector('[data-action="voice-mod-offline"]');
+    expect(why!.textContent).toBe(
+      "Reconnecting. Voice moderation comes back once you are connected.",
+    );
+    for (const action of ["server-mute", "server-deafen", "voice-disconnect"]) {
+      const item = menu!.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!;
+      expect(item.disabled).toBe(true);
+      expect(item.classList.contains("disabled")).toBe(true);
+      item.click();
+    }
+    const move = menu!.querySelector('[data-action="move-to"]')!;
+    expect(move.getAttribute("aria-disabled")).toBe("true");
+    expect(move.querySelector("[data-move-channel]")).toBeNull();
+    expect(cb.onServerMute).not.toHaveBeenCalled();
+    expect(cb.onServerDeafen).not.toHaveBeenCalled();
+    expect(cb.onDisconnect).not.toHaveBeenCalled();
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+    const offline = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    expect(offline!.querySelector('[data-action="voice-mod-offline"]')!.textContent).toBe(
+      "Not connected. Voice moderation needs a connection to the server.",
+    );
+
+    // Back online: the rows are live again and the reason is gone.
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    const live = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    expect(live!.querySelector('[data-action="voice-mod-offline"]')).toBeNull();
+    const mute = live!.querySelector<HTMLButtonElement>('[data-action="server-mute"]')!;
+    expect(mute.disabled).toBe(false);
+    mute.click();
+    expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
+  });
+
   it("offers only the other voice channels as move targets", () => {
     const cb = voiceModCallbacks();
     const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
@@ -2055,6 +2098,19 @@ describe("ChannelSidebar", () => {
     const icon = container.querySelector(".vu-muted.vu-server-muted") as HTMLElement;
     expect(icon).not.toBeNull();
     expect(icon.title).toBe("Muted by a moderator");
+  });
+
+  it("colours a self-mute grey and a moderator's mute red, with a steady speaking ring", () => {
+    expect(varToken(cascadedDeclaration(".voice-user-item .vu-muted", "color"))).toBe(
+      "--text-muted",
+    );
+    expect(varToken(cascadedDeclaration(".vu-muted.vu-server-muted", "color"))).toBe("--red");
+    // The ring is steady: no pulse on the sidebar row or on the user bar.
+    expect(cascadedDeclaration(".voice-user-item.speaking .vu-avatar", "box-shadow")).toBeDefined();
+    expect(
+      cascadedDeclaration(".voice-user-item.speaking .vu-avatar", "animation"),
+    ).toBeUndefined();
+    expect(cascadedDeclaration(".user-bar .ub-avatar.speaking", "animation")).toBeUndefined();
   });
 
   it("keeps a moderator's mute on the single icon of a self-deafened user", () => {

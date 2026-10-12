@@ -31,7 +31,8 @@ export interface VoiceWidgetOptions {
   onDeafenToggle(): void;
   onCameraToggle(): void;
   onScreenshareToggle(): void;
-  /** Open the DM a DM call belongs to. Without it the call name is plain text. */
+  /** Open the call's channel: the DM for a DM call, the call view for a guild
+   *  voice channel. Without it the call name is plain text. */
   onOpenCall?(channelId: number): void;
 }
 
@@ -293,6 +294,18 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
   }
 
+  /** A live control's tooltip: what a press does next. */
+  function liveTitle(btn: HTMLButtonElement): string {
+    const { localCamera, localScreenshare } = voiceStore.getState();
+    if (btn === cameraBtn) {
+      return localCamera ? t("widget.control.cameraOff") : t("widget.control.cameraOn");
+    }
+    if (btn === shareBtn) {
+      return localScreenshare ? t("widget.control.shareStop") : t("widget.control.shareStart");
+    }
+    return "";
+  }
+
   /** Freeze controls that need WS signaling, while keeping local hangup
    *  available: the LiveKit call may still be live when chat is disconnected.
    *  Mute and deafen stay live: they apply locally and the server is told when
@@ -305,7 +318,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     for (const btn of [cameraBtn, shareBtn, grantMicBtn]) {
       if (btn === null) continue;
       btn.disabled = frozen;
-      btn.title = frozen ? reason : "";
+      btn.title = frozen ? reason : liveTitle(btn);
     }
     // render() tightens these again for a moderator restriction or listen-only
     // mode; resetting here is what lets a lifted restriction re-enable them.
@@ -350,8 +363,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // looked at yet would otherwise label the call "Voice Channel".
     const channel = channelsStore.getState().channels.get(channelId);
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-    // A DM call's name is a link back to the DM, where the call panel is.
-    const asLink = dm !== undefined && options.onOpenCall !== undefined;
+    // The name is a link back to the call: the DM for a DM call, where the
+    // call panel is, or the guild voice channel's call view. A call whose
+    // channel is not known yet stays plain text.
+    const asLink =
+      options.onOpenCall !== undefined && (dm !== undefined || channel?.type === "voice");
     if (asLink !== channelNameEl instanceof HTMLButtonElement) {
       const next = asLink ? createChannelLink() : createElement("span", { class: "vw-channel" });
       channelNameEl.replaceWith(next);

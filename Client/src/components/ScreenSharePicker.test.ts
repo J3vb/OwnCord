@@ -140,6 +140,8 @@ describe("showScreenSharePicker", () => {
     const root = await mounted();
     const [quality, fps] = root.querySelectorAll<HTMLSelectElement>(".ssp-select");
     expect(fps!.selectedOptions[0]!.textContent).toBe("Default (5 fps)");
+    // Low is 720p too: its frame rate is what tells it apart from Medium.
+    expect(quality!.selectedOptions[0]!.textContent).toBe("Low (720p, 5 fps)");
     quality!.value = "medium";
     quality!.dispatchEvent(new Event("change"));
     expect(fps!.selectedOptions[0]!.textContent).toBe("Default (30 fps)");

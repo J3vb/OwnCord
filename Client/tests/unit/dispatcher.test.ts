@@ -142,6 +142,7 @@ import {
   failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
+import { takeVoiceMoved } from "../../src/features/voice/moveHint";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -3758,6 +3759,8 @@ describe("WS Dispatcher", () => {
     expect(mock.ws.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_join", payload: { channel_id: 7 } }),
     );
+    // The destination's connect plays the moved tone (uiSounds), not the join one.
+    expect(takeVoiceMoved(7)).toBe(true);
   });
 
   it("wires voice_disconnected to clearing the local voice session", async () => {
