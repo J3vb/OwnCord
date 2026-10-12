@@ -295,42 +295,17 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		// Notify clients that the server is restarting.
-		hub.BroadcastServerRestart(ws.RestartReasonBackupRestore, 5)
-
-		// Checkpoint the WAL and close the database connection before overwriting
-		// to prevent corruption from concurrent writes (BUG-096).
-		if _, checkpointErr := database.SQLDb().ExecContext(context.WithoutCancel(r.Context()), "PRAGMA wal_checkpoint(TRUNCATE)"); checkpointErr != nil {
-			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
-		}
-
-		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
-
-		if err := closeDatabase(database); err != nil {
-			// database.Close() closes the writer and reader pools regardless of
-			// the error it returns (Server/db/db.go), so this process cannot
-			// serve anything more either way — every other failure path below
-			// (copyBackupFile failing, and the success path itself) restarts for
-			// exactly that reason. The live database file is still intact here
-			// (copyBackupFile hasn't run yet), so the restarted process comes back on
-			// the pre-restore data rather than leaving clients pinned on
-			// "Reconnecting..." against a process that never actually restarts.
-			slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to close database")
-			commitRestartPending()
-			go requestRestart("backup_restore_close_failed")
+		ctx := context.WithoutCancel(r.Context())
+		if !checkpointForRestore(ctx, w, database) {
 			return
 		}
 
-		// The close drained every accepted send. Preserve the greatest possible
-		// pre-restore logical id outside the database before restoring a snapshot
-		// that may have lost its receipt. A failed cutoff write must not copy.
-		if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
-			slog.Error("restore refused: could not preserve message retry cutoff", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
-				"could not preserve message retry protection — database untouched, server restarting")
-			commitRestartPending()
-			go requestRestart("backup_restore_cutoff_failed")
+		// Notify clients that the server is restarting.
+		hub.BroadcastServerRestart(ws.RestartReasonBackupRestore, 5)
+
+		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
+
+		if !closeForRestore(ctx, w, database, dbPath) {
 			return
 		}
 
@@ -374,6 +349,88 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		go requestRestart("backup_restore")
 	})
 }
+
+// checkpointForRestore empties the WAL before anything is closed or announced.
+// A reader still inside a snapshot can keep the checkpoint from emptying the
+// log; the restore is refused then, while the live database is untouched and
+// still serving. It reports whether the restore may go on.
+func checkpointForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB) bool {
+	truncated, err := database.CheckpointForRestore(ctx)
+	if err != nil {
+		slog.Error("pre-restore WAL checkpoint failed", "err", err)
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+			"could not checkpoint the database — restore refused, database untouched")
+		return false
+	}
+	if !truncated {
+		slog.Warn("restore refused: the database is busy, the WAL checkpoint could not finish")
+		writeErr(w, http.StatusConflict, "DATABASE_BUSY",
+			"the database is busy — restore refused, database untouched; try again in a moment")
+		return false
+	}
+	return true
+}
+
+// closeForRestore closes the database and readies dbPath for the copy. Every
+// failure leaves the file untouched and restarts, because the pools are
+// closed either way. It reports whether the copy may go on.
+func closeForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB, dbPath string) bool {
+	fail := func(msg, reason string) bool {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", msg)
+		commitRestartPending()
+		go requestRestart(reason)
+		return false
+	}
+
+	if err := closeDatabase(database); err != nil {
+		// database.Close() closes the writer and reader pools regardless of
+		// the error it returns (Server/db/db.go), so this process cannot
+		// serve anything more either way — every other failure path below
+		// (copyBackupFile failing, and the success path itself) restarts for
+		// exactly that reason. The live database file is still intact here
+		// (copyBackupFile hasn't run yet), so the restarted process comes back on
+		// the pre-restore data rather than leaving clients pinned on
+		// "Reconnecting..." against a process that never actually restarts.
+		slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
+		return fail("failed to close database", "backup_restore_close_failed")
+	}
+
+	// Close leaves a connection that is mid-query open until the query
+	// returns, and the last connection to close checkpoints its log into the
+	// main file. Copy only once none is left.
+	waitCtx, cancel := context.WithTimeout(ctx, restoreConnDrainTimeout)
+	err := database.WaitConnsClosed(waitCtx)
+	cancel()
+	if err != nil {
+		slog.Error("restore refused: database connections did not close", "err", err)
+		return fail(
+			"database connections did not close — database untouched, server restarting", "backup_restore_conns_open")
+	}
+
+	// The close drained every accepted send. Preserve the greatest possible
+	// pre-restore logical id outside the database before restoring a snapshot
+	// that may have lost its receipt. A failed cutoff write must not copy.
+	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
+		slog.Error("restore refused: could not preserve message retry cutoff", "err", err)
+		return fail(
+			"could not preserve message retry protection — database untouched, server restarting", "backup_restore_cutoff_failed")
+	}
+
+	// SQLite replays a -wal it finds beside the main file at the next open,
+	// so none may outlive the copy. Every connection is closed by now, and
+	// whatever a leftover log still holds belongs to the database this copy
+	// replaces.
+	if err := db.RemoveWALSidecars(dbPath); err != nil {
+		slog.Error("restore refused: could not remove the database's WAL files", "err", err)
+		return fail(
+			"could not clear the database's WAL files — database untouched, server restarting", "backup_restore_sidecars_failed")
+	}
+	return true
+}
+
+// restoreConnDrainTimeout bounds how long a restore waits for in-flight
+// queries to release their connections after Close.
+const restoreConnDrainTimeout = 5 * time.Second
 
 // dbCloser is swappable in tests to simulate database.Close() returning an
 // error. modernc.org/sqlite's sqlite3_close_v2 essentially never fails on a

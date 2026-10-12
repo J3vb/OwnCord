@@ -122,17 +122,17 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	if safety == "" {
 		aside = dbPath + ".pre_restore_" + time.Now().UTC().Format("20060102_150405")
 	}
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		var err error
-		switch {
-		case aside != "":
-			err = os.Rename(dbPath+suffix, aside+suffix)
-		case suffix != "":
-			err = os.Remove(dbPath + suffix)
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "error: could not clear %s before restoring: %v\n", dbPath+suffix, err)
+	if aside == "" {
+		if err := db.RemoveWALSidecars(dbPath); err != nil {
+			fmt.Fprintf(os.Stderr, "error: could not clear the database's WAL files before restoring: %v\n", err)
 			return 1
+		}
+	} else {
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			if err := os.Rename(dbPath+suffix, aside+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintf(os.Stderr, "error: could not clear %s before restoring: %v\n", dbPath+suffix, err)
+				return 1
+			}
 		}
 	}
 

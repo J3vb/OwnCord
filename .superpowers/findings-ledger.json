@@ -1,5 +1,5 @@
 {
-  "nextId": 488,
+  "nextId": 489,
   "findings": [
     {
       "id": "OC-0001",
@@ -11290,6 +11290,30 @@
         "revertProof": "pass (before the fix TestConnWritesStop_DatabaseClosedByRestore failed with the nightly's error: flushing connection stamps: StampConnections begin: sql: database is closed; phase R failed on the base binary and passed on the fixed one)"
       },
       "note": "Roadmap phase 0, WP 0-1 (architecture audit ARCH-001). Phase C also passes locally on the fixed binary; phases D (needs a size-limited filesystem) and S (needs livekit-server) were left to the nightly."
+    },
+    {
+      "id": "OC-0488",
+      "title": "The admin backup restore could leave a write-ahead log beside the restored file, or copy while a connection was still open, so the next open could replay old pages onto the restored database",
+      "file": "Server/admin/handlers_backup.go",
+      "line": 300,
+      "severity": "medium",
+      "why": "Affected property: after a restore the database must be exactly the backup. The admin restore ran wal_checkpoint(TRUNCATE) and ignored its result, closed the pools, and copied the backup over the main file without removing <db>-wal and <db>-shm (the CLI restore already removed them). database/sql Close only closes idle connections; a connection mid-query closes when its query returns, and the last SQLite connection to close checkpoints its log into the main file. A log left beside the file, or a connection that closed after the copy, could put pre-restore pages into the restored file.",
+      "repro": "Server/admin/handlers_backup_restore_wal_test.go TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL: writers and a briefly held reader run across the restore and a valid log is left beside the file after the pools close. Before the fix the -wal survived the restore and the reopened database had 5 rows from the stale log instead of the backup's 50.",
+      "evidence": "Server/admin/handlers_backup.go handleRestoreBackup (checkpoint result discarded, no sidecar removal); Server/restore_cli.go replaceLiveDatabase (removes them); Go database/sql DB.Close closes only free connections. Architecture audit ARCH-002 (alternative C).",
+      "suggestedFix": "Read the checkpoint result and refuse with 409 before anything is closed or announced when the log could not be emptied; after Close wait until both pools report no open connection; remove -wal/-shm through a helper shared with the CLI before copying.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-12",
+      "hunt": "roadmap-wp-0-3-2026-10-12",
+      "lens": "data-integrity",
+      "finder": "wp-0-3",
+      "fixedDate": "2026-10-12",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_backup_restore_wal_test.go (TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL, TestHandleRestoreBackup_RefusesWhenCheckpointBusy)",
+        "revertProof": "pass (before the fix the busy test got 200 instead of 409, and the load test found the -wal beside the restored file and 5 rows instead of 50)"
+      },
+      "note": "Roadmap phase 0, WP 0-3 (stop-gap). The staged restore is Phase 5."
     }
   ]
 }
