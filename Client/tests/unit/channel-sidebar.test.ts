@@ -614,6 +614,29 @@ describe("ChannelSidebar", () => {
     expect(onOpenCall).not.toHaveBeenCalled();
   });
 
+  it("Enter or Space on a voice user row opens the profile, own row included (V11)", () => {
+    setAdminUser();
+    setChannels(testChannels);
+    addVoiceUser(3, 1, "Admin");
+    addVoiceUser(3, 30, "alice");
+    sidebar.mount(container);
+
+    for (const [uid, key] of [
+      [1, "Enter"],
+      [30, " "],
+    ] as const) {
+      const row = container.querySelector(
+        `.voice-user-item[data-voice-uid="${uid}"]`,
+      ) as HTMLElement;
+      expect(row.tabIndex).toBe(0);
+      row.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      expect(mockOpenUserProfilePopup).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: uid }),
+      );
+    }
+    expect(mockOpenUserProfilePopup).toHaveBeenCalledTimes(2);
+  });
+
   it("clicking a voice user with a stream watches it and opens no profile (V11)", () => {
     const onWatchStream = vi.fn();
     sidebar.destroy?.();

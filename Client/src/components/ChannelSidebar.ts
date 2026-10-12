@@ -354,11 +354,10 @@ function renderVoiceChannelItem(
         class: rowClasses,
         "data-voice-uid": String(user.userId),
       });
-      // A remote participant's row opens the per-user volume/moderation menu
-      // (A11Y-01): make it a focusable row so the menu is reachable
-      // from the keyboard too. The local user's own row has no menu.
-      const ownRow = getCurrentUser()?.id === user.userId;
-      if (!ownRow) row.tabIndex = 0;
+      // Every row is focusable (A11Y-01): Enter/Space does what a click does
+      // (watch or profile, below), and on a remote participant's row
+      // Shift+F10 opens the per-user volume/moderation menu.
+      row.tabIndex = 0;
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -528,6 +527,15 @@ function renderVoiceChannelItem(
           if (voiceStore.getState().currentChannelId !== channel.id) return;
           const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
           onWatchStream(tileId);
+        },
+        { signal },
+      );
+      row.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          row.click();
         },
         { signal },
       );
