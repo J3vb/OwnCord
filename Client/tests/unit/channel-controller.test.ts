@@ -34,6 +34,8 @@ const {
       user?: { id: number; username: string };
       deleted?: boolean;
       status?: string;
+      correlationId?: string;
+      errorCode?: string | null;
     }> => [],
   ),
   mockSetReplyTo: vi.fn(),
@@ -1318,6 +1320,50 @@ describe("createChannelController", () => {
       expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
       expect(mockAddOptimistic).toHaveBeenLastCalledWith(
         expect.objectContaining({ correlationId: "cid-3", content: "hello" }),
+      );
+    });
+
+    it("onRetry re-sends a refused reply as a plain message", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hello", 7, []);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "BAD_REQUEST" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ content: "hello", reply_to: null }),
+        }),
+      );
+    });
+
+    it("onRetry keeps the reply when the send failed for another reason", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hello", 7, []);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ content: "hello", reply_to: 7 }),
+        }),
       );
     });
 
