@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createStore, shallowEqual } from "../../src/lib/store";
 import { expectConsole } from "../helpers/console";
+import { addLogListener } from "../../src/lib/logger";
 
 interface TestState {
   count: number;
@@ -486,6 +487,30 @@ describe("listener isolation", () => {
 
     expect(store.getState().value).toBe((100 * 10 + 10) * 10);
     expect(seen).toEqual([1000, 1010, 10100]);
+    expectConsole("error", /\[store\] Store listener threw/);
+  });
+
+  it("a log sink that throws while reporting does not break notification", () => {
+    const store = freshStore();
+    const after = vi.fn();
+    const removeSink = addLogListener(() => {
+      throw new Error("sink failed");
+    });
+    let thrown = false;
+    store.subscribe(() => {
+      if (thrown) return;
+      thrown = true;
+      throw new Error("listener failed");
+    });
+    store.subscribe(after);
+
+    try {
+      store.setState((prev) => ({ ...prev, count: 1 }));
+      expect(() => store.flush()).not.toThrow();
+    } finally {
+      removeSink();
+    }
+    expect(after).toHaveBeenCalledWith({ count: 1, name: "test" });
     expectConsole("error", /\[store\] Store listener threw/);
   });
 

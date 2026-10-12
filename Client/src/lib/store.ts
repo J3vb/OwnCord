@@ -135,7 +135,11 @@ export function createStore<T>(initialState: T): Store<T> {
       try {
         listener(state);
       } catch (err) {
-        log.error("Store listener threw", err);
+        try {
+          log.error("Store listener threw", err);
+        } catch {
+          // A failing log sink must not break notification either.
+        }
       }
     }
   }
