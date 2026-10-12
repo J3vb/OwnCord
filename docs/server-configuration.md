@@ -386,9 +386,19 @@ Without editing the file: set the matching `OWNCORD_*` variable (for example
 over the panel. Then reach the panel through an SSH tunnel
 (`ssh -L 8443:127.0.0.1:8443 host`) and reset the key there.
 
-In Docker the file is in the `owncord-data` volume:
-`docker compose exec owncord rm /app/data/config-overrides.json`, or run a
-shell on the volume while the server container is stopped.
+In Docker the file is in the `owncord-data` volume. The image is distroless
+(no shell, no `rm`), so `docker compose exec` cannot delete it; use a
+throwaway container on the same volume while the server is stopped:
+
+```bash
+docker compose stop owncord
+docker run --rm --volumes-from "$(docker compose ps -aq owncord)" \
+  busybox:1.37 rm /app/data/config-overrides.json
+docker compose start owncord
+```
+
+With a bare `docker run`, pass the server container's name to
+`--volumes-from` instead.
 
 With `server.restart_mode: supervised` and no supervisor, the server exits at
 the next restart and nothing starts it again. Start it by hand, then fix the
