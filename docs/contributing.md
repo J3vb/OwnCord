@@ -365,6 +365,17 @@ fails closed on any missing input.
    pre-release: `gh release create` is called without `--prerelease`, so
    existing servers' `/releases/latest` updater still sees it.
 
+   Check the latest nightly `upgrade-rehearsal.yml` run is green before
+   tagging: `release.yml`'s `nightly-drills` job refuses the release when the
+   latest completed scheduled run is not `success` or is more than 72 hours
+   old, because the release rehearsal skips the failure and recovery drills and
+   the nightly is their only run. For an emergency release, set the
+   `RELEASE_ALLOW_RED_NIGHTLY` repository variable to `true` before tagging
+   (the dry run takes the `allow_red_nightly` input instead) and remove it
+   afterwards; the job then passes with a warning. Only scheduled runs count:
+   after a fix for a red nightly merges, wait for the next nightly rather than
+   reaching for the override.
+
 8. **Approve the two `environment: release` stops.** The `release-server-docker`
    and `publish` jobs each wait on the required reviewer; record who approved
    and when. Nothing is pushed to `ghcr.io` or published until both pass.

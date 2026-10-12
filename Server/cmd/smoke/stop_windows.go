@@ -33,3 +33,18 @@ func stopGracefully(p *os.Process) error {
 	}
 	return windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(p.Pid))
 }
+
+// strayServers finds nothing on Windows: there is no portable way to read
+// another process's working directory, so a leftover replacement is reported
+// by the next phase's ensurePortFree instead.
+func strayServers([]string) []int { return nil }
+
+func terminate(pid int) error { return kill(pid) }
+
+func kill(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding process %d: %w", pid, err)
+	}
+	return p.Kill()
+}
