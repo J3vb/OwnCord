@@ -103,6 +103,10 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
+
+/** Whether the native voice-shortcut poller runs. App-wide, not per page: the
+ *  poller outlives a logout or server switch, so a remount keeps standing down. */
+let globalPollerActive = false;
 /**
  * DP-24's call notification and missed-call notice. They are re-exported by the
  * DM call panel, which the page already loads at mount, so the ring's OS alert
@@ -1022,7 +1026,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The rest of the shortcuts listed on the settings Keybinds tab.
     const voiceKeybindActions = createVoiceWidgetCallbacks(ws, limiters);
-    let globalPollerActive = false;
     unsubscribers.push(
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
@@ -1057,8 +1060,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     void desktop.globalShortcuts
       .supported()
       .then(async (supported) => {
-        if (!supported || tornDown) return;
-        globalPollerActive = true;
+        if (tornDown) return;
+        globalPollerActive = supported;
+        if (!supported) return;
         await desktop.globalShortcuts.start();
       })
       .catch(() => {

@@ -1322,6 +1322,31 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     supported.mockRestore();
   });
 
+  it("keeps standing down after a remount while the running poller is re-checked (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    page.destroy?.();
+
+    // A logout or server switch remounts the page; the native poller is still live.
+    supported.mockReturnValue(new Promise<boolean>(() => {}));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+    );
+
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+
+    start.mockRestore();
+    supported.mockRestore();
+  });
+
   it("toggles mute in-app on Ctrl+Shift+M where global keys are unsupported (1A-5)", async () => {
     const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
     const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
