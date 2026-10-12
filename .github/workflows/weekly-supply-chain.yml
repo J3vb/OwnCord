@@ -1,0 +1,94 @@
+# Weekly dependency scan of dev and main (WP 0-5).
+#
+# ci.yml's Supply-chain Scan runs only when a manifest, a lockfile or a
+# scanner baseline changes, because a source-only change cannot move a
+# version. A new advisory against a dependency nobody touched would otherwise
+# go unseen until the next lockfile change. This re-scans both branches once a
+# week so it shows up on its own.
+#
+# Its own file rather than a schedule on ci.yml, for the reason
+# nightly-docker-smoke.yml's header gives: a scheduled run lands its checks on
+# the default branch's tip, and the jobs a scoped schedule would skip carry
+# required-context names that scripts/verify-gate-evidence.mjs does not count
+# as success when skipped. The job name below matches no required context.
+#
+# The steps are the same as ci.yml's supply-chain job; scripts/
+# check-supply-chain-sync.test.mjs fails Repository Hygiene if the pinned
+# versions, digests or lockfile list drift apart.
+#
+# A schedule only ever runs from the default branch: this file does nothing on
+# a timer until it reaches main. Dispatch it by hand before then.
+name: Weekly Supply-chain Scan
+
+on:
+  schedule:
+    # Monday, after the weekly Dependabot run has opened its PRs.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  weekly-supply-chain:
+    name: Weekly Supply-chain Scan (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [dev, main]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+
+      - name: Print checked-out revision
+        run: git rev-parse HEAD
+
+      - name: Install osv-scanner
+        env:
+          OSV_VERSION: 2.6.0
+          OSV_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        run: |
+          set -euo pipefail
+          url="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/osv-scanner" "$url"
+          echo "$OSV_SHA256  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan the dependency manifests (osv-scanner)
+        run: |
+          osv-scanner scan source --config osv-scanner.toml \
+            -L Server/go.mod \
+            -L Client/package-lock.json \
+            -L Client/src-tauri/Cargo.lock \
+            -L tools/mcp-introspect/package-lock.json \
+            -L package-lock.json
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Install cargo-deny
+        env:
+          CARGO_DENY_VERSION: 0.20.2
+          CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+        run: |
+          set -euo pipefail
+          url="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/cargo-deny.tar.gz" "$url"
+          echo "$CARGO_DENY_SHA256  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP" \
+            --strip-components=1 "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Report tool versions
+        run: osv-scanner --version && cargo-deny --version
+
+      - name: Check the Rust dependency policy (cargo-deny)
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check

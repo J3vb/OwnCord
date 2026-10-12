@@ -41,6 +41,14 @@
 #       ledger that fails to render, and L-07's closure evidence is "CI rejects
 #       generation failure or drift" -- rejecting requires pinning.
 #
+#       Workflow Security Lint and Supply-chain Scan added 2026-10-12 (WP 0-5).
+#       Both are job-level gated on the change selector, so on a dev PR that
+#       does not touch workflows or lockfiles they report `skipped`, which
+#       branch protection counts as passing (the same as Client Unit Tests and
+#       Rust Unit Tests). On main the selector runs everything, so the release
+#       gate sees them run. Names read off ci.yml's non-matrix `name:` keys and
+#       confirmed against PR #2309's check runs.
+#
 #       Deliberately NOT pinned, and why:
 #         Server Docker Build (verify)  reports "skipping" on a dev PR
 #                                       (if: ref_name=='main' || base_ref=='main')
@@ -79,7 +87,9 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
       "Client E2E (Windows native)",
       "Analyze (go)",
       "Analyze (javascript-typescript)",
-      "Analyze (actions)"
+      "Analyze (actions)",
+      "Workflow Security Lint",
+      "Supply-chain Scan"
     ]
   },
   "enforce_admins": true,

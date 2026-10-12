@@ -956,7 +956,13 @@ jobs:
   # One vulnerability scan across every lockfile, plus cargo-deny for the
   # licence and source policy osv-scanner does not carry. Gated on `deps`: a
   # manifest, a lockfile, osv-scanner.toml or deny.toml. A source-only change
-  # cannot move a version, so it does not pay for this.
+  # cannot move a version, so it does not pay for this. A new advisory against
+  # an untouched lockfile is caught by weekly-supply-chain.yml, which repeats
+  # these steps on dev and main every Monday; keep the two in sync
+  # (scripts/check-supply-chain-sync.test.mjs fails Repository Hygiene if not).
+  #
+  # Both this job and workflow-lint are required checks on dev. Skipped by the
+  # selector they count as passing; on main they always run.
   #
   # Both tools are clean at HEAD with the reviewed baselines committed at
   # osv-scanner.toml and Client/src-tauri/deny.toml; each exception names its
