@@ -2088,6 +2088,33 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("the voice widget's call name opens a guild call only after leaving DM mode has shown the channel (1B-1)", async () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      // The page's channel subscriber shows that channel's chat; the call
+      // view must open after it, not before.
+      const order: string[] = [];
+      const unsub = channelsStore.subscribe(() => order.push("channel shown"));
+      onOpenCall.mockImplementation(() => order.push("call opened"));
+      try {
+        const widgetArgs = (createVoiceWidget as MockedFn).mock.calls.at(-1)![0];
+        widgetArgs.onOpenCall(4242);
+        expect(onOpenCall).not.toHaveBeenCalled();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(uiStore.getState().sidebarMode).toBe("channels");
+        expect(onOpenCall).toHaveBeenCalledOnce();
+        expect(order.at(-1)).toBe("call opened");
+      } finally {
+        unsub();
+        cleanup(result);
+      }
+    });
+
     it("onOpenCall forwards to the page's call opener", () => {
       const onOpenCall = vi.fn();
       const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
@@ -3616,6 +3643,43 @@ describe("SidebarArea", () => {
         expect(unread?.textContent).toBe("3");
         setPending(0);
         expect(badge?.style.display).toBe("none");
+        cleanup(result);
+      });
+
+      it("lists pending requests as a row that opens the inbox, for a user with no DMs", () => {
+        pending = 2;
+        const onOpenView = vi.fn();
+        const result = mount({ destinations: destinations(), onOpenView });
+        expect(result.sidebarWrapper.querySelectorAll("[data-testid='dm-entry']")).toHaveLength(0);
+
+        const row = q(result, "dm-section-requests-entry");
+        expect(row?.tagName).toBe("BUTTON");
+        expect(row?.style.display).not.toBe("none");
+        expect(row?.textContent).toBe("Message Requests (2)");
+        row?.click();
+        expect(onOpenView).toHaveBeenCalledWith("requests", row);
+
+        setPending(1);
+        expect(row?.textContent).toBe("Message Requests (1)");
+        setPending(0);
+        expect(row?.style.display).toBe("none");
+        cleanup(result);
+      });
+
+      it("hides the requests row while the DM section is collapsed", () => {
+        pending = 1;
+        const result = mount({ destinations: destinations() });
+        const row = q(result, "dm-section-requests-entry");
+        const header = result.sidebarWrapper.querySelector<HTMLElement>(
+          ".sidebar-dm-section .category",
+        );
+        header?.click();
+        expect(row?.style.display).toBe("none");
+        setPending(2);
+        expect(row?.style.display).toBe("none");
+        header?.click();
+        expect(row?.style.display).not.toBe("none");
+        expect(row?.textContent).toBe("Message Requests (2)");
         cleanup(result);
       });
 

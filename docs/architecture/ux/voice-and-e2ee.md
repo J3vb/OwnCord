@@ -155,7 +155,7 @@ double-click. No capability names the pop-out label on purpose (capabilities onl
 the pop-out has none, and the main window drives its full screen by label), and the about:blank
 popup inherits the app's CSP. The stream's volume and mute go along into the window, shown over the video.
 The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
-no window opens the video stays in the grid. Full screen on a
+no window opens the video stays in the grid and an error toast says "Couldn't open the pop-out window". Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it).
 Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
 `lib/channel-navigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
@@ -229,7 +229,10 @@ Per-user volume is adjustable (0–100%; saved values above 100% are read as 100
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
+"Voice connection lost — failed to reconnect" + auto-leave. One exception on success: a reconnect
+drops your camera and screen share (`teardownForReconnect`), so once it lands a toast names what stopped,
+with a "Turn on again" button ("Share again" for a screen share alone) that runs the normal enable path;
+nothing is restored automatically. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 **A planned restart returns the call (RT-12).** The hub wipes `voice_states` on

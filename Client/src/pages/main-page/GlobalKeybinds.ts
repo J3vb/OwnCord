@@ -11,15 +11,16 @@ import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 import { dialogOpen } from "@lib/dialogOpen";
+import { keyEventToVk, loadGlobalShortcutVks, type GlobalShortcutVks } from "@lib/voiceShortcuts";
 
 const log = createLogger("global-keybinds");
 
 export interface GlobalKeybindHandlers {
   /** Ctrl+F — open the message search overlay. */
   readonly onSearch: () => void;
-  /** Ctrl+M — toggle microphone mute (voice only). */
+  /** The global mute binding (default Ctrl+Shift+M), or the Ctrl+M alias — toggle mute (voice only). */
   readonly onToggleMute: () => void;
-  /** Ctrl+D — toggle deafen (voice only). */
+  /** The global deafen binding (default Ctrl+Shift+D), or the Ctrl+D alias — toggle deafen (voice only). */
   readonly onToggleDeafen: () => void;
   /** Ctrl+Shift+V — toggle the camera (voice only). */
   readonly onToggleCamera: () => void;
@@ -30,6 +31,12 @@ export interface GlobalKeybindHandlers {
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
   /** Whether shortcuts should be ignored right now (e.g. settings overlay open). */
   readonly isSuspended?: () => boolean;
+  /** The mute/deafen keys of the global shortcut, read on every press so a
+   *  Settings rebind applies at once. Defaults to the persisted binding. */
+  readonly voiceShortcutKeys?: () => GlobalShortcutVks;
+  /** True while the native poller delivers the voice shortcuts itself (it
+   *  sees the keys focused or not), so the in-app handler must not toggle too. */
+  readonly isGlobalPollerActive?: () => boolean;
 }
 
 /** True while the user is connected to a voice channel. */
@@ -67,8 +74,28 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     const run = (label: string, action: () => void): void => runGlobal(e, label, action);
 
     if (e.shiftKey) {
-      // Only Ctrl+Shift+V is claimed; other Shift combos fall through to the app.
-      if (key === "v" && inVoice()) run("toggle-camera", handlers.onToggleCamera);
+      if (key === "v") {
+        if (inVoice()) run("toggle-camera", handlers.onToggleCamera);
+        return;
+      }
+      // Mute and deafen use the global shortcut's own binding, so the focused
+      // and unfocused keys can never disagree. Other Shift combos fall through.
+      const vk = keyEventToVk(e);
+      const keys = (handlers.voiceShortcutKeys ?? loadGlobalShortcutVks)();
+      const action = vk === keys.mute ? "mute" : vk === keys.deafen ? "deafen" : null;
+      if (action === null || !inVoice()) return;
+      if (handlers.isGlobalPollerActive?.() === true) {
+        // The poller fires on exactly Ctrl+Shift; any other combo is not ours.
+        if (e.ctrlKey && !e.metaKey) e.preventDefault();
+        return;
+      }
+      // Like the poller, toggle on the press edge only, not on auto-repeat.
+      if (e.repeat) {
+        e.preventDefault();
+        return;
+      }
+      if (action === "mute") run("toggle-mute", handlers.onToggleMute);
+      else run("toggle-deafen", handlers.onToggleDeafen);
       return;
     }
 
@@ -76,6 +103,8 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       case "f":
         run("search", handlers.onSearch);
         break;
+      // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
+      // remove after beta.5
       case "m":
         if (inVoice()) run("toggle-mute", handlers.onToggleMute);
         break;

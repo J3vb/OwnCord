@@ -765,6 +765,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- DM section (above channels, below server header) ---
       const dmSectionResult = createSidebarDmSection({
         pendingRequests: opts.destinations?.requests?.pending,
+        onOpenRequests: (opener) => opts.onOpenView?.("requests", opener),
         onSelectDm: (dm) => {
           selectDmConversation(dm, dmDeps);
         },
@@ -943,8 +944,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       }
       // A guild voice channel: back to the server view, then its call, the
       // same as clicking the joined channel in the sidebar.
-      if (uiStore.getState().sidebarMode !== "channels") returnToChannel();
-      opts.onOpenCall?.();
+      if (uiStore.getState().sidebarMode === "channels") {
+        opts.onOpenCall?.();
+        return;
+      }
+      returnToChannel();
+      // After the channel switch's store notification, which shows that
+      // channel's chat and would close a call view opened before it.
+      queueMicrotask(() => opts.onOpenCall?.());
     },
   });
   voiceWidget.mount(voiceWidgetSlot);

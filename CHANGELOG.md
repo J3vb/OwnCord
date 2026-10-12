@@ -60,6 +60,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A server update shows one restart countdown instead of two.
 
+**Voice**
+
+- Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Before, the app used Ctrl+M / Ctrl+D while focused, so a rebind changed only the unfocused keys. Ctrl+M and Ctrl+D still work for now. A focused press toggles once, never twice.
+
 ### Added
 
 **Desktop UI**
@@ -69,7 +73,10 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- Clicking the voice channel you are in, or its name in the voice panel, opens the call: a tile for everyone in it, with their picture, a ring while they speak and a mute or deafen badge. It stays open with no cameras on until you leave or go back to chat.
 - While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
+- When voice reconnects after a dropped connection, a message now says your camera or screen share stopped, with a **Turn on again** (or **Share again**) button. Before, they were just off afterwards.
+- A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 
 ### Fixed
@@ -103,6 +110,10 @@ and only when it changes something a contributor or fork holder must do
 - A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
+
+**Messages & files**
+
+- The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
 
 ## v2.2.0-beta.3
 

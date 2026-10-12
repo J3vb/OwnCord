@@ -156,8 +156,6 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.key.escape": "Escape",
   "keybinds.key.altArrow": "Alt + ↑ / ↓",
   "keybinds.key.altShiftArrow": "Alt + Shift + ↑ / ↓",
-  "keybinds.key.ctrlM": "Ctrl + M",
-  "keybinds.key.ctrlD": "Ctrl + D",
   "keybinds.key.ctrlShiftV": "Ctrl + Shift + V",
   "keybinds.key.ctrlU": "Ctrl + U",
   "keybinds.key.arrowUp": "Arrow Up",

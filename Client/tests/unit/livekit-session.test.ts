@@ -185,6 +185,12 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
+const mockShowActionToast = vi.hoisted(() => vi.fn());
+vi.mock("@lib/toast", () => ({
+  showToast: vi.fn(),
+  showActionToast: mockShowActionToast,
+}));
+
 vi.mock("@lib/noise-suppression", () => ({
   createRNNoiseProcessor: vi.fn(),
 }));
@@ -1842,6 +1848,102 @@ describe("LiveKitSession", () => {
       // Without a generation bump in teardownForReconnect, the stale enable
       // would publish onto the room being torn down for auto-reconnect.
       expect(mockRoom.localParticipant.publishTrack).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("camera/screen share lost on reconnect notice (WP 1A-4)", () => {
+    let wsState: string;
+    let secondDrop: ((reason?: number) => void) | undefined;
+
+    beforeEach(() => {
+      wsState = "connected";
+      mockShowActionToast.mockClear();
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, { id: 1, type: "voice" } as any]]),
+      }));
+    });
+
+    afterEach(() => {
+      resetChannelsStore();
+    });
+
+    async function dropWhile(media: { camera: boolean; screenshare: boolean }): Promise<void> {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn(), getState: () => wsState } as any);
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      mockVoiceState.localCamera = media.camera;
+      mockVoiceState.localScreenshare = media.screenshare;
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      secondDrop = disconnectedHandler;
+    }
+
+    it("shows one toast with a Turn on again action once a camera-on call reconnects", async () => {
+      await dropWhile({ camera: true, screenshare: false });
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      const [message, type, action] = mockShowActionToast.mock.calls[0]!;
+      expect(message).toBe("Your camera stopped when the connection dropped");
+      expect(type).toBe("warning");
+      expect(action.label).toBe("Turn on again");
+
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      const enableScreenshare = vi.spyOn(session, "enableScreenshare").mockResolvedValue();
+      action.run();
+      expect(enableCamera).toHaveBeenCalledOnce();
+      expect(enableScreenshare).not.toHaveBeenCalled();
+    });
+
+    it("keeps what the first drop stopped when a second drop lands before the notice", async () => {
+      await dropWhile({ camera: true, screenshare: false });
+      // The reconnect lands, then the new room drops again before its tail
+      // reaches the notice: the camera is already off by then.
+      const reconnecting = (session as any)._state;
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: reconnecting.latestToken,
+        lastUrl: reconnecting.lastUrl,
+        lastDirectUrl: reconnecting.lastDirectUrl,
+      };
+      reconnecting.ac.abort();
+      mockVoiceState.localCamera = false;
+      secondDrop!(/* SERVER_SHUTDOWN */ 1);
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your camera stopped when the connection dropped",
+      );
+    });
+
+    it("shows no toast after a reconnect when neither was on", async () => {
+      await dropWhile({ camera: false, screenshare: false });
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("shows no toast when the reconnect gives up", async () => {
+      await dropWhile({ camera: true, screenshare: true });
+      // The chat socket closed for good: the loop gives up instead of resuming.
+      wsState = "disconnected";
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("idle");
+      expect(mockShowActionToast).not.toHaveBeenCalled();
     });
   });
 

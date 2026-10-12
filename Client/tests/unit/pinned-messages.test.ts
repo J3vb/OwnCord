@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
+
+vi.mock("@components/message-list/attachments", () => ({
+  fetchImageAsObjectUrl,
+  recoverEvictedImage: () => {},
+  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
+  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
+}));
+
 import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage, PinnedMessagesOptions } from "@components/PinnedMessages";
 
@@ -7,6 +17,7 @@ const samplePins: PinnedMessage[] = [
     id: 1,
     content: "Hello world",
     author: "Alice",
+    avatar: null,
     timestamp: "2024-01-01T12:00:00Z",
     avatarColor: "#5865f2",
   },
@@ -14,6 +25,7 @@ const samplePins: PinnedMessage[] = [
     id: 2,
     content: "Important notice",
     author: "Bob",
+    avatar: null,
     timestamp: "2024-01-02T14:30:00Z",
     avatarColor: "#e74c3c",
   },
@@ -21,6 +33,7 @@ const samplePins: PinnedMessage[] = [
     id: 3,
     content: "Reminder",
     author: "Charlie",
+    avatar: null,
     timestamp: "2024-01-03T09:00:00Z",
     avatarColor: "#2ecc71",
   },
@@ -30,6 +43,8 @@ describe("PinnedMessages", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    fetchImageAsObjectUrl.mockReset();
+    fetchImageAsObjectUrl.mockResolvedValue(null);
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -105,6 +120,7 @@ describe("PinnedMessages", () => {
         id: 1,
         content: "a",
         author: "Alice",
+        avatar: null,
         timestamp: "2024-01-02 23:30:00",
         avatarColor: "#5865f2",
       },
@@ -112,6 +128,7 @@ describe("PinnedMessages", () => {
         id: 2,
         content: "b",
         author: "Bob",
+        avatar: null,
         timestamp: "2024-01-02T23:30:00Z",
         avatarColor: "#e74c3c",
       },
@@ -119,6 +136,43 @@ describe("PinnedMessages", () => {
     const { panel } = makePanel({ pinnedMessages: pins });
     const times = container.querySelectorAll(".pinned-msg__time");
     expect(times[0]!.textContent).toBe(times[1]!.textContent);
+    panel.destroy?.();
+  });
+
+  it("shows the author's letter on their colour when they have no avatar", () => {
+    const { panel } = makePanel();
+    const avatar = container.querySelector<HTMLElement>(".pinned-msg__avatar")!;
+    expect(avatar.textContent).toBe("A");
+    expect(avatar.style.background).toBe("rgb(88, 101, 242)");
+    expect(avatar.querySelector("img")).toBeNull();
+    expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+    panel.destroy?.();
+  });
+
+  it("shows the author's profile picture when they have one", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue("blob:alice");
+    const pins: PinnedMessage[] = [{ ...samplePins[0]!, avatar: "/api/v1/files/abc" }];
+    const { panel } = makePanel({ pinnedMessages: pins });
+    const avatar = container.querySelector<HTMLElement>(".pinned-msg__avatar")!;
+
+    await vi.waitFor(() => expect(avatar.querySelector("img")).not.toBeNull());
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/abc");
+    const img = avatar.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("blob:alice");
+    expect(img.getAttribute("alt")).toBe("Alice");
+    expect(avatar.querySelector(".avatar-initial")).toBeNull();
+    panel.destroy?.();
+  });
+
+  it("keeps the letter when the profile picture fails to load", async () => {
+    const pins: PinnedMessage[] = [{ ...samplePins[0]!, avatar: "/api/v1/files/abc" }];
+    const { panel } = makePanel({ pinnedMessages: pins });
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalled());
+    await Promise.resolve();
+    const avatar = container.querySelector<HTMLElement>(".pinned-msg__avatar")!;
+    expect(avatar.querySelector("img")).toBeNull();
+    expect(avatar.textContent).toBe("A");
+    expect(avatar.style.background).toBe("rgb(88, 101, 242)");
     panel.destroy?.();
   });
 
