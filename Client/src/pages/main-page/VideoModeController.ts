@@ -156,9 +156,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     // Opened for a stream (Watch, back from the mini-player): everyone in
     // the call is drawn too, before the next roster change.
     const { currentChannelId, voiceUsers } = voiceStore.getState();
-    const users = currentChannelId === null ? undefined : voiceUsers.get(currentChannelId);
+    if (currentChannelId === null) return;
+    const users = voiceUsers.get(currentChannelId);
     // The DM call panel draws its own call's people.
-    if (users !== undefined && opts.panelHost?.()?.ownsCall(currentChannelId!) !== true) {
+    if (users !== undefined && opts.panelHost?.()?.ownsCall(currentChannelId) !== true) {
       givePeople(users);
     }
   }

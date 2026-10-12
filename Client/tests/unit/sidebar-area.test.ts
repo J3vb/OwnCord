@@ -2099,19 +2099,20 @@ describe("SidebarArea", () => {
       const order: string[] = [];
       const unsub = channelsStore.subscribe(() => order.push("channel shown"));
       onOpenCall.mockImplementation(() => order.push("call opened"));
+      try {
+        const widgetArgs = (createVoiceWidget as MockedFn).mock.calls.at(-1)![0];
+        widgetArgs.onOpenCall(4242);
+        expect(onOpenCall).not.toHaveBeenCalled();
 
-      const widgetArgs = (createVoiceWidget as MockedFn).mock.calls.at(-1)![0];
-      widgetArgs.onOpenCall(4242);
-      expect(onOpenCall).not.toHaveBeenCalled();
-
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(uiStore.getState().sidebarMode).toBe("channels");
-      expect(onOpenCall).toHaveBeenCalledOnce();
-      expect(order.at(-1)).toBe("call opened");
-
-      unsub();
-      cleanup(result);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(uiStore.getState().sidebarMode).toBe("channels");
+        expect(onOpenCall).toHaveBeenCalledOnce();
+        expect(order.at(-1)).toBe("call opened");
+      } finally {
+        unsub();
+        cleanup(result);
+      }
     });
 
     it("onOpenCall forwards to the page's call opener", () => {
