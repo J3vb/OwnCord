@@ -77,6 +77,7 @@ import {
 } from "../../src/pages/main-page/VoiceCallbacks";
 import type { WsClient } from "../../src/lib/ws";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
+import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -489,6 +490,16 @@ describe("createSidebarVoiceCallbacks", () => {
       type: "voice_join",
       payload: { channel_id: 42, user_initiated: true },
     });
+  });
+
+  it("onVoiceJoin records the join's envelope id so only its refusal rolls it back", () => {
+    const ws = { send: vi.fn(() => "join-42") } as unknown as WsClient;
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceJoin(42);
+
+    expect(takeJoinRefusal("FORBIDDEN", "other")).toBe(false);
+    expect(takeJoinRefusal("FORBIDDEN", "join-42")).toBe(true);
   });
 
   it("onVoiceJoin is a no-op when already in the requested voice channel (OC-0289)", () => {

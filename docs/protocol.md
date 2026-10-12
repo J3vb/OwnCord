@@ -1470,6 +1470,14 @@ delivered synchronously (same call, same seq mechanism as any other
 broadcast) rather than handed to the hub's asynchronous broadcast queue, so
 it is written before item 3 in the same program order as items 1 and 4.
 
+A refused join is answered with an `error` whose envelope `id` echoes the
+`voice_join`'s own `id` (omitted when the request carried none), so the client
+rolls back only the join that was refused, never on an error answering another
+command. Servers before this change sent join refusals with no `id`; the client
+still treats an id-less error as a refusal when its code is one a join can
+return (`CHANNEL_FULL`, `VOICE_ERROR`, `FORBIDDEN`, `NOT_FOUND`, `BAD_REQUEST`,
+`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`).
+
 ### voice_token (Server -> Client, direct)
 
 ```json

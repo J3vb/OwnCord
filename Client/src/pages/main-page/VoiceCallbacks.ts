@@ -15,6 +15,7 @@ import {
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { noteJoinSent } from "../../features/voice/joinRequest";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
@@ -222,7 +223,9 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       joinVoiceChannel(channelId);
       // The user's own join: the server's rejoin block after a moderator
       // move or kick refuses only automatic rejoins (voice_rejoin_block.go).
-      ws.send({ type: "voice_join", payload: { channel_id: channelId, user_initiated: true } });
+      noteJoinSent(
+        ws.send({ type: "voice_join", payload: { channel_id: channelId, user_initiated: true } }),
+      );
     },
     onVoiceLeave: () => {
       log.info("Leaving voice channel");

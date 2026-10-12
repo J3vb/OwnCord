@@ -37,6 +37,7 @@ import type {
   SessionState,
 } from "../features/voice/sessionState";
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
+import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
@@ -500,7 +501,7 @@ export class LiveKitSession {
         this.leaveVoice(false, true);
         this._rejoinPending = true;
         setVoiceStatus("joining");
-        this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
+        noteJoinSent(this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } }));
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       sweepPublications: (room) => this.sweepPublications(room),
