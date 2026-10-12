@@ -42,6 +42,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
 		}
 	}
+	// After the retry lookup, so a retry of a committed send still gets its
+	// original message even if the reply target has gone since.
+	if err := s.checkReplyTarget(ctx, p); err != nil {
+		return nil, err
+	}
 	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
 		return nil, err
 	}
@@ -140,6 +145,22 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 // written: rate limit, channel lookup, send permission, content sanitization,
 // and attachment permission. It returns the resolved channel and the
 // sanitized content for the caller to persist.
+// checkReplyTarget requires a reply's target to be a message in the same
+// channel that is not deleted. Every way of failing that gives one answer.
+func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessageParams) error {
+	if p.ReplyTo == nil {
+		return nil
+	}
+	refs, err := s.st.GetReferencedMessages(ctx, p.ChannelID, []int64{*p.ReplyTo})
+	if err != nil {
+		return fmt.Errorf("%w: reply target lookup: %w", ErrInternal, err)
+	}
+	if ref := refs[*p.ReplyTo]; ref == nil || ref.Deleted {
+		return fmt.Errorf("%w: reply target not found", ErrBadRequest)
+	}
+	return nil
+}
+
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	// Rate limit.
 	ratKey := auth.Key("chat", p.UserID)
