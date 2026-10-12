@@ -827,6 +827,36 @@ describe("mapToPinnedMessage", () => {
     expect(result.avatarColor).toMatch(/^hsl\(\d+, 55%, 55%\)$/);
   });
 
+  it("carries the author's avatar from the payload", () => {
+    const result = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "Alice", avatar: "/api/v1/files/abc" },
+      content: "Hello",
+    });
+
+    expect(result.avatar).toBe("/api/v1/files/abc");
+  });
+
+  it("prefers the live membersStore avatar over the payload's", () => {
+    setMembers([
+      {
+        id: 101,
+        username: "alice",
+        avatar: "/api/v1/files/new",
+        role: "member",
+        status: "online",
+      },
+    ]);
+
+    const result = mapToPinnedMessage({
+      id: 1,
+      user: { id: 101, username: "alice", avatar: "/api/v1/files/old" },
+      content: "Hello",
+    });
+
+    expect(result.avatar).toBe("/api/v1/files/new");
+  });
+
   it("falls back to timestamp when created_at is undefined", () => {
     const result = mapToPinnedMessage({
       id: 2,
