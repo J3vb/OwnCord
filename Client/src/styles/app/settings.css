@@ -527,6 +527,8 @@ details.disclose > summary {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Mirrored, like your own tile in a call. */
+  transform: scaleX(-1);
 }
 .camera-preview-label {
   position: absolute;

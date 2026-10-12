@@ -47,6 +47,10 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.deafen": "Deafen",
   "widget.control.camera": "Camera",
   "widget.control.screenshare": "Screenshare",
+  "widget.control.cameraOn": "Turn on camera",
+  "widget.control.cameraOff": "Turn off camera",
+  "widget.control.shareStart": "Share your screen",
+  "widget.control.shareStop": "Stop sharing",
   "widget.control.disconnect": "Disconnect",
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",
@@ -65,6 +69,8 @@ export const voiceText = defineCatalog("voice", {
   "volume.serverUndeafen": "Server Undeafen",
   "volume.moveTo": "Move to",
   "volume.disconnect": "Disconnect",
+  "volume.modReconnecting": "Reconnecting. Voice moderation comes back once you are connected.",
+  "volume.modNotConnected": "Not connected. Voice moderation needs a connection to the server.",
   "volume.modUnknown":
     "Voice moderation unavailable: the server hasn't confirmed you can moderate this channel.",
 
@@ -148,9 +154,9 @@ export const voiceText = defineCatalog("voice", {
   "picker.fpsDefault": "Default ({fps} fps)",
   "picker.fpsWaylandLimit": "Wayland screen capture is limited to 60 fps",
   "picker.goLive": "Go Live",
-  "picker.quality.low": "Low (720p)",
-  "picker.quality.medium": "Medium (720p)",
-  "picker.quality.high": "High (1080p)",
+  "picker.quality.low": "Low (720p, 5 fps)",
+  "picker.quality.medium": "Medium (720p, 30 fps)",
+  "picker.quality.high": "High (1080p, 30 fps)",
   "picker.quality.source": "Source",
 
   "key.mouseLeft": "Mouse Left",

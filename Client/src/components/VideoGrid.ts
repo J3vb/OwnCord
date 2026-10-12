@@ -404,6 +404,12 @@ function isFullscreenKey(e: KeyboardEvent): boolean {
   return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
 }
 
+/** Your own camera tile, which shows mirrored like a mirror does. Never a
+ *  screen share: that must read the way viewers see it. */
+function isSelfCamera(config: TileConfig | undefined): boolean {
+  return config?.isSelf === true && !config.isScreenshare;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<number, CellEntry>();
@@ -1279,6 +1285,7 @@ export function createVideoGrid(): VideoGridComponent {
       applyNames(existing, username, config?.name ?? username);
       // Sync stream type attribute in case it changed
       existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
+      existing.el.classList.toggle("video-cell--self", isSelfCamera(config));
       return;
     }
 
@@ -1296,7 +1303,7 @@ export function createVideoGrid(): VideoGridComponent {
 
     const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
-      class: "video-cell",
+      class: isSelfCamera(config) ? "video-cell video-cell--self" : "video-cell",
       "data-user-id": String(userId),
       "data-stream-type": streamType,
     });

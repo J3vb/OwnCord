@@ -709,6 +709,55 @@ describe("VideoGrid", () => {
     });
   });
 
+  describe("your own camera is mirrored", () => {
+    /** Whether the cascaded transform for `selector` is exactly scaleX(-1). */
+    function mirrored(selector: string): boolean {
+      const d = cascadedDeclaration(selector, "transform")?.value;
+      if (d?.property !== "transform") return false;
+      const fns = d.value as ReadonlyArray<{ type: string; value?: unknown }>;
+      const only = fns.length === 1 ? fns[0] : undefined;
+      return (
+        only?.type === "scaleX" &&
+        JSON.stringify(only.value) === JSON.stringify({ type: "number", value: -1 })
+      );
+    }
+
+    it("marks your own camera tile, and neither a screen share nor someone else's camera", () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true }));
+      grid.addStream(
+        2,
+        "Your screen",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      grid.addStream(3, "Alice", fakeStream(), makeTileConfig());
+
+      const cell = (id: number): HTMLElement =>
+        container.querySelector(`.video-cell[data-user-id="${id}"]`) as HTMLElement;
+      expect(cell(1).classList.contains("video-cell--self")).toBe(true);
+      expect(cell(2).classList.contains("video-cell--self")).toBe(false);
+      expect(cell(3).classList.contains("video-cell--self")).toBe(false);
+    });
+
+    it("drops the mirror when a tile is re-used for a screen share", () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true }));
+      grid.addStream(
+        1,
+        "Your screen",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      const cell = container.querySelector('.video-cell[data-user-id="1"]') as HTMLElement;
+      expect(cell.classList.contains("video-cell--self")).toBe(false);
+    });
+
+    it("flips the self tile's video and the settings camera preview horizontally", () => {
+      expect(mirrored(".video-cell--self video")).toBe(true);
+      expect(mirrored(".camera-preview video")).toBe(true);
+      expect(mirrored(".video-cell video")).toBe(false);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Focus mode tests (Spec 2)
   // -----------------------------------------------------------------------

@@ -510,7 +510,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("links a DM call's name back to the DM, and keeps a guild channel's name as text", () => {
+  it("links the call's name back to the call, for a DM and a guild channel alike", () => {
     dmStore.setState(() => ({
       channels: [
         {
@@ -545,14 +545,63 @@ describe("VoiceWidget", () => {
     link!.click();
     expect(onOpenCall).toHaveBeenCalledWith(100);
 
-    // A guild voice channel is not a DM: its name stays plain text.
+    // A guild voice channel links too: it opens that channel's call view.
     setVoiceChannel(999, []);
     voiceStore.flush();
+    const guildLink = container.querySelector<HTMLButtonElement>("[data-testid='vw-channel-link']");
+    expect(guildLink?.textContent).toBe("Voice Channel");
+    guildLink!.click();
+    expect(onOpenCall).toHaveBeenLastCalledWith(999);
+    expect(container.querySelectorAll(".vw-channel")).toHaveLength(1);
+
+    widget.destroy?.();
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("keeps the call's name as plain text when nothing can open the call", () => {
+    setVoiceChannel(999, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
     expect(container.querySelector("[data-testid='vw-channel-link']")).toBeNull();
     expect(container.querySelectorAll(".vw-channel")).toHaveLength(1);
 
     widget.destroy?.();
     dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("says what the camera and share buttons do next in their tooltips", () => {
+    setVoiceChannel(1, []);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
+    const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(shareBtn.title).toBe("Share your screen");
+
+    voiceStore.setState((prev) => ({ ...prev, localCamera: true, localScreenshare: true }));
+    voiceStore.flush();
+    expect(cameraBtn.title).toBe("Turn off camera");
+    expect(shareBtn.title).toBe("Stop sharing");
+
+    // A freeze reason still wins over the action.
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+    expect(cameraBtn.title).toBe("Reconnecting…");
+    expect(shareBtn.title).toBe("Reconnecting…");
+
+    widget.destroy?.();
   });
 
   it("falls back to 'Voice Channel' when channel is not in store", () => {
@@ -1180,7 +1229,7 @@ describe("VoiceWidget", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("");
+    expect(cameraBtn.title).toBe("Turn on camera");
 
     widget.destroy?.();
   });
@@ -1204,7 +1253,7 @@ describe("VoiceWidget", () => {
 
     setVoiceStatus("connected");
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("");
+    expect(cameraBtn.title).toBe("Turn on camera");
 
     widget.destroy?.();
   });

@@ -17,6 +17,7 @@ import {
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
+import { noteVoiceMoved } from "./moveHint";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -254,6 +255,7 @@ export function handleVoiceMoved(
   void livekitSession().then(({ leaveVoice }) => {
     leaveVoice(false);
     leaveVoiceChannel();
+    noteVoiceMoved(payload.to_channel_id);
     joinVoiceChannel(payload.to_channel_id);
     ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } });
   });

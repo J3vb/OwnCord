@@ -222,7 +222,17 @@ function buildVoiceModOptions(
   const moveTargets = Array.from(channelsStore.getState().channels.values())
     .filter((ch) => ch.type === "voice" && ch.id !== channelId)
     .map((ch) => ({ id: ch.id, name: ch.name }));
+  // Greyed with a reason rather than hidden while the socket is down: the
+  // actions are server commands, and a click would be dropped silently.
+  const connectionStatus = uiStore.getState().connectionStatus;
+  const disabledReason =
+    connectionStatus === "connected"
+      ? undefined
+      : voiceText(
+          connectionStatus === "reconnecting" ? "volume.modReconnecting" : "volume.modNotConnected",
+        );
   return {
+    ...(disabledReason !== undefined ? { disabledReason } : {}),
     serverMuted: user.serverMuted === true,
     serverDeafened: user.serverDeafened === true,
     moveTargets,

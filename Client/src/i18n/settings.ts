@@ -348,8 +348,8 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.screenQualityDesc":
     "Medium stays smooth on slower connections; High sends sharper text but needs a fast one. Viewers on a weak connection get a lighter 720p copy. Changes take effect on your next screen share.",
   "voiceAudio.screenQuality.low": "Low (720p, 5 fps)",
-  "voiceAudio.screenQuality.medium": "Medium (720p)",
-  "voiceAudio.screenQuality.high": "High (1080p)",
+  "voiceAudio.screenQuality.medium": "Medium (720p, 30 fps)",
+  "voiceAudio.screenQuality.high": "High (1080p, 30 fps)",
   "voiceAudio.screenQuality.source": "Source (native resolution)",
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":

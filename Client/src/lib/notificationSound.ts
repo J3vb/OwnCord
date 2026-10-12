@@ -272,8 +272,9 @@ export function playNotificationSound(): void {
   }
 }
 
-/** The short voice UI sounds (DP-40): join/leave, mute/unmute, deafen/undeafen. */
-export type VoiceSound = "join" | "leave" | "mute" | "unmute" | "deafen" | "undeafen";
+/** The short voice UI sounds (DP-40): join/leave, a moderator's move,
+ *  mute/unmute, deafen/undeafen. */
+export type VoiceSound = "join" | "leave" | "moved" | "mute" | "unmute" | "deafen" | "undeafen";
 
 // A note (or pair) per edge, all under a fifth of a second. Distinct enough to
 // tell apart by ear without being a message or a call.
@@ -285,6 +286,11 @@ const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number,
   leave: [
     [784, 0],
     [523, 0.09],
+  ],
+  // Two quick equal notes: you landed somewhere you did not pick.
+  moved: [
+    [659, 0],
+    [659, 0.09],
   ],
   mute: [[392, 0]],
   unmute: [[587, 0]],

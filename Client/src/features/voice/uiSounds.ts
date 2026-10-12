@@ -16,19 +16,25 @@
  *    `voice_state`/`voice_leave` handlers bump. A reconnect therefore replays
  *    the roster with no sound storm.
  *
+ * Your own join sounds when the session reaches `connected`, not on the
+ * click, so a join that fails or is abandoned plays nothing; leave sounds only
+ * after a join did. A moderator move plays its own tone in place of the join.
+ *
  * DM calls are `call-ring.ts`'s; the incoming ringtone is exempt from the
  * deafen gate per D2, so it does not route through here.
  */
 
-import { voiceStore, getVoiceRosterRevision } from "@stores/voice.store";
+import { voiceStore, getVoiceRosterRevision, type VoiceStatus } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/preferences";
 import { loadUserStatus } from "@lib/userStatus";
-import { playVoiceSound } from "@lib/notificationSound";
+import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
+import { takeVoiceMoved } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */
 interface SoundState {
   readonly channelId: number | null;
+  readonly voiceStatus: VoiceStatus;
   readonly rosterRevision: number;
   /** Other members (not self) in `channelId`, so a join/leave of the room can
    *  be told from a mute toggle. */
@@ -49,6 +55,7 @@ function snapshot(channelId: number | null): SoundState {
   const s = voiceStore.getState();
   return {
     channelId,
+    voiceStatus: s.voiceStatus,
     rosterRevision: getVoiceRosterRevision(),
     peers: remotePeers(channelId),
     localMuted: s.localMuted,
@@ -67,8 +74,30 @@ function canPlay(): boolean {
  */
 export function startVoiceUiSounds(): () => void {
   let prev = snapshot(voiceStore.getState().currentChannelId);
+  /** The channel whose join was last announced: the one we are in for real.
+   *  A reconnect inside it is not a new join, and a failed join never set it,
+   *  so its teardown is not a leave. */
+  let announced: number | null =
+    prev.channelId !== null &&
+    (prev.voiceStatus === "connected" || prev.voiceStatus === "reconnecting")
+      ? prev.channelId
+      : null;
 
-  return voiceStore.subscribe((state) => {
+  /** Your own join/move/leave edge, if this state has one. Runs on every
+   *  update (deafened or not), so `announced` always tracks the session. */
+  const selfEdge = (next: SoundState): VoiceSound | null => {
+    if (next.channelId === null) {
+      const wasIn = announced !== null;
+      announced = null;
+      takeVoiceMoved(null);
+      return wasIn ? "leave" : null;
+    }
+    if (next.voiceStatus !== "connected" || next.channelId === announced) return null;
+    announced = next.channelId;
+    return takeVoiceMoved(next.channelId) ? "moved" : "join";
+  };
+
+  const unsubscribe = voiceStore.subscribe((state) => {
     const next = snapshot(state.currentChannelId);
     const finish = (): void => {
       prev = next;
@@ -79,9 +108,13 @@ export function startVoiceUiSounds(): () => void {
     // not a user edge: without this guard the cleared channel/deafen/mute
     // flags read as leave/undeafen/mute over the logout screen.
     if (!authStore.getState().isAuthenticated) {
+      announced = null;
+      takeVoiceMoved(null);
       finish();
       return;
     }
+
+    const self = selfEdge(next);
 
     // A deafen edge is its own sound and owns the notification: the mute that
     // a deafen implies (the keybind mutes too) must not also blip.
@@ -101,10 +134,10 @@ export function startVoiceUiSounds(): () => void {
       return;
     }
 
-    // Self join/leave/move is the channel edge. A move plays the join sound;
-    // the leave half is skipped so a move is not two blips back to back.
-    if (next.channelId !== prev.channelId) {
-      playVoiceSound(next.channelId !== null ? "join" : "leave");
+    // Self join/leave/move. A switch plays nothing until the new channel
+    // connects, and then only the join: never a leave and a join back to back.
+    if (self !== null || next.channelId !== prev.channelId) {
+      if (self !== null) playVoiceSound(self);
       finish();
       return;
     }
@@ -129,4 +162,8 @@ export function startVoiceUiSounds(): () => void {
 
     finish();
   });
+  return () => {
+    unsubscribe();
+    takeVoiceMoved(null);
+  };
 }
