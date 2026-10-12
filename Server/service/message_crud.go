@@ -42,8 +42,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
 		}
 	}
-	// After the retry lookup, so a retry of a committed send still gets its
-	// original message even if the reply target has gone since.
 	if err := s.checkReplyTarget(ctx, p); err != nil {
 		return nil, err
 	}
@@ -139,22 +137,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
-}
-
-// checkReplyTarget requires a reply's target to be a message in the same
-// channel that is not deleted. Every way of failing that gives one answer.
-func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessageParams) error {
-	if p.ReplyTo == nil {
-		return nil
-	}
-	refs, err := s.st.GetReferencedMessages(ctx, p.ChannelID, []int64{*p.ReplyTo})
-	if err != nil {
-		return fmt.Errorf("%w: reply target lookup: %w", ErrInternal, err)
-	}
-	if ref := refs[*p.ReplyTo]; ref == nil || ref.Deleted {
-		return fmt.Errorf("%w: reply target not found", ErrBadRequest)
-	}
-	return nil
 }
 
 // sendMessagePrecheck runs every gate a send must clear before anything is
