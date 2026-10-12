@@ -522,13 +522,14 @@ describe("AudioElements", () => {
       expect(elements.getScreenshareAudioMuted(999)).toBe(false);
     });
 
-    it("getScreenshareAudioMuted reads from audio element when no persisted state", () => {
+    it("getScreenshareAudioMuted does not read a deafen-muted element as the tile's own mute", () => {
+      // The element's muted flag also carries deafen, so it is not the
+      // user's choice; only muteScreenshareAudio sets that.
       const audioEl = document.createElement("audio");
       audioEl.muted = true;
       (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
-      // No call to muteScreenshareAudio, so no persisted state for user 42
 
-      expect(elements.getScreenshareAudioMuted(42)).toBe(true);
+      expect(elements.getScreenshareAudioMuted(42)).toBe(false);
     });
 
     it("getScreenshareAudioMuted returns false for empty audio element set", () => {
@@ -573,9 +574,9 @@ describe("AudioElements", () => {
       expect(mockPub.setSubscribed).toHaveBeenCalledWith(true);
     });
 
-    it("leaves screenshare audio subscribed when deafened", () => {
-      // Muting/deafening yourself gates voices, not the stream someone is
-      // sharing — its audio keeps playing under its own per-tile controls.
+    it("keeps screenshare audio subscribed when deafened (it is muted, not unsubscribed)", () => {
+      // Deafen silences stream audio by muting its elements, so undeafen
+      // brings it back without a resubscribe.
       const micPub = { source: "microphone", setSubscribed: vi.fn() };
       const streamPub = { source: "screenShareAudio", setSubscribed: vi.fn() };
       const mockParticipant = {
@@ -593,6 +594,85 @@ describe("AudioElements", () => {
 
       expect(micPub.setSubscribed).toHaveBeenCalledWith(false);
       expect(streamPub.setSubscribed).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("deafen silences stream audio", () => {
+    function attachStream(userId: number): HTMLAudioElement {
+      const { track, audioEl } = createMockTrack("audio", `track-ss-${userId}`);
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      const participant = { identity: `user-${userId}`, setVolume: vi.fn() };
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      return audioEl;
+    }
+
+    it("deafen mutes the stream element and undeafen unmutes it", () => {
+      const audioEl = attachStream(42);
+      expect(audioEl.muted).toBe(false);
+
+      mockVoiceStoreState.localDeafened = true;
+      elements.applyRemoteAudioSubscriptionState(true);
+      expect(audioEl.muted).toBe(true);
+
+      mockVoiceStoreState.localDeafened = false;
+      elements.applyRemoteAudioSubscriptionState(false);
+      expect(audioEl.muted).toBe(false);
+    });
+
+    it("undeafen restores each stream to its own mute state", () => {
+      const mutedEl = attachStream(42);
+      const openEl = attachStream(43);
+      elements.muteScreenshareAudio(42, true);
+
+      mockVoiceStoreState.localDeafened = true;
+      elements.applyRemoteAudioSubscriptionState(true);
+      expect(mutedEl.muted).toBe(true);
+      expect(openEl.muted).toBe(true);
+
+      mockVoiceStoreState.localDeafened = false;
+      elements.applyRemoteAudioSubscriptionState(false);
+      expect(mutedEl.muted).toBe(true);
+      expect(openEl.muted).toBe(false);
+      expect(elements.getScreenshareAudioMuted(42)).toBe(true);
+      expect(elements.getScreenshareAudioMuted(43)).toBe(false);
+    });
+
+    it("unmuting a stream tile while deafened keeps it silent until undeafen", () => {
+      const audioEl = attachStream(42);
+      elements.muteScreenshareAudio(42, true);
+      mockVoiceStoreState.localDeafened = true;
+      elements.applyRemoteAudioSubscriptionState(true);
+
+      elements.muteScreenshareAudio(42, false);
+      expect(audioEl.muted).toBe(true);
+      expect(elements.getScreenshareAudioMuted(42)).toBe(false);
+
+      mockVoiceStoreState.localDeafened = false;
+      elements.applyRemoteAudioSubscriptionState(false);
+      expect(audioEl.muted).toBe(false);
+    });
+
+    it("a stream that attaches while deafened starts muted", () => {
+      mockVoiceStoreState.localDeafened = true;
+      const audioEl = attachStream(42);
+      expect(audioEl.muted).toBe(true);
+      expect(elements.getScreenshareAudioMuted(42)).toBe(false);
+    });
+
+    it("the native room's stream gain is 0 while deafened and is told on each change", () => {
+      const listener = vi.fn();
+      elements.setScreenshareGainListener(listener);
+      expect(elements.getScreenshareGain(42)).toBe(1);
+
+      mockVoiceStoreState.localDeafened = true;
+      elements.applyRemoteAudioSubscriptionState(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(elements.getScreenshareGain(42)).toBe(0);
+
+      mockVoiceStoreState.localDeafened = false;
+      elements.applyRemoteAudioSubscriptionState(false);
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(elements.getScreenshareGain(42)).toBe(1);
     });
   });
 
@@ -797,12 +877,12 @@ describe("AudioElements", () => {
       expect(publication.setSubscribed).toHaveBeenCalledWith(false);
     });
 
-    it("attaches screenshare audio even when locally deafened", () => {
-      // Stream audio is exempt from the deafen gate: muting/deafening
-      // yourself silences voices, not the content someone is streaming.
+    it("attaches screenshare audio muted when locally deafened", () => {
+      // Stream audio stays subscribed while deafened and plays muted, so
+      // undeafen needs no resubscribe.
       mockVoiceStoreState.localDeafened = true;
 
-      const { track } = createMockTrack("audio", "track-deaf-ss");
+      const { track, audioEl } = createMockTrack("audio", "track-deaf-ss");
       const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 
@@ -810,6 +890,7 @@ describe("AudioElements", () => {
 
       expect(track.attach).toHaveBeenCalled();
       expect(publication.setSubscribed).not.toHaveBeenCalled();
+      expect(audioEl.muted).toBe(true);
     });
 
     it("attaches mic audio normally when not deafened", () => {

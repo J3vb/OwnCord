@@ -392,10 +392,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([["setMicrophone", [1, false]]]);
     host.commands.length = 0;
     mockVoiceState.localMuted = true;
+    mockVoiceState.localDeafened = true;
     session.setDeafened(true);
     await flush();
-    // Deafen unsubscribes remote audio and re-asserts the mic mute, as on the web path.
+    // Deafen silences stream audio, unsubscribes remote voice audio and
+    // re-asserts the mic mute, as on the web path.
     expect(host.commands).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0]],
       ["setSubscribed", [1, "user-2", "TR_a", false]],
       ["setMicrophone", [1, false]],
     ]);
@@ -418,9 +421,10 @@ describe("LiveKitSession on the Linux native backend", () => {
       },
     });
     await flush();
+    // A participant who joins while deafened starts with stream audio silent.
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 1]],
-      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
       ["setSubscribed", [1, "user-3", "TR_b", false]],
     ]);
   });
