@@ -337,7 +337,9 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 			// A local peer forwarding for someone else while no proxy is
 			// trusted means the allowlist is judging the proxy, not the
 			// client: every client inherits the proxy's private address.
-			if len(proxyNets) == 0 && r.Header.Get("X-Forwarded-For") != "" {
+			// Either header clientIPWithProxies reads marks a proxy.
+			forwarded := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != ""
+			if len(proxyNets) == 0 && forwarded {
 				if peer := net.ParseIP(ip); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
 					warnUndeclaredProxy.Do(func() {
 						slog.Warn("admin_allowed_cidrs is checked against the connecting address and trusted_proxies is empty — "+
