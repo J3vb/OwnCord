@@ -40,6 +40,7 @@ import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
+import { showMediaLostNotice, type LostMedia } from "../features/voice/mediaLostNotice";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
@@ -399,6 +400,13 @@ export class LiveKitSession {
         // webhook clears a reconnected, non-rogue participant), occupying a
         // max_video slot the user can never free.
         const { localCamera, localScreenshare } = voiceStore.getState();
+        // Merged: a second drop before the first reconnect lands finds both
+        // already off, and must not erase what the first drop stopped.
+        const prev = this._lostOnReconnect;
+        this._lostOnReconnect = {
+          camera: localCamera || (prev?.camera ?? false),
+          screenshare: localScreenshare || (prev?.screenshare ?? false),
+        };
         if (this.ws !== null) {
           if (localCamera) {
             this.ws.send({ type: "voice_camera", payload: { enabled: false } });
@@ -428,6 +436,10 @@ export class LiveKitSession {
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });
   }
+
+  /** What teardownForReconnect stopped, for the notice once the reconnect
+   *  lands. Cleared by leaveVoice, so a give-up or a rejoin shows nothing. */
+  private _lostOnReconnect: LostMedia | null = null;
 
   /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
    *  callback sequence so setReconnectAc can form the "reconnecting" state atomically. */
@@ -499,6 +511,25 @@ export class LiveKitSession {
       reapplyMuteGain: () => this.reapplyMuteGain(),
       clearPendingReconnectFields: () => {
         this._pendingReconnectFields = null;
+      },
+      noticeLostMedia: () => {
+        const lost = this._lostOnReconnect;
+        this._lostOnReconnect = null;
+        if (lost === null) return;
+        // Runs inside the reconnect's try: a throw here must not fail a
+        // reconnect that already succeeded.
+        try {
+          showMediaLostNotice(lost, {
+            camera: () =>
+              void this.enableCamera().catch((e) => log.error("Camera restart failed", e)),
+            screenshare: () =>
+              void this.enableScreenshare().catch((e) =>
+                log.error("Screenshare restart failed", e),
+              ),
+          });
+        } catch (e) {
+          log.warn("Media-lost notice failed", e);
+        }
       },
     });
   }
@@ -770,6 +801,7 @@ export class LiveKitSession {
 
   leaveVoice(sendWs = true, keepWatched = false): void {
     this._rejoinPending = false;
+    this._lostOnReconnect = null;
     if (!keepWatched) this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }

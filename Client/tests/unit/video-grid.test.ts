@@ -13,6 +13,9 @@ const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
 
+const mockShowToast = vi.hoisted(() => vi.fn());
+vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
+
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
   setScreenshareAudioVolume: (...args: unknown[]) => mockSetScreenshareAudioVolume(...args),
@@ -1906,6 +1909,7 @@ describe("VideoGrid", () => {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
         control(SCREEN, "pip").click();
         expectConsole("warn", "Pop out window refused");
+        expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
         expect(cell(SCREEN).querySelector("video")).not.toBeNull();
         expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
         expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
