@@ -771,6 +771,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
+      // 1B-1 replaces this with the call view.
+      onOpenCall: () => videoModeCtrl?.showVideoGrid(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts

@@ -1,7 +1,7 @@
 /**
  * ChannelSidebar component — channel list sidebar with categories,
  * unread indicators, and collapse/expand behavior.
- * Voice channels show connected users and join/leave on click.
+ * Voice channels show connected users; a click joins, or opens the call once joined.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -35,6 +35,7 @@ import { Permission } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -64,7 +65,9 @@ export function canModerateVoice(): boolean {
 
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
-  readonly onVoiceLeave: () => void;
+  /** Called when the user clicks the voice channel they are already in. Leaving
+   *  is the voice widget's Disconnect, never a channel click. */
+  readonly onOpenCall: () => void;
   /** Voice moderation wiring; the moderation menu section is hidden without it. */
   readonly onVoiceModerate?: VoiceModerationCallbacks;
   /** Called when the user clicks the "+" on a category header. */
@@ -230,12 +233,22 @@ function buildVoiceModOptions(
   };
 }
 
+/**
+ * Whether a channel row still shows under a collapsed category. Today only the
+ * voice channel the user is in (Discord keeps it, with its users, so the call
+ * stays visible); phase 2's "collapsed shows unread" extends this predicate.
+ */
+function rowVisibleWhenCollapsed(channel: Channel): boolean {
+  return channel.type === "voice" && voiceStore.getState().currentChannelId === channel.id;
+}
+
 function renderVoiceChannelItem(
   channel: Channel,
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
-  onVoiceLeave: () => void,
+  onOpenCall: () => void,
+  openProfile: (userId: number, anchor: HTMLElement) => void,
   onWatchStream?: (userId: number) => void,
   onVoiceModerate?: VoiceModerationCallbacks,
 ): HTMLDivElement {
@@ -313,7 +326,7 @@ function renderVoiceChannelItem(
         // widget's Disconnect still ends a join in progress.
         const status = voiceStore.getState().voiceStatus;
         if (status === "joining" || status === "securing") return;
-        onVoiceLeave();
+        onOpenCall();
       } else {
         onVoiceJoin(channel.id);
       }
@@ -341,11 +354,10 @@ function renderVoiceChannelItem(
         class: rowClasses,
         "data-voice-uid": String(user.userId),
       });
-      // A remote participant's row opens the per-user volume/moderation menu
-      // (A11Y-01): make it a focusable row so the menu is reachable
-      // from the keyboard too. The local user's own row has no menu.
-      const ownRow = getCurrentUser()?.id === user.userId;
-      if (!ownRow) row.tabIndex = 0;
+      // Every row is focusable (A11Y-01): Enter/Space does what a click does
+      // (watch or profile, below), and on a remote participant's row
+      // Shift+F10 opens the per-user volume/moderation menu.
+      row.tabIndex = 0;
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -492,31 +504,42 @@ function renderVoiceChannelItem(
         openMenuOnKeyboard(row, openVolumeMenu, signal);
       }
 
-      // Click to watch stream (if user has camera or screenshare)
-      if (onWatchStream !== undefined && (user.camera || user.screenshare)) {
-        row.addEventListener(
-          "click",
-          (e) => {
-            // Don't trigger if the right-click menu is open
-            if (e.button !== 0) return;
-            e.stopPropagation();
-            // Watching a stream needs a live LiveKit room -- join first.
-            if (voiceStore.getState().currentChannelId !== channel.id) {
-              // Read before the join: it refuses inside the wait, and an accepted switch arms one.
-              const refused = joinRetryInMs() > 0;
-              onVoiceJoin(channel.id);
-              if (refused) return;
-            }
-            if (voiceStore.getState().currentChannelId !== channel.id) return;
-            const tileId = user.screenshare
-              ? user.userId + SCREENSHARE_TILE_ID_OFFSET
-              : user.userId;
-            onWatchStream(tileId);
-          },
-          { signal },
-        );
-        row.style.cursor = "pointer";
-      }
+      // A click watches their camera or stream; with nothing to watch it opens
+      // their profile, as in the member list.
+      const watchable = onWatchStream !== undefined && (user.camera || user.screenshare);
+      row.addEventListener(
+        "click",
+        (e) => {
+          // Don't trigger if the right-click menu is open
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          if (!watchable) {
+            openProfile(user.userId, row);
+            return;
+          }
+          // Watching a stream needs a live LiveKit room -- join first.
+          if (voiceStore.getState().currentChannelId !== channel.id) {
+            // Read before the join: it refuses inside the wait, and an accepted switch arms one.
+            const refused = joinRetryInMs() > 0;
+            onVoiceJoin(channel.id);
+            if (refused) return;
+          }
+          if (voiceStore.getState().currentChannelId !== channel.id) return;
+          const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
+          onWatchStream(tileId);
+        },
+        { signal },
+      );
+      row.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          row.click();
+        },
+        { signal },
+      );
+      row.style.cursor = "pointer";
 
       usersContainer.appendChild(row);
     }
@@ -532,7 +555,8 @@ function renderChannelItem(
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
-  onVoiceLeave: () => void,
+  onOpenCall: () => void,
+  openProfile: (userId: number, anchor: HTMLElement) => void,
   onEditChannel?: (channel: Channel) => void,
   onDeleteChannel?: (channel: Channel) => void,
   containerEl?: HTMLElement,
@@ -549,7 +573,8 @@ function renderChannelItem(
       signal,
       lifetimeSignal,
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
+      openProfile,
       onWatchStream,
       onVoiceModerate,
     );
@@ -628,7 +653,7 @@ interface GroupRender {
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
   const {
     onVoiceJoin,
-    onVoiceLeave,
+    onOpenCall,
     onCreateChannel,
     onEditChannel,
     onDeleteChannel,
@@ -650,6 +675,22 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
+  /** Closes the profile popup a voice user row opened; destroy() calls it. */
+  let closeProfilePopup: (() => void) | null = null;
+
+  /** Open a voice user's profile beside their row. The popup lives on
+   *  document.body, so it takes the sidebar-lifetime signal: a voice re-render
+   *  while it loads must not drop it. */
+  function openProfile(userId: number, anchor: HTMLElement): void {
+    const rect = anchor.getBoundingClientRect();
+    closeProfilePopup = openUserProfilePopup({
+      userId,
+      anchorX: rect.right,
+      anchorY: rect.top,
+      signal: disposable.signal,
+      fallbackFocus: () => voiceRowByUserId.get(userId) ?? null,
+    });
+  }
 
   const unsubscribers: Array<() => void> = [];
 
@@ -755,9 +796,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       groups.push({ name: category, channels, orderIds: channels.map((c) => c.id).join(",") });
     }
 
-    /** One group's rows, keyed and reused (B9-21). */
+    /** One group's rows, keyed and reused (B9-21). A collapsed category
+     *  keeps only the rows `rowVisibleWhenCollapsed` allows. */
     function reconcileRows(container: HTMLElement, g: GroupRender): void {
-      reconcileChildren(container, g.channels, {
+      const collapsed = g.name !== null && isCategoryCollapsed(g.name);
+      const rows = collapsed ? g.channels.filter(rowVisibleWhenCollapsed) : g.channels;
+      reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
         signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
         create: (ch) => {
@@ -772,7 +816,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // re-render (OC-0281, OC-0282).
             disposable.signal,
             onVoiceJoin,
-            onVoiceLeave,
+            onOpenCall,
+            openProfile,
             onEditChannel,
             onDeleteChannel,
             container,
@@ -814,7 +859,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     rebuildVoiceRowCache();
   }
 
-  /** Build the header (and, when expanded, the rows) for one category group. */
+  /** Build the header and rows for one category group. */
   function buildCategoryGroup(
     g: GroupRender,
     reconcileRows: (container: HTMLElement, g: GroupRender) => void,
@@ -887,13 +932,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       group.appendChild(header);
     }
 
-    if (g.name === null || !isCategoryCollapsed(g.name)) {
-      const container = createElement("div", { class: "category-channels-container" });
-      // Populate through the reconciler so every row gets its key metadata; a
-      // later in-place update can then recognise and reuse them.
-      reconcileRows(container, g);
-      group.appendChild(container);
-    }
+    // Built even when collapsed: the joined voice channel stays visible there,
+    // and a later join or leave reconciles this container in place.
+    const container = createElement("div", { class: "category-channels-container" });
+    // Populate through the reconciler so every row gets its key metadata; a
+    // later in-place update can then recognise and reuse them.
+    reconcileRows(container, g);
+    group.appendChild(container);
 
     return group;
   }
@@ -1052,6 +1097,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // disposable.destroy() also releases this sidebar's hold on the shared document-level
     // drag listeners (drag-reorder.ts tracks owners by signal).
     disposable.destroy();
+    closeProfilePopup?.();
+    closeProfilePopup = null;
     for (const unsub of unsubscribers) {
       unsub();
     }
