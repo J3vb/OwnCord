@@ -18,6 +18,7 @@ import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
+import { noteJoinSent } from "../voice/joinRequest";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
@@ -181,7 +182,7 @@ export function rejoinVoiceAfterRestart(
   }
   log.info("Rejoining voice channel after planned restart", { channelId });
   joinVoiceChannel(channelId);
-  ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+  noteJoinSent(ws.send({ type: "voice_join", payload: { channel_id: channelId } }));
 }
 
 /**

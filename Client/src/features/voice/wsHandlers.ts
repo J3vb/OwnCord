@@ -17,6 +17,7 @@ import {
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
+import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
 import { noteVoiceMoved } from "./moveHint";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
@@ -259,7 +260,7 @@ export function handleVoiceMoved(
     leaveVoice(false);
     leaveVoiceChannel();
     joinVoiceChannel(payload.to_channel_id);
-    ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } });
+    noteJoinSent(ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } }));
   });
 }
 
@@ -387,8 +388,11 @@ export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void
   );
 }
 
-/** The `error` chain's voice-join rollback. Runs for every error that reaches it; never consumes the frame. */
-export function handleVoiceJoinRollback(): void {
+/**
+ * The `error` chain's voice-join rollback. Acts only on the refusal of the
+ * join in flight; never consumes the frame.
+ */
+export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | undefined): void {
   // OC-0224: the sidebar/widget optimistically writes currentChannelId
   // before the server answers voice_join (VoiceCallbacks.onVoiceJoin,
   // voiceStatus="joining"). A first-time join refusal earns no
@@ -396,17 +400,14 @@ export function handleVoiceJoinRollback(): void {
   // else ever clears that optimistic state — setVoiceStatus("idle") only
   // runs inside LiveKitSession.leaveVoice(). handleVoiceJoin can refuse
   // for CHANNEL_FULL, VOICE_ERROR, FORBIDDEN, NOT_FOUND, BAD_REQUEST,
-  // RATE_LIMITED, ALREADY_JOINED, or INTERNAL — this used to only roll
-  // back CHANNEL_FULL, leaving the sidebar keyed on a channel with no
-  // LiveKit session for every other refusal. voice_join's error replies
-  // carry no envelope id to correlate against (Server/ws/voice_join.go
-  // always answers with buildErrorMsg, never buildErrorMsgWithID), so —
-  // unlike the pendingSends/pendingReactions correlation above — this
-  // can't be scoped to "the refusal that answered this specific join";
-  // it runs once, ahead of every code-specific branch below, for any
-  // error that lands while a join is outstanding. A channel *switch*
-  // refusal hits the same guard: the self voice_leave for the OLD
-  // channel that precedes it no longer resets voiceStatus (OC-0015 —
+  // RATE_LIMITED, ALREADY_JOINED, or INTERNAL, and every refusal echoes
+  // the join's envelope id (voice_join.go, buildErrorMsgWithID). Only that
+  // refusal rolls the join back: an error answering another command (a
+  // refused chat_edit, a rate-limited typing frame) used to cancel the
+  // join too. An older server sends the refusal with no id, so an id-less
+  // error still counts when its code is one a join refusal can carry
+  // (joinRequest.ts). A channel *switch* refusal hits the same guard: the
+  // self voice_leave for the OLD channel that precedes it no longer resets voiceStatus (OC-0015 —
   // that voice_leave's channel no longer matches the already-updated
   // currentChannelId, so it must not tear down the NEW channel's
   // optimistic state either), so voiceStatus is still "joining" when
@@ -430,7 +431,7 @@ export function handleVoiceJoinRollback(): void {
   // also covers "connecting"/"reconnecting", and leaveVoice() itself
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
-  if (voiceStore.getState().voiceStatus === "joining") {
+  if (voiceStore.getState().voiceStatus === "joining" && takeJoinRefusal(payload.code, id)) {
     // A refused join (often before any voice token) is a failed join: back
     // off the next one, or every click re-sends voice_join.
     noteJoinFailed();

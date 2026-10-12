@@ -482,7 +482,8 @@ export async function parkLiveKitSocket(page: Page): Promise<void> {
 
 /**
  * Voice join failure handler for E2E testing.
- * Simulates a server error response when attempting to join a voice channel.
+ * Simulates a server refusing a voice join: a real join code, with the
+ * request's envelope id echoed as the server does (voice_join.go).
  */
 export function voiceJoinFailureHandler(): { type: string; handler: string } {
   return {
@@ -492,7 +493,8 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
       setTimeout(function() {
         __tauriEmitEvent("ws-message", JSON.stringify({
           type: "error",
-          payload: { code: "VOICE_JOIN_FAILED", message: "Failed to join voice channel" }
+          id: parsed.id,
+          payload: { code: "VOICE_ERROR", message: "Failed to join voice channel" }
         }));
       }, 50);
     `,

@@ -340,7 +340,7 @@ export function wireDispatcher(
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
       if (handleMessagingError(payload, id)) return;
-      handleVoiceJoinRollback();
+      handleVoiceJoinRollback(payload, id);
       if (handleVoiceError(payload, id)) return;
       // Every remaining code has no dedicated handler above (not a pending
       // send/reaction rollback, not a capacity refusal) — this is the one

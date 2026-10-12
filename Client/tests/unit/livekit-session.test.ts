@@ -263,6 +263,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
+import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
@@ -3966,13 +3967,13 @@ describe("LiveKitSession", () => {
   // call instead of ejecting the user after about 27 s.
   describe("attemptAutoReconnect slow phase (D-4)", () => {
     let wsState: string;
-    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => void>>;
+    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => string | undefined>>;
     let errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
     let ac: AbortController;
 
     beforeEach(() => {
       wsState = "connected";
-      sendSpy = vi.fn<(msg: { type: string }) => void>();
+      sendSpy = vi.fn<(msg: { type: string }) => string | undefined>();
       errorCb = vi.fn<(message: string) => void>();
       ac = new AbortController();
       session.setServerHost("localhost:7880");
@@ -4108,6 +4109,7 @@ describe("LiveKitSession", () => {
     });
 
     it("rejoins with voice_join when the server released the membership during a long drop", async () => {
+      sendSpy.mockImplementation((msg) => (msg.type === "voice_join" ? "rejoin-1" : undefined));
       // The media path is back before the chat socket, and the stale roster
       // still lists us: nothing can tell yet whether the server kept the
       // membership, so the loop must not connect on the old token.
@@ -4130,6 +4132,8 @@ describe("LiveKitSession", () => {
       expect(mockRoom.connect).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
       expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_leave")).toBe(false);
+      // The rejoin's own refusal is the one that may end it.
+      expect(takeJoinRefusal("FORBIDDEN", "rejoin-1")).toBe(true);
       expect(errorCb).not.toHaveBeenCalled();
       expect(leaveVoiceChannel).not.toHaveBeenCalled();
       expect(setVoiceStatus).toHaveBeenLastCalledWith("joining");

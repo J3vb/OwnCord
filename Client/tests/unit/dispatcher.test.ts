@@ -143,6 +143,11 @@ import {
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
 import { takeVoiceMoved } from "../../src/features/voice/moveHint";
+import {
+  noteJoinSent,
+  resetJoinRequest,
+  takeJoinRefusal,
+} from "../../src/features/voice/joinRequest";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -217,6 +222,7 @@ describe("WS Dispatcher", () => {
   let mock: ReturnType<typeof createMockWs>;
 
   beforeEach(() => {
+    resetJoinRequest();
     vi.useFakeTimers();
     // Reset all stores to initial state
     authStore.setState(() => ({
@@ -3759,6 +3765,8 @@ describe("WS Dispatcher", () => {
     expect(mock.ws.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_join", payload: { channel_id: 7 } }),
     );
+    // Its refusal is the one that may roll the re-join back.
+    expect(takeJoinRefusal("FORBIDDEN", "test-id")).toBe(true);
     // The destination's connect plays the moved tone (uiSounds), not the join one.
     expect(takeVoiceMoved(7)).toBe(true);
   });
@@ -3998,6 +4006,7 @@ describe("WS Dispatcher", () => {
       expect(mock.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join", payload: { channel_id: 42 } }),
       );
+      expect(takeJoinRefusal("FORBIDDEN", "test-id")).toBe(true);
       expect(voiceStore.getState().currentChannelId).toBe(42);
     });
 
@@ -5743,6 +5752,31 @@ describe("WS Dispatcher", () => {
       expect(voiceStore.getState().voiceStatus).toBe("idle");
 
       vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
+    });
+
+    // A server that echoes the join's envelope id on its refusals lets the
+    // rollback tell the join's own refusal from an error answering another
+    // command, which must leave the join in flight.
+    it("leaves a voice join in place on an unrelated error during it", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      noteJoinSent("join-1");
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "cannot edit" }, "other");
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(voiceStore.getState().currentChannelId).toBe(5);
+      expect(voiceStore.getState().voiceStatus).toBe("joining");
+    });
+
+    it("rolls a voice join back on the refusal carrying its id", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      noteJoinSent("join-1");
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "denied" }, "join-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
     });
   });
 
