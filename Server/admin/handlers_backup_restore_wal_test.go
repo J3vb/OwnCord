@@ -266,3 +266,36 @@ func TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL(t *testing.T) {
 		t.Errorf("restored rows = %d, want the backup's %d", n, restoreFixtureRows)
 	}
 }
+
+// TestHandleRestoreBackup_CopiesOnlyAfterEveryConnectionCloses: Close leaves a
+// connection that is in use open until it is released, and the last SQLite
+// connection to close checkpoints into the main file. The copy must wait for it.
+func TestHandleRestoreBackup_CopiesOnlyAfterEveryConnectionCloses(t *testing.T) {
+	f := newFileRestoreFixture(t)
+	conn, err := f.database.SQLReaderDB().Conn(context.Background())
+	if err != nil {
+		t.Fatalf("reader conn: %v", err)
+	}
+	releaseTimer := time.AfterFunc(300*time.Millisecond, func() { _ = conn.Close() })
+	defer releaseTimer.Stop()
+
+	openAtCopy := -1
+	copyHook := admin.StubCopyBackup(func(src, dst string) error {
+		openAtCopy = f.database.SQLDb().Stats().OpenConnections + f.database.SQLReaderDB().Stats().OpenConnections
+		return admin.CopyBackupForTest(src, dst)
+	})
+	defer copyHook()
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if openAtCopy != 0 {
+		t.Errorf("%d database connection(s) were still open when the backup was copied in", openAtCopy)
+	}
+	if !waitRestarted(t, restarted) {
+		t.Error("restore did not request a restart")
+	}
+}
