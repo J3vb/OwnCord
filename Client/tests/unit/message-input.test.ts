@@ -730,6 +730,39 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("ArrowUp that opens an edit cancels the default caret move", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    container.addEventListener("edit-last-message", () => comp.startEdit(5, "last message"));
+
+    const event = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true });
+    textarea.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(textarea.value).toBe("last message");
+
+    comp.destroy?.();
+  });
+
+  it("Shift+ArrowUp on an empty textarea does not open an edit", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    const listener = vi.fn();
+    container.addEventListener("edit-last-message", listener);
+
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowUp", shiftKey: true, bubbles: true }),
+    );
+
+    expect(listener).not.toHaveBeenCalled();
+
+    comp.destroy?.();
+  });
+
   it("ArrowUp with content in textarea does NOT dispatch edit-last-message", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
