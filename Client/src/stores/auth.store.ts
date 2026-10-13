@@ -111,6 +111,22 @@ export function setAuth(
   }));
 }
 
+/** Replace the upload file-type lists (an `upload_policy` event), keeping the
+ *  rest of the policy auth_ok set. */
+export function setUploadFileTypes(
+  blockedExtensions: readonly string[],
+  allowedExtensions: readonly string[],
+): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    uploadPolicy: {
+      ...prev.uploadPolicy,
+      blocked_extensions: blockedExtensions,
+      allowed_extensions: allowedExtensions,
+    },
+  }));
+}
+
 /** Reset auth state (logout / disconnect). Also cleans up the voice
  *  session (WebRTC, AudioContext, streams) and clears voice store state —
  *  including camera/screenshare, whose tracks leaveVoice stops and whose

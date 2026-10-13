@@ -119,6 +119,7 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
+- Upload file types saved in the admin page now reach open apps straight away. Before, an app kept refusing files by the old lists (so emptying both lists did not allow every type) until it reconnected.
 - An attachment still uploading when you switched channels was cancelled and gone when you came back. It now keeps uploading and is still there.
 
 ## v2.2.0-beta.3
