@@ -233,8 +233,11 @@ export class AudioElements {
     });
   }
 
+  /** Callers have already removed the tracks' elements (cleanup or a
+   *  released room), so the graphs are dropped without handing back. */
   private closeAudioContext(): void {
     for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid);
+    this.micTracks.clear();
     const ctx = this.audioCtx;
     this.audioCtx = null;
     if (ctx !== null) {
