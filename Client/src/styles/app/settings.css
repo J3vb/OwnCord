@@ -1020,3 +1020,77 @@ details.disclose[open] > summary .icon {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
+
+/* ── About tab and the bundled release notes ── */
+.about-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.about-name {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.about-repo-link,
+.about-notes-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--text-link);
+  font-weight: 600;
+}
+.about-notes {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.about-history details.disclose {
+  border-top: 1px solid var(--border);
+}
+.about-history details.disclose > .changelog-body {
+  padding: 0 0 var(--space-3) var(--space-6);
+}
+.changelog-body {
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.changelog-body p,
+.changelog-body ul {
+  margin: 0 0 var(--space-2);
+}
+.changelog-body ul {
+  padding-left: var(--space-5);
+}
+.changelog-body li {
+  margin: 2px 0;
+}
+.changelog-body .changelog-heading {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.changelog-body .changelog-subheading {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.changelog-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.changelog-body a {
+  color: var(--text-link);
+}

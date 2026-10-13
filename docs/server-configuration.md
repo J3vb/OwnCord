@@ -1,12 +1,16 @@
 # Server Configuration Reference
 
-Complete reference for all OwnCord server configuration options.
+This page is for server owners. It lists every setting the OwnCord server
+reads, with its default and what it does. Use it when you edit `config.yaml`,
+set an environment variable, or change a setting in the admin panel.
 
 ## Overview
 
-OwnCord server reads configuration from `config.yaml` in the working directory. On first run, if the file does not exist, a default `config.yaml` is created automatically.
+The server reads `config.yaml` from its working folder. If the file does not
+exist on first start, the server writes one with default values and short
+comments.
 
-Configuration is loaded in four layers (later layers override earlier ones):
+Settings come from four layers. A later layer overrides an earlier one:
 
 1. **Built-in defaults** (compiled into the binary)
 2. **YAML file** (`config.yaml`)
@@ -15,28 +19,37 @@ Configuration is loaded in four layers (later layers override earlier ones):
 
 ### First-run setup wizard
 
-The admin panel's first-time setup wizard (shown at `/admin` until the Owner
-account exists) writes a subset of these keys into `config.yaml` for you:
-`server.port`, `server.name`, `tls.mode`, `tls.domain`, `upload.max_size_mb`,
-`voice.quality` and `voice.auto_download_livekit`. It also persists the auto-generated
-`voice.livekit_api_key` / `voice.livekit_api_secret` (only when the file has
-none) so voice tokens survive restarts. The wizard patches the file in place —
-comments and hand-edited values it doesn't manage are preserved — and restarts
-the server automatically when a startup-only value changed. Note that
-`OWNCORD_*` environment variables still override anything the wizard writes.
+The admin panel shows a setup wizard at `/admin` until the Owner account
+exists. The wizard writes some of these keys into `config.yaml` for you:
 
-Before it replaces the original, the wizard runs the patched file through the
-same load pipeline a boot uses — defaults, file, `OWNCORD_*` environment, the
-bounds clamp and the credential fill — and refuses the write if that fails, so
-it can never persist a file the next boot would reject. Two consequences: a
-malformed `OWNCORD_*` value fails a save as well as a boot, and saving with an
-empty `voice` section logs the same generated-credential warnings a boot does.
+- `server.port` and `server.name`
+- `tls.mode` and `tls.domain`
+- `upload.max_size_mb`
+- `voice.quality` and `voice.auto_download_livekit`
 
-While setup is open the server prints a one-time **setup token** beside the
-start-up banner, and the wizard requires it. The token is regenerated at every
-start, so to get a fresh one — including after re-opening setup by clearing the
-`setup_completed` setting ([security.md](security.md#first-run-setup)) —
-restart the server and read the new token from its start-up output.
+It also saves the generated `voice.livekit_api_key` and
+`voice.livekit_api_secret`, but only when the file has none. This keeps voice
+tokens working across restarts.
+
+How it writes the file:
+
+- It edits the file in place. Comments, and values it does not manage, are
+  kept.
+- It restarts the server by itself when a startup-only value changed.
+- `OWNCORD_*` environment variables still override anything it writes.
+- Before saving, it loads the edited file exactly as a start-up would:
+  defaults, file, `OWNCORD_*` environment, range checks and the credential
+  fill. If that fails, it refuses to save. So it can never save a file that
+  the next start would reject.
+- So a bad `OWNCORD_*` value makes a save fail, just as it makes a start fail.
+  And saving with an empty `voice` section logs the same generated-credential
+  warnings as a start.
+
+**The setup token.** While setup is open, the server prints a one-time setup
+token next to its start-up banner. The wizard asks for it. The token changes
+at every start. To get a fresh one, restart the server and read it from the
+start-up output. This also applies after you re-open setup by clearing the
+`setup_completed` setting ([security.md](security.md#first-run-setup)).
 
 ## Config Key Reference
 
@@ -46,7 +59,7 @@ restart the server and read the new token from its start-up output.
 | -------------------------------------- | -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `server.port`                          | int      | `8443`             | HTTP(S) listen port                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `server.name`                          | string   | `"OwnCord Server"` | Server display name (shown in `/api/v1/info` and admin panel)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `server.data_dir`                      | string   | `"data"`           | Directory for the key files (`totp.key`, `erasure.key`, `push_vapid.key`), the erasure marker store, the managed LiveKit binary, and the volume the free-space probes watch. **It does not move the database, uploads, certificates or backups**: the database path, upload storage directory, backup directory and the TLS cert/key file are separate keys with independent `data/...` defaults that do not follow this one (REL-04). Set them explicitly if you relocate the install.                                                                                                                                                                                                                |
+| `server.data_dir`                      | string   | `"data"`           | Directory for the key files (`totp.key`, `erasure.key`, `push_vapid.key`), the erasure marker store, the managed LiveKit binary, and the volume the free-space probes watch. **It does not move the database, uploads, certificates or backups**: the database path, upload storage directory, backup directory and the TLS cert/key file are separate keys with independent `data/...` defaults that do not follow this one. Set them explicitly if you relocate the install.                                                                                                                                                                                                                         |
 | `server.min_free_disk_mb`              | int      | `256`              | Reserved headroom, in MiB, on the volumes the server writes to — the one definition of "low disk": below it the start-up banner logs an error, `/health` reports `degraded`/`disk`, and uploads (attachments, avatars, emoji) are refused with `507 STORAGE_LOW_DISK`. `0` disables the floor. A negative value falls back to the default with a warning rather than turning the floor off.                                                                                                                                                                                                                                                                                                            |
 | `server.max_ws_connections`            | int      | `0`                | Cap on concurrently connected WebSocket clients, counting sockets still authenticating or waiting for a ready-build permit; further upgrades get 503 until connections free up. `0` = unlimited. Every connection costs goroutines and buffered send queues — set a ceiling that matches the host's memory before opening the server to a large community.                                                                                                                                                                                                                                                                                                                                             |
 | `server.metrics_allowed_cidrs`         | []string | `[]`               | Separate allowlist for `/api/v1/metrics` and the Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -57,7 +70,7 @@ restart the server and read the new token from its start-up output.
 | `server.allowed_origins`               | string[] | `[]`               | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `server.trusted_proxies`               | string[] | `[]`               | CIDRs of trusted reverse proxies (for X-Forwarded-For)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `server.admin_allowed_cidrs`           | string[] | private networks   | CIDRs allowed to access `/admin` routes (the admin panel and its API). Actions the desktop client uses — change role, ban/unban, force logout, member list, and channel create, edit and delete — are also served at `/api/v1/moderation/members` and `/api/v1/moderation/channels` and are not limited by this setting; they need this server's session or API token plus the permission checks (members also need the rank checks, channels need `MANAGE_CHANNELS`). Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`                                                                                                                                  |
-| `server.browser_client_enabled`        | bool     | `false`            | Owner opt-in for hosting a browser client from this server. Off by default, and **this build ships no browser assets**, so turning it on hosts nothing yet — it mounts no route and serves no file, and the server logs a warning saying so. The bundle, its route and its own CSP arrive in a later release (BG-01).                                                                                                                                                                                                                                                                                                                                                                                  |
+| `server.browser_client_enabled`        | bool     | `false`            | Owner opt-in for hosting a browser client from this server. Off by default, and **this build ships no browser assets**, so turning it on hosts nothing yet — it mounts no route and serves no file, and the server logs a warning saying so. The bundle, its route and its own CSP arrive in a later release.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `server.reachability_report_enabled`   | bool     | `false`            | Owner opt-in for the `reachability` block on the admin-only `GET /api/v1/diagnostics/connectivity`: this host's addresses by class, the ports that must be forwarded, and an explicit list of what the server **cannot** determine about its own reachability. Off by default because it enumerates every address on every interface. It performs no network probe — no socket is opened and no name resolved — so it adds no outbound dependency and no latency. Switching it off does not silence the honest reporting: the startup banner names the address class either way, and a non-public voice node address is warned about at boot regardless. See [port-forwarding.md](port-forwarding.md). |
 | `server.waf_enabled`                   | bool     | `false`            | Enable the Coraza WAF middleware (inline rules + OWASP Core Rule Set)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `server.waf_paranoia_level`            | int      | `2`                | OWASP CRS paranoia level 1–4; values outside that range fall back to 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -244,15 +257,16 @@ ring buffer that backs the admin panel's live log view.
 | `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
 
 An administrator can switch the running server to `debug` for 15 minutes from
-the admin panel's Logs page (SRE-07) without editing this file or restarting:
+the admin panel's Logs page without editing this file or restarting:
 the level reverts to the configured one when the window elapses. This does not
 change `config.yaml`, so a restart returns to `logging.level`.
 
 ### Moderation (`moderation`)
 
-The report queue's content retention window (B5-8). The `reports` row itself
-— the outcome, kept for `VIEW_AUDIT_LOG` holders and B4-10's marker
-unlinking — is never pruned; only its content is bounded.
+How long report content and moderation actions are kept. The `reports` row
+itself is never deleted: it records the outcome, for `VIEW_AUDIT_LOG` holders
+and for unlinking after an account is erased. Only the report's content is
+deleted after the window.
 
 | Key                                | Type | Default | Description                                                                                                                                                                                                                                                                                         |
 | ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -261,7 +275,7 @@ unlinking — is never pruned; only its content is bounded.
 
 ### Admin attention panel (`attention`)
 
-Warning floors for the Dashboard's attention panel (RI-07). The server samples
+Warning floors for the Dashboard's attention panel. The server samples
 each signal once a minute. The first disk level shows at once and a stopped
 dispatch loop as soon as it is seen; any other disk or rate level must hold for two samples to raise
 or clear, a raised rate clears only below half its threshold, and a disk
@@ -272,7 +286,7 @@ During those ten samples reconnects raise nothing, while writer wait and
 delivery raise at the floor and learn only samples at or below it, so
 pressure present at boot is raised rather than learned. Critical disk is
 `server.min_free_disk_mb`. The panel also reports the previous run's exit
-(`last_exit`, SRE-08), read from the boot marker `data/boot.json`: a run that
+(`last_exit`), read from the boot marker `data/boot.json`: a run that
 was killed or crashed rather than shut down cleanly warns, a clean restart
 clears it, and a first start with no marker is unknown. It also reports the
 served TLS certificate's expiry (`certificate`): for a self-signed or manual
@@ -315,22 +329,37 @@ save to it is refused (the value would lose at the next boot). An override
 takes effect at the next server start; the page offers **Restart now** once
 something is pending. The boot log names each overridden key, never its value.
 
-The page also has a **Restart server** button that works with nothing pending,
-for example after editing `config.yaml` on the host. Both open the same dialog:
-it warns that everyone connected is disconnected for a moment and says how this
-server comes back, then waits for it and reloads the panel. How it comes back
-follows `server.restart_mode`: in Docker the server exits and the container's
-restart policy starts it (the shipped `docker-compose.yml` sets
-`restart: unless-stopped`; a container run by hand needs
-`--restart unless-stopped`); under systemd or NSSM it exits for the service
-manager; with no supervisor detected (or `restart_mode: spawn`) it starts its
-own replacement. The dialog's Restart server confirm is disabled while the page
-has unsaved edits (they would not apply), so save or discard them first. When
-`restart_mode` is `supervised` but no supervisor is detected, the dialog says
-the server may stay stopped. The restart is Owner-only, is refused while an
-update or backup restore is running, is accepted once per process (a second
-request answers `409 RESTART_PENDING`), and writes a `server_restart_requested`
-audit row naming who asked.
+### Restarting from the panel
+
+The page also has a **Restart server** button. It works even with nothing
+pending, for example after you edit `config.yaml` on the host. **Restart now**
+and **Restart server** open the same dialog. It warns that everyone connected
+is disconnected for a moment, and says how this server comes back. It then
+waits for the server and reloads the panel.
+
+How the server comes back follows `server.restart_mode`:
+
+- **Docker:** the server exits and the container's restart policy starts it.
+  The shipped `docker-compose.yml` sets `restart: unless-stopped`. A container
+  run by hand needs `--restart unless-stopped`.
+- **systemd or NSSM:** the server exits and the service manager starts it.
+- **No supervisor found, or `restart_mode: spawn`:** the server starts its own
+  replacement.
+- **`restart_mode: supervised` but no supervisor found:** the dialog warns
+  that the server may stay stopped.
+
+Other rules:
+
+- The confirm button is disabled while the page has unsaved edits, because
+  they would not apply. Save or discard them first.
+- Only the Owner can restart.
+- A restart is refused while an update or a backup restore is running.
+- Only one restart is accepted per run. A second request gets
+  `409 RESTART_PENDING`.
+- Each restart writes a `server_restart_requested` audit entry naming who
+  asked.
+
+### What the page covers
 
 Almost every key is on the page. Each row shows a plain-language name (the
 `config.yaml` key beside it), a one-line description, the recommended value and
@@ -515,23 +544,27 @@ Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags 
 
 ## Environment Variable Overrides
 
-Every config key can be overridden via environment variables using the prefix `OWNCORD_`.
+You can override any config key with an environment variable. The name starts
+with `OWNCORD_`.
 
-**Format:** `OWNCORD_<SECTION>_<KEY>` — the first `_` after the prefix maps to
-the section/key dot; the scheme covers **every** key in the file, including ones
-absent from the table below (it is a representative subset, not the full list).
+**Format:** `OWNCORD_<SECTION>_<KEY>`, in capitals. The first `_` after the
+prefix stands for the dot between section and key. For example,
+`server.port` becomes `OWNCORD_SERVER_PORT`. This works for **every** key. The
+table below is only a sample.
 
-**Values:** a list-valued key takes a comma-separated list —
-`OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32` is two entries, each
-side trimmed. Every other key takes a single scalar of its own type, and a value
-that type cannot hold fails startup naming the variable, rather than being
-coerced or silently ignored.
+**Values:**
 
-**YAML types are literal.** Write `port: 8443`, never `port: "8443"`: the quoted
-form is the string `8443`, which is not an integer and now fails startup with
-the file, the line and the value. The same goes for booleans —
-`"true"` is not `true`. Quote only what you mean as text, such as
-`tls.domain` or a version number.
+- A list key takes a comma-separated list. For example,
+  `OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32` is two entries.
+  Spaces around each entry are trimmed.
+- Every other key takes one value of its own type.
+- A value of the wrong type stops the server at start-up, naming the variable.
+  It is never silently changed or ignored.
+
+**YAML types are exact.** Write `port: 8443`, never `port: "8443"`. The quoted
+form is text, not a number, and stops start-up with the file, the line and the
+value. The same goes for true/false: `"true"` is not `true`. Only quote values
+that are meant as text, such as `tls.domain` or a version number.
 
 | Environment Variable                        | Config Path                         |
 | ------------------------------------------- | ----------------------------------- |
@@ -576,16 +609,17 @@ the file, the line and the value. The same goes for booleans —
 
 ## Example config.yaml
 
-The authoritative example is the file the server writes itself: on first start
-`Load` writes `defaultYAML` (`Server/config/config.go`) to `config.yaml` beside
-the binary, comments and all. That generated copy is the one kept in step with
-the key reference above — the hand-maintained example that used to sit here had
-already drifted from it, so it is gone. `Server/config.yaml.example`, which the
-Docker quick-start copies, is a byte-for-byte copy of that template, pinned by
-`TestConfigExampleMatchesGeneratedTemplate` (`Server/config/parity_test.go`).
+The best example is the file the server writes itself. On first start, it
+writes `config.yaml` into its working folder, with comments.
+That template lives in `Server/config/config.go` (`defaultYAML`).
+
+`Server/config.yaml.example`, which the Docker quick start copies, is an exact
+copy of that template. A test keeps them identical
+(`TestConfigExampleMatchesGeneratedTemplate` in
+`Server/config/parity_test.go`).
 
 ## See Also
 
-- [Deployment Guide](deployment.md) -- production deployment guide
-- [LiveKit Setup](livekit-setup.md) -- voice/video setup
-- [Quick Start](quick-start.md) -- getting started
+- [Deployment Guide](deployment.md) — running a server for real
+- [LiveKit Setup](livekit-setup.md) — voice and video setup
+- [Quick Start](quick-start.md) — getting started

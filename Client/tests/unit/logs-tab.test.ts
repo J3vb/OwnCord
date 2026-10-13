@@ -632,18 +632,9 @@ describe("LogsTab", () => {
     });
   });
 
-  describe("client version footer", () => {
-    it("shows the version the host reports", async () => {
-      mockGetVersion.mockResolvedValue("2.0.0");
-      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
-      await vi.waitFor(() => expect(el.textContent).toContain("Client version: v2.0.0"));
-    });
-
-    it("says unknown, never vnull, when the host reports no version", async () => {
-      mockGetVersion.mockResolvedValue(null);
-      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
-      await vi.waitFor(() => expect(el.textContent).toContain("Client version: unknown"));
-      expect(el.textContent).not.toContain("vnull");
-    });
+  it("has no version line or update check: both moved to the About tab", () => {
+    const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+    expect(el.textContent).not.toContain("Client version");
+    expect(el.querySelector(".update-check-btn")).toBeNull();
   });
 });

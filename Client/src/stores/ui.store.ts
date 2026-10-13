@@ -43,7 +43,7 @@ export interface UiState {
 }
 
 /** Settings tabs another surface may open directly. */
-export type SettingsTabRequest = "Safety";
+export type SettingsTabRequest = "Safety" | "About";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
