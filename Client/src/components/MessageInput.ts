@@ -5,7 +5,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/dialogOpen";
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
@@ -226,9 +226,10 @@ const MAX_ATTACHMENTS = 10;
 const MAX_MESSAGE_LEN = 4000;
 // The server's maintenance sweep deletes unlinked attachments about an hour
 // after upload (Server/internal/app/maintenance.go), and a send silently skips
-// an id it no longer knows. A restored draft drops chips past this age, with
-// a margin under the sweep, rather than posting the message without the file.
-const DRAFT_ATTACHMENT_TTL_MS = 50 * 60 * 1000;
+// an id it no longer knows. A staged chip past this age (a margin under the
+// sweep) is never sent: it re-uploads from its file, or is marked expired when
+// the file is gone (a restored draft), and Send refuses until it is fresh.
+const ATTACHMENT_TTL_MS = 50 * 60 * 1000;
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
 
@@ -307,8 +308,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let emojiStart = -1;
 
   /** Pending attachment IDs to send with the next message. `owner` is set
-   *  exactly while the upload is in flight, so it alone is what blocks Send:
-   *  destroying it cancels that upload when the user removes the preview, and
+   *  exactly while the upload is in flight, which blocks Send (as does a chip
+   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying it cancels that
+   *  upload when the user removes the preview, and
    *  it is detached once the upload succeeds. A `Disposable` rather than a raw
    *  AbortController keeps the upload token in the lifecycle primitives,
    *  matching MessageList's per-row owner. */
@@ -318,6 +320,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     readonly previewEl: HTMLDivElement;
     owner?: Disposable;
     uploadedAt?: number;
+    /** The picked file, kept so a chip past ATTACHMENT_TTL_MS can re-upload.
+     *  Absent on chips restored from a draft. */
+    file?: File;
+    /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
+    expired?: boolean;
   }[] = [];
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
@@ -672,6 +679,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
 
+    // The age timer can fire late (a sleeping machine, a throttled window), so
+    // Send checks the age itself and never posts an id the sweep may have taken.
+    if (state.editing === null) {
+      const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
+      if (stale.length > 0) {
+        for (const a of stale) refreshStale(a);
+        showUploadError(
+          messagingText(
+            stale.some((a) => a.expired === true)
+              ? "error.attachmentExpired"
+              : "error.attachmentRefreshing",
+          ),
+        );
+        return;
+      }
+    }
+
     // Debounce to prevent double-click duplicate sends
     const now = Date.now();
     if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
@@ -703,6 +727,36 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Unique counter for preview items (before upload completes and we have a server ID). */
   let previewCounter = 0;
+
+  function isStale(a: (typeof pendingAttachments)[number]): boolean {
+    return a.uploadedAt !== undefined && Date.now() - a.uploadedAt >= ATTACHMENT_TTL_MS;
+  }
+
+  /** Re-upload a stale chip from its file, or mark it expired when there is none. */
+  function refreshStale(a: (typeof pendingAttachments)[number]): void {
+    if (a.owner !== undefined || a.expired === true) return;
+    if (a.file !== undefined) {
+      void runUpload(a, a.file);
+      return;
+    }
+    a.expired = true;
+    a.previewEl.classList.add("expired");
+    a.previewEl.title = messagingText("attach.expired");
+  }
+
+  /** Mark a chip with no file expired once it reaches ATTACHMENT_TTL_MS. A
+   *  chip that has its file waits for Send to re-upload it, so an idle
+   *  composer never uploads in the background. */
+  function scheduleExpiry(a: (typeof pendingAttachments)[number]): void {
+    if (a.uploadedAt === undefined || a.file !== undefined) return;
+    setOwnedTimeout(
+      signal,
+      () => {
+        if (pendingAttachments.includes(a)) refreshStale(a);
+      },
+      Math.max(0, a.uploadedAt + ATTACHMENT_TTL_MS - Date.now()),
+    );
+  }
 
   function removePreviewItem(el: HTMLDivElement): void {
     const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
@@ -833,26 +887,41 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       appendFileLabel(item, file.name);
     }
 
-    // A native progress bar on the chip: indeterminate (no value) while the
-    // transport reports nothing, determinate from its first tick.
-    const progressBar = createElement("progress", { "aria-label": file.name });
-    item.appendChild(progressBar);
-
     appendRemoveButton(item, file.name);
     attachmentPreviewBar.appendChild(item);
-    const uploadOwner = new Disposable();
     const pending: (typeof pendingAttachments)[number] = {
       id: tempId,
       filename: file.name,
       previewEl: item,
-      owner: uploadOwner,
+      file,
     };
     pendingAttachments.push(pending);
+    await runUpload(pending, file);
+  }
+
+  /** Upload `file` for `pending`'s chip; also re-uploads a stale chip. */
+  async function runUpload(
+    pending: (typeof pendingAttachments)[number],
+    file: File,
+  ): Promise<void> {
+    const upload = options.onUploadFile;
+    if (upload === undefined) return;
+    const item = pending.previewEl;
+    // A native progress bar on the chip: indeterminate (no value) while the
+    // transport reports nothing, determinate from its first tick.
+    const progressBar = createElement("progress", { "aria-label": file.name });
+    item.insertBefore(progressBar, item.querySelector(".attachment-preview-remove"));
+    item.classList.add("uploading");
+    const uploadOwner = new Disposable();
+    pending.owner = uploadOwner;
+    /** Set when refreshing a stale chip; a failed refresh keeps the chip. */
+    const staleUploadedAt = pending.uploadedAt;
+    pending.uploadedAt = undefined;
 
     // Upload in background
     try {
       // A late tick after the preview is removed writes a detached node only.
-      const result = await options.onUploadFile(
+      const result = await upload(
         file,
         uploadOwner.signal,
         (fraction) => (progressBar.value = fraction),
@@ -865,13 +934,24 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         pending.uploadedAt = Date.now();
         item.classList.remove("uploading");
         progressBar.remove();
+        if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
+          clearUploadError();
+        }
       }
     } catch (err) {
       // A user-cancelled upload (removed preview) is not a failure: the
       // preview is already gone and there is nothing to report.
       if (uploadOwner.signal.aborted) return;
-      // Upload failed — remove preview and show error
-      removePreviewItem(item);
+      if (staleUploadedAt !== undefined) {
+        // A failed refresh keeps the chip stale, so the next Send retries it
+        // and still never sends the old id.
+        pending.owner = undefined;
+        pending.uploadedAt = staleUploadedAt;
+        item.classList.remove("uploading");
+        progressBar.remove();
+      } else {
+        removePreviewItem(item);
+      }
       const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     }
@@ -1388,7 +1468,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
     const now = Date.now();
-    const live = draft.attachments.filter((a) => now - a.uploadedAt < DRAFT_ATTACHMENT_TTL_MS);
+    const live = draft.attachments.filter((a) => now - a.uploadedAt < ATTACHMENT_TTL_MS);
     for (const att of live) {
       if (attachmentPreviewBar === null) break;
       const item = createElement("div", { class: "attachment-preview-item" });
@@ -1396,7 +1476,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       appendRemoveButton(item, att.filename);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
-      pendingAttachments.push({ ...att, previewEl: item });
+      const restored = { ...att, previewEl: item };
+      pendingAttachments.push(restored);
+      scheduleExpiry(restored);
     }
     if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));
