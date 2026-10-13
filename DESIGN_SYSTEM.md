@@ -1,6 +1,6 @@
 # Design system
 
-Condensed from the sources listed at the end, at commit `7732f969` (2026-09-25). On conflict, the source documents win.
+Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the source documents win.
 
 The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/b9-ui-contract.md](docs/architecture/b9-ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/lib/themes.ts`.
 
@@ -193,13 +193,14 @@ Beta is **desktop-only**. The Tauri window has a hard minimum size of **940×500
 
 The only `@media` width breakpoints in `Client/src/styles/`:
 
-| Breakpoint          | File                 | Effect                                                                                                                                                                         |
-| ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `max-width: 1200px` | `app/responsive.css` | zeroes `.member-list` padding and clips overflow; the width stays 100% (a more specific `.sidebar-members-section .member-list` rule wins), so it does not collapse to width 0 |
-| `max-width: 800px`  | `app/responsive.css` | collapses `.unified-sidebar` to width 0; the header's menu button reopens it as a drawer                                                                                       |
-| `max-width: 700px`  | `login.css`          | narrows `.server-panel` and `.form-container` on the connect screen                                                                                                            |
+| Breakpoint          | File                          | Effect                                                                                                                                                                         |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `max-width: 1200px` | `app/responsive.css`          | zeroes `.member-list` padding and clips overflow; the width stays 100% (a more specific `.sidebar-members-section .member-list` rule wins), so it does not collapse to width 0 |
+| `max-width: 800px`  | `app/responsive.css`          | collapses `.unified-sidebar` to width 0; the header's menu button reopens it as a drawer                                                                                       |
+| `max-width: 800px`  | `app/screen-share-picker.css` | stacks the screen-share picker's `.ssp-options` into one column                                                                                                                |
+| `max-width: 700px`  | `login.css`                   | narrows `.server-panel` and `.form-container` on the connect screen                                                                                                            |
 
-`prefers-reduced-motion: reduce` queries exist in `login.css`, `app/chat-area.css` and `app/profile-popup.css` to zero out specific animations; the app-wide mechanism is the `.reduced-motion` class (see [Accessibility](#accessibility)), not per-file media queries.
+`prefers-reduced-motion: reduce` queries exist in `login.css`, `app/chat-area.css`, `app/composer.css`, `app/profile-popup.css` and `app/video.css` to zero out specific animations; the app-wide mechanism is the `.reduced-motion` class (see [Accessibility](#accessibility)), not per-file media queries.
 
 ## Accessibility
 
@@ -237,16 +238,17 @@ Live regions exist in the DOM before their text changes (a region inserted alrea
 
 Every UI PR runs these against its own journey:
 
-| Export                           | Checks                                                                                                                         |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `Q1`                             | the thresholds as constants (`Q1.text` 4.5, `Q1.nonText` 3, `Q1.focus` 3); assert against these, not literal ratios            |
-| `setAppearance(page, prefs)`     | stores theme/accent/High Contrast/font size/Large Font/motion prefs, then reloads so real startup applies them                 |
-| `findUnnamedControls(root)`      | every visible focusable control has an accessible name                                                                         |
-| `focusIndicator(page)`           | the focused element's ring is visible, ≥2px, ≥3:1 against its background                                                       |
-| `textContrast(locator, pseudo?)` | text (or `::placeholder`) against its composited background                                                                    |
-| `tokenContrasts(page, pairs)`    | token pairs as the page actually resolves them                                                                                 |
-| `tokenHex(page, token)`          | a token as `<body>` resolves it, as `#rrggbb` (`""` if unset)                                                                  |
-| `mountSharedControls(page)`      | the shared-controls fixture (modal, form, button, toggle, status classes) in every state, including pending, error and success |
+| Export                            | Checks                                                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Q1`                              | the thresholds as constants (`Q1.text` 4.5, `Q1.nonText` 3, `Q1.focus` 3); assert against these, not literal ratios            |
+| `setAppearance(page, prefs)`      | stores theme/accent/High Contrast/font size/Large Font/motion prefs, then reloads so real startup applies them                 |
+| `findUnnamedControls(root)`       | every visible focusable control has an accessible name                                                                         |
+| `keyboardReachable(page, target)` | Tab from the top of the document reaches `target` (within 150 presses); catches a visible, named control that is not focusable |
+| `focusIndicator(page)`            | the focused element's ring is visible, ≥2px, ≥3:1 against its background                                                       |
+| `textContrast(locator, pseudo?)`  | text (or `::placeholder`) against its composited background                                                                    |
+| `tokenContrasts(page, pairs)`     | token pairs as the page actually resolves them                                                                                 |
+| `tokenHex(page, token)`           | a token as `<body>` resolves it, as `#rrggbb` (`""` if unset)                                                                  |
+| `mountSharedControls(page)`       | the shared-controls fixture (modal, form, button, toggle, status classes) in every state, including pending, error and success |
 
 `Client/tests/e2e/b9-primitives.spec.ts` demonstrates each helper, including negative controls proving each check fails when the underlying behaviour is removed.
 
