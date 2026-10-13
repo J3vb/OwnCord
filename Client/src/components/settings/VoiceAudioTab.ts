@@ -55,7 +55,8 @@ function applyMicTestSink(el: HTMLAudioElement): void {
   });
 }
 
-/** Output Volume percent as an element volume; a corrupt pref plays at full. */
+/** Output Volume percent as an element volume, which caps at 1: above 100 %
+ *  the test plays at 100 %. A corrupt pref plays at full. */
 function micTestVolume(percent: number): number {
   return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 1;
 }
@@ -576,12 +577,15 @@ function buildVoiceAudioTabInner(
   );
   speakersCard.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
-  const savedOutputVolume = Math.min(100, loadPref<number>("outputVolume", 100));
+  const storedOutputVolume = loadPref<number>("outputVolume", 100);
+  const savedOutputVolume = Number.isFinite(storedOutputVolume)
+    ? Math.max(0, Math.min(200, storedOutputVolume))
+    : 100;
   const outputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
     min: "0",
-    max: "100",
+    max: "200",
     step: "1",
     value: String(savedOutputVolume),
     "aria-label": t("voiceAudio.outputVolume"),

@@ -64,6 +64,7 @@ export const voiceText = defineCatalog("voice", {
   "volume.user": "User Volume: {percent}%",
   "volume.reset": "Reset Volume",
   "volume.resetFull": "User Volume: 100%",
+  "volume.mute": "Mute",
   "volume.serverMute": "Server Mute",
   "volume.serverUnmute": "Server Unmute",
   "volume.serverDeafen": "Server Deafen",

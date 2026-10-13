@@ -103,7 +103,10 @@ function fakePipeline(over: Partial<AudioPipeline> = {}): AudioPipeline {
 }
 
 function fakeElements(effectiveVolume = 1): AudioElements {
-  return { getEffectiveVolume: () => effectiveVolume } as unknown as AudioElements;
+  return {
+    getEffectiveVolume: () => effectiveVolume,
+    getPlayingVolume: (p: { getVolume: () => number }) => p.getVolume(),
+  } as unknown as AudioElements;
 }
 
 // ── attachDiagnosticListeners ──────────────────────────────────────────────

@@ -7,7 +7,13 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createMenuItem, enableMenuKeyboard, clampMenuToViewport } from "@lib/context-menu";
-import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { createIcon } from "@lib/icons";
+import {
+  setUserVolume,
+  getUserVolume,
+  setUserLocalMute,
+  getUserLocalMute,
+} from "@lib/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 /** No-op default until the keyboard model installs the real restorer. */
@@ -54,7 +60,12 @@ export function showUserVolumeMenu(
     el.remove();
   });
 
-  const menu = createElement("div", { class: "context-menu user-vol-menu" });
+  // Discord-width: a long notice (moderation unavailable) wraps instead of
+  // stretching the menu.
+  const menu = createElement("div", {
+    class: "context-menu user-vol-menu",
+    style: "max-width:240px",
+  });
   // One owner for the menu's whole life, so the keyboard model and the
   // outside-click dismissal are torn down together (B9 A11Y-01).
   const dismiss = new Disposable();
@@ -84,6 +95,7 @@ export function showUserVolumeMenu(
   menu.appendChild(sep);
 
   const currentVol = getUserVolume(userId);
+  const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
   const volLabel = createElement(
     "div",
     {
@@ -101,7 +113,7 @@ export function showUserVolumeMenu(
     type: "range",
     class: "settings-slider",
     min: "0",
-    max: "100",
+    max: "200",
     value: String(currentVol),
     style: "flex:1",
   });
@@ -119,19 +131,59 @@ export function showUserVolumeMenu(
     setText(valLabel, `${val}%`);
     setText(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
+    // Raising the level unmutes, as the tile slider does.
+    if (val > 0 && getUserLocalMute(userId)) setUserLocalMute(userId, false);
+    renderMute(isSilenced());
   });
 
   appendChildren(sliderRow, slider, valLabel);
   menu.appendChild(sliderRow);
 
-  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
-  resetBtn.addEventListener("click", () => {
-    setUserVolume(userId, 100);
+  const showFullVolume = (): void => {
     slider.value = "100";
     setText(valLabel, "100%");
     setText(volLabel, t("volume.resetFull"));
+  };
+  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
+  resetBtn.addEventListener("click", () => {
+    setUserVolume(userId, 100);
+    showFullVolume();
+    renderMute(isSilenced());
   });
   menu.appendChild(resetBtn);
+
+  // Local Mute: silences this user for you only and keeps the slider's level,
+  // so unchecking it brings that level back. A level of 0 reads as muted too,
+  // and unchecking it restores 100%, as the tile mute does. The menu stays open.
+  const muteItem = createMenuItem(t("volume.mute"), "context-menu-item");
+  muteItem.setAttribute("role", "menuitemcheckbox");
+  muteItem.setAttribute("data-action", "local-mute");
+  muteItem.style.display = "flex";
+  muteItem.style.alignItems = "center";
+  const muteCheck = createElement("span", {
+    "aria-hidden": "true",
+    style: "margin-left:auto;display:inline-flex",
+  });
+  muteCheck.appendChild(createIcon("check", 14));
+  muteItem.appendChild(muteCheck);
+  const renderMute = (muted: boolean): void => {
+    muteItem.setAttribute("aria-checked", String(muted));
+    muteCheck.style.visibility = muted ? "visible" : "hidden";
+  };
+  renderMute(isSilenced());
+  muteItem.addEventListener("click", () => {
+    if (!isSilenced()) {
+      setUserLocalMute(userId, true);
+    } else {
+      setUserLocalMute(userId, false);
+      if (getUserVolume(userId) === 0) {
+        setUserVolume(userId, 100);
+        showFullVolume();
+      }
+    }
+    renderMute(isSilenced());
+  });
+  menu.appendChild(muteItem);
 
   if (typeof mod === "string") {
     menu.appendChild(createElement("div", { class: "context-menu-sep" }));

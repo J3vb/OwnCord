@@ -11,10 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setUserVolume = vi.fn();
 const getUserVolume = vi.fn();
+const setUserLocalMute = vi.fn();
+const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
 
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
   getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
+  setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
+  getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
 }));
 
 const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
@@ -35,8 +39,15 @@ function itemTexts(): string[] {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  setUserVolume.mockReset();
+  // The setters write what the getters read back, as the real prefs do.
+  setUserVolume.mockReset().mockImplementation((_id: unknown, v: unknown) => {
+    getUserVolume.mockReturnValue(v);
+  });
   getUserVolume.mockReset().mockReturnValue(100);
+  setUserLocalMute.mockReset().mockImplementation((_id: unknown, muted: unknown) => {
+    getUserLocalMute.mockReturnValue(muted as boolean);
+  });
+  getUserLocalMute.mockReset().mockReturnValue(false);
   document.body.innerHTML = "";
 });
 
@@ -51,7 +62,7 @@ afterEach(() => {
 // ── rendering ──────────────────────────────────────────────────────────────
 
 describe("showUserVolumeMenu rendering", () => {
-  it("renders the username, the current volume and a 0-100 slider", () => {
+  it("renders the username, the current volume and a 0-200 slider", () => {
     getUserVolume.mockReturnValue(80);
 
     showUserVolumeMenu(7, "alice", 10, 20, new AbortController().signal);
@@ -63,7 +74,12 @@ describe("showUserVolumeMenu rendering", () => {
     const slider = sliderEl();
     expect(slider?.value).toBe("80");
     expect(slider?.min).toBe("0");
-    expect(slider?.max).toBe("100");
+    expect(slider?.max).toBe("200");
+  });
+
+  it("caps its width so a long notice wraps instead of widening the menu", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal, "a long notice");
+    expect(menuEl()?.style.maxWidth).toBe("240px");
   });
 
   it("positions the menu at the supplied coordinates", () => {
@@ -145,6 +161,71 @@ describe("reset button", () => {
     expect(sliderEl()?.value).toBe("100");
     expect(itemTexts()).toContain("User Volume: 100%");
     expect(document.querySelector(".slider-val")?.textContent).toBe("100%");
+  });
+});
+
+describe("local Mute (WP 1D-5)", () => {
+  function muteItem(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('.user-vol-menu [data-action="local-mute"]');
+  }
+
+  it("is an unchecked checkbox row while the user is not muted", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("toggles the Mute, keeps the menu open and leaves the volume alone", () => {
+    getUserVolume.mockReturnValue(150);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(setUserLocalMute).toHaveBeenLastCalledWith(7, true);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+    expect(menuEl()).not.toBeNull();
+
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(setUserLocalMute).toHaveBeenLastCalledWith(7, false);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+    expect(setUserVolume).not.toHaveBeenCalled();
+    expect(sliderEl()?.value).toBe("150");
+  });
+
+  it("raising the slider clears the Mute", () => {
+    getUserLocalMute.mockReturnValue(true);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    const slider = sliderEl()!;
+    slider.value = "120";
+    slider.dispatchEvent(new Event("input"));
+    expect(setUserVolume).toHaveBeenCalledWith(7, 120);
+    expect(setUserLocalMute).toHaveBeenCalledWith(7, false);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("a user at 0% opens checked, and unchecking restores 100%", () => {
+    getUserVolume.mockReturnValue(0);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(setUserVolume).toHaveBeenCalledWith(7, 100);
+    expect(sliderEl()?.value).toBe("100");
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("dragging the slider to 0 checks the Mute", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    const slider = sliderEl()!;
+    slider.value = "0";
+    slider.dispatchEvent(new Event("input"));
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("opens checked for a user already muted", () => {
+    getUserLocalMute.mockReturnValue(true);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
   });
 });
 
