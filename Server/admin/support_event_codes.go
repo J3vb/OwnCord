@@ -164,7 +164,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"failed to create file storage for maintenance; orphan file cleanup disabled":                                      "failed_to_create_maintenance_file_storage",
 	"failed to decode image dimensions":                                                                                "failed_to_decode_image_dimensions",
 	"failed to decrypt TOTP secret":                                                                                    "failed_to_decrypt_totp_secret",
-	"failed to delete discarded upload":                                                                                "failed_to_delete_discarded_upload",
 	"failed to delete orphan file":                                                                                     "failed_to_delete_orphan_file",
 	"failed to determine executable path":                                                                              "failed_to_determine_executable_path",
 	"failed to encrypt TOTP secret":                                                                                    "failed_to_encrypt_totp_secret",
