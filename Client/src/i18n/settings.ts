@@ -338,6 +338,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
   "voiceAudio.inputSensitivity": "Input Sensitivity",
+  "voiceAudio.autoSensitivity": "Automatically determine input sensitivity",
   "voiceAudio.sensitivityValue": "Sensitivity {value}%",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",

@@ -43,7 +43,7 @@ import {
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
-import { migrateInputMode } from "@lib/inputMode";
+import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { MountableComponent } from "@lib/safe-render";
@@ -149,6 +149,9 @@ void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+
+// A profile from before automatic sensitivity keeps a tuned slider.
+migrateAutoInputSensitivity();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming), once the
 // input mode is settled: a profile from before Input Mode keeps its PTT key.

@@ -233,6 +233,8 @@ test.describe("Settings — Voice & Audio Tab", () => {
   test("names every control and keeps the card text readable", async ({ page }) => {
     const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
     expect(await findUnnamedControls(pane)).toEqual([]);
+    // The sensitivity value shows with the manual slider.
+    await page.getByRole("switch", { name: "Automatically determine input sensitivity" }).click();
     const failures: string[] = [];
     for (const selector of [
       ".settings-card-head h3",
@@ -258,8 +260,15 @@ test.describe("Settings — Voice & Audio Tab", () => {
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {
-    // Voice Activity is the default input mode, so the sensitivity gate shows.
+    // Voice Activity is the default input mode, so the sensitivity gate shows:
+    // automatic at first, with the level meter and no handle.
+    const auto = page.getByRole("switch", { name: "Automatically determine input sensitivity" });
     const slider = page.getByRole("slider", { name: "Input Sensitivity" });
+    await expect(auto).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".mic-meter-bar")).toBeVisible();
+    await expect(slider).toBeHidden();
+
+    await auto.click();
     await expect(slider).toBeVisible();
   });
 

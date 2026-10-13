@@ -24,6 +24,38 @@ export function migrateInputMode(): void {
  *  mic (`pttLive`: the poller is running on a host that reports key state);
  *  otherwise the saved sensitivity keeps gating, as before Input Mode. */
 export function effectiveVoiceSensitivity(pttLive: boolean): number {
-  const pttGates = inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0 && pttLive;
-  return pttGates ? 100 : loadPref<number>("voiceSensitivity", 50);
+  return pttGates(pttLive) ? 100 : loadPref<number>("voiceSensitivity", 50);
+}
+
+function pttGates(pttLive: boolean): boolean {
+  return inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0 && pttLive;
+}
+
+/** Whether the gate finds its own threshold above the room's noise floor.
+ *  A profile from before the choice existed has none: a sensitivity moved
+ *  off the default (50) means the user tuned it, so it stays manual. */
+export function autoInputSensitivity(): boolean {
+  return loadPref<boolean>("autoInputSensitivity", loadPref<number>("voiceSensitivity", 50) === 50);
+}
+
+/** Persist the derived choice once at startup, so a later slider move does
+ *  not switch automatic sensitivity off. */
+export function migrateAutoInputSensitivity(): void {
+  // Saved when both fallbacks read back the same value.
+  if (
+    loadPref<boolean>("autoInputSensitivity", true) !==
+    loadPref<boolean>("autoInputSensitivity", false)
+  ) {
+    savePref("autoInputSensitivity", autoInputSensitivity());
+  }
+}
+
+/** The gate the web microphone runs: none ("off") while a Push to Talk key
+ *  gates or the sensitivity is 100, the noise-floor estimate ("auto"), or the
+ *  saved sensitivity. */
+export function effectiveVoiceGate(pttLive: boolean): "off" | "auto" | number {
+  if (pttGates(pttLive)) return "off";
+  if (autoInputSensitivity()) return "auto";
+  const sensitivity = loadPref<number>("voiceSensitivity", 50);
+  return sensitivity >= 100 ? "off" : sensitivity;
 }

@@ -817,6 +817,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     it("states the input sensitivity beside the meter, and follows the handle", () => {
       localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+      localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
       const { el, ac } = build();
       const value = el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
       expect(value.textContent).toBe("50%");
@@ -825,6 +826,92 @@ describe("VoiceAudioTab UI structure", () => {
       );
       expect(value.textContent).toBe("45%");
       ac.abort();
+    });
+
+    describe("automatic sensitivity", () => {
+      const autoToggle = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>("[data-testid='auto-sensitivity'] .toggle")!;
+      const handleOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>(".mic-meter-threshold")!;
+      const valueOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
+
+      it("is on for a fresh profile: the meter stays, the handle and value hide", () => {
+        const { el, ac } = build();
+        expect(autoToggle(el).getAttribute("aria-checked")).toBe("true");
+        expect(el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden).toBe(false);
+        expect(handleOf(el).hidden).toBe(true);
+        expect(valueOf(el).hidden).toBe(true);
+        ac.abort();
+      });
+
+      it("keeps a tuned slider manual, with its handle at the saved value", () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "30");
+        const { el, ac } = build();
+        expect(autoToggle(el).getAttribute("aria-checked")).toBe("false");
+        expect(handleOf(el).hidden).toBe(false);
+        expect(valueOf(el).textContent).toBe("30%");
+        ac.abort();
+      });
+
+      it("turning it off shows the slider at the saved value and re-runs the call's gate", () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        mockApplyInputMode.mockClear();
+
+        autoToggle(el).click();
+
+        expect(localStorage.getItem("owncord:settings:autoInputSensitivity")).toBe("false");
+        expect(handleOf(el).hidden).toBe(false);
+        expect(valueOf(el).hidden).toBe(false);
+        expect(handleOf(el).style.left).toBe("50%");
+        expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+        ac.abort();
+      });
+
+      it("a click on the meter does not move a threshold it does not show", () => {
+        const { el, ac } = build();
+        el.querySelector(".mic-meter-bar")!.dispatchEvent(new MouseEvent("click", { clientX: 0 }));
+        expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+        ac.abort();
+      });
+
+      it("runs the meter's detector on the automatic threshold, and back on the slider's", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        await vi.waitFor(() =>
+          expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+        );
+        const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+        // Before the first estimate, auto gates at the default threshold.
+        expect(worklet.port.postMessage).toHaveBeenCalledWith({
+          type: "config",
+          threshold: vadThreshold(50),
+        });
+        vi.useFakeTimers({ toFake: ["performance"] });
+        try {
+          // A quiet room (-60 dBFS) for over a second: the gate moves to
+          // 10 dB above it, without resetting the gate.
+          worklet.emit({ type: "rms", value: 0.001 });
+          vi.advanceTimersByTime(1100);
+          worklet.emit({ type: "rms", value: 0.001 });
+          const moved = worklet.port.postMessage.mock.calls.at(-1)![0] as {
+            type: string;
+            threshold: number;
+          };
+          expect(moved.type).toBe("threshold");
+          expect(moved.threshold).toBeCloseTo(0.001 * 10 ** 0.5, 6);
+        } finally {
+          vi.useRealTimers();
+        }
+
+        autoToggle(el).click();
+        expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
+          type: "config",
+          threshold: vadThreshold(50),
+        });
+        ac.abort();
+      });
     });
 
     it("shows the microphone's state as a pill: no input while the meter hears nothing", async () => {
@@ -934,6 +1021,7 @@ describe("VoiceAudioTab UI structure", () => {
 
       it("draws the level on the threshold handle's own axis", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
         const { el, worklet, ac } = await meter();
         const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
         expect(handle.style.left).toBe("50%");
@@ -949,6 +1037,7 @@ describe("VoiceAudioTab UI structure", () => {
 
       it("moves the detector's threshold as the handle is dragged, without reopening the mic", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
         const { el, worklet, ac } = await meter();
         const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
 
@@ -985,7 +1074,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const settingRows = el.querySelectorAll(".setting-row");
+    const settingRows = el.querySelectorAll(".setting-row:not([data-testid='auto-sensitivity'])");
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
     ac.abort();
@@ -999,7 +1088,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     // Toggles are divs with class "toggle" (not buttons)
-    const toggleDiv = el.querySelector(".setting-row .toggle") as HTMLElement;
+    const toggleDiv = el.querySelector(
+      ".setting-row:not([data-testid='auto-sensitivity']) .toggle",
+    ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();
 
@@ -1314,6 +1405,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("keyboard moves the threshold handle the way the key points", () => {
     localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1346,6 +1438,7 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("clicking the meter bar calls setVoiceSensitivity", () => {
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1779,7 +1872,10 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       (h) => h.textContent,
     );
     expect(headings).toContain("Input Sensitivity");
+    // The engine gates on the saved slider alone: no automatic toggle.
+    expect(tab.element.querySelector("[data-testid='auto-sensitivity']")).toBeNull();
     const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    expect(handle.hidden).toBe(false);
     handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
     expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("45");
@@ -2037,6 +2133,7 @@ describe("VoiceAudioTab input mode (WP 1D-2)", () => {
     expect(pttBox(el).hidden).toBe(false);
     expect(pttBox(el).querySelector('[data-testid="ptt-release-delay"]')).not.toBeNull();
     expect(sensitivityShown(el)).toBe(false);
+    expect(el.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!.hidden).toBe(true);
     expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
     expect(mockPttUpdateKey).toHaveBeenCalledWith(65);
     ac.abort();

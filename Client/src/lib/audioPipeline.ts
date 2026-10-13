@@ -22,7 +22,8 @@ import {
   type MicProcessor,
 } from "@lib/micProcessor";
 import { voiceText } from "../i18n/voice";
-import { effectiveVoiceSensitivity } from "@lib/inputMode";
+import { effectiveVoiceGate, effectiveVoiceSensitivity } from "@lib/inputMode";
+import { NoiseFloorTracker } from "@lib/noiseFloor";
 
 const log = createLogger("audioPipeline");
 
@@ -89,8 +90,11 @@ export function isMissingDeviceError(err: unknown, options: { deviceId?: unknown
 export interface VadDetector {
   /** Resolves once the worklet has stopped: only then may its context close. */
   stop(): Promise<void>;
-  /** Move the threshold without restarting; the attack/hold state carries on. */
-  setThreshold(threshold: number): void;
+  /** Move the threshold without restarting, or hand it to the automatic
+   *  noise-floor estimate ("auto"). */
+  setThreshold(threshold: number | "auto"): void;
+  /** The input gain ahead of the detector moved: relearn the floor. */
+  resetFloor(): void;
 }
 
 export interface VadDetectorHandlers {
@@ -100,24 +104,41 @@ export interface VadDetectorHandlers {
   onRms?(rms: number): void;
   /** Which path is running once it has started. */
   onStarted?(usingWorklet: boolean): void;
+  /** The automatic threshold moved (only while running "auto"). */
+  onThreshold?(threshold: number): void;
 }
 
 /**
  * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
  * when it loads, otherwise a setTimeout poll with the same timing. Both apply
  * the same attack (~32 ms) and hold (~320 ms), so the settings meter and the
- * live gate open and close alike.
+ * live gate open and close alike. `gate` "auto" runs the threshold a margin
+ * above the noise floor of the levels the detector reports (lib/noiseFloor.ts),
+ * starting at `seed`.
  */
 export function startVadDetector(
   ctx: AudioContext,
   analyser: AnalyserNode,
-  initialThreshold: number,
+  gate: number | "auto",
   handlers: VadDetectorHandlers,
+  seed?: number,
 ): VadDetector {
-  let threshold = initialThreshold;
+  let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
+  let threshold = tracker?.threshold ?? (gate as number);
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Every level report: the meter's, and the automatic estimate's input. */
+  const onLevel = (rms: number): void => {
+    handlers.onRms?.(rms);
+    const moved = tracker?.push(rms, performance.now()) ?? null;
+    if (moved === null) return;
+    threshold = moved;
+    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+    workletNode?.port.postMessage({ type: "threshold", threshold });
+    handlers.onThreshold?.(moved);
+  };
 
   const startFallback = (): void => {
     // setTimeout instead of rAF: rAF pauses when the Tauri window is
@@ -142,9 +163,14 @@ export function startVadDetector(
       }
       const rms = Math.sqrt(sum / dataArray.length);
       frameCounter++;
+      // One poll's level, not the worklet's 50 ms peak: the automatic
+      // margin absorbs the difference.
+      // The start-up grace is the capture settling: the meter shows it, the
+      // automatic floor does not learn from it (the worklet reports none).
       if (frameCounter >= 3) {
         frameCounter = 0;
-        handlers.onRms?.(rms);
+        if (startupFrames < STARTUP_GRACE) handlers.onRms?.(rms);
+        else onLevel(rms);
       }
       if (startupFrames < STARTUP_GRACE) {
         startupFrames++;
@@ -189,7 +215,7 @@ export function startVadDetector(
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
-        else if (event.data.type === "rms") handlers.onRms?.(event.data.value as number);
+        else if (event.data.type === "rms") onLevel(event.data.value as number);
       };
       handlers.onStarted?.(true);
       log.info("VAD AudioWorklet started", { threshold });
@@ -217,10 +243,14 @@ export function startVadDetector(
   };
   return {
     stop,
-    setThreshold(next: number): void {
-      threshold = next;
+    setThreshold(next: number | "auto"): void {
+      tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
+      threshold = tracker?.threshold ?? (next as number);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode?.port.postMessage({ type: "config", threshold });
+    },
+    resetFloor(): void {
+      tracker?.reset(performance.now());
     },
   };
 }
@@ -254,6 +284,11 @@ export class AudioPipeline {
   private _lastVadRms = 0;
   private _vadUsingWorklet = false;
   private currentInputGain = loadPref<number>("inputVolume", 100) / 100;
+  /** The automatic threshold the last detector reached, so a restarted one
+   *  (slider, mode, reconnect) starts there instead of reopening the mic. Kept
+   *  across calls on purpose: it only seeds the first second, until the new
+   *  detector's own estimate replaces it. */
+  private lastAutoThreshold: number | undefined = undefined;
   /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
   private voiceSensitivity: number | null = null;
   /** The track whose SDK restarts are watched, see onMicRestarted. */
@@ -433,6 +468,7 @@ export class AudioPipeline {
     savePref("inputVolume", clamped);
     this.currentInputGain = clamped / 100;
     this.processor?.setInputGain(this.currentInputGain);
+    this.vad?.resetFloor();
   }
 
   /** Close (true) or open (false) the push-to-talk gate. It is applied to the
@@ -460,9 +496,9 @@ export class AudioPipeline {
     log.debug("Voice sensitivity updated", { sensitivity: clamped });
   }
 
-  /** Re-run the sensitivity gate after the input mode or the PTT poller
-   *  changed: a live Push to Talk key runs none, otherwise the saved
-   *  sensitivity gates. */
+  /** Re-run the sensitivity gate after the input mode, the PTT poller or the
+   *  automatic sensitivity toggle changed: a live Push to Talk key runs none,
+   *  otherwise the automatic or saved sensitivity gates. */
   applyInputMode(): void {
     this.startVadPolling();
     this.applyRoomVoiceGate();
@@ -475,27 +511,37 @@ export class AudioPipeline {
     void this.stopVadPolling();
     const processor = this.processor;
     if (processor === null || processor.analyser === null) return;
-    const sensitivity = effectiveVoiceSensitivity(this.pttPollingLive());
-    if (sensitivity >= 100) {
+    const gate = effectiveVoiceGate(this.pttPollingLive());
+    if (gate === "off") {
       processor.setLookahead(0);
       return;
     }
     processor.setLookahead(GATE_LOOKAHEAD_S);
     this.onGateSpeaking?.(true);
-    this.vad = startVadDetector(processor.context, processor.analyser, vadThreshold(sensitivity), {
-      onGate: (gated) => {
-        if (this.processor !== processor) return;
-        this.vadGated = gated;
-        processor.setGate("vad", gated);
-        this.onGateSpeaking?.(!gated);
+    const threshold = gate === "auto" ? "auto" : vadThreshold(gate);
+    this.vad = startVadDetector(
+      processor.context,
+      processor.analyser,
+      threshold,
+      {
+        onGate: (gated) => {
+          if (this.processor !== processor) return;
+          this.vadGated = gated;
+          processor.setGate("vad", gated);
+          this.onGateSpeaking?.(!gated);
+        },
+        onRms: (rms) => {
+          this._lastVadRms = rms;
+        },
+        onStarted: (usingWorklet) => {
+          this._vadUsingWorklet = usingWorklet;
+        },
+        onThreshold: (next) => {
+          if (this.processor === processor) this.lastAutoThreshold = next;
+        },
       },
-      onRms: (rms) => {
-        this._lastVadRms = rms;
-      },
-      onStarted: (usingWorklet) => {
-        this._vadUsingWorklet = usingWorklet;
-      },
-    });
+      this.lastAutoThreshold,
+    );
   }
 
   /** Stop the detector and open its gate. The processor stays. Resolves once

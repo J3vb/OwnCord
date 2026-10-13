@@ -152,6 +152,7 @@ const SETTINGS_ALLOWLIST = [
   "inputVolume",
   "outputVolume",
   "voiceSensitivity",
+  "autoInputSensitivity",
   "pttVk",
   "inputMode",
   "pttReleaseDelayMs",
