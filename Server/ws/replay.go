@@ -114,10 +114,6 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
-	// RT-8: registerNow inherits a parked grace membership; drop it first
-	// if its row is gone. Outside h.seqMu, like every DB read here.
-	h.dropOrphanVoiceGrace(ctx, c.userID)
-
 	events, ok, refused := h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
 	if refused {
 		// U4: nothing before registerNow touched another session; just refuse.
@@ -438,6 +434,10 @@ func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) (events [][]byte, ok, refused bool) {
+	// RT-8: drop a parked grace entry whose row is gone (a DB read, before
+	// h.seqMu); the voice lock spans that and registerNow.
+	defer h.voiceLock(c.userID)()
+	h.dropOrphanVoiceGrace(ctx, c.userID)
 	h.seqMu.Lock()
 	start := time.Now()
 	switch replaySource {

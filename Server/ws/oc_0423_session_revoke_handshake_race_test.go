@@ -195,6 +195,7 @@ func TestReconnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing.T)
 	hub.SeedSeq(100)
 
 	var hookRan bool
+	revokeDone := make(chan struct{})
 	handleReconnectPostCheckPreRegisterRaceHook = func() {
 		if hookRan {
 			return
@@ -206,9 +207,21 @@ func TestReconnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing.T)
 			`DELETE FROM sessions WHERE token = ?`, tokenHash); err != nil {
 			t.Fatalf("revoke session: %v", err)
 		}
-		hub.DisconnectRevokedUser(uid)
+		// The hook runs inside the reconnect's voice-lock section, and
+		// DisconnectRevokedUser takes that lock, so it runs alongside. With
+		// no client registered yet it has nothing to evict; the session
+		// delete above is what the post-register recheck must catch.
+		go func() {
+			defer close(revokeDone)
+			hub.DisconnectRevokedUser(uid)
+		}()
 	}
-	defer func() { handleReconnectPostCheckPreRegisterRaceHook = nil }()
+	defer func() {
+		handleReconnectPostCheckPreRegisterRaceHook = nil
+		if hookRan {
+			<-revokeDone
+		}
+	}()
 
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()

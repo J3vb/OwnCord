@@ -64,6 +64,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 	precheckDone := time.Now()
+	defer h.voiceLock(c.userID)()
 
 	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, c, channelID, reqID)
 	if !ok {
@@ -344,13 +345,13 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, c *Client, capacity int, cha
 
 	// BUG-088: set the client's voice channel as soon as the DB row is
 	// confirmed committed, before the permission checks and LiveKit token
-	// generation below (which can take several round trips). Leaving this
-	// until after those steps left a window where the concurrent stale-voice
-	// sweep sees c.getVoiceChID() still 0 while the row already exists,
-	// misclassifies the in-flight join as a ghost and deletes it — leaving
-	// the joiner live on the hub and in the SFU with no DB row. A failure
-	// further down still unwinds this via rollbackVoiceJoin, which clears
-	// the client's voice channel association, same as before.
+	// generation below. The stale-voice sweep snapshots clients without the
+	// voice lock, so it can still see 0 here, but its delete runs under
+	// voiceLock and rechecks first (WP 1D-10). A failure further down
+	// unwinds this via rollbackVoiceJoin.
+	if voiceJoinPostCommitRaceHook != nil {
+		voiceJoinPostCommitRaceHook(c)
+	}
 	c.setVoiceState(channelID, state.JoinedAt)
 
 	return state, true
@@ -456,14 +457,9 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 			slog.Info("ws handleVoiceJoin: join superseded before token delivery",
 				"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
 			// Best-effort defense in depth: this join has not reached the SFU
-			// (see above), so this is normally a no-op, but it closes the
-			// sliver of time between this check and c.sendMsg below the same
-			// way every other eviction path's RemoveParticipant call does.
-			rbCtx := context.WithoutCancel(ctx)
-			if err := h.livekit.RemoveParticipant(rbCtx, channelID, c.userID, state.JoinedAt); err != nil {
-				slog.Warn("ws handleVoiceJoin: RemoveParticipant after supersession failed (may already be gone)",
-					"err", err, "user_id", c.userID, "channel_id", channelID)
-			}
+			// (see above), so this is normally a no-op. Async, because the
+			// voice lock is held here and no LiveKit RPC runs under it.
+			h.removeLiveKitParticipantAsync(ctx, channelID, c.userID, state.JoinedAt, "handleVoiceJoin supersession")
 			return false
 		}
 		// Send the proxy path and, when loopback, the direct URL (see
@@ -711,6 +707,7 @@ func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
 // instead of the failed one. When joinedAt is empty (the caller never read
 // the row back far enough to learn it), the row is re-read here and the
 // delete is skipped unless it still names channelID.
+// The caller holds h.voiceLock(c.userID).
 func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
 	// OC-0219: the rollback must clear via clearVoiceAndUnsubscribe, not
 	// merely drop the in-memory voiceChID: a join that already reached

@@ -56,7 +56,7 @@ type AppealService struct {
 // their notifies race each other out of commit order.
 //
 // Entries are reference-counted and evicted once nobody holds or is
-// waiting on them (round 4 review, the same shape ws/voice_mod_lock.go's
+// waiting on them (round 4 review, the same shape ws/user_locks.go's
 // own round 5 took for the identical reason): every caller acquires the
 // lock only AFTER the appeal is confirmed to exist and the caller is
 // authorized to touch it (Submit: after its own insert commits; Withdraw:

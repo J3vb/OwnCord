@@ -65,8 +65,12 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
+		// The tail budget starts once the lock is held, so a wait behind
+		// another membership change cannot spend it.
+		unlockVoice := h.voiceLock(c.userID)
 		tailCtx, cancelTail := h.sweepTailCtx(ctx)
 		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
+		unlockVoice()
 		cancelTail()
 		if !evicted {
 			continue

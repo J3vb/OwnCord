@@ -519,21 +519,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
 	// own read through the voice service.
 	database := h.readers.Ready
-	// RT-8: a fresh connect ends any parked grace window (registerNow drops
-	// it); a replay-failure fallback may inherit one only while its row
-	// still exists.
-	if c.lastSeq == 0 {
-		h.voiceGrace.take(c.userID)
-	} else {
-		h.dropOrphanVoiceGrace(ctx, c.userID)
-	}
-	// Clean stale voice state BEFORE building ready and registering.
-	// When a user F5-reloads while in voice, the DB row from the previous
-	// session must be removed so the ready payload doesn't include it and
-	// other clients see a voice_leave broadcast.
-	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
-		h.freshConnectCleanStaleVoice(ctx, c, vs)
-	}
+	h.freshConnectSettleVoice(ctx, c)
 
 	// c.user is the auth-time snapshot — re-read it so the ready payload and
 	// any inherited subscriptions resolve from the user's CURRENT role, not
@@ -566,7 +552,10 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	}
 	// U4: an atomic re-check under h.mu. A device connecting between the check
 	// above and here would otherwise be displaced; refuse instead.
-	if h.registerNow(c, allowedChannelIDs) {
+	unlockVoice := h.voiceLock(c.userID)
+	refused := h.registerNow(c, allowedChannelIDs)
+	unlockVoice()
+	if refused {
 		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
 	}
@@ -622,6 +611,30 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	h.announceFreshConnect(c)
 
 	return nil
+}
+
+// freshConnectSettleVoice runs a fresh connect's voice steps before ready is
+// built, under the voice lock so the old socket's voice paths cannot
+// interleave. The lock is released for handleFreshConnect's DB reads and
+// taken again for registerNow; every row deleter also drops the grace entry,
+// so the gap is safe.
+func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
+	defer h.voiceLock(c.userID)()
+	// RT-8: a fresh connect ends any parked grace window (registerNow drops
+	// it); a replay-failure fallback may inherit one only while its row
+	// still exists.
+	if c.lastSeq == 0 {
+		h.voiceGrace.take(c.userID)
+	} else {
+		h.dropOrphanVoiceGrace(ctx, c.userID)
+	}
+	// Clean stale voice state BEFORE building ready and registering.
+	// When a user F5-reloads while in voice, the DB row from the previous
+	// session must be removed so the ready payload doesn't include it and
+	// other clients see a voice_leave broadcast.
+	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
+		h.freshConnectCleanStaleVoice(ctx, c, vs)
+	}
 }
 
 // freshConnectCleanStaleVoice removes the voice state left behind by this
