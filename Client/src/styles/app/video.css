@@ -69,7 +69,8 @@
 .video-grid--call {
   padding-bottom: 64px;
 }
-.video-grid .video-cell[hidden] {
+.video-grid .video-cell[hidden],
+.video-focus-strip[hidden] {
   display: none;
 }
 

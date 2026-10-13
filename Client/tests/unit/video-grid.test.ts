@@ -2919,12 +2919,47 @@ describe("VideoGrid", () => {
       expect(root().querySelector(".video-focus-strip")).not.toBeNull();
 
       toggle("strip").click();
-      expect(root().querySelector(".video-focus-strip")).toBeNull();
+      // Hidden, not detached: a video taken out of the document pauses.
+      const strip = root().querySelector<HTMLElement>(".video-focus-strip")!;
+      expect(strip.hidden).toBe(true);
+      expect(strip.contains(tile(3))).toBe(true);
       expect(tile(2).parentElement!.classList.contains("video-focus-main")).toBe(true);
       expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
 
       toggle("strip").click();
-      expect(root().querySelector(".video-focus-strip")).not.toBeNull();
+      expect(root().querySelector<HTMLElement>(".video-focus-strip")!.hidden).toBe(false);
+    });
+
+    it("moves focus past your hidden camera when the focused stream ends", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      toggle("selfCamera").click();
+      grid.setFocusedTile(2);
+
+      grid.removeStream(2);
+      expect(grid.getFocusedTileId()).toBe(3);
+    });
+
+    it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {
+      document.body.appendChild(container);
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.setFocusedTile(2);
+
+      barButton("camera").focus();
+      grid.setPeople([person(4, "Ana")]);
+      expect(document.activeElement).toBe(barButton("camera"));
+
+      toggle("strip").focus();
+      toggle("strip").click();
+      expect(document.activeElement).toBe(toggle("strip"));
+      // The grid's own controls stay after the tiles.
+      expect(root().lastElementChild).toBe(bar());
+      container.remove();
     });
 
     it("reads the saved toggles when the grid mounts", () => {

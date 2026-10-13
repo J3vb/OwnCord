@@ -572,7 +572,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
     for (const el of allTiles()) {
       if (el.classList.contains("video-cell--avatar") || el.parentElement !== root) {
-        root.appendChild(el);
+        beforeChrome(el);
       }
     }
     applyGridSizes();
@@ -686,12 +686,13 @@ export function createVideoGrid(): VideoGridComponent {
     syncTileNav();
 
     if (focusedTileId === null || cells.size === 0) {
-      // No focus — use regular flex-wrap layout
-      while (root.firstChild) root.removeChild(root.firstChild);
+      // No focus — use regular flex-wrap layout. The grid's own controls stay
+      // put, so a control the user is on keeps focus.
+      for (const child of Array.from(root.childNodes)) if (!isChrome(child)) child.remove();
       root.classList.remove("focus-mode");
       for (const el of allTiles()) {
         el.classList.remove("focused", "thumb");
-        root.appendChild(el);
+        beforeChrome(el);
       }
       appendChrome();
       applyGridSizes();
@@ -711,7 +712,9 @@ export function createVideoGrid(): VideoGridComponent {
     const mainArea =
       root.querySelector<HTMLDivElement>(":scope > .video-focus-main") ??
       createElement("div", { class: "video-focus-main" });
-    for (const child of Array.from(root.childNodes)) if (child !== mainArea) child.remove();
+    for (const child of Array.from(root.childNodes)) {
+      if (child !== mainArea && !isChrome(child)) child.remove();
+    }
     // Strip area
     const stripArea = createElement("div", { class: "video-focus-strip" });
 
@@ -736,12 +739,13 @@ export function createVideoGrid(): VideoGridComponent {
       stripArea.appendChild(el);
     }
 
-    if (mainArea.parentNode !== root) root.appendChild(mainArea);
-    // Only show strip if there are thumbnails, and the call view's toggle
-    // has not hidden it
+    if (mainArea.parentNode !== root) beforeChrome(mainArea);
+    // Only show strip if there are thumbnails. The call view's toggle hides
+    // it rather than detaching it: a detached video pauses.
     const shownThumbs = [...stripArea.children].some((el) => !(el as HTMLElement).hidden);
-    if (shownThumbs && !(callView && !viewOn.strip)) {
-      root.appendChild(stripArea);
+    if (shownThumbs) {
+      stripArea.hidden = callView && !viewOn.strip;
+      beforeChrome(stripArea);
     }
     // Keep the exit control in the DOM (it was stripped with the other
     // children above) and on top, so focus mode is never a dead end.
@@ -754,8 +758,26 @@ export function createVideoGrid(): VideoGridComponent {
    *  toggles and the call view's control bar. */
   function appendChrome(): void {
     if (root === null) return;
-    for (const el of [exitBtn, viewBar, callBar]) if (el !== null) root.appendChild(el);
+    for (const el of [exitBtn, viewBar, callBar]) {
+      if (el !== null && el.parentNode !== root) root.appendChild(el);
+    }
     syncViewBar();
+  }
+
+  function isChrome(node: Node): boolean {
+    return node === exitBtn || node === viewBar || node === callBar;
+  }
+
+  /** Seat a tile (or layout area) after the tiles and before the grid's own
+   *  controls, which stay last in tab order. */
+  function beforeChrome(el: HTMLElement): void {
+    if (root === null) return;
+    // The trailing run of controls (mount puts the exit control first).
+    let anchor: Element | null = null;
+    for (let c = root.lastElementChild; c !== null && isChrome(c); c = c.previousElementSibling) {
+      anchor = c;
+    }
+    root.insertBefore(el, anchor);
   }
 
   function setFocusedTile(tileId: number | null): void {
@@ -977,6 +999,7 @@ export function createVideoGrid(): VideoGridComponent {
         savePref(VIEW_PREFS[key], viewOn[key]);
         relayout();
         syncViewBar();
+        syncStatsPolling();
         syncViews();
       });
       bar.appendChild(btn);
@@ -1725,8 +1748,8 @@ export function createVideoGrid(): VideoGridComponent {
     // If focused tile was removed, focus the first remaining tile or clear
     const wasFocusMode = focusedTileId !== null;
     if (focusedTileId === userId) {
-      const firstKey = cells.keys().next().value;
-      focusedTileId = firstKey ?? null;
+      // Never onto a tile the view toggles hide.
+      focusedTileId = [...cells].find(([, e]) => !e.el.hidden)?.[0] ?? null;
     }
 
     syncPeople();
@@ -1850,6 +1873,7 @@ export function createVideoGrid(): VideoGridComponent {
     root.appendChild(exitBtn);
 
     container.appendChild(root);
+    if (callView) setCallView(true);
     document.addEventListener("fullscreenchange", onFullscreenChange, {
       signal: gridListeners.signal,
     });
