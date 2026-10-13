@@ -18,20 +18,10 @@ import {
 } from "../../features/whats-new/changelog";
 import type { ChangelogVersion } from "../../features/whats-new/changelog";
 import { loadChangelog } from "../../features/whats-new/changelogSource";
-import { desktop } from "../../platform/desktop";
+import { readAppVersion } from "../../features/whats-new/appVersion";
 import { whatsNewText as t } from "../../i18n/whatsNew";
 
 const log = createLogger("AboutTab");
-
-/** The version the host reports, or null when it gives none (a browser mock). */
-async function readVersion(): Promise<string | null> {
-  try {
-    const v = await desktop.appMetadata.getVersion();
-    return typeof v === "string" && v !== "" ? v.replace(/^v/, "") : null;
-  } catch {
-    return null;
-  }
-}
 
 function externalLink(href: string, text: string, className: string): HTMLAnchorElement {
   const a = createElement("a", {
@@ -90,7 +80,7 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   const history = createElement("div", {});
   appendChildren(section, notesTitle, notes, historyTitle, history);
 
-  const versionRead = readVersion();
+  const versionRead = readAppVersion();
   void versionRead.then((version) => {
     if (version !== null && !signal.aborted) name.textContent = t("about.appName", { version });
   });

@@ -7,27 +7,20 @@
 import type { MountableComponent } from "../../lib/safe-render";
 import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";
-import { desktop } from "../../platform/desktop";
+import { readAppVersion } from "./appVersion";
 import { isNewVersion, markVersionSeen } from "./seenVersion";
 import type { WhatsNewDialog } from "./WhatsNewDialog";
 
 const log = createLogger("whats-new");
 
-async function readVersion(): Promise<string | null> {
-  try {
-    const v = await desktop.appMetadata.getVersion();
-    return typeof v === "string" && v !== "" ? v.replace(/^v/, "") : null;
-  } catch {
-    return null;
-  }
-}
-
-export function createWhatsNewPrompt(): MountableComponent {
+/** `onOpenHistory` opens Settings › About; the page passes it so the lazy
+ *  dialog chunk does not pull the UI store into a shared startup chunk. */
+export function createWhatsNewPrompt(onOpenHistory: () => void): MountableComponent {
   const owner = new Disposable();
   let dialog: WhatsNewDialog | null = null;
 
   async function run(container: Element): Promise<void> {
-    const version = await readVersion();
+    const version = await readAppVersion();
     if (version === null || owner.signal.aborted || !isNewVersion(version)) return;
     // The changelog and the dialog load only on the start that needs them.
     const [{ loadChangelog }, { findVersion }, { showWhatsNewDialog }] = await Promise.all([
@@ -39,7 +32,7 @@ export function createWhatsNewPrompt(): MountableComponent {
     if (owner.signal.aborted) return;
     markVersionSeen(version);
     if (entry === null) return;
-    dialog = showWhatsNewDialog(container, entry, () => {
+    dialog = showWhatsNewDialog(container, entry, onOpenHistory, () => {
       dialog = null;
     });
   }

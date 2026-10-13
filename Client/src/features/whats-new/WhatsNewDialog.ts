@@ -8,7 +8,6 @@ import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
 import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
-import { openSettings } from "../../stores/ui.store";
 import { whatsNewText as t } from "../../i18n/whatsNew";
 import { REPO_URL, renderChangelogBody } from "./changelog";
 import type { ChangelogVersion } from "./changelog";
@@ -20,6 +19,7 @@ export interface WhatsNewDialog {
 export function showWhatsNewDialog(
   container: Element,
   entry: ChangelogVersion,
+  onOpenHistory: () => void,
   onClosed: () => void,
 ): WhatsNewDialog {
   const disposable = new Disposable();
@@ -84,8 +84,7 @@ export function showWhatsNewDialog(
     "click",
     () => {
       close();
-      // i18n-exempt: settings tab key, not shown text
-      openSettings("About");
+      onOpenHistory();
     },
     { signal: disposable.signal },
   );

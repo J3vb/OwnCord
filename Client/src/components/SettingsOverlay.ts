@@ -8,6 +8,7 @@ import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
@@ -30,7 +31,8 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
-import { buildAboutTab } from "./settings/AboutTab";
+
+const log = createLogger("SettingsOverlay");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,7 +120,7 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Keybinds: "keyboard",
   Advanced: "settings",
   Logs: "scroll-text",
-  About: "info",
+  About: "file-text",
 };
 
 // i18n-exempt: TabName key; its label is settingsText("tabs.safety")
@@ -233,7 +235,19 @@ export function createSettingsOverlay(
     Keybinds: (signal) => buildKeybindsTab(signal),
     Advanced: (signal) => buildAdvancedTab(signal),
     Logs: (signal) => logsTab.build(signal),
-    About: (signal) => buildAboutTab(signal),
+    // Loaded on first open: the release notes renderer stays out of this chunk.
+    About: (signal) => {
+      const host = createElement("div", { class: "settings-pane active" });
+      void import("./settings/AboutTab").then(
+        ({ buildAboutTab }) => {
+          if (!signal.aborted) host.replaceWith(buildAboutTab(signal));
+        },
+        (err: unknown) => {
+          log.warn("About tab failed to load", { error: String(err) });
+        },
+      );
+      return host;
+    },
   };
 
   // ---- Core methods ---------------------------------------------------------

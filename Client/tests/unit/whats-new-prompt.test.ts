@@ -17,7 +17,6 @@ vi.mock("../../src/features/whats-new/changelogSource", () => ({
 
 import { createWhatsNewPrompt } from "../../src/features/whats-new/whatsNewPrompt";
 import { markVersionSeen } from "../../src/features/whats-new/seenVersion";
-import { uiStore } from "../../src/stores/ui.store";
 
 const dialog = (): HTMLElement | null =>
   document.querySelector<HTMLElement>("[data-testid=whats-new-dialog]");
@@ -25,12 +24,14 @@ const dialog = (): HTMLElement | null =>
 describe("What's new prompt", () => {
   let container: HTMLDivElement;
   let prompt: ReturnType<typeof createWhatsNewPrompt>;
+  const onOpenHistory = vi.fn();
 
   beforeEach(() => {
     localStorage.clear();
+    onOpenHistory.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
-    prompt = createWhatsNewPrompt();
+    prompt = createWhatsNewPrompt(onOpenHistory);
   });
   afterEach(() => {
     prompt.destroy?.();
@@ -49,7 +50,7 @@ describe("What's new prompt", () => {
     (dialog()!.querySelector(".whats-new-actions .ac-btn:not(.secondary)") as HTMLElement).click();
     expect(dialog()).toBeNull();
 
-    const again = createWhatsNewPrompt();
+    const again = createWhatsNewPrompt(onOpenHistory);
     again.mount(container);
     await new Promise((r) => setTimeout(r, 20));
     expect(dialog()).toBeNull();
@@ -74,15 +75,14 @@ describe("What's new prompt", () => {
     expect(dialog()).toBeNull();
   });
 
-  it("Version history opens Settings on the About tab", async () => {
+  it("Version history closes the window and opens the history", async () => {
     markVersionSeen("2.0.0");
     mockGetVersion.mockResolvedValue("2.1.0");
     prompt.mount(container);
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
     (dialog()!.querySelector(".whats-new-actions .secondary") as HTMLElement).click();
     expect(dialog()).toBeNull();
-    expect(uiStore.getState().settingsOpen).toBe(true);
-    expect(uiStore.getState().settingsTab).toBe("About");
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
   });
 
   it("closes with Escape and when the page is torn down", async () => {
@@ -94,7 +94,7 @@ describe("What's new prompt", () => {
     expect(dialog()).toBeNull();
 
     markVersionSeen("2.0.0");
-    const next = createWhatsNewPrompt();
+    const next = createWhatsNewPrompt(onOpenHistory);
     next.mount(container);
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
     next.destroy?.();

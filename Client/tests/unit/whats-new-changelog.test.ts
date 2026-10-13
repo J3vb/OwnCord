@@ -30,7 +30,7 @@ const SAMPLE = [
   "  across restarts.",
   "- See [the docs](https://example.com/docs) or [a path](docs/x.md).",
   "",
-  "## v2.0.0",
+  "## v2.0.0 — First release",
   "",
   "- First release",
 ].join("\n");
@@ -51,10 +51,15 @@ describe("parseChangelog", () => {
     expect(findVersion(versions, "9.9.9")).toBeNull();
   });
 
-  it("parses the repository's own CHANGELOG.md, current release first", () => {
+  it("parses the repository's own CHANGELOG.md, with notes for this build's version", () => {
     const md = readFileSync(resolve(import.meta.dirname, "../../../CHANGELOG.md"), "utf8");
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"),
+    ) as { version: string };
     const versions = parseChangelog(md);
     expect(versions.length).toBeGreaterThan(3);
+    // A version bump without its CHANGELOG section would never show What's new.
+    expect(findVersion(versions, pkg.version)?.version).toBe(pkg.version);
     for (const v of versions) {
       expect(v.version).toMatch(/^\d+\.\d+\.\d+/);
       expect(v.body).not.toMatch(/^## /m);

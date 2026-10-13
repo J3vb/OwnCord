@@ -17,7 +17,7 @@ export interface ChangelogVersion {
   readonly body: string;
 }
 
-const VERSION_HEADING = /^## v(\d[^\s]*)\s*$/;
+const VERSION_HEADING = /^## v(\d\S*)(?:\s.*)?$/;
 
 /** Every released section, newest first as the file lists them. The preamble
  *  and "Unreleased" are not releases, so they are left out. */
