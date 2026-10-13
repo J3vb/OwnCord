@@ -77,6 +77,10 @@ and only when it changes something a contributor or fork holder must do
 - Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
 - After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after the one that adds it, and a fresh install does not show it.
 
+**Admin panel**
+
+- A **What's new** page shows the release notes of the version the server runs, every earlier version and a link to OwnCord on GitHub. Click the version in the top bar to open it. The notes ship with the server, so nothing is downloaded.
+
 **Voice**
 
 - Clicking the voice channel you are in, or its name in the voice panel, opens the call: a tile for everyone in it, with their picture, a ring while they speak and a mute or deafen badge. It stays open with no cameras on until you leave or go back to chat.
