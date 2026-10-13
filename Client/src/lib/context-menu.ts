@@ -33,7 +33,9 @@ export interface ContextMenuOptions {
 }
 
 /** Actionable menu rows, in any menu. Disabled rows are not navigable. */
-const MENU_ITEM_SELECTOR = '[role="menuitem"]:not([aria-disabled="true"]):not([disabled])';
+const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox"]
+  .map((role) => `[role="${role}"]:not([aria-disabled="true"]):not([disabled])`)
+  .join(", ");
 
 /** The menu rows directly inside `menu`. A nested submenu holds its own; the
  *  ban/purge reveal form's confirm row is excluded while hidden (it becomes a
