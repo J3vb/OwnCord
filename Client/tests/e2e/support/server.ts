@@ -5,6 +5,9 @@ import { resolve, join } from "node:path";
 import { freePorts, freeUdpPort, startProcess, stopProcess, waitForHttp } from "./process";
 
 export const TEST_PASSWORD = "OwnCord-E2E-pass-123!";
+/** The LiveKit API key pair the test server and its SFU share. */
+export const LIVEKIT_API_KEY = "e2e-key";
+export const LIVEKIT_API_SECRET = "e2e-secret-at-least-32-characters-long";
 
 /** No database shortcuts: setup, accounts and channels use production HTTP routes. */
 export async function startTestServer(
@@ -45,7 +48,7 @@ export async function startTestServer(
     // attached to each native test so an ICE failure is diagnosable from CI.
     await writeFile(
       join(dataDir, "livekit.yaml"),
-      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n  ips:\n    includes: [127.0.0.1/32]\nlogging:\n  level: info\n  pion_level: debug\nkeys:\n  e2e-key: e2e-secret-at-least-32-characters-long\n`,
+      `port: ${livekitPort}\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: ${rtcPort}\n  udp_port: ${rtcUdpPort}\n  use_external_ip: false\n  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n  ips:\n    includes: [127.0.0.1/32]\nlogging:\n  level: info\n  pion_level: debug\nkeys:\n  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}\n`,
     );
   }
   const config = {
@@ -67,8 +70,8 @@ export async function startTestServer(
       auto_download_livekit: false,
       livekit_binary: options.livekit ? resolve(livekit!) : "",
       livekit_url: `ws://127.0.0.1:${livekitPort}`,
-      livekit_api_key: "e2e-key",
-      livekit_api_secret: "e2e-secret-at-least-32-characters-long",
+      livekit_api_key: LIVEKIT_API_KEY,
+      livekit_api_secret: LIVEKIT_API_SECRET,
     },
   };
   // JSON is valid YAML; avoids platform-specific escaping of temporary paths.

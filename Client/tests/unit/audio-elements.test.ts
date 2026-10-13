@@ -574,6 +574,25 @@ describe("AudioElements", () => {
       expect(mockPub.setSubscribed).toHaveBeenCalledWith(true);
     });
 
+    it("does not re-subscribe a voice published without end-to-end encryption on undeafen", () => {
+      const mockPub = {
+        source: "microphone",
+        setSubscribed: vi.fn(),
+        // Encryption_Type.NONE
+        trackInfo: { encryption: 0 },
+      };
+      const mockRoom = {
+        remoteParticipants: new Map([
+          ["user-1", { audioTrackPublications: new Map([["pub-1", mockPub]]) }],
+        ]),
+      } as never;
+      elements.setRoom(mockRoom);
+
+      elements.applyRemoteAudioSubscriptionState(false);
+
+      expect(mockPub.setSubscribed).not.toHaveBeenCalled();
+    });
+
     it("keeps screenshare audio subscribed when deafened (it is muted, not unsubscribed)", () => {
       // Deafen silences stream audio by muting its elements, so undeafen
       // brings it back without a resubscribe.
