@@ -202,7 +202,9 @@ jobs:
       # The doc gates the race leg runs with -count=1 because they read files
       # outside the module. Cheap (seconds) and pure drift checks.
       - name: Document gates (-count=1)
-        run: go test -count=1 ./cmd/dbinventory/ ./migrations/
+        run: |
+          go test -count=1 ./cmd/dbinventory/ ./migrations/
+          go test -count=1 -run TestBundledChangelog ./admin/
 
       # Same action, version and inputs as the required server leg's Lint step;
       # the point is the earlier report, not a second policy.
@@ -521,9 +523,12 @@ jobs:
       # leg's package set cannot silently drop the gates.
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
+      #   admin            -> CHANGELOG.md (the panel's bundled release notes)
       - name: Run document gates (-count=1)
         if: env.RUN_SERVER != 'false'
-        run: go test -count=1 ./cmd/dbinventory/ ./migrations/
+        run: |
+          go test -count=1 ./cmd/dbinventory/ ./migrations/
+          go test -count=1 -run TestBundledChangelog ./admin/
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
       # only COMPILES the otel/wazero variants; the tests behind those tags
