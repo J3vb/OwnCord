@@ -34,7 +34,7 @@ import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore, isSelfMuted } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -223,6 +223,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
   setAudioVolumeHost(apiConfig.host ?? null);
+  // Mute and deafen outlive a restart; the next join applies them.
+  restoreSavedSelfVoiceState();
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a
   // profile switch isolates the cache even before this page is destroyed.
@@ -1054,10 +1056,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
     // while the app is unfocused. The native host polls the keys (Windows and
     // X11 Linux) and the tray emits the same event; both run the same toggles
-    // as the in-app shortcuts, and like them no-op outside a voice channel.
+    // as the in-app shortcuts, in a call or not.
     unsubscribers.push(
       desktop.globalShortcuts.onShortcut((action) => {
-        if (voiceStore.getState().currentChannelId === null) return;
         if (action === "mute") voiceKeybindActions.onMuteToggle();
         else voiceKeybindActions.onDeafenToggle();
       }),

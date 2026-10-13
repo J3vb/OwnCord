@@ -71,8 +71,6 @@ function resetStores(): void {
 function mountWidget(container: HTMLElement) {
   const widget = createVoiceWidget({
     onDisconnect: vi.fn(),
-    onMuteToggle: vi.fn(),
-    onDeafenToggle: vi.fn(),
     onCameraToggle: vi.fn(),
     onScreenshareToggle: vi.fn(),
   });

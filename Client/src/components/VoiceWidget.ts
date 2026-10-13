@@ -10,7 +10,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { voiceStore, isSelfMuted, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -27,8 +27,6 @@ import { voiceText as t } from "../i18n/voice";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
-  onMuteToggle(): void;
-  onDeafenToggle(): void;
   onCameraToggle(): void;
   onScreenshareToggle(): void;
   /** Open the call's channel: the DM for a DM call, the call view for a guild
@@ -123,8 +121,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let securedBadge: HTMLSpanElement | null = null;
   let securedText: HTMLSpanElement | null = null;
   let controlsRow: HTMLDivElement | null = null;
-  let muteBtn: HTMLButtonElement | null = null;
-  let deafenBtn: HTMLButtonElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
@@ -308,8 +304,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   /** Freeze controls that need WS signaling, while keeping local hangup
    *  available: the LiveKit call may still be live when chat is disconnected.
-   *  Mute and deafen stay live: they apply locally and the server is told when
-   *  the socket returns. */
+   *  Mute and deafen live in the user panel (UserBar). */
   function updateFrozen(status: "connected" | "reconnecting" | "disconnected"): void {
     const frozen = status !== "connected";
     const reason =
@@ -319,13 +314,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : liveTitle(btn);
-    }
-    // render() tightens these again for a moderator restriction or listen-only
-    // mode; resetting here is what lets a lifted restriction re-enable them.
-    for (const btn of [muteBtn, deafenBtn]) {
-      if (btn === null) continue;
-      btn.disabled = false;
-      btn.title = "";
     }
     // Camera and share need the room, which exists only once the join has
     // connected; before that the press would bounce off (D-08).
@@ -379,53 +367,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback")),
     );
 
-    // Toggle button active states, swap icons, and update aria-pressed.
-    // The mic "active" (red/muted) state reflects the user's OWN mute, not the
-    // one a PTT release applied: PTT routes through setMuted and writes
-    // localMuted, so a PTT user would otherwise read as permanently muted
-    // between presses. An idle PTT gate gets its own (non-active) affordance.
-    const userMuted = isSelfMuted(voice);
     const serverMuted = voice.localServerMuted === true;
     const serverDeafened = voice.localServerDeafened === true;
-    // Joined listen-only (no mic permission/track): there is nothing to mute,
-    // so the control reads mic-off and visibly inert. "Grant Microphone" is
-    // the action that changes this state.
-    const listenOnly = voice.listenOnly && !serverMuted;
-    const pttGated = voice.pttGated === true && !userMuted && !listenOnly;
-    muteBtn?.classList.toggle("active-ctrl", userMuted);
-    muteBtn?.classList.toggle("ptt-gated", pttGated);
-    muteBtn?.classList.toggle("vw-listen-only", listenOnly);
-    deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
-    // A moderator-imposed mute/deafen is not ours to lift: the server refuses
-    // the unmute, so disable the control and say why instead of letting the
-    // click bounce off with an error toast.
-    if (muteBtn) {
-      swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
-      muteBtn.setAttribute("aria-pressed", String(userMuted));
-      // A PTT gate gets its own title; the ordinary mute case leaves the
-      // title to updateFrozen (which owns the freeze reason) as before.
-      if (pttGated) {
-        muteBtn.title = t("widget.control.pttGated");
-      }
-      // Only ever tighten: updateFrozen ran above and reset the button.
-      if (serverMuted) {
-        muteBtn.disabled = true;
-        muteBtn.title = t("widget.mutedByModerator");
-      } else if (listenOnly) {
-        muteBtn.disabled = true;
-        muteBtn.title = t("widget.control.listenOnly");
-      }
-    }
-    if (deafenBtn) {
-      swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
-      deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened));
-      if (serverDeafened) {
-        deafenBtn.disabled = true;
-        deafenBtn.title = t("widget.deafenedByModerator");
-      }
-    }
     if (cameraBtn) {
       swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
       cameraBtn.setAttribute("aria-pressed", String(voice.localCamera));
@@ -605,12 +550,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // Controls row
     const controls = createElement("div", { class: "vw-controls" });
     controlsRow = controls;
-    muteBtn = createControlButton(t("widget.control.mute"), "mic", options.onMuteToggle);
-    deafenBtn = createControlButton(
-      t("widget.control.deafen"),
-      "headphones",
-      options.onDeafenToggle,
-    );
     cameraBtn = createControlButton(t("widget.control.camera"), "camera", options.onCameraToggle);
     shareBtn = createControlButton(
       t("widget.control.screenshare"),
@@ -624,7 +563,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onDisconnect,
       "disconnect",
     );
-    appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
+    appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
 
     // "Grant Microphone" button for listen-only mode
     grantMicBtn = createElement(
@@ -695,28 +634,22 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       voiceStore.subscribeSelector(
         (s) => ({
           channelId: s.currentChannelId,
-          muted: s.localMuted,
-          deafened: s.localDeafened,
           serverMuted: s.localServerMuted,
           serverDeafened: s.localServerDeafened,
           camera: s.localCamera,
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
-          pttGated: s.pttGated === true,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
         }),
         () => render(),
         (a, b) =>
           a.channelId === b.channelId &&
-          a.muted === b.muted &&
-          a.deafened === b.deafened &&
           a.serverMuted === b.serverMuted &&
           a.serverDeafened === b.serverDeafened &&
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
-          a.pttGated === b.pttGated &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
       ),
@@ -762,8 +695,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     securedBadge = null;
     securedText = null;
     controlsRow = null;
-    muteBtn = null;
-    deafenBtn = null;
     cameraBtn = null;
     shareBtn = null;
     disconnectBtn = null;

@@ -591,15 +591,23 @@ test.describe("B9-20 settings, account and voice text", () => {
       await expectWhole(el);
     }
 
-    for (const name of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
+    for (const name of ["Camera", "Screenshare", "Disconnect"]) {
       await expect(
         widget.getByRole("button", { name: new RegExp(`^⟦${name} .+⟧$`) }),
       ).toBeVisible();
     }
     expect(await findUnnamedControls(widget)).toEqual([]);
 
+    // Mute and deafen live in the user panel (WP 1D-1).
+    const userBar = page.locator(".user-bar");
+    for (const name of ["Mute", "Deafen"]) {
+      await expect(
+        userBar.getByRole("button", { name: new RegExp(`^⟦${name} .+⟧$`) }),
+      ).toBeVisible();
+    }
+
     // Mute toggles from the keyboard under its expanded name.
-    const mute = widget.getByRole("button", { name: expanded("Mute") });
+    const mute = userBar.getByRole("button", { name: expanded("Mute") });
     const pressed = await mute.getAttribute("aria-pressed");
     await mute.focus();
     await page.keyboard.press("Space");

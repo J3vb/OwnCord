@@ -3,8 +3,10 @@
  *
  * Quick Switcher (Ctrl+K) is owned by its own manager; everything else the
  * Keybinds tab lists lives here so the panel and the behaviour can't drift.
- * Voice actions no-op outside a voice channel rather than firing signalling
- * messages into a session that doesn't exist.
+ * The camera shortcut no-ops outside a voice channel rather than firing
+ * signalling messages into a session that doesn't exist. Mute and deafen work
+ * anywhere, like the user panel's buttons: outside a call they only change the
+ * saved state the next join starts with.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -18,9 +20,9 @@ const log = createLogger("global-keybinds");
 export interface GlobalKeybindHandlers {
   /** Ctrl+F — open the message search overlay. */
   readonly onSearch: () => void;
-  /** The global mute binding (default Ctrl+Shift+M), or the Ctrl+M alias — toggle mute (voice only). */
+  /** The global mute binding (default Ctrl+Shift+M), or the Ctrl+M alias — toggle mute. */
   readonly onToggleMute: () => void;
-  /** The global deafen binding (default Ctrl+Shift+D), or the Ctrl+D alias — toggle deafen (voice only). */
+  /** The global deafen binding (default Ctrl+Shift+D), or the Ctrl+D alias — toggle deafen. */
   readonly onToggleDeafen: () => void;
   /** Ctrl+Shift+V — toggle the camera (voice only). */
   readonly onToggleCamera: () => void;
@@ -83,7 +85,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       const vk = keyEventToVk(e);
       const keys = (handlers.voiceShortcutKeys ?? loadGlobalShortcutVks)();
       const action = vk === keys.mute ? "mute" : vk === keys.deafen ? "deafen" : null;
-      if (action === null || !inVoice()) return;
+      if (action === null) return;
       if (handlers.isGlobalPollerActive?.() === true) {
         // The poller fires on exactly Ctrl+Shift; any other combo is not ours.
         if (e.ctrlKey && !e.metaKey) e.preventDefault();
@@ -104,12 +106,13 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
         run("search", handlers.onSearch);
         break;
       // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
+      // A text field keeps its own Ctrl+D (forward-delete on macOS).
       // remove after beta.5
       case "m":
-        if (inVoice()) run("toggle-mute", handlers.onToggleMute);
+        if (!isTypingTarget(e.target)) run("toggle-mute", handlers.onToggleMute);
         break;
       case "d":
-        if (inVoice()) run("toggle-deafen", handlers.onToggleDeafen);
+        if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
         break;
       case "u":
         run("upload-file", handlers.onUploadFile);
