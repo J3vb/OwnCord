@@ -25,6 +25,7 @@ import { loadPref, savePref } from "@lib/preferences";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import { openPopout, type Popout } from "../features/voice/popout";
 import type { MiniPlayer } from "../features/voice/miniPlayer";
@@ -99,6 +100,14 @@ export interface VideoGridCallbacks {
   /** Focus a control on the main page, for focus that was in a mini-player
    *  that has just closed. */
   readonly focusFallback?: () => void;
+  /** The person's rows in a remote tile's menu; each is left out without it. */
+  readonly tileMenu?: {
+    readonly onProfile?: (userId: number, x: number, y: number) => void;
+    readonly onMessage?: (userId: number) => void;
+    /** The voice roster's moderation section for this person, read when the
+     *  menu opens: the options, why it is unavailable, or undefined to hide it. */
+    readonly moderation?: (userId: number) => VoiceModMenuOptions | string | undefined;
+  };
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -1019,17 +1028,20 @@ export function createVideoGrid(): VideoGridComponent {
         "data-view-toggle": key,
       });
       btn.appendChild(createIcon(icon, 18));
-      btn.addEventListener("click", () => {
-        viewOn[key] = !viewOn[key];
-        savePref(VIEW_PREFS[key], viewOn[key]);
-        relayout();
-        syncViewBar();
-        syncStatsPolling();
-        syncViews();
-      });
+      btn.addEventListener("click", () => setView(key, !viewOn[key]));
       bar.appendChild(btn);
     }
     return bar;
+  }
+
+  /** Turn a view toggle on or off, and remember it. */
+  function setView(key: ViewToggle, on: boolean): void {
+    viewOn[key] = on;
+    savePref(VIEW_PREFS[key], on);
+    relayout();
+    syncViewBar();
+    syncStatsPolling();
+    syncViews();
   }
 
   /** Each toggle's pressed state; the strip toggle only in focus mode. */
@@ -1649,21 +1661,16 @@ export function createVideoGrid(): VideoGridComponent {
         ),
         back,
       );
-      // Loaded on first use: the menu opens only on a right-click or
-      // Shift+F10, so it stays out of the eager bundle.
+      resizeObserver?.observe(cell);
+    }
+    // Loaded on first use: the menu opens only on a right-click or Shift+F10,
+    // so it stays out of the eager bundle. Your own screen share has none.
+    if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
       const openMenu = (x: number, y: number): void =>
-        void import("./video-grid/tile-menu").then(({ showTileMenu }) => {
+        void import("./video-grid/tile-menu").then((menus) => {
           if (entry.listeners.signal.aborted || root?.contains(cell) !== true) return;
-          showTileMenu({
-            x,
-            y,
-            name: entry.name,
-            config,
-            signal: entry.listeners.signal,
-            onVolumeChange: (isScreenshare, level, muted) =>
-              applyVolume(config.audioUserId, isScreenshare, level, muted),
-            onStopWatching: () => setWatching(userId, false),
-          });
+          if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
+          else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));
         });
       cell.addEventListener(
         "contextmenu",
@@ -1674,7 +1681,6 @@ export function createVideoGrid(): VideoGridComponent {
         { signal: entry.listeners.signal },
       );
       openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
-      resizeObserver?.observe(cell);
     }
 
     // Your own screen share: say what is going out instead of showing a
@@ -1695,6 +1701,69 @@ export function createVideoGrid(): VideoGridComponent {
     syncTileNav();
     relayout();
     syncViews();
+  }
+
+  /** A remote tile's menu, with the tile's view state as it is now. */
+  function tileMenuOptions(
+    x: number,
+    y: number,
+    tileId: number,
+    entry: CellEntry,
+    config: TileConfig,
+  ) {
+    const personId = config.audioUserId;
+    const actions = callbacks.tileMenu;
+    // Profile and Message leave the tile, which a full-screen tile would hide.
+    const leaving = (run: () => void) => (): void => {
+      if (isFullscreen(tileId)) leaveFullscreen();
+      run();
+    };
+    const onProfile = actions?.onProfile;
+    const onMessage = actions?.onMessage;
+    const moderation = actions?.moderation?.(personId);
+    return {
+      x,
+      y,
+      name: entry.name,
+      config,
+      signal: entry.listeners.signal,
+      onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
+        applyVolume(personId, isScreenshare, level, muted),
+      onStopWatching: () => setWatching(tileId, false),
+      view: {
+        focused: focusedTileId === tileId,
+        fullscreen: isFullscreen(tileId),
+        poppedOut: entry.popout !== undefined,
+        onFocus: () => setFocusedTile(focusedTileId === tileId ? null : tileId),
+        onFullscreen: () => toggleFullscreen(tileId),
+        onPopout: () => togglePopout(tileId),
+      },
+      person: {
+        ...(onProfile === undefined ? {} : { onProfile: leaving(() => onProfile(personId, x, y)) }),
+        ...(onMessage === undefined ? {} : { onMessage: leaving(() => onMessage(personId)) }),
+        ...(moderation === undefined ? {} : { moderation }),
+      },
+    };
+  }
+
+  /** Your own camera tile's menu: Hide my camera where the call view's toggle
+   *  applies, Turn off camera where the host offers the camera control. */
+  function selfMenuOptions(x: number, y: number, tileId: number, entry: CellEntry) {
+    const onCamera = callbacks.callControls?.onCameraToggle;
+    // A hidden full-screen tile would leave a blank screen; focus goes to
+    // the toggle that brings the tile back.
+    const hide = (): void => {
+      if (isFullscreen(tileId)) leaveFullscreen();
+      setView("selfCamera", false);
+      viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']")?.focus();
+    };
+    return {
+      x,
+      y,
+      signal: entry.listeners.signal,
+      ...(callView ? { onHide: hide } : {}),
+      ...(onCamera === undefined ? {} : { onCameraOff: onCamera, cameraLocked: mediaLockReason() }),
+    };
   }
 
   /** The tile's label, and the person's name on its controls and menu. */

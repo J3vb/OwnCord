@@ -199,7 +199,7 @@ function renderTextChannelItem(
  *  menu opens, so a role or override change since the last render counts. Move
  *  targets are the other voice channels; the server re-checks rank, timeouts
  *  and that the TARGET may connect to the one picked. */
-function buildVoiceModOptions(
+export function buildVoiceModOptions(
   channelId: number,
   user: VoiceUser,
   cb?: VoiceModerationCallbacks,

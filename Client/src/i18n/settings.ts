@@ -18,6 +18,7 @@ export const settingsText = defineCatalog("settings", {
   "tabs.advanced": "Advanced",
   "tabs.logs": "Diagnostics & logs",
   "tabs.about": "About",
+  "tabs.aboutUpdate": "Update available",
 
   "common.unknown": "Unknown",
   "common.save": "Save",

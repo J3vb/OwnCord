@@ -144,8 +144,14 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
-`components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
-volumes apart and offers Mute stream and **Stop watching**. Cameras play on
+`components/video-grid/tile-menu.ts`, loaded on first use) is the person's
+menu: Profile, Message, the two volumes kept apart, Mute stream, the local
+Mute, Focus (Back to grid when focused), Full screen, Pop out, **Stop
+watching**, and the voice roster's moderation section where the channel's
+`can_moderate_voice` allows it (none in a DM call). Profile and Message leave
+full screen first. Your own camera tile's menu has Hide my camera (the call
+view's Show my camera toggle) and Turn off camera; your own screen share has
+no menu. Cameras play on
 their own (**Automatically play cameras** in Voice & Audio settings, the
 `autoPlayCameras` preference, default on): a remote camera is subscribed as it
 is published. A screen share is opt-in, Discord-style: it arrives as a tile

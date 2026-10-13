@@ -9,7 +9,11 @@ import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { createDisclosure } from "../../features/settings/status";
-import { buildUpdateCheckRow } from "../../features/updates/UpdateCheckRow";
+import { buildUpdateCheckRow, installInProgressText } from "../../features/updates/UpdateCheckRow";
+import { subscribeAvailableUpdate } from "../../features/updates/availableUpdate";
+import type { AvailableUpdate } from "../../features/updates/availableUpdate";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import type { UpdateInstallState } from "@lib/updater";
 import {
   REPO_URL,
   findVersion,
@@ -55,6 +59,99 @@ function buildHistory(versions: readonly ChangelogVersion[]): HTMLDivElement {
   return list;
 }
 
+/**
+ * The offer the update check found, with its own notes: what installing it
+ * brings, next to what this version already has. Hidden while there is none.
+ */
+function buildUpdateCard(signal: AbortSignal, installed: Promise<string | null>): HTMLDivElement {
+  const card = createElement("div", { class: "about-update", "data-testid": "about-update" });
+  card.hidden = true;
+  let offer: AvailableUpdate | null = null;
+  let installState: UpdateInstallState = { status: "idle" };
+  let current: string | null = null;
+
+  const title = createElement("div", { class: "about-update-title" });
+  const desc = createElement("div", { class: "setting-desc" });
+  const text = createElement("div", { class: "about-update-text" });
+  appendChildren(text, title, desc);
+  const installBtn = createElement(
+    "button",
+    { class: "ac-btn about-update-install", type: "button" },
+    t("about.updateNow"),
+  );
+  const head = createElement("div", { class: "about-update-head" });
+  const tile = createElement("div", { class: "about-update-icon" });
+  tile.appendChild(createIcon("download", 22));
+  appendChildren(head, tile, text, installBtn);
+  const notesTitle = createElement("div", { class: "about-update-eyebrow" });
+  const notes = createElement("div", {
+    class: "about-update-notes",
+    tabindex: "0",
+    role: "region",
+  });
+  card.append(head, notes);
+
+  const renderDesc = (): void => {
+    const busy = installInProgressText(installState);
+    installBtn.disabled = busy !== null;
+    if (busy !== null) desc.textContent = busy;
+    else if (current !== null) desc.textContent = t("about.updateDesc", { current });
+    else desc.textContent = t("about.updateDescNoVersion");
+  };
+
+  const render = (next: AvailableUpdate | null): void => {
+    offer = next;
+    card.hidden = next === null;
+    if (next === null) return;
+    title.textContent = t("about.updateTitle", { version: next.version });
+    notesTitle.textContent = t("about.updateNotesFor", { version: next.version });
+    notes.setAttribute("aria-label", t("about.updateNotesLabel", { version: next.version }));
+    clearChildren(notes);
+    notes.appendChild(notesTitle);
+    notes.appendChild(
+      next.body.trim() !== ""
+        ? renderChangelogBody(next.body)
+        : externalLink(
+            releaseUrl(next.version),
+            t("about.updateNotesMissing"),
+            "about-notes-missing",
+          ),
+    );
+    renderDesc();
+  };
+
+  installBtn.addEventListener(
+    "click",
+    () => {
+      if (offer === null) return;
+      void downloadAndInstallUpdate(offer.serverUrl).catch((err: unknown) => {
+        log.error("Update install failed", { error: String(err) });
+      });
+    },
+    { signal },
+  );
+
+  const unsubOffer = subscribeAvailableUpdate(render);
+  const unsubInstall = subscribeToUpdateInstall((state) => {
+    installState = state;
+    renderDesc();
+  });
+  signal.addEventListener(
+    "abort",
+    () => {
+      unsubOffer();
+      unsubInstall();
+    },
+    { once: true },
+  );
+  void installed.then((version) => {
+    if (version === null || signal.aborted) return;
+    current = version;
+    renderDesc();
+  });
+  return card;
+}
+
 export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active about-tab" });
 
@@ -72,6 +169,8 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(header);
 
+  const versionRead = readAppVersion();
+  section.appendChild(buildUpdateCard(signal, versionRead));
   section.appendChild(buildUpdateCheckRow(signal));
 
   const notesTitle = createElement("h3", { class: "setting-group-title" });
@@ -87,7 +186,6 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   const history = createElement("div", {});
   appendChildren(section, notesTitle, notes, historyTitle, history);
 
-  const versionRead = readAppVersion();
   void versionRead.then((version) => {
     if (version !== null && !signal.aborted) name.textContent = t("about.appName", { version });
   });

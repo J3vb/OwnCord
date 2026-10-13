@@ -135,6 +135,7 @@ export const shards = {
     "src/lib/toast.ts",
     "src/features/updates/updateChecker.ts",
     "src/features/updates/UpdateCheckRow.ts",
+    "src/features/updates/availableUpdate.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/appVersion.ts",
     "src/features/whats-new/changelog.ts",

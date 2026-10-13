@@ -95,6 +95,7 @@ import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
+import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -1440,6 +1441,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
+    const tileMenu = createTileMenuActions(ws, sidebar.messageUser, () =>
+      videoModeCtrl?.showChat(),
+    );
+    unsubscribers.push(tileMenu.destroy);
     // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
       onStopSharing: () => {
@@ -1481,6 +1486,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl?.showVideoGrid();
         videoModeCtrl?.setFocus(tileId);
       },
+      tileMenu,
     });
 
     let prevVideoSignature = "";

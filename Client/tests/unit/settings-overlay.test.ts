@@ -7,6 +7,7 @@ import * as attachments from "@components/message-list/attachments";
 import * as formatting from "@lib/formatting";
 import * as media from "@components/message-list/media";
 import * as channelMutes from "@lib/channel-mutes";
+import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
@@ -123,6 +124,18 @@ describe("SettingsOverlay", () => {
 
   afterEach(() => {
     container.remove();
+  });
+
+  it("marks the About tab while a newer version is on offer", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    const about = container.querySelector("#settings-tab-about")!;
+    expect(about.querySelector(".settings-nav-dot")).toBeNull();
+    setAvailableUpdate({ version: "9.9.9", body: "", serverUrl: "https://s.example" });
+    expect(about.querySelector(".settings-nav-dot")?.textContent).toBe("Update available");
+    setAvailableUpdate(null);
+    expect(about.querySelector(".settings-nav-dot")).toBeNull();
+    overlay.destroy?.();
   });
 
   it("mounts with all tabs", () => {

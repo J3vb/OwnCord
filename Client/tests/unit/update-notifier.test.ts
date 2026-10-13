@@ -22,7 +22,13 @@ vi.mock("@lib/updater", () => ({
   subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
 }));
 
-import { createUpdateNotifier, formatDownloadProgress } from "../../src/components/UpdateNotifier";
+import {
+  createUpdateNotifier,
+  formatDownloadProgress,
+  formatDownloadSize,
+} from "../../src/components/UpdateNotifier";
+import { getAvailableUpdate } from "../../src/features/updates/availableUpdate";
+import { uiStore } from "../../src/stores/ui.store";
 import type { UpdateInstallState } from "../../src/lib/updater";
 
 let onInstallState: (state: UpdateInstallState) => void;
@@ -55,6 +61,18 @@ describe("formatDownloadProgress", () => {
     expect(formatDownloadProgress({ received: 5 * 1024 * 1024, total: null })).toBe(
       "Downloading update… 5.0 MB",
     );
+  });
+});
+
+describe("formatDownloadSize", () => {
+  it("shows received of total in MB", () => {
+    expect(formatDownloadSize({ received: 38.4 * 1024 * 1024, total: 61.9 * 1024 * 1024 })).toBe(
+      "38.4 of 61.9 MB",
+    );
+  });
+
+  it("has nothing to show while the total is unknown", () => {
+    expect(formatDownloadSize({ received: 5, total: null })).toBeNull();
   });
 });
 
@@ -181,7 +199,50 @@ describe("createUpdateNotifier download progress", () => {
   it("announces an available update when the banner first appears", async () => {
     const notifier = await mountWithAvailableUpdate();
     const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
-    expect(live.textContent).toBe("Update v1.2.0 available");
+    expect(live.textContent).toBe("OwnCord 1.2.0 is ready to install");
+    notifier.destroy?.();
+  });
+
+  it("shares the offer, notes included, and opens About from See what's new", async () => {
+    mockCheckForUpdate.mockResolvedValue({ available: true, version: "1.2.0", body: "- Fixes" });
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getAvailableUpdate()).toEqual({
+      version: "1.2.0",
+      body: "- Fixes",
+      serverUrl: "https://s.example",
+    });
+
+    const link = host.querySelector<HTMLButtonElement>(".update-banner-link")!;
+    expect(link.textContent).toBe("See what's new");
+    link.click();
+    expect(uiStore.getState().settingsOpen).toBe(true);
+    expect(uiStore.getState().settingsTab).toBe("About");
+
+    // Dismissing the banner keeps the offer for the About tab.
+    (host.querySelector(".update-banner-later") as HTMLButtonElement).click();
+    expect(getAvailableUpdate()?.version).toBe("1.2.0");
+
+    // A page that goes away forgets it: the next server may offer another.
+    notifier.destroy?.();
+    expect(getAvailableUpdate()).toBeNull();
+  });
+
+  it("draws a progress bar with the size while the download size is known", async () => {
+    mockDownloadAndInstall.mockImplementation(() => new Promise<void>(() => {}));
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "downloading", progress: null });
+    expect(host.querySelector(".update-banner-progress")).toBeNull();
+
+    onInstallState({
+      status: "downloading",
+      progress: { received: 25 * 1024 * 1024, total: 100 * 1024 * 1024 },
+    });
+    const fill = host.querySelector<HTMLElement>(".update-banner-progress-fill")!;
+    expect(fill.style.width).toBe("25%");
+    expect(host.querySelector(".update-banner-size")?.textContent).toBe("25.0 of 100.0 MB");
+    expect(host.querySelector(".update-banner-progress")?.getAttribute("aria-hidden")).toBe("true");
     notifier.destroy?.();
   });
 

@@ -83,6 +83,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → About has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
 - Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
 - After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after the one that adds it, and a fresh install does not show it.
+- The update banner is quieter and says "OwnCord X is ready to install", with **See what's new**, **Update now** and **Later**. While it downloads it shows a progress bar. **See what's new** opens Settings → About, where the new version's notes are shown before you install, and the About tab has a dot while an update is waiting.
 
 **Admin panel**
 
@@ -99,6 +100,7 @@ and only when it changes something a contributor or fork holder must do
 - Right-clicking someone in a voice channel offers **Mute**, which silences them for you only and keeps their volume for when you unmute. Their row shows a speaker-off icon while muted, and the mute button on their video tile is the same setting.
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 - People who can mute and move others in a voice channel (the Mute Members permission, or Administrator) can now join it when it is full. Everyone else still gets "voice channel is full".
+- Right-clicking someone's video tile now gives the full menu: Profile, Message, their volume, **Mute** (for you only), Focus, Full screen, Pop out, Stop watching and, if you can moderate voice, Server Mute, Server Deafen, Move to and Disconnect. Your own camera tile has **Hide my camera** and **Turn off camera**.
 
 ### Fixed
 
