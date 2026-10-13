@@ -3,12 +3,14 @@ import { cascadedDeclaration, varToken } from "../helpers/app-css";
 
 // Mock livekitSession. rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
-const { mockRePinPeerIdentity } = vi.hoisted(() => ({
+const { mockRePinPeerIdentity, mockGetUserLocalMute } = vi.hoisted(() => ({
   mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
+  mockGetUserLocalMute: vi.fn((_userId: number) => false),
 }));
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
+  getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
   rePinPeerIdentity: mockRePinPeerIdentity,
 }));
 
@@ -2098,6 +2100,29 @@ describe("ChannelSidebar", () => {
     const icon = container.querySelector(".vu-muted.vu-server-muted") as HTMLElement;
     expect(icon).not.toBeNull();
     expect(icon.title).toBe("Muted by a moderator");
+  });
+
+  it("shows a locally muted participant's icon and redraws on a local Mute change (WP 1D-5)", () => {
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    setChannels(testChannels);
+    addVoiceUser(3, 82, "loud");
+    sidebar.mount(container);
+    expect(container.querySelector(".vu-local-muted")).toBeNull();
+
+    mockGetUserLocalMute.mockImplementation((id) => id === 82);
+    try {
+      window.dispatchEvent(
+        new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 82 } }),
+      );
+      const icon = container.querySelector(
+        '.voice-user-item[data-voice-uid="82"] .vu-local-muted',
+      ) as HTMLElement;
+      expect(icon).not.toBeNull();
+      expect(icon.title).toBe("Muted for you");
+    } finally {
+      mockGetUserLocalMute.mockImplementation(() => false);
+    }
   });
 
   it("colours a self-mute grey and a moderator's mute red, with a steady speaking ring", () => {

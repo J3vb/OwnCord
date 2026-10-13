@@ -167,7 +167,7 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     return {
       identity: p.identity,
       userId,
-      volume: p.getVolume(),
+      volume: audioElements.getPlayingVolume(p),
       effectiveVolume: audioElements.getEffectiveVolume(userId),
       tracks: [...p.trackPublications.values()].map((pub) => ({
         sid: pub.trackSid,

@@ -21,6 +21,7 @@ vi.mock("@lib/logger", () => ({
 }));
 
 vi.mock("livekit-client", () => ({
+  RoomEvent: { ActiveDeviceChanged: "activeDeviceChanged" },
   Track: {
     Source: {
       Microphone: "microphone",
@@ -105,12 +106,12 @@ describe("AudioElements", () => {
     });
   });
 
-  describe("volume ceiling of 100%", () => {
+  describe("volume ceiling of 200%", () => {
     afterEach(() => {
       mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     });
 
-    it("applies a saved 161% per-user volume as 1.0 so the join does not throw", () => {
+    it("applies a saved 161% per-user volume as 1.0 without a gain node so the join does not throw", () => {
       mockLoadPref.mockImplementation((key: string, def: unknown) =>
         key === "userVolume_42" ? 161 : def,
       );
@@ -131,14 +132,28 @@ describe("AudioElements", () => {
         ),
       ).not.toThrow();
       expect(participant.setVolume).toHaveBeenCalledWith(1);
-      expect(elements.getUserVolume(42)).toBe(100);
+      expect(elements.getUserVolume(42)).toBe(161);
     });
 
-    it("clamps a saved output volume above 100% when read", () => {
+    it("loads a saved per-user volume above 200% as 200%", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 250 : def,
+      );
+      expect(elements.getUserVolume(42)).toBe(200);
+    });
+
+    it("reads a saved output volume of 150% as a 1.5 multiplier", () => {
       mockLoadPref.mockImplementation((key: string, def: unknown) =>
         key === "outputVolume" ? 150 : def,
       );
-      expect(new AudioElements().getEffectiveVolume(42)).toBe(1);
+      expect(new AudioElements().getEffectiveVolume(42)).toBe(1.5);
+    });
+
+    it("clamps a saved output volume above 200% when read", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "outputVolume" ? 300 : def,
+      );
+      expect(new AudioElements().getEffectiveVolume(42)).toBe(2);
     });
   });
 
@@ -224,12 +239,12 @@ describe("AudioElements", () => {
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
-    it("clamps to 0-100 range", () => {
+    it("clamps to 0-200 range", () => {
       elements.setUserVolume(42, -10);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 0);
 
       elements.setUserVolume(42, 250);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 100);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 200);
     });
 
     it("applies volume to matching remote participant", () => {
@@ -408,12 +423,12 @@ describe("AudioElements", () => {
       expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 80);
     });
 
-    it("clamps to 0-100 range", () => {
+    it("clamps to 0-200 range", () => {
       elements.setOutputVolume(-10);
       expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 0);
 
       elements.setOutputVolume(250);
-      expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 100);
+      expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 200);
     });
 
     it("updates screenshare audio element volumes", () => {
@@ -956,6 +971,454 @@ describe("AudioElements", () => {
       elements.muteScreenshareAudio(42, true);
       elements.cleanupAllAudioElementsFull();
       expect(elements.getScreenshareAudioMuted(42)).toBe(false);
+    });
+  });
+
+  describe("gain node above 100% (WP 1D-5)", () => {
+    class FakeGain {
+      gain = { value: 1 };
+      connect = vi.fn();
+      disconnect = vi.fn();
+    }
+    class FakeSource {
+      connect = vi.fn();
+      disconnect = vi.fn();
+    }
+    class FakeAudioContext {
+      static instances: FakeAudioContext[] = [];
+      static initialState = "running";
+      state = FakeAudioContext.initialState;
+      destination = {};
+      gains: FakeGain[] = [];
+      sources: FakeSource[] = [];
+      setSinkId = vi.fn(async () => undefined);
+      resume = vi.fn(async () => undefined);
+      private stateListeners: Array<() => void> = [];
+      addEventListener = vi.fn((_type: string, fn: () => void) => this.stateListeners.push(fn));
+      setState(state: string): void {
+        this.state = state;
+        for (const fn of this.stateListeners) fn();
+      }
+      close = vi.fn(async () => {
+        this.state = "closed";
+      });
+      constructor() {
+        FakeAudioContext.instances.push(this);
+      }
+      createMediaStreamSource(): FakeSource {
+        const src = new FakeSource();
+        this.sources.push(src);
+        return src;
+      }
+      createGain(): FakeGain {
+        const g = new FakeGain();
+        this.gains.push(g);
+        return g;
+      }
+    }
+
+    function makeRoom(
+      participants: Array<{ identity: string; setVolume: ReturnType<typeof vi.fn> }>,
+    ) {
+      const listeners = new Map<string, (...args: unknown[]) => void>();
+      return {
+        remoteParticipants: new Map(participants.map((p) => [p.identity, p])),
+        on: vi.fn((event: string, fn: (...args: unknown[]) => void) => listeners.set(event, fn)),
+        off: vi.fn(),
+        emit: (event: string, ...args: unknown[]) => listeners.get(event)?.(...args),
+      };
+    }
+
+    function webParticipant(identity: string) {
+      return {
+        identity,
+        setVolume: vi.fn((v: number) => {
+          if (v > 1) throw new DOMException("volume out of range", "IndexSizeError");
+        }),
+      };
+    }
+
+    beforeEach(() => {
+      FakeAudioContext.instances = [];
+      FakeAudioContext.initialState = "running";
+      vi.stubGlobal("AudioContext", FakeAudioContext);
+      vi.stubGlobal(
+        "MediaStream",
+        class {
+          constructor(public tracks: unknown[]) {}
+        },
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+    });
+
+    function subscribe(participant: { identity: string }, sid = "mic-1") {
+      const { track, audioEl } = createMockTrack("audio", sid);
+      (track as any).mediaStreamTrack = { id: sid };
+      elements.handleTrackSubscribedAudio(
+        track as any,
+        { source: "microphone" } as any,
+        participant as any,
+      );
+      return { track, audioEl };
+    }
+
+    it("at or below 100% the element plays the voice and no context opens", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+
+      elements.setUserVolume(42, 80);
+
+      expect(FakeAudioContext.instances).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(0.8);
+      expect(audioEl.muted).toBe(false);
+    });
+
+    it("user 150% plays through a gain node at 1.5 with the element muted", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      participant.setVolume.mockClear();
+
+      elements.setUserVolume(42, 150);
+
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(true);
+      expect(participant.setVolume).not.toHaveBeenCalled();
+    });
+
+    it("back at 100% the track returns to its element", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      elements.setUserVolume(42, 150);
+      const gain = FakeAudioContext.instances[0]!.gains[0]!;
+
+      elements.setUserVolume(42, 100);
+
+      expect(gain.disconnect).toHaveBeenCalled();
+      expect(audioEl.muted).toBe(false);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+    });
+
+    it("a saved boost routes a newly subscribed track through its gain node", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+
+      expect(FakeAudioContext.instances[0]!.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(true);
+    });
+
+    it("diagnostics report the gain node's level, not the muted element's", () => {
+      const participant = { ...webParticipant("user-42"), getVolume: vi.fn(() => 1) };
+      elements.setRoom(makeRoom([participant]) as any);
+      expect(elements.getPlayingVolume(participant as any)).toBe(1);
+      subscribe(participant);
+      elements.setUserVolume(42, 150);
+      expect(elements.getPlayingVolume(participant as any)).toBe(1.5);
+    });
+
+    it("keeps a graph-routed element silent after Room.startAudio() unmutes it", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      elements.setUserVolume(42, 150);
+
+      // What livekit's startAudio does to every attached element without webAudioMix.
+      audioEl.muted = false;
+
+      expect(audioEl.volume).toBe(0);
+    });
+
+    it("moves a boosted track onto its gain node once a suspended context starts running", () => {
+      FakeAudioContext.initialState = "suspended";
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+
+      ctx.setState("running");
+
+      expect(ctx.gains).toHaveLength(1);
+      expect(ctx.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(true);
+    });
+
+    it("hands tracks back to their elements when a running context suspends", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      elements.setUserVolume(42, 150);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(audioEl.muted).toBe(true);
+
+      ctx.setState("suspended");
+
+      expect(ctx.gains[0]!.disconnect).toHaveBeenCalled();
+      expect(audioEl.muted).toBe(false);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+    });
+
+    it("a running context leaves a user at 100% on their element while another is boosted", () => {
+      FakeAudioContext.initialState = "suspended";
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+      const boosted = webParticipant("user-42");
+      const plain = webParticipant("user-7");
+      elements.setRoom(makeRoom([boosted, plain]) as any);
+      subscribe(boosted, "mic-42");
+      const { audioEl } = subscribe(plain, "mic-7");
+      const ctx = FakeAudioContext.instances[0]!;
+
+      ctx.setState("running");
+
+      expect(ctx.gains).toHaveLength(1);
+      expect(ctx.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(false);
+      expect(plain.setVolume).toHaveBeenLastCalledWith(1);
+    });
+
+    it("a context opened after a device fallback plays on the room's active output", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "unplugged-headset";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      const participant = webParticipant("user-42");
+      const room = { ...makeRoom([participant]), getActiveDevice: vi.fn(() => "default") };
+      elements.setRoom(room as any);
+      subscribe(participant);
+
+      expect(FakeAudioContext.instances[0]!.setSinkId).toHaveBeenCalledWith("");
+    });
+
+    it("keeps boosted voice on its element while the context cannot reach the chosen output", async () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      vi.stubGlobal(
+        "AudioContext",
+        class extends FakeAudioContext {
+          override setSinkId = vi.fn(async () => {
+            throw new Error("no such device");
+          });
+        },
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+
+      // The switch is still pending: the element plays, at most 100%.
+      expect(ctx.gains).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+      expect(audioEl.muted).toBe(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(ctx.gains).toHaveLength(0);
+    });
+
+    it("moves boosted voice onto its gain node once the chosen output is set", async () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains).toHaveLength(0);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(ctx.gains).toHaveLength(1);
+      expect(ctx.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(true);
+    });
+
+    it("never boosts on a context that cannot change output while another one is chosen", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      vi.stubGlobal(
+        "AudioContext",
+        class extends FakeAudioContext {
+          override setSinkId = undefined as unknown as FakeAudioContext["setSinkId"];
+        },
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      subscribe(participant);
+
+      expect(FakeAudioContext.instances[0]!.gains).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+    });
+
+    it("caps user 200% × output 200% at a gain of 2", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      subscribe(participant);
+
+      elements.setUserVolume(42, 200);
+      elements.setOutputVolume(200);
+
+      expect(FakeAudioContext.instances[0]!.gains[0]!.gain.value).toBe(2);
+    });
+
+    it("never calls a web participant's setVolume above 1 when the context is not running", () => {
+      FakeAudioContext.initialState = "suspended";
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+
+      const { audioEl } = subscribe(participant);
+
+      expect(participant.setVolume).toHaveBeenCalledWith(1);
+      expect(audioEl.muted).toBe(false);
+    });
+
+    it("gives the native mixer an unclamped gain", () => {
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+      const room = { ...makeRoom([participant]), nativePlayout: true };
+      elements.setRoom(room as any);
+      subscribe(participant);
+
+      elements.setUserVolume(42, 150);
+
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1.5);
+      expect(FakeAudioContext.instances).toHaveLength(0);
+    });
+
+    it("Mute silences the voice, keeps the volume, and unmute restores it", () => {
+      const store = new Map<string, unknown>();
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        store.has(key) ? store.get(key) : def,
+      );
+      mockSavePref.mockImplementation((key: string, val: unknown) => store.set(key, val));
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      elements.setUserVolume(42, 150);
+      const boosted = FakeAudioContext.instances[0]!.gains[0]!;
+
+      elements.setUserLocalMute(42, true);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(0);
+      expect(boosted.disconnect).toHaveBeenCalled();
+      expect(audioEl.muted).toBe(false);
+      expect(elements.getUserLocalMute(42)).toBe(true);
+      expect(elements.getUserVolume(42)).toBe(150);
+
+      elements.setUserLocalMute(42, false);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains.at(-1)!.gain.value).toBe(1.5);
+      mockSavePref.mockReset();
+    });
+
+    it("announces a Mute change on the window", () => {
+      const seen: unknown[] = [];
+      const onChange = (e: Event): void => {
+        seen.push((e as CustomEvent).detail);
+      };
+      window.addEventListener("owncord:user-local-mute-changed", onChange);
+      elements.setUserLocalMute(7, true);
+      window.removeEventListener("owncord:user-local-mute-changed", onChange);
+      expect(seen).toEqual([{ userId: 7 }]);
+    });
+
+    it("scopes the Mute pref to the current host", () => {
+      setAudioVolumeHost("a.example:8443");
+      try {
+        elements.setUserLocalMute(7, true);
+        expect(mockSavePref).toHaveBeenCalledWith("userLocalMute_7:a.example:8443", true);
+      } finally {
+        setAudioVolumeHost(null);
+      }
+    });
+
+    it("unsubscribe and cleanup disconnect the gain graph", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { track } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+
+      elements.handleTrackUnsubscribedAudio(
+        track as any,
+        { source: "microphone" } as any,
+        participant as any,
+      );
+      expect(ctx.sources[0]!.disconnect).toHaveBeenCalled();
+      expect(ctx.gains[0]!.disconnect).toHaveBeenCalled();
+
+      subscribe(participant, "mic-2");
+      elements.cleanupAllAudioElements();
+      expect(ctx.gains[1]!.disconnect).toHaveBeenCalled();
+    });
+
+    it("a fast re-subscribe drops the old graph before building a new one", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 150 : def,
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      subscribe(participant);
+      subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains[0]!.disconnect).toHaveBeenCalled();
+      expect(ctx.gains[1]!.disconnect).not.toHaveBeenCalled();
+    });
+
+    it("the context follows the saved and switched output device", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "speakers-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      const participant = webParticipant("user-42");
+      const room = makeRoom([participant]);
+      elements.setRoom(room as any);
+      subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.setSinkId).toHaveBeenCalledWith("speakers-1");
+
+      room.emit("activeDeviceChanged", "audiooutput", "headset-2");
+      expect(ctx.setSinkId).toHaveBeenLastCalledWith("headset-2");
+
+      room.emit("activeDeviceChanged", "audiooutput", "default");
+      expect(ctx.setSinkId).toHaveBeenLastCalledWith("");
+
+      room.emit("activeDeviceChanged", "audioinput", "mic-9");
+      expect(ctx.setSinkId).toHaveBeenCalledTimes(3);
+    });
+
+    it("leaving closes the context", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      subscribe(participant);
+      elements.setUserVolume(42, 150);
+      const ctx = FakeAudioContext.instances[0]!;
+      elements.setRoom(null);
+      expect(ctx.close).toHaveBeenCalled();
     });
   });
 });

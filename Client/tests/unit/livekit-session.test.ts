@@ -844,12 +844,12 @@ describe("LiveKitSession", () => {
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
-    it("clamps volume to 0-100 range", () => {
+    it("clamps volume to 0-200 range", () => {
       session.setUserVolume(42, -10);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 0);
 
       session.setUserVolume(42, 300);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 100);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 200);
     });
   });
 

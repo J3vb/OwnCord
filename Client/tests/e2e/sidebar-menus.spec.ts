@@ -542,4 +542,36 @@ test.describe("Per-user volume menu", () => {
     await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("100");
     await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("100%");
   });
+
+  test("the slider goes to 200% and Mute marks the row while keeping the level", async ({
+    page,
+  }) => {
+    const row = page.locator(".voice-user-item[data-voice-uid='2']");
+    await expect(row).toBeVisible({ timeout: 5_000 });
+    await row.click({ button: "right" });
+
+    const menu = page.locator(".user-vol-menu");
+    await expect(menu).toBeVisible({ timeout: 3_000 });
+    const slider = menu.locator("input.settings-slider");
+    await slider.focus();
+    await slider.press("End");
+    await expect(menu.locator(".slider-val")).toHaveText("200%");
+
+    const mute = menu.locator("[role='menuitemcheckbox']", { hasText: "Mute" });
+    await expect(mute).toHaveAttribute("aria-checked", "false");
+    await mute.click();
+    await expect(mute).toHaveAttribute("aria-checked", "true");
+    await expect(row.locator(".vu-local-muted")).toBeVisible();
+
+    // Reopened: still muted, and the level under the Mute is unchanged.
+    await page.mouse.click(5, 5);
+    await expect(menu).not.toBeVisible();
+    await row.click({ button: "right" });
+    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("200");
+    const reopened = page.locator(".user-vol-menu [role='menuitemcheckbox']");
+    await expect(reopened).toHaveAttribute("aria-checked", "true");
+
+    await reopened.click();
+    await expect(row.locator(".vu-local-muted")).toHaveCount(0);
+  });
 });

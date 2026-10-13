@@ -446,12 +446,26 @@ describe("LiveKitSession on the Linux native backend", () => {
     ]);
     host.commands.length = 0;
     // The volume menu, then the master output volume scaling everyone.
+    // The native mixer takes gains above 1, so 150% reaches it as 1.5.
     session.setUserVolume(4, 150);
     session.setOutputVolume(50);
     expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
-      ["setVolume", [1, "user-4", 1]],
+      ["setVolume", [1, "user-4", 1.5]],
       ["setVolume", [1, "user-3", 0.25]],
-      ["setVolume", [1, "user-4", 0.5]],
+      ["setVolume", [1, "user-4", 0.75]],
+    ]);
+  });
+
+  it("a local Mute sends 0 to the native mixer and unmute restores the saved volume", async () => {
+    prefs.set("userVolume_3", 150);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    host.commands.length = 0;
+    session.setUserLocalMute(3, true);
+    session.setUserLocalMute(3, false);
+    expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
+      ["setVolume", [1, "user-3", 0]],
+      ["setVolume", [1, "user-3", 1.5]],
     ]);
   });
 
@@ -460,7 +474,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     host.commands.length = 0;
     const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
-    // Per-user stream volume x master output, clamped to 0-1 (output volume caps at 100%); muted is 0.
+    // Per-user stream volume x master output, clamped to 0-1 (stream audio stays at most 100%); muted is 0.
     session.setScreenshareAudioVolume(3, 0.8);
     session.setOutputVolume(50);
     session.muteScreenshareAudio(3, true);
@@ -471,7 +485,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ["setScreenshareVolume", [1, "user-3", 0.4]],
       ["setScreenshareVolume", [1, "user-3", 0]],
       ["setScreenshareVolume", [1, "user-3", 0.4]],
-      ["setScreenshareVolume", [1, "user-3", 0.8]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
     ]);
   });
 

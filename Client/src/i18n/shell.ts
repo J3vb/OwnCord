@@ -57,6 +57,7 @@ export const shellText = defineCatalog("shell", {
   "channel.mutedByModerator": "Muted by a moderator",
   "channel.deafenedByModerator": "Deafened by a moderator",
   "channel.deafened": "Deafened",
+  "channel.locallyMuted": "Muted for you",
   "channel.ownSessionFingerprint":
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
   "channel.empty": "No channels yet",

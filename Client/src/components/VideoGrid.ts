@@ -13,11 +13,14 @@ import { showToast } from "@lib/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
+  getUserLocalMute,
   getUserVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
+  setUserLocalMute,
   setUserVolume,
 } from "@lib/livekitSession";
+import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
@@ -299,23 +302,24 @@ function isPlayingHere(e: CellEntry | undefined): boolean {
   );
 }
 
-/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
- *  of a remote tile: mute, a slider named for whose it is, and its value. */
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+ *  of a remote tile: mute, a slider named for whose it is, and its value. A
+ *  voice tile's mute is the user's local Mute, shared with the sidebar menu. */
 function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;
   apply: (volume: number, muted: boolean) => void;
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Both sliders
-  // are 0-100 (HTMLAudioElement.volume caps at 1.0).
+  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Stream audio
+  // plays on an element (volume caps at 1.0); voice has a gain node.
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
     : getUserVolume(config.audioUserId);
   let currentVolume = savedVolume;
   let muted = config.isScreenshare
     ? getScreenshareAudioMuted(config.audioUserId)
-    : savedVolume === 0;
+    : getUserLocalMute(config.audioUserId) || savedVolume === 0;
   /** What the slider shows: the stored level on open (even if muted), 0
    *  once muted from here, the level again on unmute. */
   let shown = currentVolume;
@@ -324,7 +328,7 @@ function buildVolumeControls(config: TileConfig): {
   const volumeSlider = createElement("input", {
     type: "range",
     min: "0",
-    max: "100",
+    max: config.isScreenshare ? "100" : "200",
     value: String(currentVolume),
     class: "tile-volume-slider",
     // Lets a tile rebuild or removal put focus back on the same control
@@ -359,7 +363,12 @@ function buildVolumeControls(config: TileConfig): {
       muteScreenshareAudio(config.audioUserId, muted);
       if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
     } else {
-      setUserVolume(config.audioUserId, muted ? 0 : currentVolume);
+      // The saved level stays as it is under the Mute; a level of 0 (from an
+      // older build's mute) comes back at 100.
+      if (!muted && getUserVolume(config.audioUserId) !== currentVolume) {
+        setUserVolume(config.audioUserId, currentVolume);
+      }
+      setUserLocalMute(config.audioUserId, muted);
     }
   }
 
@@ -373,6 +382,9 @@ function buildVolumeControls(config: TileConfig): {
       setScreenshareAudioVolume(config.audioUserId, value / 100);
     } else {
       setUserVolume(config.audioUserId, value);
+      if (value > 0 && getUserLocalMute(config.audioUserId)) {
+        setUserLocalMute(config.audioUserId, false);
+      }
     }
     render();
   });
@@ -1485,6 +1497,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** The sidebar menu (or another tile) changed a user's local Mute. */
+  function onUserLocalMute(e: Event): void {
+    const userId = (e as CustomEvent<{ userId: number }>).detail.userId;
+    const volume = getUserVolume(userId);
+    applyVolume(userId, false, volume, getUserLocalMute(userId) || volume === 0);
+  }
+
   /** Update an already-open tile's label in place. No-op if the tile isn't
    *  open — used to keep a remote tile's name in sync with a mid-call
    *  rename without re-creating the tile (addStream is only called once per
@@ -1656,6 +1675,9 @@ export function createVideoGrid(): VideoGridComponent {
     });
     document.addEventListener("keydown", onTheatreKey, { signal: gridListeners.signal });
     document.addEventListener("visibilitychange", syncViews, { signal: gridListeners.signal });
+    window.addEventListener(USER_LOCAL_MUTE_CHANGED, onUserLocalMute, {
+      signal: gridListeners.signal,
+    });
 
     // Observe container size changes to recalculate tile layout, and the
     // remote tiles' sizes (0 once the grid is closed) for their video views.
