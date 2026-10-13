@@ -1,8 +1,8 @@
 # Product requirements
 
-Condensed from the sources listed at the end, at commit `7732f969` (2026-09-25). On conflict, the code wins, then the source documents.
+Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the code wins, then the source documents.
 
-What OwnCord is, who it is for, and what the public beta must do. Requirement IDs (`BPR-###`) are defined in [docs/plans/beta-product-requirements-2026-08-23.md](docs/plans/beta-product-requirements-2026-08-23.md). The phase plans (B6, B7, B9, …) and their current status are indexed in [docs/plans/README.md](docs/plans/README.md), which is the authority on status; this file deliberately carries none.
+What OwnCord is, who it is for, and what the public beta must do. Requirement IDs (`BPR-###`) are defined in [docs/plans/beta-product-requirements-2026-08-23.md](docs/plans/beta-product-requirements-2026-08-23.md). Where the project is now (current release, nightly health, roadmap phases) is in [docs/STATUS.md](docs/STATUS.md). The B-phase plans (B6, B7, B9, …) are indexed in [docs/plans/README.md](docs/plans/README.md), the authority on each plan's state; that chain is history since B9 exited on 2026-09-25. This file deliberately carries no status.
 
 ## Product overview
 
@@ -48,7 +48,7 @@ From [README.md](README.md) "What OwnCord Already Has" and the beta requirements
 - Owner-designated NSFW channels with explicit labels and per-user, server-backed consent before any preview loads (BPR-063).
 - Local moderation: user reports; a permission-gated Moderation Center (queue, evidence, assignment, notes, actions, immutable audit history); warning, timeout, removal, kick and ban; and rate-limited in-app appeals (three per day, one per action; kicks are not appealable, and a user who is still banned can appeal only out of band) (BPR-070–073).
 - A WASM plugin system for slash commands: experimental, sandboxed and disabled by default (`plugins.enabled`, build tag `wazero`), with no beta plugin-API compatibility promise (BPR-080).
-- A GIF picker, off by default, using a server-supplied Klipy key.
+- A GIF picker, off by default, using a server-supplied Klipy key; each user's favorite GIFs are saved on the server under their account.
 - No automatic product or usage telemetry; diagnostics stay local, and support-bundle export is user-initiated (BPR-055).
 
 ## User flows
@@ -125,7 +125,7 @@ Budgets may only be tightened from data, never loosened. The capacity target its
 
 ## Success metrics
 
-Beta readiness is defined by each phase's exit gates and the owner's hold-point sign-offs (HP-6, HP-7, HP-9), not by usage metrics; OwnCord collects no telemetry to measure usage with (BPR-055). The current status of every gate is in [docs/plans/README.md](docs/plans/README.md).
+Beta readiness is defined by each phase's exit gates and the owner's hold-point sign-offs (HP-6, HP-7, HP-9), not by usage metrics; OwnCord collects no telemetry to measure usage with (BPR-055). The status of every phase gate is in [docs/plans/README.md](docs/plans/README.md); B10 and B11 were not run as phases (the betas shipped after B9), and current status is in [docs/STATUS.md](docs/STATUS.md).
 
 **B6: server deployment, operations, capacity** ([B6 PRD](docs/plans/b6-server-deployment-operations-capacity.prd.md) "Success Metrics"):
 

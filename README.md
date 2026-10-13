@@ -3,20 +3,27 @@
 ![Status](https://img.shields.io/badge/status-beta-orange)
 ![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Windows%20ARM64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 # OwnCord
 
-A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own.
+OwnCord is a self-hosted chat app I build for me and my friends. It has text
+channels, voice and video, and a server you own.
 
 > **Beta, and a hobby project.**
-> This is something I build for fun and run for a small group of friends. It isn't a product, it comes with no support commitment, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
+> I build this for fun and run it for a small group of friends. It is not a
+> product. There is no support promise, and it is not production-ready. Expect
+> rough edges, fast changes and the odd breaking change.
 >
-> Don't use it for anything sensitive.
+> Do not use it for anything sensitive.
 
-It's a Go server plus a Tauri desktop client: real-time messaging, voice/video via LiveKit, file sharing, and a web admin panel.
-Run the server on a spare box or a VPS, hand your friends an invite code, and that's the whole thing.
+OwnCord has two parts:
+
+- a **Go server**, which you run on a spare computer or a VPS
+- a **desktop app**, built with Tauri, which your friends install
+
+You start the server, give your friends an invite code, and that is it.
 
 <p align="center">
   <img src=".github/images/Client.png" alt="OwnCord Client" width="700">
@@ -27,100 +34,133 @@ Run the server on a spare box or a VPS, hand your friends an invite code, and th
   <img src=".github/images/Admin_Panel.png" alt="Admin Panel" width="340">
 </p>
 
-## How it's built
+## Start here
 
-Most of the implementation is generated with AI tooling, with quality held up by automated checks — CI, tests, linting — and by me and my friends actually using it.
-That keeps iteration fast, and it also means behaviour can change quickly between releases.
+| I want to…                              | Read                                                   |
+| --------------------------------------- | ------------------------------------------------------ |
+| Get a server running quickly            | [docs/quick-start.md](docs/quick-start.md)             |
+| Run the server on Linux with Docker     | [docs/deployment.md](docs/deployment.md)               |
+| Let friends connect without router work | [docs/tailscale.md](docs/tailscale.md)                 |
+| Open ports on my router myself          | [docs/port-forwarding.md](docs/port-forwarding.md)     |
+| Know what the beta does not do          | [docs/known-limitations.md](docs/known-limitations.md) |
+| Find any other document                 | [docs/README.md](docs/README.md)                       |
 
-## What works right now
+## What works today
 
-| Area               | Status                                                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Core chat flow     | Working in beta                                                                                                                 |
-| Voice/video        | Working in beta                                                                                                                 |
-| Admin panel        | Working in beta                                                                                                                 |
-| Security hardening | Ongoing review passes; findings and their statuses are tracked in the dated audits in [docs/](docs/) (see the Docs Index below) |
+| Area            | Status          |
+| --------------- | --------------- |
+| Text chat       | Working in beta |
+| Voice and video | Working in beta |
+| Admin panel     | Working in beta |
 
-## Platform Support (Current Releases)
+Security is reviewed in regular passes. Each review is a dated audit, listed in
+[docs/README.md](docs/README.md#audits).
 
-| Component      | Windows x64          | Windows ARM64        | Linux x64              | Linux ARM64            |
-| -------------- | -------------------- | -------------------- | ---------------------- | ---------------------- |
-| Server binary  | Yes                  | Yes                  | Yes                    | Yes                    |
-| Desktop client | Yes (NSIS installer) | Yes (NSIS installer) | Yes (AppImage, .deb)   | Yes (AppImage, .deb)   |
-| Docker server  | N/A                  | N/A                  | Yes (multi-arch image) | Yes (multi-arch image) |
+## Features
 
-Every server asset and the Docker image ship for both `amd64` and `arm64`
-(`ghcr.io/j3vb/owncord-server` is one multi-architecture tag).
+- **Chat.** Real-time channels and direct messages, with saved history and
+  per-channel message retention.
+- **Voice and video.** Runs on [LiveKit](https://livekit.io). The server can
+  download and run LiveKit for you. Call media is end-to-end encrypted, and
+  you can check another person's security key.
+- **Who can join.** Four registration modes: `closed`, `invite`, `approval`
+  and `open`. Invite codes and role-based permissions.
+- **Moderation.** Reports, appeals, warnings and timeouts, the Moderation
+  Center, Message Requests and NSFW handling.
+- **Admin panel.** A web page for logs, backups, retention, the audit log and
+  updates.
+- **Files.** Uploads and inline images and video. The app asks before it loads
+  content from other websites.
+- **Accounts.** Two-factor sign-in (TOTP) with backup codes, a recovery kit you
+  keep yourself, and rate limits on sign-in.
+- **Devices.** Sign in on several devices. The desktop app keeps saved
+  credentials in the system keyring.
+- **Updates.** The desktop app updates itself and checks each update's
+  signature first.
+- **Plugins (experimental).** WASM plugins can add slash commands. They are
+  off by default and not in release builds. To try them, build with
+  `-tags wazero` and set `plugins.enabled`.
+- **GIF picker.** Off by default. Each server uses its own
+  [Klipy](https://partner.klipy.com) key, set with `gif.api_key`
+  ([setup](docs/server-configuration.md#gif-picker-gif)).
 
-## Start Here
+More detail: [docs/architecture/](docs/architecture/README.md) and
+[docs/protocol.md](docs/protocol.md).
 
-- New user quick path: [docs/quick-start.md](docs/quick-start.md)
-- Linux Docker deployment: [docs/deployment.md](docs/deployment.md)
-- Remote access without router config: [docs/tailscale.md](docs/tailscale.md)
-- Manual router/network setup: [docs/port-forwarding.md](docs/port-forwarding.md)
+## Platform support
 
-## Quick Start
+| Part          | Windows x64     | Windows ARM64   | Linux x64            | Linux ARM64          |
+| ------------- | --------------- | --------------- | -------------------- | -------------------- |
+| Server        | Yes             | Yes             | Yes                  | Yes                  |
+| Desktop app   | Yes (installer) | Yes (installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
+| Docker server | No              | No              | Yes                  | Yes                  |
 
-### Option A: Prebuilt binaries
+The Docker image is `ghcr.io/j3vb/owncord-server`. One tag covers both `amd64`
+and `arm64`.
 
-1. Download assets from [Releases](https://github.com/J3vb/OwnCord/releases) (binaries, checksums, signatures, SBOMs, a signed provenance attestation and a full source snapshot per release).
-2. Run the server binary:
-   - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
-   - Linux: `./chatserver`, from the `amd64` or `arm64` archive
-3. Open `https://localhost:8443/admin` and complete the setup wizard, entering the setup token from the server's start-up output — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
-4. Create invite codes in the admin panel's **Invites** page (or the OwnCord desktop client's "Invite people" action) and share them with friends.
+## Quick start
 
-### Option B: Docker (Linux server)
+The full guide is [docs/quick-start.md](docs/quick-start.md). This is the
+short version.
 
-The compose file and the `.example` files it needs are **not release assets** —
-take them from the source snapshot attached to a [release](https://github.com/J3vb/OwnCord/releases)
-(or the repository's `Server/` directory).
+### Option A: download the server
+
+1. Download the server from
+   [Releases](https://github.com/J3vb/OwnCord/releases). Each release also has
+   checksums, signatures, SBOMs, a signed provenance record and a full copy of
+   the source code.
+2. Start the server:
+   - Windows x64: `chatserver.exe`
+   - Windows ARM64: `chatserver-windows-arm64.exe`
+   - Linux: `./chatserver`, from `chatserver-linux-amd64.tar.gz` or
+     `chatserver-linux-arm64.tar.gz`
+3. Open `https://localhost:8443/admin` in a browser.
+4. Follow the setup wizard. It asks for the **setup token** that the server
+   printed when it started. The wizard creates your Owner account and saves
+   your settings to `config.yaml`.
+5. Make invite codes on the admin panel's **Invites** page, or with **Invite
+   people** in the desktop app. Send them to your friends.
+
+### Option B: Docker on Linux
+
+The compose file and the `.example` files are **not separate release
+downloads**. Get them from the source code attached to a
+[release](https://github.com/J3vb/OwnCord/releases), or from the `Server/`
+folder of this repository.
 
 ```bash
 cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml before starting (matching LiveKit key/secret). The compose file wires voice.livekit_url to the LiveKit service
-# and turns auto-download off, so config.yaml needs no voice edit.
+# Edit .env and livekit.yaml first. They need the same LiveKit key and secret.
+# The compose file already connects the server to LiveKit,
+# so config.yaml needs no voice changes.
 docker compose up -d
 ```
 
-See the full setup guide in [docs/deployment.md](docs/deployment.md).
+The full Docker guide is in [docs/deployment.md](docs/deployment.md#docker-linux).
 
-The client uses TOFU (Trust On First Use) for self-signed certificates: it prompts once, then pins the certificate for future connections.
+### The first connection
 
-## What OwnCord Already Has
+The server makes its own certificate. The desktop app uses **trust on first
+use** (TOFU): it asks you once to trust the server's certificate, then
+remembers it. If the certificate changes later, the app warns you.
 
-- Real-time channels and direct messages over WebSocket, with durable history
-  and per-channel retention
-- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and
-  managed for you, with end-to-end-encrypted media and key verification
-- Registration modes (`closed` / `invite` / `approval` / `open`), invite codes,
-  and role-based permissions
-- Moderation: reports, appeals, warnings and timeouts, the Moderation Center,
-  Message Requests and NSFW handling
-- Web admin panel with logs, backups, retention controls, an audit log and
-  update tooling
-- File uploads, inline media rendering and an external-content consent gate
-- TOTP 2FA with emergency recovery codes, a rotating local recovery kit for
-  account recovery, and API rate limiting
-- Multi-device sessions; every credential is stored in the OS keyring
-- Desktop client auto-update with signature verification
-- WASM plugin system (slash commands; sandboxed, default-disabled — enable via
-  `plugins.enabled` and build with `-tags wazero`)
-- GIF picker — off by default; each server supplies its own
-  [Klipy](https://partner.klipy.com) key via `gif.api_key`
-  ([setup](docs/server-configuration.md#gif-picker-gif))
+## How it is built
 
-See deeper feature and architecture docs in [docs/architecture/](docs/architecture/README.md) and [docs/protocol.md](docs/protocol.md).
+Most of the code is written with AI tools. Quality comes from automated checks
+(CI, tests and linting) and from me and my friends using it every day. This
+keeps changes fast, but it also means behaviour can change quickly between
+releases.
 
 ## Architecture
 
-Two main components:
+The server and the desktop app talk over three channels:
 
-- Go server (REST API, WebSocket hub, SQLite, admin panel)
-- Tauri v2 desktop client (Rust backend + TypeScript frontend)
+- **WebSocket (WSS)** for live chat events
+- **HTTPS** for the REST API
+- **LiveKit** for voice and video
 
 ```text
 +---------------------+         +---------------------+
@@ -142,18 +182,20 @@ Two main components:
                                 +---------------------+
 ```
 
-## Build and Test
+The server also serves the web admin panel. The desktop app has a TypeScript
+front end and a small Rust back end.
+
+## Build and test
 
 ### Prerequisites
 
-- Go 1.27+
-- Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
-  `npm ci`)
-- Rust stable (client builds)
-- Linux client builds additionally need clang >= 21, the prebuilt libwebrtc,
-  and the GStreamer `-dev` headers; see
-  [docs/contributing.md](docs/contributing.md) (Linux native voice and camera
-  build prerequisites).
+- Go 1.27 or newer
+- Node.js 26.x and npm 11.x. `Client/.nvmrc` sets the version. A different
+  major version makes `npm ci` fail.
+- Rust stable, for the desktop app
+- On Linux, the desktop app also needs clang 21 or newer, a prebuilt
+  libwebrtc and the GStreamer `-dev` packages. See
+  [docs/contributing.md](docs/contributing.md#client-tauri-v2).
 
 ### Build from source
 
@@ -166,27 +208,28 @@ go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 cd Server
 CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 
-# Client
+# Desktop app
 cd Client
 npm install
 npm run tauri build
 ```
 
-### Core verification commands
+### Run the checks
 
-The local mirror of CI's static, unit and drift gates, from the repository
-root — it does **not** run the Playwright jobs, govulncheck, npm audit, the
-coverage-floor scripts, `typecheck:e2e` or the tag-gated Go tests; see
-[AGENTS.md](AGENTS.md#commands) for the exact split:
+From the repository root:
 
 ```bash
-npm run check                  # server + client + Rust
-npm run check:server           # or one stack at a time
-node scripts/run.mjs --list    # exactly what each task runs, and where
+npm run check                  # server, client, Rust, docs and hygiene
+npm run check:server           # or one part at a time
+node scripts/run.mjs --list    # shows exactly what each task runs, and where
 ```
 
-Or run the stacks directly — the facade is a convenience, not the only path,
-and **server work needs no Node at all**:
+This runs the same static, unit and drift checks as CI. It does **not** run
+everything CI runs: the Playwright tests, govulncheck, npm audit, the coverage
+floors, `typecheck:e2e` and the tag-gated Go tests are left out. See
+[AGENTS.md](AGENTS.md#commands) for the exact split.
+
+You can also run each part directly. **Server work needs no Node at all.**
 
 ```bash
 # Server
@@ -200,87 +243,97 @@ npm run lint
 npm test
 ```
 
-For the full command set, use [docs/contributing.md](docs/contributing.md).
+The full list of commands is in [docs/contributing.md](docs/contributing.md).
 
 ## Configuration
 
-On first run, the server generates `config.yaml` and a local `data/` directory:
+On first start, the server creates `config.yaml` and a `data/` folder:
 
 ```text
 data/
 ├── chatserver.db
-├── cert.pem        # self-signed TLS certificate (key.pem beside it)
+├── cert.pem        # self-signed TLS certificate (key.pem is next to it)
 ├── uploads/
 └── backups/
 ```
 
-Key options include TLS mode, upload limits, LiveKit settings, and admin CIDR restrictions.
-See [docs/server-configuration.md](docs/server-configuration.md).
+You can set the TLS mode, upload limits, LiveKit settings and which networks
+may open the admin panel. Every option is in
+[docs/server-configuration.md](docs/server-configuration.md).
 
-## Security and Vulnerability Reporting
+## Reporting a security problem
 
-- For vulnerabilities, use GitHub Security Advisories (private disclosure flow).
-- Do not open public issues for security bugs.
-- Read full policy and hardening notes in [docs/security.md](docs/security.md).
+- Use a private [GitHub Security Advisory](https://github.com/J3vb/OwnCord/security/advisories/new).
+- Do not open a public issue for a security bug.
+- The full policy is in [SECURITY.md](SECURITY.md) and
+  [docs/security.md](docs/security.md).
 
-## Update Signing Notes (Maintainers)
+## Getting help
 
-Client and server update signing keys are intentionally separate.
+There is no support promise (see the note at the top). But each kind of
+message has a right place:
 
-Required Actions secrets for release signing:
+| What you have                 | Where it goes                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| A bug you can reproduce       | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)                                 |
+| A question about setup or use | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)             |
+| An idea or feature request    | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas)         |
+| A security problem            | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new), never an issue |
+
+## Contributing
+
+1. Make a branch from `dev`. `dev` is where development happens.
+2. Keep each change focused, and test it.
+3. Open a pull request into `dev`. `dev` is merged into `main` for releases.
+
+The full process is in [docs/contributing.md](docs/contributing.md).
+
+## Documentation
+
+[docs/README.md](docs/README.md) lists every document in `docs/`. It groups
+them into guides, reference, audits and plans. The ones people use most:
+
+- [docs/quick-start.md](docs/quick-start.md): get a server running
+- [docs/deployment.md](docs/deployment.md): run a server for real
+- [docs/contributing.md](docs/contributing.md): set up, branch, and run the
+  checks CI runs
+- [docs/security.md](docs/security.md): report a security problem
+- [docs/STATUS.md](docs/STATUS.md): the current release and roadmap
+- [docs/architecture/](docs/architecture/README.md): how the system is built
+- [docs/architecture/ux/](docs/architecture/ux/README.md): how the desktop app
+  should behave (a target-state spec)
+- [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md),
+  [docs/schema.md](docs/schema.md) and
+  [docs/server-configuration.md](docs/server-configuration.md): reference
+- [docs/plans/README.md](docs/plans/README.md): the plan index. It records each
+  plan's state and overrides a plan's own header.
+
+Audits are dated snapshots. Nobody updates them afterwards, so read them as
+history.
+
+### Files for AI coding agents
+
+These short files at the repository root give an AI agent, or a new
+contributor, the key context: [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
+[ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md),
+[CODE_STYLE.md](CODE_STYLE.md), [DATABASE.md](DATABASE.md), [API.md](API.md)
+and [SECURITY.md](SECURITY.md). Each one lists its sources. If they disagree,
+the code wins, then those sources.
+
+## Update signing (maintainers)
+
+The desktop app and the server use separate update signing keys.
+
+A release needs these GitHub Actions secrets:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY`
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD`
 
-When rotating the server updater key, update [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt) and use staged rollover for live fleets.
-
-## Docs Index
-
-**[docs/README.md](docs/README.md) is the complete index** — every document in
-`docs/`, grouped by whether it is guidance, a reference contract, a dated audit,
-or a plan. The most-used entries:
-
-- [docs/quick-start.md](docs/quick-start.md) — get a server running
-- [docs/deployment.md](docs/deployment.md) — production deployment
-- [docs/contributing.md](docs/contributing.md) — setup, branch model, how to run the checks CI runs
-- [docs/security.md](docs/security.md) — reporting a vulnerability
-- [docs/architecture/](docs/architecture/README.md) — system blueprints (diagrams + flows)
-- [docs/architecture/ux/](docs/architecture/ux/README.md) — client UX specification (target-state flows, per-view states, event→reaction maps)
-- [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md), [docs/schema.md](docs/schema.md), [docs/server-configuration.md](docs/server-configuration.md) — reference contracts
-- [docs/plans/README.md](docs/plans/README.md) — plan index; records each plan's state and is the authority over a plan's own header
-
-Condensed context files for AI coding agents and new contributors, at the
-repository root (each lists its sources; on conflict the code wins, then those
-sources): [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
-[ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md),
-[CODE_STYLE.md](CODE_STYLE.md), [DATABASE.md](DATABASE.md), [API.md](API.md),
-[SECURITY.md](SECURITY.md).
-
-Audits are dated snapshots and are not maintained after the fact — read them as
-history. [docs/README.md](docs/README.md#audits--dated-not-maintained) lists all
-nine, newest first.
-
-## Contributing
-
-1. Create a branch from `dev` (the active development branch).
-2. Keep changes focused and tested.
-3. Open a PR targeting `dev` — `dev` is merged to `main` for releases.
-
-See [docs/contributing.md](docs/contributing.md) for the full process.
-
-## Getting Help and Reporting Problems
-
-Nothing here is a support promise — see the note at the top — but there is a
-right place for each kind of message:
-
-| Kind                            | Where                                                                                        |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| A reproducible bug              | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)                                  |
-| A question about setup or usage | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)              |
-| An idea or feature suggestion   | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas)          |
-| A security vulnerability        | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new) — never an issue |
+To rotate the server update key, update
+[Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt).
+Roll it over in stages so running servers keep accepting updates.
 
 ## License
 
