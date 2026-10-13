@@ -5,6 +5,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 -- name: DeleteUnlinkedAttachment :execrows
 DELETE FROM attachments WHERE id = ? AND uploader_id = ? AND message_id IS NULL;
 
+-- name: DiscardUnlinkedAttachment :one
+-- The uploader withdraws a file it staged and never sent. A live avatar is an
+-- unlinked row too, so it is kept, as in the orphan sweep.
+DELETE FROM attachments
+WHERE id = ? AND uploader_id = ? AND message_id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
+  )
+RETURNING stored_as;
+
 -- name: GetAttachmentByID :one
 SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id
 FROM attachments WHERE id = ?;

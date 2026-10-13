@@ -10,7 +10,7 @@ import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
-import type { ApiClient } from "@lib/api";
+import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
@@ -1007,6 +1007,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // failure is reported once, inline, by the composer from this
           // rejection, so it is not toasted here too.
           if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
+          throw err;
+        }
+      },
+      onDiscardUpload: async (id: string) => {
+        try {
+          await api.discardUpload(id);
+        } catch (err) {
+          // The server sweeps an unsent upload on its own; this only frees
+          // the quota sooner, so a failure is logged and not shown. A 404 is
+          // a copy already gone (withdrawn before, or an older server).
+          if (!(err instanceof ApiClientError && err.status === 404)) {
+            log.warn("Discarding an unsent upload failed", { error: String(err) });
+          }
           throw err;
         }
       },

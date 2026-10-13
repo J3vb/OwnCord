@@ -109,6 +109,29 @@ func (q *Queries) DeleteUnlinkedAttachment(ctx context.Context, arg DeleteUnlink
 	return result.RowsAffected()
 }
 
+const discardUnlinkedAttachment = `-- name: DiscardUnlinkedAttachment :one
+DELETE FROM attachments
+WHERE id = ? AND uploader_id = ? AND message_id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
+  )
+RETURNING stored_as
+`
+
+type DiscardUnlinkedAttachmentParams struct {
+	ID         string `json:"id"`
+	UploaderID *int64 `json:"uploaderId"`
+}
+
+// The uploader withdraws a file it staged and never sent. A live avatar is an
+// unlinked row too, so it is kept, as in the orphan sweep.
+func (q *Queries) DiscardUnlinkedAttachment(ctx context.Context, arg DiscardUnlinkedAttachmentParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, discardUnlinkedAttachment, arg.ID, arg.UploaderID)
+	var stored_as string
+	err := row.Scan(&stored_as)
+	return stored_as, err
+}
+
 const getAttachmentByID = `-- name: GetAttachmentByID :one
 SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id
 FROM attachments WHERE id = ?

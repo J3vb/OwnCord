@@ -175,10 +175,41 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	// Upload requires authentication; handleUpload applies its own body cap
 	// (uploadBodyCap), which follows upload.max_size_mb.
 	r.With(AuthMiddleware(sessions)).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
+	// The uploader withdraws a file it staged and never sent.
+	r.With(AuthMiddleware(sessions)).Delete("/api/v1/uploads/{id}", handleDiscardUpload(uploads, store))
 	// File serving requires authentication for channel-level access control.
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 	// A bounded preview of an image file, under the same access rule (P4-08).
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
+}
+
+// handleDiscardUpload deletes the caller's own upload that no message holds,
+// returning its quota now. Anything else (unknown, another user's, already
+// sent, a live avatar) is a 404, so the route reveals nothing about files the
+// caller does not own.
+func handleDiscardUpload(uploads *service.UploadService, store FileStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		fileID := chi.URLParam(r, "id")
+		storedAs, err := uploads.Discard(r.Context(), fileID, user.ID)
+		if errors.Is(err, service.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "upload not found")
+			return
+		}
+		if storedAs != "" {
+			if delErr := store.Delete(storedAs); delErr != nil {
+				slog.Error("failed to delete discarded upload", "stored_as", storedAs, "error", delErr)
+			}
+		}
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {

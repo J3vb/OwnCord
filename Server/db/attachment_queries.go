@@ -63,6 +63,20 @@ func (d *DB) DeleteUnlinkedAttachment(ctx context.Context, id string, userID int
 	return n > 0, nil
 }
 
+// DiscardUnlinkedAttachment removes userID's unlinked attachment row for id,
+// unless it is a live avatar, and returns its stored file name. found is false
+// when there was no such row.
+func (d *DB) DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error) {
+	storedAs, err = d.q.DiscardUnlinkedAttachment(ctx, dbgen.DiscardUnlinkedAttachmentParams{ID: id, UploaderID: &userID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("DiscardUnlinkedAttachment: %w", err)
+	}
+	return storedAs, true, nil
+}
+
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
 func (d *DB) GetAttachmentByID(ctx context.Context, id string) (*Attachment, error) {
 	r, err := d.q.GetAttachmentByID(ctx, id)

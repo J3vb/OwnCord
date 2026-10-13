@@ -815,6 +815,13 @@ describe("API Client", () => {
       expect(fetchCallOpts().method).toBe("DELETE");
     });
 
+    it("discardUpload calls DELETE /uploads/{id}", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.discardUpload("a1b2");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/uploads/a1b2");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
     it("purgeMessages posts the limit to /channels/{id}/messages/purge", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ channel_id: 7, ids: [3, 2], count: 2 }));
       const result = await api.purgeMessages(7, 25);
