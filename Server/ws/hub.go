@@ -220,6 +220,7 @@ type Hub struct {
 	settingsMotd       string
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
+	uploadPolicyMu     syncutil.Mutex // orders BroadcastUploadPolicy's saves (hub_settings.go)
 
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.

@@ -32,7 +32,7 @@ func TestHandlePatchSettings_LogsTheCauseOfA500(t *testing.T) {
 
 	r := httptest.NewRequest(http.MethodPatch, "/admin/api/settings", strings.NewReader(`{"server_name":"x"}`))
 	rec := httptest.NewRecorder()
-	handlePatchSettings(svc, nil).ServeHTTP(rec, r)
+	handlePatchSettings(svc, nil, nil).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
