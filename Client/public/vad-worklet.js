@@ -7,6 +7,7 @@
 //
 // Protocol:
 //   Main → Worklet:  { type: "config", threshold: number, gateOnFrames: number, gateOffFrames: number }
+//   Main → Worklet:  { type: "threshold", threshold: number }  (move the level only; automatic sensitivity)
 //   Main → Worklet:  { type: "stop" }
 //   Worklet → Main:  { type: "gate", gated: boolean }
 //   Worklet → Main:  { type: "rms", value: number }  (loudest smoothed level since the last one)
@@ -54,6 +55,10 @@ class VadProcessor extends AudioWorkletProcessor {
           this._gated = false;
           this.port.postMessage({ type: "gate", gated: false });
         }
+      } else if (event.data.type === "threshold") {
+        // The automatic floor moved: the attack/hold state and the gate carry
+        // on, so a running estimate never reopens a closed gate.
+        this._threshold = event.data.threshold;
       } else if (event.data.type === "stop") {
         this._active = false;
       }

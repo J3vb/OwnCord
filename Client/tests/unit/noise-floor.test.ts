@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+import {
+  AUTO_MARGIN_DB,
+  AUTO_MAX_THRESHOLD,
+  AUTO_MIN_THRESHOLD,
+  NoiseFloorTracker,
+} from "../../src/lib/noiseFloor";
+
+const db = (rms: number): number => 20 * Math.log10(rms);
+const rmsAt = (dbfs: number): number => 10 ** (dbfs / 20);
+
+/** Feed `level(t)` every `stepMs` from `fromMs` for `durationMs`; returns the end time. */
+function feed(
+  tracker: NoiseFloorTracker,
+  level: (t: number) => number,
+  fromMs: number,
+  durationMs: number,
+  stepMs = 50,
+): number {
+  let t = fromMs;
+  for (; t < fromMs + durationMs; t += stepMs) tracker.push(level(t), t);
+  return t;
+}
+
+describe("NoiseFloorTracker", () => {
+  it("steady noise settles the threshold the margin above it", () => {
+    const tracker = new NoiseFloorTracker();
+    feed(tracker, () => rmsAt(-50), 0, 3000);
+    expect(db(tracker.threshold)).toBeCloseTo(-50 + AUTO_MARGIN_DB, 5);
+    // The noise itself stays below the gate.
+    expect(rmsAt(-50)).toBeLessThan(tracker.threshold);
+  });
+
+  it("speech above the floor clears the threshold", () => {
+    const tracker = new NoiseFloorTracker();
+    feed(tracker, () => rmsAt(-50), 0, 3000);
+    expect(rmsAt(-25)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("the floor follows rising noise within the window", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
+    // A fan starts: 15 dB louder. Within the 8 s window plus one sub-window
+    // the old quiet ages out and the gate rises above the fan.
+    t = feed(tracker, () => rmsAt(-40), t, 9500);
+    expect(db(tracker.threshold)).toBeCloseTo(-30, 5);
+    expect(rmsAt(-40)).toBeLessThan(tracker.threshold);
+  });
+
+  it("the floor drops at once to quieter noise", () => {
+    const tracker = new NoiseFloorTracker();
+    const t = feed(tracker, () => rmsAt(-40), 0, 3000);
+    tracker.push(rmsAt(-55), t);
+    expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
+  });
+
+  it("continuous speech with short pauses does not lift the floor", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    // 20 s of talking at -20 dBFS with a 100 ms pause back to the room's
+    // level every 1.5 s.
+    t = feed(tracker, (now) => (now % 1500 < 100 ? rmsAt(-55) : rmsAt(-20)), t, 20000);
+    expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
+  });
+
+  it("digital silence (a muted capture) does not drag the floor down", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-50), 0, 5000);
+    t = feed(tracker, () => 0, t, 3000);
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    // The fan after the unmute stays below the gate.
+    feed(tracker, () => rmsAt(-50), t, 1000);
+    expect(rmsAt(-50)).toBeLessThan(tracker.threshold);
+  });
+
+  it("an input-volume change relearns the floor without learning its gain ramp", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-50), 0, 5000);
+    // Volume to 0: the gain ramps down (time constant 15 ms) before the
+    // reports reach digital silence.
+    tracker.reset(t);
+    const start = t;
+    t = feed(tracker, (now) => rmsAt(-50) * Math.exp(-(now - start) / 15), t, 2000);
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    // Volume back up: the room is relearned and stays below the gate.
+    tracker.reset(t);
+    t = feed(tracker, () => rmsAt(-50), t, 3000);
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    expect(rmsAt(-50)).toBeLessThan(tracker.threshold);
+  });
+
+  it("clamps to the minimum and maximum thresholds", () => {
+    const quiet = new NoiseFloorTracker();
+    feed(quiet, () => rmsAt(-90), 0, 3000);
+    expect(quiet.threshold).toBeCloseTo(AUTO_MIN_THRESHOLD, 9);
+
+    const loud = new NoiseFloorTracker();
+    feed(loud, () => rmsAt(-20), 0, 3000);
+    expect(loud.threshold).toBeCloseTo(AUTO_MAX_THRESHOLD, 9);
+  });
+
+  it("gates at the seed, or the maximum, until a second of levels has come in", () => {
+    expect(new NoiseFloorTracker().threshold).toBe(AUTO_MAX_THRESHOLD);
+    const seeded = new NoiseFloorTracker(0.004);
+    expect(seeded.threshold).toBe(0.004);
+    feed(seeded, () => rmsAt(-60), 0, 1000);
+    expect(seeded.threshold).toBe(0.004);
+    expect(seeded.push(rmsAt(-60), 1000)).toBeCloseTo(rmsAt(-50), 9);
+  });
+
+  it("reports only moves of a decibel or more", () => {
+    const tracker = new NoiseFloorTracker();
+    feed(tracker, () => rmsAt(-50), 0, 1100);
+    expect(tracker.push(rmsAt(-50.5), 1150)).toBeNull();
+    expect(tracker.push(rmsAt(-52), 1200)).toBeCloseTo(rmsAt(-42), 9);
+  });
+
+  it("still adapts when a hidden window throttles reports to one a second", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000, 1000);
+    expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
+    t = feed(tracker, () => rmsAt(-40), t, 10000, 1000);
+    expect(db(tracker.threshold)).toBeCloseTo(-30, 5);
+  });
+});

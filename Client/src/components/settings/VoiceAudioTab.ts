@@ -37,7 +37,7 @@ import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
-import { inputMode, type InputMode } from "@lib/inputMode";
+import { autoInputSensitivity, inputMode, type InputMode } from "@lib/inputMode";
 import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
@@ -225,6 +225,7 @@ function buildVoiceAudioTabInner(
       // The meter's own processor measures after the same gain as the call's.
       inputVolumePercent = val;
       meterProcessor?.setInputGain(val / 100);
+      meterResetFloor?.();
     },
     { signal },
   );
@@ -238,6 +239,32 @@ function buildVoiceAudioTabInner(
     t("voiceAudio.inputSensitivity"),
   );
   micCard.appendChild(sensitivityHeader);
+
+  // Automatic sensitivity: the gate finds its own threshold above the room's
+  // noise, and the meter shows the level without a handle. The native engine
+  // gates on the saved slider alone, so it keeps the handle and no toggle.
+  let autoSensitivity = !nativeAudio && autoInputSensitivity();
+  const autoRow = createElement("div", {
+    class: "setting-row",
+    "data-testid": "auto-sensitivity",
+  });
+  const autoToggle = createToggle(autoSensitivity, {
+    signal,
+    label: t("voiceAudio.autoSensitivity"),
+    onChange: (nowOn) => {
+      autoSensitivity = nowOn;
+      savePref("autoInputSensitivity", nowOn);
+      paintSensitivity();
+      meterThresholdSetter?.(nowOn ? "auto" : vadThreshold(currentSensitivity));
+      applyInputMode();
+    },
+  });
+  appendChildren(
+    autoRow,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.autoSensitivity")),
+    autoToggle,
+  );
+  if (!nativeAudio) micCard.appendChild(autoRow);
 
   // Real-time mic level bar with embedded draggable threshold handle
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
@@ -284,6 +311,7 @@ function buildVoiceAudioTabInner(
     }
     pttBox.hidden = mode !== "ptt";
     sensitivityHeader.hidden = mode === "ptt";
+    autoRow.hidden = mode === "ptt";
     meterWrap.hidden = mode === "ptt";
   };
   const chooseMode = (mode: InputMode): void => {
@@ -335,6 +363,12 @@ function buildVoiceAudioTabInner(
   }
   updateThresholdIndicator(currentSensitivity);
 
+  function paintSensitivity(): void {
+    meterThreshold.hidden = autoSensitivity;
+    sensitivityValue.hidden = autoSensitivity;
+  }
+  paintSensitivity();
+
   /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
   function sensitivityFromPointer(clientX: number): number {
     const rect = meterBar.getBoundingClientRect();
@@ -344,7 +378,9 @@ function buildVoiceAudioTabInner(
   }
 
   /** The meter's detector, so a dragged threshold applies to it at once. */
-  let meterThresholdSetter: ((threshold: number) => void) | null = null;
+  let meterThresholdSetter: ((threshold: number | "auto") => void) | null = null;
+  /** The meter's detector, so an Input Volume move relearns its noise floor. */
+  let meterResetFloor: (() => void) | null = null;
   /** The meter's processor, so the Enhanced NS toggle re-routes it at once. */
   let meterProcessor: MicProcessor | null = null;
 
@@ -396,6 +432,7 @@ function buildVoiceAudioTabInner(
   meterBar.addEventListener(
     "click",
     (e: MouseEvent) => {
+      if (autoSensitivity) return;
       applySensitivity(sensitivityFromPointer(e.clientX));
     },
     { signal },
@@ -988,7 +1025,7 @@ function buildVoiceAudioTabInner(
         const detector = startVadDetector(
           processor.context,
           processor.analyser!,
-          vadThreshold(currentSensitivity),
+          autoSensitivity ? "auto" : vadThreshold(currentSensitivity),
           {
             onGate: (gated) => {
               gateOpen = !gated;
@@ -1001,8 +1038,10 @@ function buildVoiceAudioTabInner(
           },
         );
         meterThresholdSetter = detector.setThreshold;
+        meterResetFloor = detector.resetFloor;
         registerMic(() => {
           if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
+          if (meterResetFloor === detector.resetFloor) meterResetFloor = null;
           if (meterProcessor === processor) meterProcessor = null;
           void detector.stop().then(() => processor.destroy());
           stopStream();

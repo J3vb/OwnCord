@@ -391,9 +391,9 @@ describe("SettingsOverlay", () => {
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    // 4 toggles: echo cancellation, noise suppression, auto gain control,
-    // enhanced noise suppression (RNNoise)
-    expect(toggles.length).toBe(4);
+    // 5 toggles: automatic input sensitivity, echo cancellation, noise
+    // suppression, auto gain control, enhanced noise suppression (RNNoise)
+    expect(toggles.length).toBe(5);
 
     overlay.destroy?.();
   });
@@ -431,8 +431,9 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
     getTab(container, 5).click();
 
-    const toggles = container.querySelectorAll(".toggle");
-    const echoToggle = toggles[0] as HTMLElement;
+    const echoToggle = container.querySelector(
+      ".toggle[aria-label='Echo Cancellation']",
+    ) as HTMLElement;
 
     // Default is on
     expect(echoToggle.classList.contains("on")).toBe(true);

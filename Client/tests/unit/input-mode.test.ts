@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { inputMode, migrateInputMode, effectiveVoiceSensitivity } from "../../src/lib/inputMode";
+import {
+  autoInputSensitivity,
+  effectiveVoiceGate,
+  effectiveVoiceSensitivity,
+  inputMode,
+  migrateAutoInputSensitivity,
+  migrateInputMode,
+} from "../../src/lib/inputMode";
 
 const PREFIX = "owncord:settings:";
 const set = (key: string, value: unknown): void =>
@@ -80,5 +87,88 @@ describe("effectiveVoiceSensitivity", () => {
     expect(effectiveVoiceSensitivity(true)).toBe(30);
     set("pttVk", 0x41);
     expect(effectiveVoiceSensitivity(false)).toBe(30);
+  });
+});
+
+describe("autoInputSensitivity", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is on for a fresh profile", () => {
+    expect(autoInputSensitivity()).toBe(true);
+  });
+
+  it("is on for a profile that kept the default sensitivity", () => {
+    set("voiceSensitivity", 50);
+    expect(autoInputSensitivity()).toBe(true);
+  });
+
+  it("stays manual for a profile that tuned the slider", () => {
+    set("voiceSensitivity", 30);
+    expect(autoInputSensitivity()).toBe(false);
+    set("voiceSensitivity", 100);
+    expect(autoInputSensitivity()).toBe(false);
+  });
+
+  it("treats a corrupt sensitivity as the default", () => {
+    set("voiceSensitivity", "loud");
+    expect(autoInputSensitivity()).toBe(true);
+  });
+
+  it("a saved choice wins over the slider", () => {
+    set("voiceSensitivity", 30);
+    set("autoInputSensitivity", true);
+    expect(autoInputSensitivity()).toBe(true);
+  });
+});
+
+describe("migrateAutoInputSensitivity", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("saves manual for a tuned slider", () => {
+    set("voiceSensitivity", 30);
+    migrateAutoInputSensitivity();
+    expect(get("autoInputSensitivity")).toBe(false);
+  });
+
+  it("saves automatic once, so a later slider move does not switch it off", () => {
+    migrateAutoInputSensitivity();
+    expect(get("autoInputSensitivity")).toBe(true);
+    set("voiceSensitivity", 30);
+    migrateAutoInputSensitivity();
+    expect(get("autoInputSensitivity")).toBe(true);
+    expect(autoInputSensitivity()).toBe(true);
+  });
+
+  it("leaves a saved choice alone", () => {
+    set("autoInputSensitivity", false);
+    migrateAutoInputSensitivity();
+    expect(get("autoInputSensitivity")).toBe(false);
+  });
+});
+
+describe("effectiveVoiceGate", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is automatic in Voice Activity mode when automatic sensitivity is on", () => {
+    set("autoInputSensitivity", true);
+    set("voiceSensitivity", 30);
+    expect(effectiveVoiceGate(false)).toBe("auto");
+  });
+
+  it("is the saved sensitivity when automatic sensitivity is off, and off at 100", () => {
+    set("autoInputSensitivity", false);
+    set("voiceSensitivity", 30);
+    expect(effectiveVoiceGate(false)).toBe(30);
+    set("voiceSensitivity", 100);
+    expect(effectiveVoiceGate(false)).toBe("off");
+  });
+
+  it("runs no gate while a bound Push to Talk key is live, even with automatic on", () => {
+    set("autoInputSensitivity", true);
+    set("inputMode", "ptt");
+    set("pttVk", 0x41);
+    expect(effectiveVoiceGate(true)).toBe("off");
+    // No live poller: the automatic gate keeps gating.
+    expect(effectiveVoiceGate(false)).toBe("auto");
   });
 });

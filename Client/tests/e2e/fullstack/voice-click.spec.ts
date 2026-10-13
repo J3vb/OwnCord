@@ -117,6 +117,10 @@ const NO_BROWSER_PROCESSING = {
   autoGainControl: false,
 };
 
+/** The slider's own threshold, not the automatic one the startup migration
+ *  already saved for this profile. */
+const MANUAL = { autoInputSensitivity: false };
+
 /** Let the gate's 500 ms start-up grace and 200 ms close time pass. */
 const SETTLE_MS = 2500;
 
@@ -132,13 +136,13 @@ test("a mouse click does not open the voice gate, before or after the SDK republ
   await joinVoice(bob);
 
   // Reference: no gate, no processing. The click is plainly audible.
-  await setPrefs(alice, { ...NO_BROWSER_PROCESSING, voiceSensitivity: 100 });
+  await setPrefs(alice, { ...NO_BROWSER_PROCESSING, ...MANUAL, voiceSensitivity: 100 });
   await joinVoice(alice);
   await alice.waitForTimeout(SETTLE_MS);
   const ungated = await loudestHeardDb(bob);
   await leaveVoice(alice);
 
-  await setPrefs(alice, { voiceSensitivity: 50 });
+  await setPrefs(alice, { ...MANUAL, voiceSensitivity: 50 });
   await joinVoice(alice);
   await alice.waitForTimeout(SETTLE_MS);
   const gated = await loudestHeardDb(bob);
@@ -191,6 +195,7 @@ test("Enhanced Noise Suppression removes the click with the gate off", async ({
   for (const enhanced of [false, true]) {
     await setPrefs(alice, {
       ...NO_BROWSER_PROCESSING,
+      ...MANUAL,
       voiceSensitivity: 100,
       enhancedNoiseSuppression: enhanced,
     });
