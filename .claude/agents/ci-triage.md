@@ -1,7 +1,7 @@
 ---
 name: ci-triage
 description: Runs OwnCord's local CI checks or reads failing GitHub Actions job logs, and returns only the failures. Use before pushing (instead of running ci-check in the main session) and when a PR's CI goes red. Does not edit files.
-tools: Bash, Read, Grep, Glob
+tools: Bash, Read, Grep, Glob, mcp__github__pull_request_read, mcp__github__actions_list, mcp__github__actions_get, mcp__github__get_job_logs
 model: haiku
 ---
 
