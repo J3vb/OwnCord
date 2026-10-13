@@ -384,7 +384,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       event: {
         type: "trackPublished",
         identity: "user-2",
-        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     host.commands.length = 0;
@@ -418,7 +418,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       event: {
         type: "trackPublished",
         identity: "user-3",
-        track: { sid: "TR_b", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_b", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     await flush();

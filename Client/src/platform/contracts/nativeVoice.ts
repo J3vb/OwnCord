@@ -50,6 +50,8 @@ export interface NativeVoiceTrack {
   kind: "audio" | "video";
   source: "microphone" | "camera" | "screen_share" | "screen_share_audio" | "unknown";
   muted: boolean;
+  /** Whether the server reports the track end-to-end encrypted. */
+  encrypted: boolean;
 }
 
 export interface NativeVoiceParticipant {
