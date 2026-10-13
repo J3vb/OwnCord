@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -111,31 +110,36 @@ func TestBroadcastUploadPolicy_FailedReadSendsNothing(t *testing.T) {
 
 	saved.set(storage.FileTypePolicy{}, errors.New("settings read failed"))
 	hub.BroadcastUploadPolicy()
-	hub.BroadcastEmojiUpdate(nil)
-
-	// emoji_update is sent after the failed broadcast on the same FIFO, so
-	// reaching it proves no upload_policy was queued before it.
-	for {
-		var env struct {
-			Type string `json:"type"`
-		}
-		var frame []byte
-		select {
-		case frame = <-send:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for emoji_update")
-		}
-		if err := json.Unmarshal(frame, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if env.Type == "upload_policy" {
-			t.Fatal("upload_policy sent after a failed policy read")
-		}
-		if env.Type == "emoji_update" {
-			break
-		}
-	}
 	if got := authOKFileTypes(t, hub, user); !slices.Equal(got.BlockedExtensions, []string{"bat"}) {
 		t.Errorf("auth_ok after a failed read = %+v, want the earlier blocked list", got)
+	}
+
+	// The next save that reads cleanly is the first upload_policy the
+	// client sees, so the failed one queued nothing.
+	saved.set(storage.FileTypePolicy{Blocked: []string{"exe"}}, nil)
+	hub.BroadcastUploadPolicy()
+	raw, err := json.Marshal(drainForMsgType(t, send, "upload_policy")["payload"])
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if got := string(raw); got != `{"allowed_extensions":[],"blocked_extensions":["exe"]}` {
+		t.Errorf("first upload_policy = %s, want the later clean save", got)
+	}
+}
+
+// upload_policy is a snapshot auth_ok already carries, so it is never
+// sequenced: a resume must not replay an older one over the current lists.
+func TestBroadcastUploadPolicy_IsNotSequenced(t *testing.T) {
+	saved := &savedFileTypes{policy: storage.FileTypePolicy{Blocked: []string{"bat"}}}
+	hub, database := uploadPolicyHub(t, saved)
+	user := seedServeUser(t, database, "policy-unsequenced")
+	send := make(chan []byte, 16)
+	client := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(client)
+	waitRegistered(t, hub, client)
+
+	hub.BroadcastUploadPolicy()
+	if seq, ok := drainForMsgType(t, send, "upload_policy")["seq"]; ok {
+		t.Errorf("upload_policy carries seq %v, want none", seq)
 	}
 }

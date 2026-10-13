@@ -94,15 +94,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                |
-| ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                    |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `upload_policy`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                                                               |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                 |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                              |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                        |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                 |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                               |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                 |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -1289,7 +1289,6 @@ reconnect; auth_ok carries the same lists from then on.
 
 ```json
 {
-  "seq": 75,
   "type": "upload_policy",
   "payload": {
     "blocked_extensions": [],
@@ -1302,6 +1301,11 @@ Both fields are always arrays, `[]` when emptied, and replace the lists
 auth_ok gave; `max_upload_bytes` and `thumbnails` keep their auth_ok values.
 Two empty lists allow every extension, though the content blocks still refuse
 executables. Unfiltered: the lists are already in every client's auth_ok.
+
+Unsequenced and never replayed: auth_ok carries the current lists on every
+connect and resume, so a replayed older frame could only overwrite them. A
+client whose send queue is full is disconnected instead, and its next auth_ok
+carries the current lists.
 
 ### user_update (Server -> Client, broadcast)
 
@@ -2343,7 +2347,7 @@ tables below add per-type behavioral notes.
 | `member_ban`          | Yes      | All clients                                                             |
 | `roles_update`        | Yes      | All clients (full role list)                                            |
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
-| `upload_policy`       | Yes      | All clients (both upload file-type lists)                               |
+| `upload_policy`       | No       | All clients (both upload file-type lists)                               |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
 | `dm_request`          | No       | Direct to recipient (B5-6)                                              |
