@@ -1,22 +1,20 @@
 # Migration reversals
 
-The hand-run reversal of every migration the B4 phase added, and every one
-since (B5-2's `044` is the first), and the order to run them in. `rollback.go` is the same list for the rehearsal that tests them.
+This folder is for server owners who need to undo a database migration by
+hand. It holds one reversal script for every migration from `032` onwards, and
+the order to run them in. `rollback.go` holds the same list for the automated
+rehearsal that tests them.
 
-`045_push_subscriptions` is B5-4's, `046_message_requests` is B5-6's,
-`047_nsfw_acknowledgements` is B5-7's, `048_reports` is B5-8's,
-`049_moderation_actions` is B5-9's, `050_appeals` is B5-10's and
-`052_report_source_nsfw` is the B5-7/B5-8 evidence-consent follow-up's,
-`053_retention_revision` is RI-08's and `055_invite_redemptions` is O1's — see
-the cost table below.
+**Read this first.** Migrations only go forward: the server applies them and
+never undoes them. Undoing one is something you do yourself, with these files,
+against a stopped server, after taking a backup. For a normal rollback after a
+bad upgrade, use the archive procedure in
+[Rolling back](../../docs/deployment.md#rolling-back) instead.
 
-Migrations here are **forward-only**: the server applies them and never
-un-applies them. Rolling one back is an operator action — these files are what
-that operator runs, against a database no server is holding open, after taking
-a backup. They were written with their migrations rather than improvised during
-an incident, and `TestMigrationRollbackRehearsalOnAlphaSnapshot`
-(`Server/db/rollback_rehearsal_test.go`) rehearses the whole set on a copy of
-the committed alpha snapshot on every CI run.
+The scripts were written together with their migrations, not made up during
+an incident. `TestMigrationRollbackRehearsalOnAlphaSnapshot`
+(`Server/db/rollback_rehearsal_test.go`) runs the whole set on a copy of the
+committed test database on every CI run.
 
 ## Running one
 
@@ -28,82 +26,90 @@ test -f "$DB" || { echo "no database at $DB" >&2; exit 1; }
   sqlite3 -bail "$DB"
 ```
 
-Every part of that command is load-bearing:
+Steps:
 
-- **The path is the configured one, and it is checked first.** `sqlite3`
-  creates the database when the file does not exist, so a wrong path does not
-  fail — it reverses a brand-new empty database, reports success, and leaves
-  the live one untouched. `data/chatserver.db` is only the shipped default
-  (`Server/config/config.go`, `Database.Path`); read your own `database.path`
-  rather than trusting it.
-- **`-bail` stops at the first error.** Without it the CLI prints the error
-  and carries on to the rest of the file, including the `schema_versions`
-  delete at the end — clearing the tracker for a reversal that did not finish,
-  so the next start would re-apply the migration onto a half-reversed schema.
-- **The wrapping transaction makes the file all-or-nothing.** Fed on stdin the
-  CLI otherwise commits each statement as it reads it, so a failure halfway
-  through leaves the earlier drops committed. No reversal here contains
-  transaction control of its own, precisely so this wrapping is valid, and
-  `TestReversalFilesAreOperatorSafe` keeps it that way — as it keeps the
-  `schema_versions` delete last, so an aborted run cannot clear the tracker
-  before the schema change lands.
+1. Stop the server.
+2. Take a backup.
+3. Set `DB` to your server's `database.path`, and run the command above once
+   per reversal, newest first.
+4. Start the server version that matches the schema you went back to.
 
-Newest first, and contiguous: to get from 043 back to 040 run 043, 042, 041,
-040 in that order. Skipping one in the middle is not a supported state.
+Every part of the command matters:
 
-Two rules the files themselves enforce, and one they cannot:
+- **Use your configured path, and check it first.** `sqlite3` creates a new
+  database when the file does not exist. So a wrong path does not fail. It
+  reverses a brand-new empty database, reports success, and leaves the live
+  one untouched. `data/chatserver.db` is only the default
+  (`Server/config/config.go`, `Database.Path`). Read your own `database.path`.
+- **`-bail` stops at the first error.** Without it, `sqlite3` prints the error
+  and carries on. It would then run the `schema_versions` delete at the end of
+  the file, for a reversal that did not finish. The next start would re-apply
+  the migration onto a half-reversed schema.
+- **The `BEGIN;` / `COMMIT;` wrapper makes each file all-or-nothing.**
+  Otherwise `sqlite3` saves each statement as it reads it, so a failure half-way
+  leaves the earlier changes saved. No file here has its own transaction
+  commands, so this wrapper is always valid. `TestReversalFilesAreOperatorSafe`
+  keeps it that way. It also keeps the `schema_versions` delete last, so a
+  failed run cannot clear the tracker before the schema change lands.
 
-- **Each reversal clears its own `schema_versions` row.** That is how the next
-  server start knows to apply the migration again. A reversal run without it
-  leaves the database claiming a schema it does not have.
-- **Order is not cosmetic.** A reversal that drops a column runs before the one
-  that drops the table holding it, and `042` moves its audit tokens back into
-  `subject_token` before `041` drops the column they are sitting in.
-- **The server must be stopped.** Nothing here takes the writer lock the server
-  holds, and a reversal that half-applies while the server is running against
-  the new schema is the one failure mode these files cannot protect against.
+**Run them newest first, with no gaps.** To get from 043 back to 040, run 043,
+042, 041, then 040. Skipping one in the middle is not supported.
+
+Three rules. The files enforce the first two. You must follow the third:
+
+- **Each reversal clears its own `schema_versions` row.** That tells the next
+  server start to apply the migration again. Without it, the database would
+  claim a schema it does not have.
+- **Order matters.** A reversal that drops a column runs before the one that
+  drops its table. `042` moves its audit tokens back into `subject_token`
+  before `041` drops the column they are in.
+- **The server must be stopped.** Nothing here takes the server's write lock.
+  A reversal that half-applies while the server is running is the one failure
+  these files cannot protect against.
 
 ## What each one costs
 
-Reversing a schema change is cheap. Reversing what the migration made possible
-is usually not, and every file says so in its own comment. The ones worth
-knowing before you start:
+Undoing a schema change is cheap. Undoing what the migration made possible
+usually is not. Each file explains its own cost in a comment. These are the
+ones to know before you start. A reversal not listed here has no cost worth
+noting beyond its schema change.
 
-| Reversal                             | What it costs                                                                                                                                                                                                                                                                                                                            |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `059_gif_favorites`                  | Every user loses their saved GIF favorites; they are provider URLs only, but the list cannot be reconstructed.                                                                                                                                                                                                                           |
-| `058_revoke_trust_for_blocked_pairs` | Nothing comes back: the standing trust it deleted for currently blocked pairs is not restored by reversing it. After an unblock the sender is not trusted again until the recipient trusts them by hand or accepts their next request.                                                                                                   |
-| `055_invite_redemptions`             | The redemption history is lost: an owner can no longer see who redeemed an invite. `invites.use_count` and the legacy `redeemed_by` are untouched, so every existing invite keeps working and every use count is unchanged.                                                                                                              |
-| `053_retention_revision`             | Removes retention revision tracking and its triggers. Existing retention settings and message history remain intact. Preview tokens must be obtained again after restarting or reapplying the migration.                                                                                                                                 |
-| `052_report_source_nsfw`             | Reports forget whether their source channel was ever labelled NSFW. Run it only with a server build from before 052 — the evidence gate reads the column — and a later re-apply backfills from current labels, so a report whose labelled channel was deleted in between comes back as unknown and stays withheld.                       |
-| `051_message_delivery_receipts`      | Loses retry memory. Recovered pending drafts require deliberate review against existing history before resending; retry deduplication cannot cover a database rollback. Existing messages remain intact.                                                                                                                                 |
-| `050_appeals`                        | Every open appeal is lost outright, and with every decided one goes the `UNIQUE(action_id)` memory that forbids re-appealing — an action already decided once can be appealed again after this table is dropped and later re-created, because nothing recorded that it ever was.                                                         |
-| `049_moderation_actions`             | Every warning, timeout, and the ledger rows ban/kick/removal recorded alongside their existing mechanisms are gone. Active timeouts stop being enforced immediately (nowhere left to read `expires_at` from); unacknowledged warnings are lost outright. Bans and kicked-out sessions are unaffected — their state lives elsewhere.      |
-| `048_reports`                        | The report queue and every outcome row are gone — including the unlinkable ones decision 7 keeps after a subject erases. A report about an account that has since erased carries the last durable trace that the report ever happened; dropping the table drops that trace too. Also revokes `MODERATE_MEMBERS` from the Moderator role. |
-| `047_nsfw_acknowledgements`          | Every stored acknowledgement is gone. Nobody's consent history is reconstructable, so every member re-acknowledges every labelled channel on their next read — a one-time annoyance, not data loss of anything the product treats as durable content.                                                                                    |
-| `046_message_requests`               | Every pending request and every ignored/deleted/blocked decision the recipient made is lost, and a later re-apply's grandfathering backfill collapses the `sent_first`/`accepted`/`grandfathered` distinction on standing trust to just "trust exists" — see the reversal's own comment.                                                 |
-| `045_push_subscriptions`             | Every stored Web Push subscription is gone. Nothing was dispatching to them yet (B5-4 is storage-only), so no delivery in flight is lost — every device just has to re-subscribe.                                                                                                                                                        |
-| `043_setup_completed`                | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup").                                                                                                      |
-| `042` + `041` (audit tokens)         | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                                                                                                                              |
-| `039_retention`                      | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                                                                                                                           |
-| `037_erasure_jobs`                   | An erasure that had not finished its file half loses the journal listing the files still to remove. Reconcile storage by hand afterwards.                                                                                                                                                                                                |
-| `036` / `035` (recovery)             | Every issued credential and every enrolled kit stops working. Tell the people holding them first.                                                                                                                                                                                                                                        |
-| `034_registration_modes`             | `approval` and `open` have no boolean spelling, so the mode becomes closed. Accounts awaiting approval become ordinary accounts that can sign in — settle them first.                                                                                                                                                                    |
-| `032_second_factor_state`            | Emergency recovery codes are invalidated, in-flight logins and enrolments dropped.                                                                                                                                                                                                                                                       |
-| `markers.down.sql`                   | Forfeits the anti-resurrection guarantee for every erasure so far: a restore of an older backup brings erased subjects back with nothing to stop them. Record it in the audit log first.                                                                                                                                                 |
+| Reversal                             | What it costs                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `059_gif_favorites`                  | Every user loses their saved GIF favorites; they are provider URLs only, but the list cannot be reconstructed.                                                                                                                                                                                                                      |
+| `058_revoke_trust_for_blocked_pairs` | Nothing comes back: the standing trust it deleted for currently blocked pairs is not restored by reversing it. After an unblock the sender is not trusted again until the recipient trusts them by hand or accepts their next request.                                                                                              |
+| `055_invite_redemptions`             | The redemption history is lost: an owner can no longer see who redeemed an invite. `invites.use_count` and the legacy `redeemed_by` are untouched, so every existing invite keeps working and every use count is unchanged.                                                                                                         |
+| `053_retention_revision`             | Removes retention revision tracking and its triggers. Existing retention settings and message history remain intact. Preview tokens must be obtained again after restarting or reapplying the migration.                                                                                                                            |
+| `052_report_source_nsfw`             | Reports forget whether their source channel was ever labelled NSFW. Run it only with a server build from before 052 — the evidence gate reads the column — and a later re-apply backfills from current labels, so a report whose labelled channel was deleted in between comes back as unknown and stays withheld.                  |
+| `051_message_delivery_receipts`      | Loses retry memory. Recovered pending drafts require deliberate review against existing history before resending; retry deduplication cannot cover a database rollback. Existing messages remain intact.                                                                                                                            |
+| `050_appeals`                        | Every open appeal is lost outright, and with every decided one goes the `UNIQUE(action_id)` memory that forbids re-appealing — an action already decided once can be appealed again after this table is dropped and later re-created, because nothing recorded that it ever was.                                                    |
+| `049_moderation_actions`             | Every warning, timeout, and the ledger rows ban/kick/removal recorded alongside their existing mechanisms are gone. Active timeouts stop being enforced immediately (nowhere left to read `expires_at` from); unacknowledged warnings are lost outright. Bans and kicked-out sessions are unaffected — their state lives elsewhere. |
+| `048_reports`                        | The report queue and every outcome row are gone — including the unlinkable ones kept after a subject erases. A report about an account that has since erased carries the last durable trace that the report ever happened; dropping the table drops that trace too. Also revokes `MODERATE_MEMBERS` from the Moderator role.        |
+| `047_nsfw_acknowledgements`          | Every stored acknowledgement is gone. Nobody's consent history is reconstructable, so every member re-acknowledges every labelled channel on their next read — a one-time annoyance, not data loss of anything the product treats as durable content.                                                                               |
+| `046_message_requests`               | Every pending request and every ignored/deleted/blocked decision the recipient made is lost, and a later re-apply's grandfathering backfill collapses the `sent_first`/`accepted`/`grandfathered` distinction on standing trust to just "trust exists" — see the reversal's own comment.                                            |
+| `045_push_subscriptions`             | Every stored Web Push subscription is gone. Nothing in flight is lost — every device just has to re-subscribe.                                                                                                                                                                                                                      |
+| `043_setup_completed`                | First-run setup goes back to being gated on "no users exist". On a server whose users table an erasure emptied, the unauthenticated wizard is open again — narrow the setup networks first (`docs/security.md`, "First-run setup").                                                                                                 |
+| `042` + `041` (audit tokens)         | An audit row naming two erased principals keeps one token, not both. Run 042 before 041 or lose the actor's token entirely.                                                                                                                                                                                                         |
+| `039_retention`                      | Nothing deleted by an earlier sweep comes back. A sweep whose replay purge had not finished loses its journal.                                                                                                                                                                                                                      |
+| `037_erasure_jobs`                   | An erasure that had not finished its file half loses the journal listing the files still to remove. Reconcile storage by hand afterwards.                                                                                                                                                                                           |
+| `036` / `035` (recovery)             | Every issued credential and every enrolled kit stops working. Tell the people holding them first.                                                                                                                                                                                                                                   |
+| `034_registration_modes`             | `approval` and `open` have no boolean spelling, so the mode becomes closed. Accounts awaiting approval become ordinary accounts that can sign in — settle them first.                                                                                                                                                               |
+| `032_second_factor_state`            | Emergency recovery codes are invalidated, in-flight logins and enrolments dropped.                                                                                                                                                                                                                                                  |
+| `markers.down.sql`                   | Forfeits the anti-resurrection guarantee for every erasure so far: a restore of an older backup brings erased subjects back with nothing to stop them. Record it in the audit log first.                                                                                                                                            |
 
-`markers.down.sql` is the odd one out: the deletion-marker file carries its own
-schema, applied on every open by `Server/db/markers.go`, so it is not a
-migration, has no `schema_versions` row to clear, and runs against
-`data/erasure/markers.sqlite` rather than the database.
+`markers.down.sql` is different from the others. The deletion-marker file has
+its own schema, applied each time it is opened by `Server/db/markers.go`. So
+it is not a migration and has no `schema_versions` row to clear. Run it
+against `data/erasure/markers.sqlite`, not the main database.
 
 ## Adding one
 
-A new migration lands with its reversal in the same PR. The rehearsal fails
-otherwise — it asserts that every migration past the snapshot's level has a
-reversal, and that the full set round-trips the snapshot's schema,
-`schema_versions`, settings and row counts exactly.
+For contributors: a new migration must land with its reversal in the same
+pull request. The rehearsal test fails otherwise. It checks that every
+migration newer than the test database has a reversal. It also checks that
+running all of them returns the test database's schema, `schema_versions`,
+settings and row counts exactly.
 
-The four B4 data contracts drafted their reversals before their migrations
-landed (`docs/plans/hp-4-drafts/`, HP-4 question 2). Those drafts are the
-historical record of the design; the files here are what runs.
+The first reversals were drafted before their migrations, in
+`docs/plans/hp-4-drafts/`. Those drafts are the design record. The files here
+are what runs.
