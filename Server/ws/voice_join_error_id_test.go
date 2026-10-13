@@ -107,7 +107,7 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 		hub.HandleMessageForTest(c1, voiceJoinFrame(t, "req-first", vcID))
 		drainChanTimeout(send1, 100*time.Millisecond)
 
-		user2 := seedCoverageOwner(t, database, "vjid-full-u2")
+		user2 := seedVoiceMember(t, database, "vjid-full-u2")
 		send2 := make(chan []byte, 64)
 		c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 		hub.Register(c2)

@@ -418,7 +418,7 @@ func TestHandleVoiceJoin_ChannelFull(t *testing.T) {
 	hub.HandleMessageForTest(c1, raw)
 	drainChanTimeout(send1, 100*time.Millisecond)
 
-	user2 := seedCoverageOwner(t, database, "vj-full-u2")
+	user2 := seedVoiceMember(t, database, "vj-full-u2")
 	send2 := make(chan []byte, 64)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
