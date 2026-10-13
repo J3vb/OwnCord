@@ -1187,6 +1187,71 @@ describe("AudioElements", () => {
       expect(FakeAudioContext.instances[0]!.setSinkId).toHaveBeenCalledWith("");
     });
 
+    it("keeps boosted voice on its element while the context cannot reach the chosen output", async () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      vi.stubGlobal(
+        "AudioContext",
+        class extends FakeAudioContext {
+          override setSinkId = vi.fn(async () => {
+            throw new Error("no such device");
+          });
+        },
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+
+      // The switch is still pending: the element plays, at most 100%.
+      expect(ctx.gains).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+      expect(audioEl.muted).toBe(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(ctx.gains).toHaveLength(0);
+    });
+
+    it("moves boosted voice onto its gain node once the chosen output is set", async () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      const ctx = FakeAudioContext.instances[0]!;
+      expect(ctx.gains).toHaveLength(0);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(ctx.gains).toHaveLength(1);
+      expect(ctx.gains[0]!.gain.value).toBe(1.5);
+      expect(audioEl.muted).toBe(true);
+    });
+
+    it("never boosts on a context that cannot change output while another one is chosen", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) => {
+        if (key === "audioOutputDevice") return "headset-1";
+        return key === "userVolume_42" ? 150 : def;
+      });
+      vi.stubGlobal(
+        "AudioContext",
+        class extends FakeAudioContext {
+          override setSinkId = undefined as unknown as FakeAudioContext["setSinkId"];
+        },
+      );
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      subscribe(participant);
+
+      expect(FakeAudioContext.instances[0]!.gains).toHaveLength(0);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
+    });
+
     it("caps user 200% × output 200% at a gain of 2", () => {
       const participant = webParticipant("user-42");
       elements.setRoom(makeRoom([participant]) as any);

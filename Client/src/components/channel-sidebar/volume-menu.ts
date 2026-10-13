@@ -95,6 +95,7 @@ export function showUserVolumeMenu(
   menu.appendChild(sep);
 
   const currentVol = getUserVolume(userId);
+  const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
   const volLabel = createElement(
     "div",
     {
@@ -131,26 +132,29 @@ export function showUserVolumeMenu(
     setText(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
     // Raising the level unmutes, as the tile slider does.
-    if (val > 0 && getUserLocalMute(userId)) {
-      setUserLocalMute(userId, false);
-      renderMute(false);
-    }
+    if (val > 0 && getUserLocalMute(userId)) setUserLocalMute(userId, false);
+    renderMute(isSilenced());
   });
 
   appendChildren(sliderRow, slider, valLabel);
   menu.appendChild(sliderRow);
 
-  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
-  resetBtn.addEventListener("click", () => {
-    setUserVolume(userId, 100);
+  const showFullVolume = (): void => {
     slider.value = "100";
     setText(valLabel, "100%");
     setText(volLabel, t("volume.resetFull"));
+  };
+  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
+  resetBtn.addEventListener("click", () => {
+    setUserVolume(userId, 100);
+    showFullVolume();
+    renderMute(isSilenced());
   });
   menu.appendChild(resetBtn);
 
   // Local Mute: silences this user for you only and keeps the slider's level,
-  // so unchecking it brings that level back. The menu stays open.
+  // so unchecking it brings that level back. A level of 0 reads as muted too,
+  // and unchecking it restores 100%, as the tile mute does. The menu stays open.
   const muteItem = createMenuItem(t("volume.mute"), "context-menu-item");
   muteItem.setAttribute("role", "menuitemcheckbox");
   muteItem.setAttribute("data-action", "local-mute");
@@ -166,11 +170,18 @@ export function showUserVolumeMenu(
     muteItem.setAttribute("aria-checked", String(muted));
     muteCheck.style.visibility = muted ? "visible" : "hidden";
   };
-  renderMute(getUserLocalMute(userId));
+  renderMute(isSilenced());
   muteItem.addEventListener("click", () => {
-    const next = !getUserLocalMute(userId);
-    setUserLocalMute(userId, next);
-    renderMute(next);
+    if (!isSilenced()) {
+      setUserLocalMute(userId, true);
+    } else {
+      setUserLocalMute(userId, false);
+      if (getUserVolume(userId) === 0) {
+        setUserVolume(userId, 100);
+        showFullVolume();
+      }
+    }
+    renderMute(isSilenced());
   });
   menu.appendChild(muteItem);
 

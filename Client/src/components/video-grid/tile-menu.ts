@@ -13,6 +13,7 @@ import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
   getUserLocalMute,
+  setUserLocalMute,
   getUserVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
@@ -133,6 +134,8 @@ export function showTileMenu(opts: TileMenuOptions): void {
       getUserVolume(id),
       (v) => {
         setUserVolume(id, v);
+        // Raising the level unmutes, as the sidebar and tile sliders do.
+        if (v > 0 && getUserLocalMute(id)) setUserLocalMute(id, false);
         opts.onVolumeChange(false, v, v === 0 || getUserLocalMute(id));
       },
     ),

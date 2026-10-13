@@ -139,6 +139,12 @@ export class AudioElements {
    *  a gain above 1 is needed in a web room and closed on leave, so a call
    *  nobody boosts never opens one. */
   private audioCtx: SinkableContext | null = null;
+  /** False while the context is not yet, or cannot be, on the output the
+   *  elements use; boosted voice then stays on its element at 100% rather
+   *  than play on another device. */
+  private sinkReady = true;
+  /** Bumped per sink switch, so only the latest switch's outcome counts. */
+  private sinkRequest = 0;
   /** Gain graphs keyed by track SID. */
   private micGraphs = new Map<string, MicGraph>();
   /** Every subscribed remote voice track, so a gain crossing 1 or a context
@@ -219,19 +225,53 @@ export class AudioElements {
     if (ctx.state !== "running") {
       for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid, true);
     }
+    this.reapplyMicGains();
+  }
+
+  private reapplyMicGains(): void {
     const users = new Set<number>();
     for (const t of this.micTracks.values()) users.add(t.userId);
     for (const userId of users) this.applyGainOf(userId, this.getEffectiveVolume(userId));
   }
 
+  /** Not ready hands the boosted tracks back to their elements; ready again
+   *  (always async, after a sink switch) moves them back onto gain nodes. */
+  private setSinkReady(ready: boolean): void {
+    if (this.sinkReady === ready) return;
+    this.sinkReady = ready;
+    if (ready) {
+      this.reapplyMicGains();
+      return;
+    }
+    const users = new Set<number>();
+    for (const [sid, graph] of this.micGraphs) {
+      this.dropMicGraph(sid, true);
+      users.add(graph.userId);
+    }
+    for (const userId of users) this.applyGainOf(userId, this.getEffectiveVolume(userId));
+  }
+
   private setContextSink(deviceId: string): void {
     const ctx = this.audioCtx;
-    if (ctx === null || typeof ctx.setSinkId !== "function") return;
+    if (ctx === null) return;
     // Web Audio has no "default" device id; the empty string is the default.
     const sinkId = deviceId === "default" ? "" : deviceId;
-    ctx.setSinkId(sinkId).catch((err) => {
-      log.warn("Failed to set output device on the voice audio context", err);
-    });
+    const request = ++this.sinkRequest;
+    if (typeof ctx.setSinkId !== "function") {
+      this.setSinkReady(sinkId === "");
+      return;
+    }
+    // The default output is where a context without a sink plays anyway.
+    this.setSinkReady(sinkId === "");
+    ctx.setSinkId(sinkId).then(
+      () => {
+        if (request === this.sinkRequest && this.audioCtx === ctx) this.setSinkReady(true);
+      },
+      (err: unknown) => {
+        log.warn("Failed to set output device on the voice audio context", err);
+        if (request === this.sinkRequest && this.audioCtx === ctx) this.setSinkReady(false);
+      },
+    );
   }
 
   /** Callers have already removed the tracks' elements (cleanup or a
@@ -241,6 +281,8 @@ export class AudioElements {
     this.micTracks.clear();
     const ctx = this.audioCtx;
     this.audioCtx = null;
+    this.sinkReady = true;
+    this.sinkRequest++;
     if (ctx !== null) {
       ctx.close().catch((err) => log.warn("AudioContext close failed", err));
     }
@@ -256,7 +298,7 @@ export class AudioElements {
     audioEl: HTMLAudioElement,
   ): MicGraph | null {
     const ctx = this.ensureAudioContext();
-    if (ctx === null) return null;
+    if (ctx === null || !this.sinkReady) return null;
     if (ctx.state !== "running") {
       ctx.resume().catch((err) => log.warn("AudioContext resume failed", err));
       return null;

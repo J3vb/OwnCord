@@ -39,9 +39,14 @@ function itemTexts(): string[] {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  setUserVolume.mockReset();
+  // The setters write what the getters read back, as the real prefs do.
+  setUserVolume.mockReset().mockImplementation((_id: unknown, v: unknown) => {
+    getUserVolume.mockReturnValue(v);
+  });
   getUserVolume.mockReset().mockReturnValue(100);
-  setUserLocalMute.mockReset();
+  setUserLocalMute.mockReset().mockImplementation((_id: unknown, muted: unknown) => {
+    getUserLocalMute.mockReturnValue(muted as boolean);
+  });
   getUserLocalMute.mockReset().mockReturnValue(false);
   document.body.innerHTML = "";
 });
@@ -174,13 +179,11 @@ describe("local Mute (WP 1D-5)", () => {
     getUserVolume.mockReturnValue(150);
     showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
 
-    getUserLocalMute.mockReturnValue(false);
     muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(setUserLocalMute).toHaveBeenLastCalledWith(7, true);
     expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
     expect(menuEl()).not.toBeNull();
 
-    getUserLocalMute.mockReturnValue(true);
     muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(setUserLocalMute).toHaveBeenLastCalledWith(7, false);
     expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
@@ -197,6 +200,26 @@ describe("local Mute (WP 1D-5)", () => {
     expect(setUserVolume).toHaveBeenCalledWith(7, 120);
     expect(setUserLocalMute).toHaveBeenCalledWith(7, false);
     expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("a user at 0% opens checked, and unchecking restores 100%", () => {
+    getUserVolume.mockReturnValue(0);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(setUserVolume).toHaveBeenCalledWith(7, 100);
+    expect(sliderEl()?.value).toBe("100");
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("dragging the slider to 0 checks the Mute", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    const slider = sliderEl()!;
+    slider.value = "0";
+    slider.dispatchEvent(new Event("input"));
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
   });
 
   it("opens checked for a user already muted", () => {

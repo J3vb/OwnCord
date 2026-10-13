@@ -1291,6 +1291,25 @@ describe("VideoGrid", () => {
       menu.remove();
     });
 
+    it("raising the menu's voice slider clears that user's Mute", async () => {
+      mockGetUserLocalMute.mockReturnValue(true);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await vi.dynamicImportSettled();
+
+      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
+      voice.value = "120";
+      voice.dispatchEvent(new Event("input"));
+
+      expect(mockSetUserVolume).toHaveBeenCalledWith(2, 120);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(2, false);
+      mockGetUserLocalMute.mockReturnValue(false);
+      menu.remove();
+    });
+
     it("Unmute stream in the menu brings a stream muted at 0 back at 100%", async () => {
       mockGetScreenshareAudioMuted.mockReturnValue(true);
       mockGetScreenshareAudioVolume.mockReturnValue(0);
