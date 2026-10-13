@@ -178,6 +178,57 @@ describe("MessageInput upload in flight across a channel switch", () => {
     next.destroy?.();
   });
 
+  it("keeps a stale chip whose refresh fails after a channel switch, and retries at Send", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let n = 0;
+      let failRefresh: (e: Error) => void = () => {};
+      const onUploadFile = vi.fn((file: File) => {
+        n += 1;
+        if (n === 2) {
+          return new Promise<UploadResult>((_res, rej) => {
+            failRefresh = rej;
+          });
+        }
+        return Promise.resolve({ id: `srv-${n}`, url: "/f", filename: file.name });
+      });
+      const opts = makeOptions({ onUploadFile });
+      const first = createMessageInput(opts);
+      first.mount(container);
+      queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+      await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+      vi.setSystemTime(Date.now() + 51 * 60 * 1000);
+      send(container);
+      expect(onUploadFile).toHaveBeenCalledTimes(2);
+      const draft = first.getDraft();
+      first.destroy?.();
+
+      const next = createMessageInput(opts);
+      next.mount(container);
+      next.restoreDraft(draft);
+      failRefresh(new Error("network down"));
+      await vi.waitFor(() =>
+        expect(container.querySelector(".attachment-upload-error")?.textContent).toMatch(
+          /network down/,
+        ),
+      );
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+      expect(container.querySelector(".uploading")).toBeNull();
+
+      send(container);
+      expect(opts.onSend).not.toHaveBeenCalled();
+      expect(onUploadFile).toHaveBeenCalledTimes(3);
+      await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+      vi.setSystemTime(Date.now() + 1000);
+      send(container);
+      expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-3"]);
+      next.destroy?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still cancels an in-flight upload on unmount when no draft took it", async () => {
     const up = controlledUpload();
     const comp = createMessageInput(makeOptions({ onUploadFile: up.fn }));

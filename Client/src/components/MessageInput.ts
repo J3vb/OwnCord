@@ -84,6 +84,9 @@ export interface DraftUpload {
   readonly fraction: number | null;
   /** The chip showing this upload sets this to drive its progress bar. */
   onProgress: ((fraction: number) => void) | null;
+  /** Set while this upload refreshes a stale chip: the chip's old id and
+   *  age, so a failed refresh keeps the chip even after a channel switch. */
+  refreshing: { readonly id: string; readonly uploadedAt: number } | null;
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -950,6 +953,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         return fraction;
       },
       onProgress: null,
+      refreshing: null,
       result,
     };
     return handle;
@@ -981,6 +985,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     handle.onProgress = (fraction) => (progressBar.value = fraction);
     /** Set when refreshing a stale chip; a failed refresh keeps the chip. */
     const staleUploadedAt = pending.uploadedAt;
+    if (staleUploadedAt !== undefined) {
+      handle.refreshing = { id: pending.id, uploadedAt: staleUploadedAt };
+    }
     pending.uploadedAt = undefined;
     // Removed preview (cancelled) or composer torn down (handed to a draft).
     const abandoned = (): boolean => handle.owner.signal.aborted || signal.aborted;
@@ -1575,11 +1582,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
       const pending: (typeof pendingAttachments)[number] = {
-        id: `pending-${++previewCounter}`,
+        id: handle.refreshing?.id ?? `pending-${++previewCounter}`,
         filename: handle.filename,
         previewEl: item,
         file: handle.file,
       };
+      if (handle.refreshing !== null) pending.uploadedAt = handle.refreshing.uploadedAt;
       pendingAttachments.push(pending);
       void followUpload(pending, handle);
     }
