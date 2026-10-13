@@ -2263,6 +2263,7 @@ describe("VoiceAudioTab mic test (WP 1D-4)", () => {
     button(el).click();
 
     expect(button(el).textContent).toBe("Stop Testing");
+    expect(button(el).getAttribute("aria-pressed")).toBe("true");
     expect(played).toHaveLength(1);
     const audio = played[0]!;
     expect(tracksOf(audio)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
@@ -2326,6 +2327,18 @@ describe("VoiceAudioTab mic test (WP 1D-4)", () => {
     el.querySelector<HTMLButtonElement>('[data-testid="input-mode-ptt"]')!.click();
     expect(gateOf(ctx).gain.value).toBe(1);
     expect(ctx.node("delay").delayTime.value).toBe(0);
+    ac.abort();
+  });
+
+  it.each([
+    ["a corrupt", '"loud"', 1],
+    ["a negative", "-20", 0],
+  ])("plays with %s saved output volume instead of failing", async (_label, saved, volume) => {
+    localStorage.setItem("owncord:settings:outputVolume", saved);
+    const { el, ac } = await mount();
+    button(el).click();
+    expect(played).toHaveLength(1);
+    expect(played[0]!.volume).toBe(volume);
     ac.abort();
   });
 

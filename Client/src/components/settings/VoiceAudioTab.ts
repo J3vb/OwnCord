@@ -55,6 +55,11 @@ function applyMicTestSink(el: HTMLAudioElement): void {
   });
 }
 
+/** Output Volume percent as an element volume; a corrupt pref plays at full. */
+function micTestVolume(percent: number): number {
+  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 1;
+}
+
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
 const MIC_NOISE_FLOOR = 0.005;
 /** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
@@ -317,7 +322,7 @@ function buildVoiceAudioTabInner(
   );
   const micTestButton = createElement(
     "button",
-    { class: "ac-btn", type: "button", "data-testid": "mic-test-button" },
+    { class: "ac-btn", type: "button", "aria-pressed": "false", "data-testid": "mic-test-button" },
     t("voiceAudio.micTest.start"),
   );
   micTestButton.disabled = nativeAudio;
@@ -440,7 +445,7 @@ function buildVoiceAudioTabInner(
     if (track === undefined) return;
     const el = document.createElement("audio");
     el.srcObject = new MediaStream([track]);
-    el.volume = Math.min(100, loadPref<number>("outputVolume", 100)) / 100;
+    el.volume = micTestVolume(loadPref<number>("outputVolume", 100));
     applyMicTestSink(el);
     micTestAudio = el;
     void el.play()?.catch((err: unknown) => {
@@ -466,6 +471,7 @@ function buildVoiceAudioTabInner(
         micTesting ? t("voiceAudio.micTest.stop") : t("voiceAudio.micTest.start"),
       );
       micTestButton.classList.toggle("secondary", micTesting);
+      micTestButton.setAttribute("aria-pressed", String(micTesting));
       if (!micTesting) stopMicTestPlayback();
       else if (meterProcessor !== null) startMicTestPlayback(meterProcessor);
     },
@@ -587,7 +593,7 @@ function buildVoiceAudioTabInner(
       const val = Number(outputVolumeSlider.value);
       setText(outputVolumeLabel, `${val}%`);
       setOutputVolume(val);
-      if (micTestAudio !== null) micTestAudio.volume = val / 100;
+      if (micTestAudio !== null) micTestAudio.volume = micTestVolume(val);
     },
     { signal },
   );
