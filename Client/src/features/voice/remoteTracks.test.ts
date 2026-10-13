@@ -166,7 +166,10 @@ describe("RemoteTracks", () => {
 
   describe("watch (opt-in watching)", () => {
     it("watches nothing until asked", () => {
-      const tracks = new RemoteTracks(() => null);
+      const tracks = new RemoteTracks(
+        () => null,
+        () => false,
+      );
       expect(tracks.isWatched(7, "camera")).toBe(false);
       expect(tracks.isWatched(7, "screenshare")).toBe(false);
     });
@@ -177,7 +180,10 @@ describe("RemoteTracks", () => {
         "screen_share",
         "screen_share_audio",
       ]);
-      const tracks = new RemoteTracks(() => room);
+      const tracks = new RemoteTracks(
+        () => room,
+        () => false,
+      );
 
       tracks.watch(7, "screenshare", true);
       expect(tracks.isWatched(7, "screenshare")).toBe(true);
@@ -225,6 +231,71 @@ describe("RemoteTracks", () => {
       tracks.watch(7, "screenshare", true);
       tracks.dropUnpublishedWatches();
       expect(tracks.isWatched(7, "screenshare")).toBe(false);
+    });
+
+    it("auto-plays a camera by default; a screen share stays opt-in (WP 1B-3)", () => {
+      const tracks = new RemoteTracks(() => null);
+      expect(tracks.isWatched(7, "camera")).toBe(true);
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+    });
+
+    it("Stop watching a camera unsubscribes it and keeps it stopped until leave", () => {
+      const { room, pub } = roomWithSources("user-7", ["camera"]);
+      const tracks = new RemoteTracks(
+        () => room,
+        () => true,
+      );
+      tracks.watch(7, "camera", false);
+      expect(pub("camera")).toHaveBeenLastCalledWith(false);
+      expect(tracks.isWatched(7, "camera")).toBe(false);
+
+      tracks.forgetWatch(7, "camera");
+      tracks.dropUnpublishedWatches();
+      expect(tracks.isWatched(7, "camera")).toBe(false);
+
+      tracks.clearWatched();
+      expect(tracks.isWatched(7, "camera")).toBe(true);
+    });
+
+    it("Watch after Stop plays the camera again", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => true,
+      );
+      tracks.watch(7, "camera", false);
+      tracks.watch(7, "camera", true);
+      expect(tracks.isWatched(7, "camera")).toBe(true);
+    });
+
+    it("forgetWatch never stops an auto-played camera", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => true,
+      );
+      tracks.forgetWatch(7, "camera");
+      expect(tracks.isWatched(7, "camera")).toBe(true);
+    });
+
+    it("forgetWatch unwatches a screen share and its audio", () => {
+      const { room, pub } = roomWithSources("user-7", ["screen_share", "screen_share_audio"]);
+      const tracks = new RemoteTracks(() => room);
+      tracks.watch(7, "screenshare", true);
+      tracks.forgetWatch(7, "screenshare");
+      expect(tracks.isWatched(7, "screenshare")).toBe(false);
+      expect(pub("screen_share")).toHaveBeenLastCalledWith(false);
+      expect(pub("screen_share_audio")).toHaveBeenLastCalledWith(false);
+    });
+
+    it("with auto-play off, a camera is opt-in and forgetWatch drops its watch", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => false,
+      );
+      expect(tracks.isWatched(7, "camera")).toBe(false);
+      tracks.watch(7, "camera", true);
+      expect(tracks.isWatched(7, "camera")).toBe(true);
+      tracks.forgetWatch(7, "camera");
+      expect(tracks.isWatched(7, "camera")).toBe(false);
     });
 
     it("clearWatched forgets every watch", () => {

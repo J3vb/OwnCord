@@ -88,6 +88,9 @@ export interface VideoGridCallbacks {
   /** Opt-in watching: the viewer watches a remote stream, or stops. Nothing
    *  is received until they do. */
   readonly setStreamWatched?: (tileId: number, watched: boolean) => void;
+  /** The stream ended: drop its watch, which is not the viewer's Stop
+   *  watching (a stopped camera stays stopped). */
+  readonly forgetStreamWatch?: (tileId: number) => void;
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
@@ -1348,6 +1351,12 @@ export function createVideoGrid(): VideoGridComponent {
     return focusedTileId;
   }
 
+  /** A stream ended or its pending watch was dropped: not Stop watching. */
+  function forgetWatch(tileId: number): void {
+    if (callbacks.forgetStreamWatch !== undefined) callbacks.forgetStreamWatch(tileId);
+    else callbacks.setStreamWatched?.(tileId, false);
+  }
+
   /** Watch a remote stream or stop (opt-in watching): it is subscribed only
    *  while watched. */
   function setWatching(tileId: number, on: boolean): void {
@@ -1749,9 +1758,9 @@ export function createVideoGrid(): VideoGridComponent {
 
     entry.popout?.close();
     entry.mini?.close();
-    // The stream is gone: so is the watch (a new one starts unwatched).
+    // The stream is gone: so is the watch (a new one starts from the default).
     if (entry.config !== undefined && !entry.config.isSelf) {
-      callbacks.setStreamWatched?.(userId, false);
+      forgetWatch(userId);
     }
     if (entry.trackCleanup) {
       entry.trackCleanup();
@@ -1788,7 +1797,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  Deleting the current key mid-iteration is well-defined for Map — no
    *  entries are skipped — so this needs no snapshot copy of the keys. */
   function clearStreams(): void {
-    for (const id of pendingWatch) callbacks.setStreamWatched?.(id, false);
+    for (const id of pendingWatch) forgetWatch(id);
     pendingWatch.clear();
     for (const userId of cells.keys()) {
       removeStream(userId);

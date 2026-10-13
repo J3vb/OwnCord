@@ -1034,6 +1034,46 @@ describe("NativeRoom remote video", () => {
     vi.unstubAllGlobals();
   });
 
+  it("auto-played cameras (WP 1B-3): the backend's subscription is kept, and Stop watching drops it", async () => {
+    const room = createNativeRoom(audio);
+    // RemoteTracks' rule with auto-play on: a camera is watched unless stopped.
+    const stopped = new Set<number>();
+    const onRemoteVideo = vi.fn();
+    const handlers = createRoomEventHandlers({
+      isWatched: (uid: number, screen: boolean) => !screen && !stopped.has(uid),
+      getOnRemoteVideoCallback: () => onRemoteVideo,
+    } as unknown as RoomEventDeps);
+    room.on("trackPublished", (pub, p) => handlers.handleTrackPublished(pub as never, p as never));
+    room.on("trackSubscribed", (t, pub, p) =>
+      handlers.handleTrackSubscribed(t as never, pub as never, p as never),
+    );
+    await room.connect("u", "t");
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[]) {}
+      },
+    );
+
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(host.calls).not.toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    expect(host.renderers).toHaveLength(1);
+    expect(onRemoteVideo).toHaveBeenCalledTimes(1);
+    expect(onRemoteVideo.mock.calls[0]![1]).not.toBeNull();
+
+    stopped.add(2);
+    room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.setSubscribed(false);
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    vi.unstubAllGlobals();
+  });
+
   it("disposes every renderer on disconnect", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");

@@ -1076,10 +1076,24 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const settingRows = el.querySelectorAll(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test'])",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras'])",
     );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
+    ac.abort();
+  });
+
+  it("Automatically play cameras is on by default and saves its choice (WP 1B-3)", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const toggle = el.querySelector<HTMLElement>("[data-testid='auto-play-cameras'] .toggle")!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Automatically play cameras");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:autoPlayCameras")).toBe("false");
     ac.abort();
   });
 
@@ -1092,7 +1106,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Toggles are divs with class "toggle" (not buttons)
     const toggleDiv = el.querySelector(
-      ".setting-row:not([data-testid='auto-sensitivity']) .toggle",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']) .toggle",
     ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();

@@ -974,6 +974,11 @@ export class LiveKitSession {
     this._remoteTracks.watch(userId, type, on);
   }
 
+  /** A remote stream ended: drop its watch without counting as Stop watching. */
+  forgetRemoteVideoWatch(userId: number, type: "camera" | "screenshare"): void {
+    this._remoteTracks.forgetWatch(userId, type);
+  }
+
   getRoom(): Room | null {
     return this._room;
   }
@@ -1075,6 +1080,7 @@ export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(se
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
+export const forgetRemoteVideoWatch = session.forgetRemoteVideoWatch.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);

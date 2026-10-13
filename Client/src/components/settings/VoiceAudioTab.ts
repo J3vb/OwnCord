@@ -5,6 +5,7 @@
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
 import { createLogger } from "@lib/logger";
+import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
   switchOutputDevice,
@@ -711,6 +712,28 @@ function buildVoiceAudioTabInner(
   const defaultVideoOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   videoSelect.appendChild(defaultVideoOpt);
   cameraCard.append(videoHeader, videoSelect);
+
+  // Remote cameras play on their own; off, each one waits behind Watch stream.
+  const autoPlayRow = createElement("div", {
+    class: "setting-row",
+    "data-testid": "auto-play-cameras",
+  });
+  const autoPlayInfo = createElement("div", {});
+  appendChildren(
+    autoPlayInfo,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.autoPlayCameras")),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.autoPlayCamerasDesc")),
+  );
+  appendChildren(
+    autoPlayRow,
+    autoPlayInfo,
+    createToggle(autoPlayCameras(), {
+      signal,
+      label: t("voiceAudio.autoPlayCameras"),
+      onChange: (nowOn) => savePref(AUTO_PLAY_CAMERAS_PREF, nowOn),
+    }),
+  );
+  cameraCard.appendChild(autoPlayRow);
 
   // Camera preview
   const previewWrap = createElement("div", { class: "camera-preview" });
