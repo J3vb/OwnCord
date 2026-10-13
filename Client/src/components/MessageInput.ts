@@ -45,6 +45,9 @@ export interface MessageInputOptions {
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
   ) => Promise<{ id: string; url: string; filename: string }>;
+  /** Withdraw an upload that will never be sent, so its quota is free at
+   *  once. Best effort: a rejection is ignored. */
+  readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -761,7 +764,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function refreshStale(a: (typeof pendingAttachments)[number]): void {
     if (a.upload !== undefined || a.expired === true) return;
     if (a.file !== undefined) {
-      void runUpload(a, a.file);
+      // The old copy goes first, so a user near their quota has room for
+      // the new one. It is never sent again either way.
+      void runUpload(a, a.file, discard(a.id));
       return;
     }
     a.expired = true;
@@ -781,6 +786,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       },
       Math.max(0, a.uploadedAt + ATTACHMENT_TTL_MS - Date.now()),
     );
+  }
+
+  /** Withdraw a settled upload's server copy. The promise resolves when that
+   *  is done or has failed, never rejecting; undefined when nothing withdraws. */
+  function discard(id: string): Promise<void> | undefined {
+    return options.onDiscardUpload?.(id).catch(() => {});
   }
 
   function removePreviewItem(el: HTMLDivElement): void {
@@ -827,6 +838,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "click",
       (e) => {
         e.stopPropagation();
+        const att = pendingAttachments.find((a) => a.previewEl === item);
+        if (att !== undefined && att.upload === undefined && att.uploadedAt !== undefined) {
+          void discard(att.id);
+        }
         removePreviewItem(item);
       },
       { signal },
@@ -924,18 +939,27 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     await runUpload(pending, file);
   }
 
-  /** Start uploading `file`; the returned upload outlives any one chip. */
+  /** Start uploading `file`, after `before` when given; the returned upload
+   *  outlives any one chip. */
   function startUpload(
     upload: NonNullable<MessageInputOptions["onUploadFile"]>,
     file: File,
+    before?: Promise<void>,
   ): DraftUpload {
     const owner = new Disposable();
     let settledAt: number | undefined;
     let fraction: number | null = null;
-    const result = upload(file, owner.signal, (f) => {
+    const onProgress = (f: number): void => {
       fraction = f;
       handle.onProgress?.(f);
-    });
+    };
+    const result =
+      before === undefined
+        ? upload(file, owner.signal, onProgress)
+        : before.then(() => {
+            owner.signal.throwIfAborted();
+            return upload(file, owner.signal, onProgress);
+          });
     // Also keeps a rejection in a draft that is never restored from
     // surfacing as unhandled; whichever chip follows the upload reads it.
     result.then(
@@ -963,10 +987,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   async function runUpload(
     pending: (typeof pendingAttachments)[number],
     file: File,
+    before?: Promise<void>,
   ): Promise<void> {
     const upload = options.onUploadFile;
     if (upload === undefined) return;
-    await followUpload(pending, startUpload(upload, file));
+    await followUpload(pending, startUpload(upload, file, before));
   }
 
   /** Show `handle` on `pending`'s chip until it settles. */

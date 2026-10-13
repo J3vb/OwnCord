@@ -120,6 +120,8 @@ and only when it changes something a contributor or fork holder must do
 
 - The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
 - An attachment still uploading when you switched channels was cancelled and gone when you came back. It now keeps uploading and is still there.
+- An attachment left in the composer for over 50 minutes could be sent after the server had already deleted it. It is now uploaded again at Send, or marked expired when it can't be.
+- Removing an attachment from the composer now frees its space in your upload quota right away, and so does re-uploading an old one. Before, a user close to the limit had to wait for the server to clean up.
 
 ## v2.2.0-beta.3
 

@@ -316,6 +316,7 @@ type Store interface {
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
+	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
 	// IsMessageDeleted backs the tombstone half of attachment access; the
 	// avatar check backs the "public exactly while in use" half.

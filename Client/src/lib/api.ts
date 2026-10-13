@@ -1358,6 +1358,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       });
     },
 
+    /** Withdraw an upload that was never sent, freeing its quota now. */
+    discardUpload(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/uploads/${encodeURIComponent(id)}`, undefined, signal);
+    },
+
     // ── Invites ───────────────────────────────────────────
 
     getInvites(signal?: AbortSignal): Promise<InviteResponse[]> {
