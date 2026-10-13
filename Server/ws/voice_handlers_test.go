@@ -106,6 +106,20 @@ func seedVoiceOwner(t *testing.T, database *db.DB, username string) *db.User {
 	return user
 }
 
+// seedVoiceMember creates a user with the default Member role (id 4):
+// CONNECT_VOICE but no MUTE_MEMBERS, so the voice channel cap applies to them.
+func seedVoiceMember(t *testing.T, database *db.DB, username string) *db.User {
+	t.Helper()
+	if _, err := database.CreateUser(context.Background(), username, "hash", int(permissions.MemberRoleID)); err != nil {
+		t.Fatalf("seedVoiceMember CreateUser: %v", err)
+	}
+	user, err := database.GetUserByUsername(context.Background(), username)
+	if err != nil || user == nil {
+		t.Fatalf("seedVoiceMember GetUserByUsername: %v", err)
+	}
+	return user
+}
+
 // seedVoiceChan creates a voice-type channel.
 func seedVoiceChan(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
@@ -1061,7 +1075,7 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 		t.Fatalf("user1 voice state missing after join: %v", err)
 	}
 
-	user2 := seedVoiceOwner(t, database, "full-user2")
+	user2 := seedVoiceMember(t, database, "full-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
@@ -1124,7 +1138,7 @@ func TestVoice_Join_SwitchToFullChannel_KeepsOldCall(t *testing.T) {
 	drainChanTimeout(fillerSend, 30*time.Millisecond)
 
 	// The switcher is live in channel A.
-	switcher := seedVoiceOwner(t, database, "switchfull-user")
+	switcher := seedVoiceMember(t, database, "switchfull-user")
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, switcher, chanA, send)
 	hub.Register(c)
