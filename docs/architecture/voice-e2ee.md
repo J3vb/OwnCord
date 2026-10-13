@@ -70,8 +70,9 @@ plus the channel's user limit) and inside the LiveKit token itself, where
 who may moderate voice in that channel can join it even when it is full;
 everyone else gets `CHANNEL_FULL` (`Server/ws/voice_join_capacity.go`).
 
-**Unencrypted media is refused.** If LiveKit reports a remote track as not
-encrypted, the client never subscribes to it or plays it, and the call's
+**Unencrypted media is refused (webview voice path).** If LiveKit reports a
+remote track as not encrypted, the webview voice path never subscribes to it or
+plays it, and the call's
 security badge shows "Unsecured" for the rest of the session
 (`src/features/voice/mediaEncryption.ts`). A participant who republishes with
 encryption is subscribed again.

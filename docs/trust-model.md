@@ -641,8 +641,10 @@ broker; for its own updates, the installer download from GitHub release
 assets, under normal web-PKI validation (`tofu::HostScopedVerifier`), once the
 server's `client-update` endpoint has named it; and any URL
 a user posted, for link previews, through the broker. The C-09 contract above
-governs every broker fetch, and nothing is fetched from those hosts until the
-viewer has given the per-server consent described there.
+governs every broker fetch: nothing is fetched through the broker (YouTube,
+Klipy, link previews) until the viewer has given the per-server consent
+described there. The update download is not a broker fetch. It happens only
+after the user accepts an update, and that preference does not gate it.
 
 ## How this document is kept true
 

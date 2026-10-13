@@ -55,7 +55,7 @@ flowchart LR
     RTR --> UPS
     PLG -.->|"allowlisted HTTP only"| NET["external hosts"]
     UPD -->|"via connected server URL"| REL
-    server -->|"update check (admin action)"| REL
+    server -->|"update check (admin action or desktop client request)"| REL
 ```
 
 **What this shows.** Every connection from the client to its own server goes

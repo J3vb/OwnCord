@@ -159,8 +159,11 @@ erDiagram
 
 **Second factor and recovery.** Tables: `partial_auth_challenges`,
 `pending_totp_enrollments`, `totp_used_codes`, `totp_recovery_codes` (032),
-`recovery_kits` (035), `recovery_assists` (036). Recovery secrets are stored
-only as argon2id verifiers. See [trust-model.md](../trust-model.md), "Account
+`recovery_kits` (035), `recovery_assists` (036). Each table stores its secrets
+in its own way. Partial-auth tokens and used TOTP codes are SHA-256 digests.
+Pending enrolment secrets are AES-GCM ciphertext. Emergency TOTP recovery codes
+are bcrypt hashes. Only `recovery_kits` and `recovery_assists` use argon2id
+verifiers. See [trust-model.md](../trust-model.md), "Account
 recovery".
 
 **Messaging.** Tables: `channels`, `messages`, `attachments`, `reactions`,
