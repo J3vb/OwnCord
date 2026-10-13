@@ -914,6 +914,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.classList.add("uploading");
     const uploadOwner = new Disposable();
     pending.owner = uploadOwner;
+    /** Set when refreshing a stale chip; a failed refresh keeps the chip. */
+    const staleUploadedAt = pending.uploadedAt;
     pending.uploadedAt = undefined;
 
     // Upload in background
@@ -940,8 +942,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       // A user-cancelled upload (removed preview) is not a failure: the
       // preview is already gone and there is nothing to report.
       if (uploadOwner.signal.aborted) return;
-      // Upload failed — remove preview and show error
-      removePreviewItem(item);
+      if (staleUploadedAt !== undefined) {
+        // A failed refresh keeps the chip stale, so the next Send retries it
+        // and still never sends the old id.
+        pending.owner = undefined;
+        pending.uploadedAt = staleUploadedAt;
+        item.classList.remove("uploading");
+        progressBar.remove();
+      } else {
+        removePreviewItem(item);
+      }
       const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     }

@@ -96,6 +96,39 @@ describe("MessageInput staged attachment age limit", () => {
     comp.destroy?.();
   });
 
+  it("keeps a stale chip when its refresh fails, and retries the refresh at the next Send", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let n = 0;
+    const onUploadFile = vi.fn(async (file: File) => {
+      n += 1;
+      if (n === 2) throw new Error("network down");
+      return { id: `srv-${n}`, url: `/f/${n}`, filename: file.name };
+    });
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+    vi.setSystemTime(Date.now() + 51 * MIN);
+    send(container);
+    await vi.waitFor(() => expect(errorText(container)).toMatch(/network down/));
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+    expect(container.querySelector(".uploading")).toBeNull();
+
+    vi.setSystemTime(Date.now() + 1000);
+    send(container);
+    expect(opts.onSend).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    expect(onUploadFile).toHaveBeenCalledTimes(3);
+
+    vi.setSystemTime(Date.now() + 1000);
+    send(container);
+    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-3"]);
+    comp.destroy?.();
+  });
+
   it("sends a chip just under the limit unchanged", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const onUploadFile = uploader();
