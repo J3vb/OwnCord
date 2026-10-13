@@ -1649,9 +1649,9 @@ describe("LiveKitSession", () => {
 
     it("sweeps the existing participants' publications into the new room on reconnect", async () => {
       // Cameras opt-in, as before WP 1B-3.
-      onTestFinished(() =>
-        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal),
-      );
+      onTestFinished(() => {
+        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      });
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
         key === "autoPlayCameras" ? false : defaultVal,
       );
