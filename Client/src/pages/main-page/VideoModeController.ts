@@ -87,13 +87,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
    *  channel persist as dead MediaStreams and keep hasStreams() true
    *  forever (OC-0012). */
   let lastChannelId: number | null = null;
-  /** Set when the user explicitly dismisses the grid while local video is
-   *  still on (switching to a text channel). Without this, checkVideoMode()
-   *  re-opens the grid the moment any remote peer's camera/screenshare
-   *  toggles, since that re-invokes checkVideoMode() and localVideoOn is
-   *  still true. Cleared once local video actually goes off, or when the
-   *  grid is opened again through any other path. */
-  let userDismissedVideo = false;
   /** Where the grid slot lives in the chat column, to put it back after the
    *  DM call panel has hosted it. */
   let slotHome: { parent: Node; next: Node | null } | null = null;
@@ -144,7 +137,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   }
 
   function showVideoGrid(): void {
-    userDismissedVideo = false;
     videoGrid.hideMiniPlayer();
     if (videoMode) return;
     videoMode = true;
@@ -169,15 +161,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     peopleGiven = true;
   }
 
-  /** Close the grid without recording a dismissal. Used by the paths that
-   *  close it on the user's behalf (no streams left, left the channel,
-   *  teardown) — only an explicit showChat() is a dismissal. */
+  /** Close the grid. Used by the paths that close it on the user's behalf
+   *  (no streams left, left the channel, teardown) and by showChat(). */
   function closeVideoGrid(): void {
     if (!videoMode) return;
     videoMode = false;
     focusedTileId = null;
     // Clear the grid's own focus state too — otherwise it stays pinned to
-    // whatever tile was focused and the next auto-open (B5-15) reopens
+    // whatever tile was focused and the next open (B5-15) reopens
     // straight into a stale focus layout.
     videoGrid.setFocusedTile(null);
     localTileAdded = false;
@@ -192,13 +183,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
   function showChat(how?: { keepWatching?: boolean }): void {
     callOpen = false;
-    // The user asked for chat (switching to a text channel) while still
-    // broadcasting — remember it, or checkVideoMode() drags them back into
-    // the grid the next time any peer toggles a camera (v048).
-    const voice = voiceStore.getState();
-    if (voice.localCamera || voice.localScreenshare) {
-      userDismissedVideo = true;
-    }
     // The stream being watched keeps playing in the mini-player (Discord's),
     // picked while the grid still knows which tile is focused.
     if (videoMode && how?.keepWatching === true) videoGrid.showMiniPlayer();
@@ -225,10 +209,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       callOpen = false;
       returnFromPanel();
       tellHost(host, false);
-      // Not a dismissal: leaving voice can clear currentChannelId before
-      // localCamera/localScreenshare go false, and this early return skips
-      // the reset below — showChat() here would strand userDismissedVideo
-      // set and suppress auto-open for the next session.
       closeVideoGrid();
       return;
     }
@@ -258,7 +238,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn) {
       anyVideoOn = videoGrid.hasStreams();
     }
-    const localVideoOn = voice.localCamera || voice.localScreenshare;
     const panel = host !== null && host.ownsCall(channelId) ? host : null;
     if (panel !== null) {
       // The DM's own call: the panel shows every stream, remote ones too,
@@ -280,15 +259,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn && !callOpen) {
       closeVideoGrid();
     }
-    // BUG-105: Auto-open video grid only for LOCAL camera/screenshare.
-    // Remote streams require manual click (Discord-style behavior).
-    if (!localVideoOn) {
-      // Nothing left to dismiss — the next camera/screenshare start should
-      // auto-open the grid again.
-      userDismissedVideo = false;
-    } else if (!videoMode && !userDismissedVideo && panel === null) {
-      showVideoGrid();
-    }
+    // No video opens the grid on its own, your own camera or share included:
+    // the chat you are reading stays. The call view shows them while open.
 
     if (videoMode) givePeople(channelUsers);
 
@@ -382,7 +354,6 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     focusedTileId = null;
     localTileAdded = false;
     localScreenshareTileAdded = false;
-    userDismissedVideo = false;
     lastChannelId = null;
   }
 

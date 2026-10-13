@@ -2040,6 +2040,27 @@ describe("VideoGrid", () => {
       expect(getStreamStats.mock.calls.length).toBe(calls);
       container.remove();
     });
+
+    it("gives a camera tile no quality chip and polls no stats for it, even focused (WP 1B-4)", async () => {
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      const getStreamStats = vi.fn(async () => null);
+      grid.setCallbacks({ getStreamStats });
+      grid.addStream(2, "Otto", fakeStream(), {
+        isSelf: false,
+        audioUserId: 2,
+        isScreenshare: false,
+      });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+
+      expect(cell(2).querySelector(".video-quality")).toBeNull();
+      expect(cell(SCREEN).querySelector(".video-quality")).not.toBeNull();
+
+      grid.setFocusedTile(2);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(getStreamStats).not.toHaveBeenCalled();
+      container.remove();
+    });
   });
 
   describe("pop-out window (Discord-style)", () => {

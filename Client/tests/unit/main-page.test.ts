@@ -510,8 +510,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
 
-    // Put the grid into video mode via a local camera start while in voice
-    // (the real, unmocked VideoModeController drives this off voiceStore).
+    // Open the call view while in voice with the camera on (the real,
+    // unmocked VideoModeController drives this off voiceStore).
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
@@ -519,6 +519,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       localCamera: true,
     }));
     voiceStore.flush();
+    // Your own camera alone no longer covers the chat (WP 1B-4).
+    expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
 
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("none");
 
