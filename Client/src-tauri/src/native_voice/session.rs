@@ -105,6 +105,9 @@ pub struct TrackInfo {
     pub kind: &'static str,
     pub source: &'static str,
     pub muted: bool,
+    /// Whether the server reports the track end-to-end encrypted. The webview
+    /// never subscribes one that is not, and neither does `forward_events`.
+    pub encrypted: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -189,7 +192,13 @@ pub enum Event {
 
 pub type EventSink = Arc<dyn Fn(Event) + Send + Sync>;
 
-fn track_info(sid: String, kind: TrackKind, source: TrackSource, muted: bool) -> TrackInfo {
+fn track_info(
+    sid: String,
+    kind: TrackKind,
+    source: TrackSource,
+    muted: bool,
+    encryption: EncryptionType,
+) -> TrackInfo {
     TrackInfo {
         sid,
         kind: match kind {
@@ -204,11 +213,24 @@ fn track_info(sid: String, kind: TrackKind, source: TrackSource, muted: bool) ->
             TrackSource::Unknown => "unknown",
         },
         muted,
+        encrypted: is_encrypted(encryption),
     }
 }
 
+/// Whether a publication is end-to-end encrypted, by the same test the SDK
+/// uses to attach its frame cryptor.
+fn is_encrypted(encryption: EncryptionType) -> bool {
+    encryption != EncryptionType::None
+}
+
 fn remote_pub_info(p: &RemoteTrackPublication) -> TrackInfo {
-    track_info(p.sid().to_string(), p.kind(), p.source(), p.is_muted())
+    track_info(
+        p.sid().to_string(),
+        p.kind(),
+        p.source(),
+        p.is_muted(),
+        p.encryption_type(),
+    )
 }
 
 fn participant_info(p: &RemoteParticipant, tracks: &[RemoteTrackPublication]) -> ParticipantInfo {
@@ -639,6 +661,17 @@ impl NativeSession {
         })
     }
 
+    /// Keep a publication only if the server accepted it as end-to-end
+    /// encrypted, the one case the SDK attaches the frame cryptor in. Any
+    /// other is stopped and unpublished at once, and the publish fails.
+    async fn require_encrypted(&self, publication: &LocalTrackPublication) -> Result<(), String> {
+        if is_encrypted(publication.encryption_type()) {
+            return Ok(());
+        }
+        withdraw_unencrypted(&self.room.local_participant(), publication).await;
+        Err("the media server did not accept end-to-end encryption for this track".into())
+    }
+
     /// Rotate the room key in place (index 0), the way OwnCord rotates on
     /// leave and on the periodic timer.
     pub fn set_key(&self, key_material: Vec<u8>) {
@@ -772,7 +805,8 @@ impl NativeSession {
         bitrate: Option<u64>,
     ) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
-        self.room
+        let publication = self
+            .room
             .local_participant()
             .publish_track(
                 LocalTrack::Audio(track.clone()),
@@ -780,6 +814,7 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         self.mic = Some(track);
         Ok(())
     }
@@ -839,6 +874,7 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         let sid = publication.sid();
         if let Some(camera) = &self.camera_capture {
             camera.capture.set_source(Some(source));
@@ -954,6 +990,7 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         let sid = publication.sid();
         if let Some(screen) = &self.screen {
             screen.capture.set_source(Some(source));
@@ -1130,6 +1167,38 @@ async fn forward_events(
                 });
             }
         }
+        if let RoomEvent::LocalTrackRepublished {
+            publication,
+            participant,
+            ..
+        } = &ev
+        {
+            if !is_encrypted(publication.encryption_type()) {
+                withdraw_unencrypted(participant, publication).await;
+                on_event(Event::EncryptionStatus {
+                    identity: participant.identity().to_string(),
+                    encrypted: false,
+                });
+                continue;
+            }
+        }
+        if let RoomEvent::TrackSubscribed {
+            publication,
+            participant,
+            ..
+        } = &ev
+        {
+            // Only end-to-end encrypted tracks reach playout, the frame
+            // socket and the webview.
+            if !is_encrypted(publication.encryption_type()) {
+                publication.set_subscribed(false);
+                log::warn!(
+                    "[native_voice] refusing a track from {} published without end-to-end encryption",
+                    participant.identity()
+                );
+                continue;
+            }
+        }
         if let RoomEvent::ParticipantPermissionChanged {
             participant: Participant::Local(_),
             permission: Some(permission),
@@ -1147,6 +1216,17 @@ async fn forward_events(
             on_event(mapped);
         }
     }
+}
+
+/// Stop and unpublish a local publication that is not end-to-end encrypted.
+async fn withdraw_unencrypted(participant: &LocalParticipant, publication: &LocalTrackPublication) {
+    if let Some(track) = publication.track() {
+        track.disable();
+    }
+    if let Err(e) = participant.unpublish_track(&publication.sid()).await {
+        log::warn!("[native_voice] unencrypted publication unpublish: {e}");
+    }
+    log::error!("[native_voice] the media server did not accept end-to-end encryption for a track");
 }
 
 /// Whether the server's grant lets this participant publish the microphone:
@@ -1313,6 +1393,21 @@ mod tests {
             &[proto::TrackSource::Camera]
         )));
         assert!(!mic_allowed(&permission(false, &[])));
+    }
+
+    #[test]
+    fn only_a_gcm_or_custom_track_counts_as_encrypted() {
+        assert!(!is_encrypted(EncryptionType::None));
+        assert!(is_encrypted(EncryptionType::Gcm));
+        assert!(is_encrypted(EncryptionType::Custom));
+        let info = track_info(
+            "TR_a".into(),
+            TrackKind::Audio,
+            TrackSource::Microphone,
+            false,
+            EncryptionType::None,
+        );
+        assert!(!info.encrypted);
     }
 
     #[test]

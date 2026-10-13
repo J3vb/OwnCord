@@ -90,6 +90,9 @@ export class NativeRemotePublication {
   /** The host's last view update: the next one waits for it. */
   private viewSent: Promise<void> = Promise.resolve();
   isMuted: boolean;
+  /** livekit-client's shape for the server's encryption report (`Encryption_Type`:
+   *  0 none, 1 GCM), so the web path's refusal of unencrypted media applies here. */
+  readonly trackInfo: { encryption: number };
   /** Video only, while subscribed. Audio has none: playout is native. */
   track: NativeRemoteVideoTrack | undefined = undefined;
   constructor(
@@ -101,6 +104,7 @@ export class NativeRemotePublication {
     this.kind = info.kind;
     this.source = info.source;
     this.isMuted = info.muted;
+    this.trackInfo = { encryption: info.encrypted ? 1 : 0 };
   }
   setSubscribed(subscribed: boolean): void {
     if (this.isSubscribed === subscribed) return;

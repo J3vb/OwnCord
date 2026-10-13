@@ -190,6 +190,7 @@ const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
   kind: "audio" as const,
   source,
   muted: false,
+  encrypted: true,
 });
 
 beforeEach(() => {
@@ -246,7 +247,9 @@ describe("NativeRoom connect/disconnect", () => {
         participants: [
           {
             identity: "user-2",
-            tracks: [{ sid: "TR_a", kind: "audio", source: "microphone", muted: false }],
+            tracks: [
+              { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
+            ],
           },
         ],
       },
@@ -516,7 +519,7 @@ describe("NativeRoom room surface", () => {
       event: {
         type: "trackPublished",
         identity: "user-2",
-        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     const pub = room.remoteParticipants.get("user-2")!.audioTrackPublications.get("TR_a")!;
@@ -668,6 +671,7 @@ describe("NativeRoom room surface", () => {
       kind: "audio" as const,
       source: "microphone" as const,
       muted: false,
+      encrypted: true,
     };
     emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: mic } });
 
@@ -786,6 +790,7 @@ const video = (sid: string, source: "camera" | "screen_share" = "camera") => ({
   kind: "video" as const,
   source,
   muted: false,
+  encrypted: true,
 });
 
 const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
@@ -1032,6 +1037,38 @@ describe("NativeRoom remote video", () => {
     expect(host.renderers).toHaveLength(1);
     expect(onRemoteVideo).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
+  });
+
+  it("carries the backend's encryption report, so the shared handler unsubscribes an unencrypted track", async () => {
+    const room = createNativeRoom(audio);
+    const onRemoteVideo = vi.fn();
+    const handlers = createRoomEventHandlers({
+      isWatched: () => true,
+      getOnRemoteVideoCallback: () => onRemoteVideo,
+    } as unknown as RoomEventDeps);
+    room.on("trackPublished", (pub, p) => handlers.handleTrackPublished(pub as never, p as never));
+    await room.connect("u", "t");
+
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    const encrypted = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    expect((encrypted as unknown as { trackInfo: unknown }).trackInfo).toEqual({ encryption: 1 });
+    expect(host.calls).not.toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
+
+    emit({
+      session: 1,
+      event: {
+        type: "trackPublished",
+        identity: "user-3",
+        track: { ...video("TR_plain"), encrypted: false },
+      },
+    });
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-3", "TR_plain", false]]);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    setEncryptionDegraded(false);
   });
 
   it("disposes every renderer on disconnect", async () => {
