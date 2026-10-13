@@ -1,27 +1,43 @@
 # Contributing to OwnCord
 
-The full guide lives in **[docs/contributing.md](docs/contributing.md)** —
-environment setup, the branch model, coding standards, and how to run the
-checks CI runs.
+Thank you for wanting to help. This page gives you the three rules to know
+before you open a pull request. The full guide is
+**[docs/contributing.md](docs/contributing.md)**. It covers setup, the branch
+model, coding standards and how to run the checks CI runs.
 
-This file exists so GitHub can find it: the contributing-guidelines link that
-appears on new issues and pull requests only resolves `CONTRIBUTING.md` at the
-repository root, in `.github/`, or in `docs/`.
+## Before you open a pull request
 
-Three things worth knowing before you open a pull request:
+1. **Branch from `dev`, and open your pull request into `dev`.** The `main`
+   branch only carries releases. See
+   [Branch and PR model](docs/contributing.md#branch-and-pr-model).
+2. **Run the checks first.** From the repository root, run:
 
-- **Branch from `dev` and target `dev`.** `main` carries releases only. See
-  [Branch and PR model](docs/contributing.md#branch-and-pr-model).
-- **Run the checks first.** `npm run check` from the repository root, or the
-  per-stack commands in [docs/contributing.md](docs/contributing.md). CI takes
-  about 15 minutes and enforces more than a plain build and test.
-- **Report security issues privately**, through GitHub Security Advisories —
-  never a public issue or pull request. See [SECURITY.md](SECURITY.md) and
-  [docs/security.md](docs/security.md).
+   ```bash
+   npm run check
+   ```
 
-New to the codebase? [docs/README.md](docs/README.md) indexes everything, and
-[docs/architecture/](docs/architecture/README.md) explains how the server and
-client fit together. Working with an AI coding agent? Point it at
-[AGENTS.md](AGENTS.md), which routes each kind of change to the one condensed
-context file it needs ([ARCHITECTURE.md](ARCHITECTURE.md),
-[CODE_STYLE.md](CODE_STYLE.md) and the others at the repository root).
+   Or use the commands for one part in
+   [docs/contributing.md](docs/contributing.md). CI takes about 15 minutes and
+   checks more than a plain build and test.
+
+3. **Report security problems privately.** Use a GitHub Security Advisory.
+   Never use a public issue or pull request. See [SECURITY.md](SECURITY.md) and
+   [docs/security.md](docs/security.md).
+
+## New to the code?
+
+- [docs/README.md](docs/README.md) lists every document.
+- [docs/architecture/](docs/architecture/README.md) explains how the server and
+  the desktop app fit together.
+
+## Working with an AI coding agent?
+
+Point it at [AGENTS.md](AGENTS.md). It sends each kind of change to the one
+short context file it needs, such as [ARCHITECTURE.md](ARCHITECTURE.md) or
+[CODE_STYLE.md](CODE_STYLE.md).
+
+## Why this file is here
+
+GitHub shows a "contributing guidelines" link on new issues and pull requests.
+That link only works for a `CONTRIBUTING.md` at the repository root, in
+`.github/` or in `docs/`. This file is that link's target.
