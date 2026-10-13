@@ -29,7 +29,7 @@ export function getAvailableUpdate(): AvailableUpdate | null {
 export function setAvailableUpdate(next: AvailableUpdate | null): void {
   if (same(current, next)) return;
   current = next;
-  for (const listener of [...listeners]) listener(current);
+  for (const listener of listeners) listener(current);
 }
 
 /** Calls `listener` now with the current value, then on every change. */

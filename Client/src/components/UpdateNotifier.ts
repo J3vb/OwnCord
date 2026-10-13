@@ -44,13 +44,16 @@ export function formatDownloadProgress(p: DownloadProgress): string {
   return connectText("update.downloadingMb", { mb });
 }
 
+function toMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
 /** "38.4 of 61.9 MB" under the progress bar, or null while the size is unknown. */
 export function formatDownloadSize(p: DownloadProgress): string | null {
   if (p.total === null || p.total <= 0) return null;
-  const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1);
   return connectText("update.progressMb", {
-    received: mb(Math.min(p.received, p.total)),
-    total: mb(p.total),
+    received: toMb(Math.min(p.received, p.total)),
+    total: toMb(p.total),
   });
 }
 
