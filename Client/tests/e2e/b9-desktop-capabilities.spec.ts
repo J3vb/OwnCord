@@ -255,9 +255,11 @@ test.describe("B9-25 update limitations are actionable", () => {
     await page.goto("/");
     await navigateToMainPageReady(page);
 
-    await expect(page.locator(".update-banner-text")).toHaveText("Update v1.2.0 available");
+    await expect(page.locator(".update-banner-text")).toHaveText(
+      "OwnCord 1.2.0 is ready to install",
+    );
     await expect(page.locator("[data-testid='update-announce']")).toHaveText(
-      "Update v1.2.0 available",
+      "OwnCord 1.2.0 is ready to install",
     );
   });
 

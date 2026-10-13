@@ -125,6 +125,6 @@ describe("createUpdateNotifier on an install that cannot update itself", () => {
 
     await mount();
 
-    expect(bannerText()).toBe("Update v9.9.9 available");
+    expect(bannerText()).toBe("OwnCord 9.9.9 is ready to install");
   });
 });
