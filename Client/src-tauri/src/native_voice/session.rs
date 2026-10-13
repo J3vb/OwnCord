@@ -523,9 +523,11 @@ pub fn process_threads() -> usize {
 /// A published camera or screen share. `issued` is the sid the webview was
 /// handed and must name to unpublish; `live` follows the SDK's republish
 /// after a full reconnect, which re-issues the sid of the same track.
+/// `capture` is the capture it carries, the id the webview names to stop it.
 struct VideoPublication {
     issued: String,
     live: TrackSid,
+    capture: Option<u64>,
 }
 
 impl VideoPublication {
@@ -533,6 +535,14 @@ impl VideoPublication {
         Self {
             issued: sid.to_string(),
             live: sid,
+            capture: None,
+        }
+    }
+
+    fn of_capture(sid: TrackSid, capture: Option<u64>) -> Self {
+        Self {
+            capture,
+            ..Self::new(sid)
         }
     }
 
@@ -879,7 +889,8 @@ impl NativeSession {
         if let Some(camera) = &self.camera_capture {
             camera.capture.set_source(Some(source));
         }
-        *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        let capture = self.camera_capture.as_ref().map(|c| c.id);
+        *self.camera.lock().unwrap() = Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
     }
 
@@ -995,7 +1006,9 @@ impl NativeSession {
         if let Some(screen) = &self.screen {
             screen.capture.set_source(Some(source));
         }
-        *self.screen_publication.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        let capture = self.screen.as_ref().map(|s| s.id);
+        *self.screen_publication.lock().unwrap() =
+            Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
     }
 
@@ -1175,6 +1188,27 @@ async fn forward_events(
         {
             if !is_encrypted(publication.encryption_type()) {
                 withdraw_unencrypted(participant, publication).await;
+                // Clear what the session holds for the withdrawn track, so the
+                // next enable publishes a fresh one: the microphone republishes
+                // on its next unmute, and a camera or screen share is ended
+                // the way a capture that stops on its own is.
+                let sid = publication.sid();
+                let ended = match publication.source() {
+                    TrackSource::Microphone => {
+                        mic_withdrawn.set();
+                        None
+                    }
+                    TrackSource::Camera => release_slot(&mut published[0].lock().unwrap(), &sid)
+                        .map(|capture| Event::CameraCaptureEnded { capture }),
+                    TrackSource::Screenshare => {
+                        release_slot(&mut published[1].lock().unwrap(), &sid)
+                            .map(|capture| Event::ScreenCaptureEnded { capture })
+                    }
+                    _ => None,
+                };
+                if let Some(ended) = ended {
+                    on_event(ended);
+                }
                 on_event(Event::EncryptionStatus {
                     identity: participant.identity().to_string(),
                     encrypted: false,
@@ -1228,6 +1262,15 @@ async fn withdraw_unencrypted(participant: &LocalParticipant, publication: &Loca
         log::warn!("[native_voice] unencrypted publication unpublish: {e}");
     }
     log::error!("[native_voice] the media server did not accept end-to-end encryption for a track");
+}
+
+/// Empty a video slot whose live publication is `sid`, returning the capture
+/// it carried. A slot holding any other publication is left alone.
+fn release_slot(slot: &mut Option<VideoPublication>, sid: &TrackSid) -> Option<u64> {
+    if slot.as_ref().is_some_and(|p| p.live == *sid) {
+        return slot.take().and_then(|p| p.capture);
+    }
+    None
 }
 
 /// Whether the server's grant lets this participant publish the microphone:
@@ -1409,6 +1452,18 @@ mod tests {
             EncryptionType::None,
         );
         assert!(!info.encrypted);
+    }
+
+    #[test]
+    fn releasing_a_withdrawn_video_empties_only_its_own_slot() {
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(7)));
+        assert_eq!(release_slot(&mut slot, &sid("TR_b")), None);
+        assert!(slot.is_some());
+        assert_eq!(release_slot(&mut slot, &sid("TR_a")), Some(7));
+        assert!(slot.is_none());
+        let mut uncaptured = Some(VideoPublication::new(sid("TR_c")));
+        assert_eq!(release_slot(&mut uncaptured, &sid("TR_c")), None);
+        assert!(uncaptured.is_none());
     }
 
     #[test]
