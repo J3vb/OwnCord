@@ -211,7 +211,7 @@ type Hub struct {
 	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod *userLocks
+	voiceMod    *userLocks
 	voiceMember userLocks // per-user voice membership lock (voiceLock); see user_locks.go
 
 	settingsMu         syncutil.RWMutex
