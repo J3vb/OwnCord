@@ -620,6 +620,7 @@ function renderChannelItem(
   onWatchStream?: (userId: number) => void,
   onVoiceModerate?: VoiceModerationCallbacks,
   onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
+  menuChannels: readonly Channel[] | undefined = channels,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
@@ -644,7 +645,7 @@ function renderChannelItem(
     onEditChannel,
     onDeleteChannel,
     onPurgeChannel,
-    channels,
+    menuChannels,
     onReorderChannel,
   );
   if (containerEl !== undefined && channels !== undefined) {
@@ -779,6 +780,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    * single per-render controller did.
    */
   const ownerByEl = new WeakMap<Element, Disposable>();
+  /** Each group's displayed rows, one array per group kept across renders and
+   *  refilled in place, so Move Up/Down on a row built earlier swaps with the
+   *  row shown next to it, not a channel a collapsed category hides. */
+  const shownRowsByGroup = new Map<string, Channel[]>();
 
   /** Abort a group's or row's owner and those of the rows inside it. */
   function disposeOwned(el: Element): void {
@@ -863,6 +868,22 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       if (header !== null) {
         syncHiddenUnreadDot(header, collapsed && hidesUnreadRow(g.channels, activeChannelId));
       }
+      const groupKey = g.name ?? "\u0000uncategorized";
+      let shown = shownRowsByGroup.get(groupKey);
+      if (shown === undefined) {
+        shown = [];
+        shownRowsByGroup.set(groupKey, shown);
+      }
+      shown.splice(0, shown.length, ...rows);
+      // A focused row a collapsed category stops showing (read, muted, emptied)
+      // hands focus to the category's arrow instead of dropping it to the page.
+      const focused = document.activeElement;
+      const focusedRow =
+        focused instanceof HTMLElement && container.contains(focused)
+          ? focused.closest<HTMLElement>(".channel-item")
+          : null;
+      const losesFocus =
+        focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
       reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
         signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
@@ -888,12 +909,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             onWatchStream,
             onVoiceModerate,
             onPurgeChannel,
+            shown,
           );
           ownerByEl.set(el, owner);
           return el;
         },
         dispose: disposeOwned,
       });
+      if (losesFocus) {
+        header?.querySelector<HTMLElement>(".category-arrow")?.focus();
+      }
     }
 
     reconcileChildren(channelList, groups, {

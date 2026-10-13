@@ -49,7 +49,7 @@ vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
   closeUserProfilePopup: vi.fn(),
 }));
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
 import {
   addChannel,
   channelsStore,
@@ -729,6 +729,48 @@ describe("ChannelSidebar", () => {
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1", "2", "3"]);
       expect(dot()).toBeNull();
+    });
+
+    it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {
+      const onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+      sidebar.destroy?.();
+      setAdminUser();
+      sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onReorderChannel });
+      setChannels([text(1, { unread_count: 1 }), text(2), text(3, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+
+      container
+        .querySelector('[data-channel-id="3"]')!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
+
+      expect(onReorderChannel).toHaveBeenCalledWith([
+        { channelId: 3, newPosition: 1, previousPosition: 3 },
+        { channelId: 1, newPosition: 3, previousPosition: 1 },
+      ]);
+      expect(channelsStore.getState().channels.get(2)?.position).toBe(2);
+    });
+
+    it("a focused row that stops showing hands focus to the category arrow", () => {
+      setChannels([text(1), text(2, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      const row = container.querySelector<HTMLElement>('[data-channel-id="2"]')!;
+      row.focus();
+      expect(document.activeElement).toBe(row);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        const ch = channels.get(2)!;
+        channels.set(2, { ...ch, unreadCount: 0 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+
+      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".category-arrow"));
     });
   });
 
