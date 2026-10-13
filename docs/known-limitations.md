@@ -1,160 +1,187 @@
 # Known limitations (beta)
 
-What the beta does not do, stated before you discover it. This is a hobby
-project with no support commitment — the repository-root
-[README](../README.md) says that plainly, and the [trust model](trust-model.md)
-says exactly what beta does and does not claim about who can read what.
+This page lists what the beta does not do, so you know before you run into
+it. It is for anyone running a server or using the desktop app. Each item
+links to the guide that covers it.
 
-Each item links to the guidance that owns it.
+OwnCord is a hobby project with no support promise. The
+[README](../README.md) says so plainly. The [trust model](trust-model.md)
+says exactly what the beta does and does not claim about who can read what.
 
 ## Certificates and TLS
 
-- **The built-in certificate lifecycle is not qualified (accepted limitation).**
-  `self_signed` is the qualified default; domain `acme` works but has not been
-  exercised against expiry, rotation and restart; there is no HTTPS on a bare
-  public IP; and there is no guided LAN/offline device-trust install. For a
-  public domain the recommended setup is a reverse proxy you trust to own
-  renewal — see [TLS Setup](deployment.md#tls-setup) and
+- **The built-in certificate handling is not fully tested.** We accept this
+  for the beta.
+  - `self_signed` is the tested default.
+  - `acme` (for a domain name) works, but it has not been tested through
+    expiry, rotation and restart.
+  - There is no HTTPS on a bare public IP address.
+  - There is no guided way to install trust on devices for a LAN or offline
+    server.
+
+  For a public domain, we recommend a reverse proxy you trust to handle
+  renewal. See [TLS Setup](deployment.md#tls-setup) and
   [What this build does not do](port-forwarding.md#what-this-build-does-not-do).
-- **A certificate change that is not a public-CA renewal looks like a
-  man-in-the-middle to desktop clients.** Every `tls.mode` pins the certificate
-  on first contact. A routine renewal where the old and the new certificate are
-  both publicly valid for the server's domain (Let's Encrypt, or a reverse
-  proxy using a public CA) is re-pinned without a prompt. Any other change — a
-  rotated self-signed or private-CA certificate, or any certificate on an
-  IP-address server — shows every user the "Certificate Changed" prompt. Have
-  them compare the new fingerprint out of band before accepting; accepting a
-  mismatch is indistinguishable from accepting an interception — see
+
+- **Most certificate changes look like an attack to the desktop app.** Every
+  `tls.mode` pins the certificate the first time a client connects.
+  - A routine renewal is re-pinned without a prompt, if the old and new
+    certificates are both publicly valid for the server's domain. Examples are
+    Let's Encrypt, or a reverse proxy using a public certificate authority.
+  - Any other change shows every user the "Certificate Changed" prompt. That
+    includes a new self-signed or private-CA certificate, and any certificate
+    on a server reached by IP address.
+
+  Ask your users to compare the new fingerprint, through another channel,
+  before they accept. If they accept a mismatch, they cannot tell it apart
+  from accepting an attack. See
   [Publishing the fingerprint after a renewal](deployment.md#publishing-the-fingerprint-after-a-renewal)
-  and [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+  and
+  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
 
-## First-run defaults we chose not to change (accepted for beta)
+## First-run defaults we chose to keep (for beta)
 
-- **The server binds every interface on `:8443`.** There is no loopback-only
-  option; put it behind a firewall or a reverse proxy if that matters to you.
-- **`server.max_ws_connections` defaults to unlimited** (`0`), and sessions
-  last 30 days after last use (a year at most).
-- **Uploads allow up to 100 MB** by default (`upload.max_size_mb`) with a magic-byte blocklist rather than an
-  allowlist, and the WAF is off by default. Review
+- **The server listens on every network interface, on port `8443`.** There
+  is no option to listen on this machine only. If that matters to you, put
+  the server behind a firewall or a reverse proxy.
+- **There is no limit on WebSocket connections by default.**
+  `server.max_ws_connections` is `0`, which means unlimited.
+- **Sessions last 30 days after last use**, and a year at most.
+- **Uploads can be up to 100 MB** by default (`upload.max_size_mb`). The
+  server blocks known dangerous file signatures, rather than allowing only a
+  fixed list of types.
+- **The web application firewall (WAF) is off by default.** Review
   [Capacity limits](deployment.md#capacity-limits) and
   [Server Configuration](server-configuration.md) for your community.
-- **Account recovery signs in without the second factor, by design.** A
-  recovery kit or an owner credential is a complete login; the kit is shown once
-  and rotates on use — see [security.md](security.md).
+- **Account recovery signs you in without the second factor.** This is by
+  design. A recovery kit, or a credential from the owner, is a complete login.
+  The kit is shown once and changes each time it is used. See
+  [security.md](security.md).
 
 ## Operating limits
 
-- **Owner lockout has no self-service fix after setup.** An owner cannot issue
-  their own recovery, and `chatserver token create` cannot reset a password.
-  The setup wizard offers to generate a recovery kit for the owner at first
-  run, and one can be enrolled any time from the desktop client; without a kit,
-  the answer is: restore `data/` from your archive and re-run setup — see
-  [Backup Strategy](deployment.md#backup-strategy) and
-  [Restore](deployment.md#restore).
-- **Restore needs a running server or the CLI.** `POST /admin/api/backups/{name}/restore`
-  is the in-product path and needs the server (and the admin panel) to be up.
-  When the server will not boot, `chatserver restore [--force] <file>` puts a
-  database backup back offline; a full archive is still the supported path for
-  a whole-state rollback — [Restoring without a running server](deployment.md#restoring-without-a-running-server).
-- **Health is poll-only.** `/health` answers, but the server never pushes an
-  alert and Docker only _surfaces_ `unhealthy` rather than restarting on it.
-  Point an uptime monitor at `/health` and, for voice,
-  `/api/v1/livekit/health` yourself — see
+- **An owner who is locked out cannot fix it themselves after setup.**
+  - An owner cannot issue their own recovery.
+  - `chatserver token create` cannot reset a password.
+  - The setup wizard offers to make a recovery kit for the owner. You can
+    also set one up at any time in the desktop app.
+  - Without a kit, the only fix is to restore `data/` from your backup and run
+    setup again. See [Backup Strategy](deployment.md#backup-strategy) and
+    [Restore](deployment.md#restore).
+- **Restoring needs a running server, or the command line.**
+  - In the product, restore uses `POST /admin/api/backups/{name}/restore`. The
+    server and admin panel must be running.
+  - If the server will not start, `chatserver restore [--force] <file>` puts
+    a database backup back while the server is stopped.
+  - To roll back everything, a full archive is still the supported way. See
+    [Restoring without a running server](deployment.md#restoring-without-a-running-server).
+- **Health checks are poll-only.** `/health` answers, but the server never
+  sends an alert. Docker only _shows_ `unhealthy`; it does not restart the
+  container. Point your own uptime monitor at `/health`, and for voice at
+  `/api/v1/livekit/health`. See
   [Monitor voice as well as liveness](deployment.md#monitor-voice-as-well-as-liveness).
-- **ARM64 server upgrades are not rehearsed.** ARM64 assets are
-  lifecycle-checked (boot, migrate, drain, restart) but there is no published
-  ARM64 alpha to upgrade _from_ yet — see
+- **ARM64 server upgrades are not rehearsed.** ARM64 builds are checked for
+  boot, migrate, drain and restart. But there is no published ARM64 alpha to
+  upgrade _from_ yet. See
   [How this procedure is checked](deployment.md#how-this-procedure-is-checked).
-- **In Docker, `config.yaml` is read-only.** The compose file bind-mounts it, so
-  the admin panel and setup wizard cannot persist a startup setting there; edit
-  the host file and recreate the container —
+- **In Docker, `config.yaml` is read-only.** The compose file mounts it
+  read-only. So the admin panel and setup wizard cannot save a start-up
+  setting there. Edit the file on the host and recreate the container. See
   [config.yaml for Docker](deployment.md#configyaml-for-docker).
 
 ## Client
 
-- **Windows installers are not code-signed.** SmartScreen warns on first
-  install and on Update Now; this is expected for an unsigned build —
-  [Windows Client: "Windows protected your PC"](quick-start.md#windows-client-windows-protected-your-pc).
-  Code signing stays declined for the beta.
-- **The browser client does not exist yet.** The desktop client is the only
-  supported client; the browser adapter is post-beta work.
-- **On Linux, in-app sounds ignore the chosen output device.** The message
-  chime, the call ringtone, the caller's ringback and the voice
-  join/leave/mute/deafen sounds play on the system default output there, because
-  the Linux webview (WebKitGTK) cannot route an `AudioContext` to a chosen
-  device (`setSinkId` is unavailable);
-  Windows follows Settings › Voice & Audio, and voice media itself is routed by
-  the native engine and unaffected — see
+- **The Windows installers are not code-signed.** SmartScreen warns on first
+  install and on Update Now. This is expected for an unsigned app. See
+  [Windows: "Windows protected your PC"](quick-start.md#windows-windows-protected-your-pc).
+  We have decided not to code-sign during the beta.
+- **There is no browser version yet.** The desktop app is the only supported
+  client. A browser version is planned for after the beta.
+- **On Linux, app sounds ignore your chosen output device.** These sounds play
+  on the system default output: the message chime, the call ringtone, the
+  caller's ringback, and the voice join, leave, mute and deafen sounds. The
+  Linux web view (WebKitGTK) cannot send an `AudioContext` to a chosen device,
+  because `setSinkId` is missing. On Windows, sounds follow **Settings › Voice
+  & Audio**. Voice itself is not affected on either platform: on Linux the
+  native voice engine routes it. See
   [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
-- **On Linux, mp4 video, colour emoji and PipeWire cameras come from distro
-  packages.** Video attachments and YouTube embeds that use H264/AAC play only
-  with `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`, emoji render in
-  colour only with `fonts-noto-color-emoji`, and a PipeWire-only camera needs
-  `gstreamer1.0-pipewire`. The `.deb` recommends all four, so apt installs them
-  by default (not with `--no-install-recommends`). The AppImage only reads host
-  fonts: it pins GStreamer to its own bundled plugins, so installing the
-  GStreamer packages on the host does nothing for it, and H264/AAC playback and
-  PipeWire cameras stay unavailable there until the release build bundles them.
+- **On Linux, some media needs extra distro packages.**
+  - Video attachments and YouTube embeds that use H264/AAC play only with
+    `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`.
+  - Emoji show in colour only with `fonts-noto-color-emoji`.
+  - A camera that only works through PipeWire needs `gstreamer1.0-pipewire`.
+
+  The `.deb` recommends all four, so apt installs them by default. It does
+  not if you use `--no-install-recommends`.
+
+  The AppImage only uses the host's fonts. It uses its own bundled GStreamer
+  plugins, so installing GStreamer packages on the host does not help it.
+  H264/AAC playback and PipeWire cameras do not work in the AppImage until the
+  release build bundles them.
 
 ## Voice and video
 
-- Voice media needs a reachable UDP port — `50000-60000` by default, or the
-  single `voice.udp_port` when set (and TCP `7881`) on the LiveKit
-  host; an HTTP reverse proxy cannot carry it. "Joins but no audio" is almost
-  always a missing forwarding rule or a wrong `voice.node_ip` — see
-  [Port Forwarding](port-forwarding.md).
-- **Linux voice needs a server on 2.0.0-beta.1 or later.** The Linux client's
-  native voice engine sends its room credential as an HTTP header, and servers
-  from the `1.2.0-alpha.*` series drop that header and refuse the join. Update
-  the server — [Linux desktop voice](deployment.md#linux-desktop-voice).
-- **On Linux, a 2.0.0-beta.1 or older client that reaches a 2.0.0-beta.1 or
-  older Docker Compose server on the same machine as `localhost` cannot join
-  voice.** Those servers hand the client LiveKit's container-internal address
-  (`ws://livekit:7880`), which does not resolve outside the container network,
-  and those clients use it as-is for a `localhost` server. Update the server or
-  the client — the next release of either fixes it — or connect using the
-  host's LAN address or hostname instead, so voice goes through the server's
-  `/livekit` tunnel —
-  [Linux desktop voice](deployment.md#linux-desktop-voice).
-- **On Linux Wayland, screen shares top out at 60 fps.** The PipeWire capture
-  is negotiated at 60 fps, so the screen-share picker disables 120 fps there
-  and a saved 120 falls back to 60.
+- **Voice needs an open UDP port.** By default that is the range
+  `50000-60000`, or the single `voice.udp_port` if you set one. TCP `7881`
+  must be open too. These ports are on the machine running LiveKit. An HTTP
+  reverse proxy cannot carry this traffic. If people can join but hear
+  nothing, the cause is almost always a missing port-forwarding rule or a
+  wrong `voice.node_ip`. See [Port Forwarding](port-forwarding.md).
+- **Old Linux desktop apps (v2.0.0-beta.1 and older) have two voice limits.**
+  Both are fixed in v2.0.1-beta.1. Update to the latest release.
+  - They cannot join voice on a `1.2.0-alpha.*` server. The Linux app sends
+    its room credential as an HTTP header, and those servers drop it and
+    refuse the join. Update the client or the server. See
+    [Linux desktop voice](deployment.md#linux-desktop-voice).
+  - They cannot join voice on a Docker Compose server of v2.0.0-beta.1 or
+    older on the same machine, reached as `localhost`. Those servers give the
+    app LiveKit's address inside the container network (`ws://livekit:7880`).
+    That name does not work outside the containers. Update the server or the
+    client. Or connect using the host's LAN address or hostname, so voice goes
+    through the server's `/livekit` tunnel. See
+    [Linux desktop voice](deployment.md#linux-desktop-voice).
+- **On Linux with Wayland, screen shares go up to 60 fps.** The PipeWire
+  capture runs at 60 fps. So the screen-share picker turns off 120 fps there,
+  and a saved 120 fps setting falls back to 60.
 
 ## FAQ
 
 **I lost the owner password and have no recovery kit.**
-There is no self-service reset for an owner. Restore `data/` and `config.yaml`
-from your archive, or recover with a recovery kit an owner enrolled. See
-[Operating limits](#operating-limits) above and
+There is no self-service reset for an owner. Restore `data/` and
+`config.yaml` from your backup. Or recover with a recovery kit, if the owner
+set one up. See [Operating limits](#operating-limits) above and
 [Backup Strategy](deployment.md#backup-strategy).
 
-**My client says the certificate changed.**
-You rotated or renewed the certificate, or restored a `config.yaml` whose
-`tls.mode` differs from what the client pinned. Publish the new fingerprint out
-of band and have the user compare it before accepting —
+**My app says the certificate changed.**
+Either the certificate was replaced or renewed, or someone restored a
+`config.yaml` with a different `tls.mode` from the one the app pinned. Publish
+the new fingerprint through another channel. Ask each user to compare it
+before they accept. See
 [Clients see a certificate mismatch](deployment.md#clients-see-a-certificate-mismatch).
 
-**Voice joins but nobody hears anything.**
-The UDP media port is not forwarded, or a pinned `voice.node_ip` is not your
-current public address (leave it empty so LiveKit detects it, and restart after
-the address changes). Both checks are in the
-[Port Forwarding Guide](port-forwarding.md); the server cannot see this
-failure because the media never reaches it.
+**People can join voice but nobody hears anything.**
+Either the UDP media port is not forwarded, or `voice.node_ip` is set to an
+address that is no longer your public address. Leave `voice.node_ip` empty so
+LiveKit finds the address itself, and restart after your address changes. Both
+checks are in the [Port Forwarding Guide](port-forwarding.md). The server
+cannot see this problem, because the media never reaches it.
 
 **I get a `403` on `/admin`.**
-`/admin` (including the first-run wizard) is restricted by
-`server.admin_allowed_cidrs`, which defaults to loopback and private networks.
-On a VPS, use an SSH tunnel or add your address to that setting — see
+The admin panel, and the first-run wizard, only accept visitors from the
+networks in `server.admin_allowed_cidrs`. By default that is this machine and
+private networks. On a VPS, use an SSH tunnel or add your address to that
+setting. See
 [Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
 
-**Voice works on Windows and macOS, but not on Linux.**
-Two known cases, both in [Voice and video](#voice-and-video): the server is an
-older `1.2.0-alpha.*` release, or a 2.0.0-beta.1 or older Linux client reaches a
-Docker Compose server on the same machine as `localhost`.
+**Voice works on Windows but not on Linux.**
+Check the Linux app's version. If it is v2.0.0-beta.1 or older, see
+[Voice and video](#voice-and-video) above, and update it.
 
 ## See also
 
-- [Deployment Guide](deployment.md) — the full operator guide
-- [trust-model.md](trust-model.md) — what beta does and does not claim
-- [security.md](security.md) — reporting a vulnerability, known security limitations
-- [port-forwarding.md](port-forwarding.md) — what the server cannot detect from inside your network
+- [Deployment Guide](deployment.md): the full guide for running a server
+- [trust-model.md](trust-model.md): what the beta does and does not claim
+- [security.md](security.md): reporting a security problem, and known security
+  limits
+- [port-forwarding.md](port-forwarding.md): what the server cannot detect from
+  inside your network
