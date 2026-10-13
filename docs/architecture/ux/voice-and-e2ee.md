@@ -145,18 +145,27 @@ for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; i
 button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
 `components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
-volumes apart and offers Mute stream and **Stop watching**. Watching is
-opt-in, Discord-style: a remote camera or screen share arrives as a tile behind
-a **Watch stream** card, and nothing of it (screen-share audio included) is
-subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
-out; Stop watching unsubscribes it and returns the card. A watch survives a
-channel switch and the app's own reconnect or rejoin, but not livekit-client's
-full reconnect, and ends when you leave voice. The room connects with
+volumes apart and offers Mute stream and **Stop watching**. Cameras play on
+their own (**Automatically play cameras** in Voice & Audio settings, the
+`autoPlayCameras` preference, default on): a remote camera is subscribed as it
+is published. A screen share is opt-in, Discord-style: it arrives as a tile
+behind a **Watch stream** card, and nothing of it (screen-share audio included)
+is subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
+out; with the setting off, a camera is opt-in the same way. Stop watching
+unsubscribes either and returns the card; a stopped camera stays stopped,
+across its owner turning it off and on and across a channel switch, until you
+leave voice, and a stream that ends is forgotten rather than stopped. A watch
+survives a channel switch and the app's own reconnect or rejoin, but not
+livekit-client's full reconnect, and ends when you leave voice. The setting is
+read as each camera is published (and on a reconnect's sweep), so turning it
+off leaves cameras already playing alone. The room connects with
 `autoSubscribe: false`: `handleTrackPublished` (`lib/roomEventHandlers.ts`)
-subscribes each voice unless deafened, and `RemoteTracks.watch` the streams.
-On Linux the native backend still auto-subscribes, so it unsubscribes an
-unwatched stream as it is published. Your own screen share is covered by what
-is going out (surface, resolution, fps, audio) with **Stop sharing** and
+subscribes each voice unless deafened, and each stream as
+`RemoteTracks.isWatched` (`features/voice/remoteTracks.ts`) decides. On Linux
+the native backend still auto-subscribes, so it unsubscribes an unwatched
+stream as it is published. Every subscribed tile asks only for its displayed
+size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
+Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it

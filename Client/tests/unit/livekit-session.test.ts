@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 
 // --- Mocks must be declared before imports ---
 
@@ -1533,6 +1533,14 @@ describe("LiveKitSession", () => {
     });
   });
 
+  it("a camera's Stop watching survives a channel switch and ends on leave (WP 1B-3)", () => {
+    session.setRemoteVideoWatched(7, "camera", false);
+    session.leaveVoice(false, true);
+    expect((session as any)._remoteTracks.isWatched(7, "camera")).toBe(false);
+    session.leaveVoice(false);
+    expect((session as any)._remoteTracks.isWatched(7, "camera")).toBe(true);
+  });
+
   describe("auto reconnect", () => {
     it("preserves local mute state on reconnect", async () => {
       mockVoiceState.localMuted = true;
@@ -1640,6 +1648,13 @@ describe("LiveKitSession", () => {
     });
 
     it("sweeps the existing participants' publications into the new room on reconnect", async () => {
+      // Cameras opt-in, as before WP 1B-3.
+      onTestFinished(() => {
+        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      });
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "autoPlayCameras" ? false : defaultVal,
+      );
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
       (session as any)._state = {
@@ -1684,6 +1699,53 @@ describe("LiveKitSession", () => {
       expect(setSubscribed).toHaveBeenCalledWith(true);
       expect(setCameraSubscribed).toHaveBeenCalledWith(false);
       expect(onRemoteVideo).toHaveBeenCalledWith(7, null, false);
+    });
+
+    it("sweeps an auto-played camera into the new room subscribed, with no Watch card (WP 1B-3)", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 9,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const setSubscribed = vi.fn();
+      const publication = { kind: "audio", source: "microphone", setSubscribed };
+      const setCameraSubscribed = vi.fn();
+      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
+      const onRemoteVideo = vi.fn();
+      session.setOnRemoteVideo(onRemoteVideo);
+      mockRoom.remoteParticipants = new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            audioTrackPublications: new Map(),
+            trackPublications: new Map<string, unknown>([
+              ["TR_a", publication],
+              ["TR_v", camera],
+            ]),
+          },
+        ],
+      ]);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        9,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setSubscribed).toHaveBeenCalledWith(true);
+      expect(setCameraSubscribed).toHaveBeenCalledWith(true);
+      expect(onRemoteVideo).not.toHaveBeenCalledWith(7, null, false);
     });
 
     // Pre-refactor parity: the reconnect success path re-installed both

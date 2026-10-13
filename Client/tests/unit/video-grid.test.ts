@@ -1615,6 +1615,21 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector("video")!.hidden).toBe(false);
     });
 
+    it("an ended camera or a dropped roster watch is forgotten, not stopped (WP 1B-3)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ setStreamWatched, forgetStreamWatch });
+      const camera = { isSelf: false, audioUserId: 3, isScreenshare: false };
+      grid.addStream(3, "Sam", fakeStream(), camera);
+      grid.removeStream(3);
+      expect(forgetStreamWatch).toHaveBeenCalledWith(3);
+
+      grid.watch(4);
+      grid.clearStreams();
+      expect(forgetStreamWatch).toHaveBeenCalledWith(4);
+      expect(setStreamWatched).not.toHaveBeenCalledWith(3, false);
+      expect(setStreamWatched).not.toHaveBeenCalledWith(4, false);
+    });
+
     it("a stream that ends stops its watch; your own preview is never one", () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
       grid.removeStream(SCREEN);

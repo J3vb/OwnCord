@@ -52,6 +52,7 @@ import {
   getLocalScreenshareFps,
   setRemoteVideoView,
   setRemoteVideoWatched,
+  forgetRemoteVideoWatch,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -1468,6 +1469,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoWatched(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", on)
           : setRemoteVideoWatched(tileId, "camera", on),
+      forgetStreamWatch: (tileId) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? forgetRemoteVideoWatch(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
+          : forgetRemoteVideoWatch(tileId, "camera"),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
       // The mini-player's way back to the full stream view.

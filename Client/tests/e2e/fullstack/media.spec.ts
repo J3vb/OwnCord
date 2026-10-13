@@ -49,10 +49,17 @@ function captureFrames(transport: {
   return frames;
 }
 
+/** Turn "Automatically play cameras" off, so a remote camera waits behind
+ *  Watch stream like a screen share (WP 1B-3). Read when a camera publishes. */
+async function optOutOfCameraAutoPlay(page: Page): Promise<void> {
+  await page.evaluate(() => localStorage.setItem("owncord:settings:autoPlayCameras", "false"));
+}
+
 test("a real remote camera produces a labelled tile while the local self tile has no audio controls", async ({
   alice,
   bob,
 }) => {
+  await optOutOfCameraAutoPlay(alice);
   await joinVoice(alice);
   await joinVoice(bob);
   await expectDecodedMedia(alice);
@@ -68,9 +75,9 @@ test("a real remote camera produces a labelled tile while the local self tile ha
   await expect(selfTile).toHaveAttribute("data-stream-type", "camera");
   await expect(selfTile.locator(".video-tile-overlay")).toHaveCount(0);
 
-  // A real remote camera arrives as its own tile with audio controls, offered
-  // with Watch stream: nothing of it is received until alice clicks it
-  // (opt-in watching), and then its media actually decodes on this client.
+  // With auto-play off, a real remote camera arrives as its own tile with
+  // audio controls, offered with Watch stream: nothing of it is received until
+  // alice clicks it, and then its media actually decodes on this client.
   const bobTile = alice.locator(".video-cell[data-user-id='2']");
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(bobTile).toBeVisible({ timeout: 10_000 });
@@ -139,6 +146,41 @@ async function videoBytesOver(page: Page, ms: number): Promise<number> {
   return (await mediaStats(page)).videoBytes - before;
 }
 
+test("a remote camera plays with no click, and Stop watching holds across a camera restart", async ({
+  alice,
+  bob,
+}) => {
+  await joinVoice(alice);
+  await joinVoice(bob);
+  await expectDecodedMedia(alice);
+
+  // Auto-play (the default): bob's camera is a playing tile, no Watch card.
+  await bob.locator(".voice-widget button[aria-label='Camera']").click();
+  const bobTile = alice.locator(".video-cell[data-user-id='2']");
+  await expect(bobTile).toBeAttached({ timeout: 10_000 });
+  await expect(bobTile.locator("[data-tile-control='watch']")).toHaveCount(0);
+  await watchCamera(alice, 2);
+  await expectDecodedMedia(alice, true);
+
+  // Stop watching: back to Watch stream, and nothing more arrives.
+  await bobTile.hover();
+  await bobTile.locator("[data-tile-control='stop']").click();
+  await expect(bobTile.locator("[data-tile-control='watch']")).toBeVisible();
+  await alice.waitForTimeout(1_500);
+  expect(await videoBytesOver(alice, 2_000)).toBe(0);
+
+  // Bob turns his camera off and on: the stop holds until alice leaves.
+  const bobCamera = bob.locator(".voice-widget button[aria-label='Camera']");
+  await bobCamera.click();
+  await expect(bobTile).toHaveCount(0, { timeout: 10_000 });
+  await bobCamera.click();
+  await expect(bobTile.locator("[data-tile-control='watch']")).toBeAttached({
+    timeout: 10_000,
+  });
+  await alice.waitForTimeout(1_500);
+  expect(await videoBytesOver(alice, 2_000)).toBe(0);
+});
+
 test("a remote camera sends no video while the grid is closed, and resumes when it is shown", async ({
   alice,
   bob,
@@ -177,6 +219,7 @@ test("a tile's mute button and volume slider change the peer's real playback vol
   alice,
   bob,
 }) => {
+  await optOutOfCameraAutoPlay(alice);
   await joinVoice(alice);
   await joinVoice(bob);
   await expectDecodedMedia(alice);
