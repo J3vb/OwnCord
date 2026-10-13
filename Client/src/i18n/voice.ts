@@ -116,6 +116,11 @@ export const voiceText = defineCatalog("voice", {
   "tile.poppedOut": "Playing in a pop-out window",
   "tile.popoutTitle": "{name} — OwnCord",
   "tile.popoutFailed": "Couldn't open the pop-out window",
+  "tile.profile": "Profile",
+  "tile.message": "Message",
+  "tile.focus": "Focus",
+  "tile.selfMenu": "Your camera",
+  "tile.hideMyCamera": "Hide my camera",
   "mini.label": "{name}'s stream, mini player",
   "mini.hint":
     "Drag it or use the arrow keys to move it. Enter or a double-click returns to the stream.",
