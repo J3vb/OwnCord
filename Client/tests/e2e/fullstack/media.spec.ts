@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET } from "../support/server";
+import { LIVEKIT_KEY_ID, LIVEKIT_API_SECRET } from "../support/server";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -543,7 +543,7 @@ for (const fault of ["missing", "wrong"] as const) {
 function liveKitToken(grants: Record<string, unknown>): string {
   const now = Math.floor(Date.now() / 1000);
   const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ iss: LIVEKIT_API_KEY, nbf: now - 10, exp: now + 600, ...grants })}`;
+  const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ iss: LIVEKIT_KEY_ID, nbf: now - 10, exp: now + 600, ...grants })}`;
   const signature = createHmac("sha256", LIVEKIT_API_SECRET).update(unsigned).digest("base64url");
   return `${unsigned}.${signature}`;
 }
