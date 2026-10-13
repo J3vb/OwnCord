@@ -28,7 +28,7 @@ func (h *Hub) clearRevokedVoiceMedia(ctx context.Context, c *Client, channelID i
 	}
 	state, err := h.voice.State(ctx, c.userID)
 	if err != nil {
-		slog.Warn("clearRevokedVoiceMedia: voice state read failed", "user_id", c.userID, "err", err)
+		slog.Warn("voice permission reconciliation deferred", "step", "read voice state", "user_id", c.userID, "err", err)
 		return
 	}
 	if state == nil || state.ChannelID != channelID || state.JoinedAt != joinToken {
@@ -39,7 +39,7 @@ func (h *Hub) clearRevokedVoiceMedia(ctx context.Context, c *Client, channelID i
 	}
 	sub, err := subjectFor(ctx, h.readers.Dispatch, h.permChecker, nil, c.userID, channelID)
 	if err != nil {
-		slog.Warn("clearRevokedVoiceMedia: permission read failed", "user_id", c.userID, "err", err)
+		slog.Warn("voice permission reconciliation deferred", "step", "read permissions", "user_id", c.userID, "err", err)
 		return
 	}
 
@@ -64,14 +64,14 @@ func (h *Hub) clearRevokedVoiceMedia(ctx context.Context, c *Client, channelID i
 func (h *Hub) clearMediaFlags(ctx context.Context, userID int64, camera, screenshare bool, sub permissions.Subject) (changed bool) {
 	if camera && !sub.Has(permissions.UseVideo) {
 		if err := h.voice.SetCamera(ctx, userID, false); err != nil {
-			slog.Warn("clearRevokedVoiceMedia: clearing camera failed", "user_id", userID, "err", err)
+			slog.Warn("voice permission reconciliation deferred", "step", "clear camera flag", "user_id", userID, "err", err)
 		} else {
 			changed = true
 		}
 	}
 	if screenshare && !sub.Has(permissions.ShareScreen) {
 		if err := h.voice.SetScreenshare(ctx, userID, false); err != nil {
-			slog.Warn("clearRevokedVoiceMedia: clearing screenshare failed", "user_id", userID, "err", err)
+			slog.Warn("voice permission reconciliation deferred", "step", "clear screenshare flag", "user_id", userID, "err", err)
 		} else {
 			changed = true
 		}
