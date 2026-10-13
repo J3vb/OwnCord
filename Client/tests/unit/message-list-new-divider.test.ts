@@ -89,6 +89,10 @@ function openChannelWithUnread(unread: number): void {
   setActiveChannel(CHANNEL_ID);
 }
 
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 describe("MessageList — new-messages divider", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
@@ -193,6 +197,38 @@ describe("MessageList — new-messages divider", () => {
     mount();
 
     expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+  });
+
+  // A jump into another channel mounts the list first (not yet detached) and
+  // only then installs the around-window.
+  it("draws no divider in an around-window that lands after the mount", async () => {
+    setMessages([100].map(makeMessage));
+    openChannelWithUnread(3);
+    mount();
+
+    setDetached(true);
+    setMessages([1, 2, 3, 4, 5, 6].map(makeMessage));
+    await nextFrame();
+
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+  });
+
+  it("restores the divider at the right place when the reader returns to the tail", async () => {
+    setMessages([100].map(makeMessage));
+    openChannelWithUnread(3);
+    mount();
+
+    setDetached(true);
+    setMessages([1, 2, 3, 4, 5, 6].map(makeMessage));
+    await nextFrame();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+
+    setDetached(false);
+    setMessages([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(makeMessage));
+    await nextFrame();
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect(divider).not.toBeNull();
+    expect((divider?.nextElementSibling as HTMLElement).dataset.testid).toBe("message-8");
   });
 
   it("clears on the next visit to the channel", () => {
