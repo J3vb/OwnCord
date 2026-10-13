@@ -231,6 +231,10 @@
 .mic-meter-wrap[hidden] {
   display: none;
 }
+.mic-test-row .ac-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .mic-meter-bar {
   flex: 1;
   position: relative;

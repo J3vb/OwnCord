@@ -23,7 +23,7 @@ import {
   startVadDetector,
   vadThreshold,
 } from "@lib/audioPipeline";
-import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
+import { GATE_LOOKAHEAD_S, createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import {
   nativeAudioDevices,
@@ -45,6 +45,19 @@ const log = createLogger("VoiceAudioTab");
 /** A microphone itself, not the browser's "default"/"communications" alias. */
 function isRealInput(d: MediaDeviceInfo): boolean {
   return d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications";
+}
+
+/** Play the mic test on the saved output device, where the host can choose one. */
+function applyMicTestSink(el: HTMLAudioElement): void {
+  if (typeof el.setSinkId !== "function") return;
+  el.setSinkId(loadPref<string>("audioOutputDevice", "")).catch((err: unknown) => {
+    log.warn("Failed to set output device on mic test", err);
+  });
+}
+
+/** Output Volume percent as an element volume; a corrupt pref plays at full. */
+function micTestVolume(percent: number): number {
+  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 1;
 }
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
@@ -290,6 +303,32 @@ function buildVoiceAudioTabInner(
   meterWrap.append(meterBar, sensitivityValue);
   micCard.appendChild(meterWrap);
 
+  // ── Mic test: plays the meter's processed microphone, after the voice gate,
+  // through the chosen output, so you hear what a call would send. The native
+  // engine's capture never reaches the webview, so there is nothing to play.
+  const micTestRow = createElement("div", {
+    class: "setting-row mic-test-row",
+    "data-testid": "mic-test",
+  });
+  const micTestInfo = createElement("div", {});
+  appendChildren(
+    micTestInfo,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.micTest.label")),
+    createElement(
+      "div",
+      { class: "setting-desc" },
+      nativeAudio ? t("voiceAudio.micTest.linux") : t("voiceAudio.micTest.desc"),
+    ),
+  );
+  const micTestButton = createElement(
+    "button",
+    { class: "ac-btn", type: "button", "aria-pressed": "false", "data-testid": "mic-test-button" },
+    t("voiceAudio.micTest.start"),
+  );
+  micTestButton.disabled = nativeAudio;
+  appendChildren(micTestRow, micTestInfo, micTestButton);
+  micCard.appendChild(micTestRow);
+
   let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
 
   // ── Input mode: Voice Activity gates on the sensitivity above, Push to Talk
@@ -319,6 +358,7 @@ function buildVoiceAudioTabInner(
     savePref("inputMode", mode);
     paintMode();
     applyInputMode();
+    syncMeterGate();
     const vk = loadPref<number>("pttVk", 0);
     if (mode === "vad") void desktop.pushToTalk.stop();
     else if (vk !== 0) void desktop.pushToTalk.updateKey(vk);
@@ -383,6 +423,60 @@ function buildVoiceAudioTabInner(
   let meterResetFloor: (() => void) | null = null;
   /** The meter's processor, so the Enhanced NS toggle re-routes it at once. */
   let meterProcessor: MicProcessor | null = null;
+  /** The meter detector's last verdict, which the mic test's gate follows. */
+  let meterGated = false;
+  /** Whether the mic test is on. Its playback follows the meter's processor
+   *  across restarts and stops with it when the tab or the overlay closes. */
+  let micTesting = false;
+  let micTestAudio: HTMLAudioElement | null = null;
+
+  /** Gate the meter's output as a call would: on the detector in Voice
+   *  Activity, open in Push to Talk (there the key decides, not the level). */
+  function syncMeterGate(): void {
+    if (meterProcessor === null) return;
+    const vad = inputMode() === "vad";
+    meterProcessor.setLookahead(vad ? GATE_LOOKAHEAD_S : 0);
+    meterProcessor.setGate("vad", vad && meterGated);
+  }
+
+  function startMicTestPlayback(processor: MicProcessor): void {
+    stopMicTestPlayback();
+    const track = processor.processedTrack;
+    if (track === undefined) return;
+    const el = document.createElement("audio");
+    el.srcObject = new MediaStream([track]);
+    el.volume = micTestVolume(loadPref<number>("outputVolume", 100));
+    applyMicTestSink(el);
+    micTestAudio = el;
+    void el.play()?.catch((err: unknown) => {
+      log.warn("Mic test playback failed", err);
+    });
+  }
+
+  function stopMicTestPlayback(): void {
+    if (micTestAudio === null) return;
+    micTestAudio.pause();
+    // Detached, or Chrome keeps the element (and this pane) alive.
+    micTestAudio.srcObject = null;
+    micTestAudio = null;
+  }
+
+  micTestButton.addEventListener(
+    "click",
+    () => {
+      if (nativeAudio || signal.aborted) return;
+      micTesting = !micTesting;
+      setText(
+        micTestButton,
+        micTesting ? t("voiceAudio.micTest.stop") : t("voiceAudio.micTest.start"),
+      );
+      micTestButton.classList.toggle("secondary", micTesting);
+      micTestButton.setAttribute("aria-pressed", String(micTesting));
+      if (!micTesting) stopMicTestPlayback();
+      else if (meterProcessor !== null) startMicTestPlayback(meterProcessor);
+    },
+    { signal },
+  );
 
   function previewSensitivity(val: number): void {
     currentSensitivity = val;
@@ -499,6 +593,7 @@ function buildVoiceAudioTabInner(
       const val = Number(outputVolumeSlider.value);
       setText(outputVolumeLabel, `${val}%`);
       setOutputVolume(val);
+      if (micTestAudio !== null) micTestAudio.volume = micTestVolume(val);
     },
     { signal },
   );
@@ -776,6 +871,7 @@ function buildVoiceAudioTabInner(
     () => {
       savePref("audioOutputDevice", outputSelect.value);
       void switchOutputDevice(outputSelect.value);
+      if (micTestAudio !== null) applyMicTestSink(micTestAudio);
     },
     { signal },
   );
@@ -1009,6 +1105,7 @@ function buildVoiceAudioTabInner(
 
         // The detector starts open, as the live gate does.
         let gateOpen = true;
+        meterGated = false;
         let level = 0;
         let lastHeardAt = Number.NEGATIVE_INFINITY;
         const paint = (): void => {
@@ -1029,6 +1126,8 @@ function buildVoiceAudioTabInner(
           {
             onGate: (gated) => {
               gateOpen = !gated;
+              meterGated = gated;
+              syncMeterGate();
               paint();
             },
             onRms: (rms) => {
@@ -1039,13 +1138,16 @@ function buildVoiceAudioTabInner(
         );
         meterThresholdSetter = detector.setThreshold;
         meterResetFloor = detector.resetFloor;
+        syncMeterGate();
         registerMic(() => {
+          stopMicTestPlayback();
           if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
           if (meterResetFloor === detector.resetFloor) meterResetFloor = null;
           if (meterProcessor === processor) meterProcessor = null;
           void detector.stop().then(() => processor.destroy());
           stopStream();
         });
+        if (micTesting) startMicTestPlayback(processor);
       } catch (err) {
         if (signal.aborted || thisRequest !== micRequestId) return;
         log.warn("Mic access denied or unavailable — meter stays empty", err);
