@@ -1458,6 +1458,11 @@ only exempts the join from a moderator's rejoin block (see `voice_mod_kick`).
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
 
+A channel with `voice_max_users` set refuses a join with `CHANNEL_FULL` once it
+holds that many users, except for a caller with `can_moderate_voice` in that
+channel (`permissions.AuthorizeVoiceModerator`): a voice moderator joins a full
+channel. Older servers apply the cap to everyone.
+
 On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
