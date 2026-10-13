@@ -128,3 +128,48 @@ func TestVoice_Join_FullChannel_ModeratorDeniedInChannel(t *testing.T) {
 		t.Fatalf("denied moderator should not be in voice: state=%+v err=%v", st, err)
 	}
 }
+
+// TestVoiceMod_Move_IntoFullChannel: the move pre-flight holds a member target
+// to the destination's cap, and lets through a target who moderates voice
+// there, since that target's own re-join would be admitted.
+func TestVoiceMod_Move_IntoFullChannel(t *testing.T) {
+	cases := []struct {
+		name       string
+		targetRole int
+		wantMoved  bool
+	}{
+		{"member target refused", int(permissions.MemberRoleID), false},
+		{"voice moderator target moved", int(permissions.AdminRoleID), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, database := newVoiceModHub(t)
+			fromID := seedVoiceChan(t, database, "vc-move-full-from")
+			toID := seedVoiceChanMaxUsers(t, database, "vc-move-full-to", 1)
+			fillVoiceChannel(t, hub, database, toID, "move-full-filler")
+
+			actor := seedVoiceUserWithRole(t, database, "owner-move-full", int(permissions.OwnerRoleID))
+			target := seedVoiceUserWithRole(t, database, "target-move-full", tc.targetRole)
+			_, targetSend := joinVoice(t, hub, target, fromID)
+
+			send := make(chan []byte, 16)
+			c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+			hub.Register(c)
+			waitRegistered(t, hub, c)
+			hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+			if tc.wantMoved {
+				if payload := receiveMsgOfType(targetSend, "voice_moved", waitTimeout); payload == nil {
+					t.Fatal("target did not receive voice_moved")
+				}
+				return
+			}
+			if code := receiveErrorCode(send, waitTimeout); code != "CHANNEL_FULL" {
+				t.Fatalf("error code = %q, want CHANNEL_FULL", code)
+			}
+			if st, err := database.GetVoiceState(context.Background(), target.ID); err != nil || st == nil || st.ChannelID != fromID {
+				t.Fatalf("refused move must leave the target in %d: state=%+v err=%v", fromID, st, err)
+			}
+		})
+	}
+}
