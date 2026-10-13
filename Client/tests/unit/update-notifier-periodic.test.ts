@@ -72,7 +72,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
     mockCheckForUpdate.mockResolvedValue(update("2.0.0"));
     await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS * 1.25);
 
-    expect(bannerText()).toBe("Update v2.0.0 available");
+    expect(bannerText()).toBe("OwnCord 2.0.0 is ready to install");
   });
 
   it("re-checks after a reconnect, so an updated server's new client is offered", async () => {
@@ -85,7 +85,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
     setConnectionStatus("connected");
     await vi.advanceTimersByTimeAsync(RECONNECT_SPREAD_MS);
 
-    expect(bannerText()).toBe("Update v2.0.0 available");
+    expect(bannerText()).toBe("OwnCord 2.0.0 is ready to install");
   });
 
   it("does not check on the initial connected state or while still reconnecting", async () => {
@@ -128,7 +128,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
 
     mockCheckForUpdate.mockResolvedValue(update("2.1.0"));
     await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS * 1.25);
-    expect(bannerText()).toBe("Update v2.1.0 available");
+    expect(bannerText()).toBe("OwnCord 2.1.0 is ready to install");
   });
 
   it("offers a newer version after a retryable download failure, even once the failure is dismissed", async () => {
@@ -153,7 +153,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
 
     mockCheckForUpdate.mockResolvedValue(update("2.1.0"));
     await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
-    expect(bannerText()).toBe("Update v2.1.0 available");
+    expect(bannerText()).toBe("OwnCord 2.1.0 is ready to install");
   });
 
   it("a manual check shows the banner again even for a dismissed version", async () => {
@@ -164,7 +164,7 @@ describe("createUpdateNotifier while the app keeps running", () => {
 
     await getActiveUpdateChecker()?.checkNow("manual");
 
-    expect(bannerText()).toBe("Update v2.0.0 available");
+    expect(bannerText()).toBe("OwnCord 2.0.0 is ready to install");
   });
 
   it("stops checking and drops the active checker when destroyed", async () => {

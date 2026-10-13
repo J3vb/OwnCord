@@ -79,6 +79,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → About has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
 - Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
 - After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after the one that adds it, and a fresh install does not show it.
+- The update banner is quieter and says "OwnCord X is ready to install", with **See what's new**, **Update now** and **Later**. While it downloads it shows a progress bar. **See what's new** opens Settings → About, where the new version's notes are shown before you install, and the About tab has a dot while an update is waiting.
 
 **Admin panel**
 

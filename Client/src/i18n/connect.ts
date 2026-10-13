@@ -25,6 +25,9 @@ export const connectText = defineCatalog("connect", {
     "This install cannot update itself. Ask your server administrator for the new version.",
   "update.dismiss": "Dismiss",
   "update.available": "Update v{version} available",
+  "update.ready": "OwnCord {version} is ready to install",
+  "update.seeWhatsNew": "See what's new",
+  "update.progressMb": "{received} of {total} MB",
   "update.now": "Update Now",
   "update.later": "Later",
   "update.smartScreen":
