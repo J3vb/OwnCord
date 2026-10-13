@@ -139,6 +139,12 @@ export class AudioElements {
   private audioCtx: SinkableContext | null = null;
   /** Gain graphs keyed by track SID. */
   private micGraphs = new Map<string, MicGraph>();
+  /** Every subscribed remote voice track, so a context that starts or stops
+   *  running later can move them onto or off their gain nodes. */
+  private micTracks = new Map<
+    string,
+    { track: RemoteTrack; userId: number; audioEl: HTMLAudioElement }
+  >();
 
   /** Remote microphone audio elements keyed by track SID for cleanup on disconnect. */
   private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
@@ -189,9 +195,32 @@ export class AudioElements {
       log.warn("AudioContext unavailable — voice volume stays at most 100%", err);
       return null;
     }
+    const ctx = this.audioCtx;
+    // The context is closed on leave, which ends the listener with it.
+    ctx.addEventListener("statechange", () => this.onContextState(ctx));
     this.setContextSink(loadPref<string>("audioOutputDevice", ""));
     this.audioCtx.resume().catch((err) => log.warn("AudioContext resume failed", err));
     return this.audioCtx;
+  }
+
+  /** A context that starts later (autoplay unlock) takes the tracks that
+   *  played on their elements meanwhile; one that suspends or is interrupted
+   *  hands them back to their elements so nobody goes silent. */
+  private onContextState(ctx: SinkableContext): void {
+    if (this.audioCtx !== ctx || ctx.state === "closed") return;
+    const moved = new Set<number>();
+    if (ctx.state === "running") {
+      for (const [sid, t] of this.micTracks) {
+        if (this.micGraphs.has(sid)) continue;
+        if (this.buildMicGraph(sid, t.userId, t.track, t.audioEl) !== null) moved.add(t.userId);
+      }
+    } else {
+      for (const [sid, graph] of this.micGraphs) {
+        this.dropMicGraph(sid, true);
+        moved.add(graph.userId);
+      }
+    }
+    for (const userId of moved) this.applyGainOf(userId, this.getEffectiveVolume(userId));
   }
 
   private setContextSink(deviceId: string): void {
@@ -232,7 +261,10 @@ export class AudioElements {
       const gain = ctx.createGain();
       source.connect(gain);
       gain.connect(ctx.destination);
+      // Both, as LiveKit's own Web Audio attach does: Room.startAudio()
+      // unmutes every attached element, and volume 0 keeps this one silent.
       audioEl.muted = true;
+      audioEl.volume = 0;
       const graph = { userId, audioEl, source, gain };
       this.micGraphs.set(sid, graph);
       return graph;
@@ -242,12 +274,15 @@ export class AudioElements {
     }
   }
 
-  private dropMicGraph(sid: string): void {
+  /** `restore` hands the track back to its element, whose volume the next
+   *  applyUserGain sets. */
+  private dropMicGraph(sid: string, restore = false): void {
     const graph = this.micGraphs.get(sid);
     if (graph === undefined) return;
     this.micGraphs.delete(sid);
     graph.source.disconnect();
     graph.gain.disconnect();
+    if (restore) graph.audioEl.muted = false;
   }
 
   /** Play a participant's voice at `gain` (0-2): through their gain node
@@ -366,6 +401,7 @@ export class AudioElements {
       // Track mic audio elements for cleanup on abnormal disconnect
       if (track.sid !== undefined) {
         this.remoteMicAudioElements.set(track.sid, audioEl);
+        this.micTracks.set(track.sid, { track, userId, audioEl });
         this.dropMicGraph(track.sid);
         if (!hasNativePlayout(this.room)) this.buildMicGraph(track.sid, userId, track, audioEl);
       }
@@ -402,6 +438,7 @@ export class AudioElements {
       for (const el of track.detach()) el.remove();
       if (track.sid !== undefined) {
         this.remoteMicAudioElements.delete(track.sid);
+        this.micTracks.delete(track.sid);
         this.dropMicGraph(track.sid);
       }
       log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
@@ -456,6 +493,16 @@ export class AudioElements {
 
   getUserVolume(userId: number): number {
     return getSavedUserVolume(userId);
+  }
+
+  /** The gain a participant's voice plays at right now (diagnostics): their
+   *  gain node's when they have one, else LiveKit's element volume. */
+  getPlayingVolume(participant: RemoteParticipant): number {
+    const userId = parseUserId(participant.identity);
+    for (const graph of this.micGraphs.values()) {
+      if (graph.userId === userId) return graph.gain.gain.value;
+    }
+    return participant.getVolume() ?? 1;
   }
 
   /** Silence one user for this client only. Their volume is left as it was,
@@ -531,6 +578,7 @@ export class AudioElements {
       el.remove();
     }
     this.remoteMicAudioElements.clear();
+    this.micTracks.clear();
     for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid);
     for (const audioEls of this.screenshareAudioElements.values()) {
       for (const el of audioEls) {

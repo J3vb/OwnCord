@@ -125,6 +125,11 @@ export function showUserVolumeMenu(
     setText(valLabel, `${val}%`);
     setText(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
+    // Raising the level unmutes, as the tile slider does.
+    if (val > 0 && getUserLocalMute(userId)) {
+      setUserLocalMute(userId, false);
+      renderMute(false);
+    }
   });
 
   appendChildren(sliderRow, slider, valLabel);

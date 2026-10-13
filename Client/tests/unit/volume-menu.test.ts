@@ -183,6 +183,17 @@ describe("local Mute (WP 1D-5)", () => {
     expect(sliderEl()?.value).toBe("150");
   });
 
+  it("raising the slider clears the Mute", () => {
+    getUserLocalMute.mockReturnValue(true);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    const slider = sliderEl()!;
+    slider.value = "120";
+    slider.dispatchEvent(new Event("input"));
+    expect(setUserVolume).toHaveBeenCalledWith(7, 120);
+    expect(setUserLocalMute).toHaveBeenCalledWith(7, false);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
   it("opens checked for a user already muted", () => {
     getUserLocalMute.mockReturnValue(true);
     showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);

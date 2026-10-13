@@ -973,6 +973,12 @@ describe("AudioElements", () => {
       sources: FakeSource[] = [];
       setSinkId = vi.fn(async () => undefined);
       resume = vi.fn(async () => undefined);
+      private stateListeners: Array<() => void> = [];
+      addEventListener = vi.fn((_type: string, fn: () => void) => this.stateListeners.push(fn));
+      setState(state: string): void {
+        this.state = state;
+        for (const fn of this.stateListeners) fn();
+      }
       close = vi.fn(async () => {
         this.state = "closed";
       });
@@ -1050,6 +1056,58 @@ describe("AudioElements", () => {
       expect(ctx.gains[0]!.gain.value).toBe(1.5);
       expect(audioEl.muted).toBe(true);
       expect(participant.setVolume).not.toHaveBeenCalled();
+    });
+
+    it("diagnostics report the gain node's level, not the muted element's", () => {
+      const participant = { ...webParticipant("user-42"), getVolume: vi.fn(() => 1) };
+      elements.setRoom(makeRoom([participant]) as any);
+      expect(elements.getPlayingVolume(participant as any)).toBe(1);
+      subscribe(participant);
+      elements.setUserLocalMute(42, true);
+      expect(elements.getPlayingVolume(participant as any)).toBe(0);
+    });
+
+    it("keeps a graph-routed element silent after Room.startAudio() unmutes it", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const { audioEl } = subscribe(participant);
+      elements.setUserVolume(42, 150);
+
+      // What livekit's startAudio does to every attached element without webAudioMix.
+      audioEl.muted = false;
+
+      expect(audioEl.volume).toBe(0);
+      elements.setUserLocalMute(42, true);
+      expect(audioEl.volume).toBe(0);
+      expect(FakeAudioContext.instances[0]!.gains[0]!.gain.value).toBe(0);
+    });
+
+    it("moves a track onto its gain node once a suspended context starts running", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const ctx = FakeAudioContext.instances[0]!;
+      ctx.state = "suspended";
+      const { audioEl } = subscribe(participant);
+      expect(ctx.gains).toHaveLength(0);
+
+      ctx.setState("running");
+
+      expect(ctx.gains).toHaveLength(1);
+      expect(audioEl.muted).toBe(true);
+    });
+
+    it("hands tracks back to their elements when a running context suspends", () => {
+      const participant = webParticipant("user-42");
+      elements.setRoom(makeRoom([participant]) as any);
+      const ctx = FakeAudioContext.instances[0]!;
+      const { audioEl } = subscribe(participant);
+      expect(audioEl.muted).toBe(true);
+
+      ctx.setState("suspended");
+
+      expect(ctx.gains[0]!.disconnect).toHaveBeenCalled();
+      expect(audioEl.muted).toBe(false);
+      expect(participant.setVolume).toHaveBeenLastCalledWith(1);
     });
 
     it("caps user 200% × output 200% at a gain of 2", () => {
