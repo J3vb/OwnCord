@@ -65,21 +65,6 @@ type broadcastMsg struct {
 	presenceSnapshot bool
 }
 
-// enqueue hands bm to the single hub dispatch loop, stamping it for the
-// enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
-// full the message is dropped and counted, with kind naming the dropped frame,
-// and enqueue reports false.
-func (h *Hub) enqueue(bm broadcastMsg, kind string) bool {
-	bm.enqueuedAt = time.Now()
-	select {
-	case h.broadcast <- bm:
-		return true
-	default:
-		h.recordQueueDrop(bm, kind)
-		return false
-	}
-}
-
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
 // channelID. When channelID is 0 the message is sent to every connected client.
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
@@ -377,7 +362,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
 	// head of the queue, before seqMu — rather than by whoever enqueued the
 	// frame. See resolveChannelContentGate and nsfwChannelID.
-	contentFilter, labelled := h.resolveChannelContentGate(bm.nsfwChannelID)
+	contentFilter, labelled, gateUnconfirmed := h.resolveChannelContentGate(bm.nsfwChannelID)
 
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
@@ -417,6 +402,12 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 
 		seq = h.nextSeq()
 		msg := wrapWithSeq(bm.msg, seq)
+		if gateUnconfirmed {
+			// The deny-all gate withheld this frame from subscribers it may
+			// not have been meant to skip: a resume at or behind it must
+			// take the full-ready path.
+			h.bumpVisibilityWatermark()
+		}
 
 		// Store in replay buffer for reconnection recovery.
 		stored := replayCopy(msg)

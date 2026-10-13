@@ -144,10 +144,13 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // lookup failure that leaves the label unconfirmed, denies every recipient
 // rather than defaulting to nil/unfiltered. labelled also gates the plugin
 // sink (decision 13: a plugin has no acknowledgement, so it never receives a
-// labelled channel's content).
-func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow func(userID int64) bool, labelled bool) {
+// labelled channel's content). unconfirmed reports that a read failed and
+// the deny-all filter stands in for an answer: subscribers who may well
+// have been allowed get nothing live, so deliverBroadcast forces their
+// resume onto the full-ready path.
+func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow func(userID int64) bool, labelled, unconfirmed bool) {
 	if h.db == nil {
-		return nil, false
+		return nil, false, false
 	}
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -162,22 +165,22 @@ func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow fun
 			slog.Error("ws: channelNSFWFilter GetChannel failed, denying all recipients",
 				"channel_id", channelID, "err", err)
 		}
-		return func(int64) bool { return false }, true
+		return func(int64) bool { return false }, true, err != nil
 	}
 	if !ch.NSFW {
-		return nil, false
+		return nil, false, false
 	}
 	ids, err := h.readers.Visibility.ListNSFWAcknowledgedUserIDs(ctx, channelID)
 	if err != nil {
 		slog.Error("ws: channelNSFWFilter ListNSFWAcknowledgedUserIDs failed, denying",
 			"channel_id", channelID, "err", err)
-		return func(int64) bool { return false }, true // fail closed
+		return func(int64) bool { return false }, true, true // fail closed
 	}
 	ackSet := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		ackSet[id] = true
 	}
-	return func(uid int64) bool { return ackSet[uid] }, true
+	return func(uid int64) bool { return ackSet[uid] }, true, false
 }
 
 // channelReadAudienceDM resolves the audience of a DM channel: the DM's
