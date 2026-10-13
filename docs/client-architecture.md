@@ -1,15 +1,17 @@
 # Client Architecture (moved)
 
-This document previously described the client architecture, including the
-planned SolidJS migration. That migration was **abandoned** (see CHANGELOG)
-and the beachhead code has been removed from the tree — the client is vanilla
-TypeScript with hand-rolled reactive stores and imperative DOM components.
+This page has moved. The current client architecture document is
+**[docs/architecture/client.md](architecture/client.md)**.
 
-The current, maintained client architecture document is:
+This file is kept so old links still work. It used to describe a planned move
+to SolidJS. That move was abandoned and its code was removed (see the
+CHANGELOG). The client is plain TypeScript with hand-written reactive stores
+and DOM components.
 
-**[docs/architecture/client.md](architecture/client.md)**
+See also:
 
-See also [docs/architecture/README.md](architecture/README.md) for the full
-blueprint set and its maintenance rule, and decision D6 in
-[docs/plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md)
-for the removal rationale.
+- [docs/architecture/README.md](architecture/README.md) for the full set of
+  architecture documents and the rule that keeps them current.
+- Decision D6 in
+  [docs/plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md)
+  for why the SolidJS code was removed.

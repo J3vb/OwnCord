@@ -1,5 +1,11 @@
 # Data lifecycle — destructive operations, their failure models, and every user-attributable data class
 
+This page is for operators and contributors who need to know what happens to
+user data when it is deleted, swept, backed up or restored, and how each of
+those operations behaves if it is interrupted. It is a design record: most
+sections are pinned to the commit they were written against, and later
+changes are added as dated amendments.
+
 **Kind:** reference and design record. **Written:** 2026-09-01 (B4-0),
 verified against `dev` @ `aabac60`. **Amended 2026-09-03 (B4-9):** O1 is the
 account erasure now (`Server/db/erasure.go`, `Server/service/erasure.go`);
@@ -14,6 +20,9 @@ markers into the same file. **Amended 2026-09-18 (B6-15):** class 21 and the
 appendix comment name both `subject_token` and `actor_token` (migrations 041,
 042); the `erasure_jobs` residue at O1's "what the operation leaves" is
 recorded as an accepted, disclosed limit (owner decision B6-15/3).
+**Amended 2026-10-13:** O4's restore sequence follows the restore fix of
+2026-10-12 (checkpoint checked before anything is closed, connections drained,
+WAL files removed before the copy), and O4 names the full archive.
 **Satisfies:** B4 entry-gate item 3, public half ("destructive operations have
 private threat and failure models" — the failure models are here; the private
 half is described in the last section). Input to HP-4. Seeds the BPR-052
@@ -237,15 +246,34 @@ removes `.tmp` files a killed backup left untouched for a day. Because the backu
 upload's quota charge (writer I/O under the quota mutex) no longer waits for
 it; that is how PERF-10 is satisfied. **Uploads are not
 in a backup** (`docs/trust-model.md`, "At rest"), and neither is `totp.key`
-(O7).
+(O7). The owner-only full archive (`GET /admin/api/archive`,
+`Server/admin/handlers_archive.go`) is the one download that carries both: a
+zip of the whole data directory and `config.yaml`, with a `VACUUM INTO`
+snapshot in place of the live database file.
 
-**Restore** (`handleRestoreBackup`), in order: serialise against update
-apply and a pending restart; `integrity_check` the source; write the
-`backup_restore` audit row **synchronously, before** the safety copy, so the
-row survives inside it; take the `pre_restore_<ts>.db` safety copy (abort,
-database untouched, if that fails); broadcast the restart; WAL checkpoint;
-close the database; stream the backup over the live file; on copy failure
-put the safety copy back; restart the process on every path past the close.
+**Restore** (`handleRestoreBackup`, re-checked at `ac6ffc4e` on 2026-10-13),
+in order:
+
+1. Serialise against update apply and a pending restart.
+2. Check the source: `integrity_check`, and refuse a backup whose schema is
+   newer than this server (`CheckBackupSchemaAhead`).
+3. Write the `backup_restore` audit row **synchronously, before** the safety
+   copy, so the row survives inside it.
+4. Take the `pre_restore_<ts>.db` safety copy. If that fails, abort with the
+   database untouched.
+5. Run a WAL checkpoint (`CheckpointForRestore`, `TRUNCATE`). If the log
+   could not be emptied, refuse with `409 DATABASE_BUSY`, remove the unused
+   safety copy, and leave the database untouched.
+6. Broadcast the restart.
+7. Close the database, then wait until both connection pools report no open
+   connection (`WaitConnsClosed`).
+8. Advance the message-delivery floor (`AdvanceMessageDeliveryFloorForRestore`)
+   and remove the `-wal` and `-shm` files (`RemoveWALSidecars`).
+9. Copy the backup over the live file. On copy failure, put the safety copy
+   back.
+10. Restart the process on every path past the close.
+
+A failure in steps 7 or 8 also restarts with the database untouched.
 
 | Axis | Model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -321,7 +349,7 @@ generation on confirmed non-existence only, every other error failing
 closed with the file untouched, and an atomic write (temp file + rename) so
 A1 cannot even produce a partial file.
 
-### O8 — Recovery-secret rotation (B4-5 kit landed 2026-09-02; B4-6 credentials pending)
+### O8 — Recovery-secret rotation (B4-5 kit landed 2026-09-02; B4-6 credentials 2026-09-03)
 
 Written as the model the implementation must satisfy. B4-5's kit satisfies
 it as follows: A1 and A2 by `DB.RedeemRecoveryKit` (consume, password,

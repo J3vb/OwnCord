@@ -1,18 +1,28 @@
 # Server Architecture
 
-**Verified against:** commit `a3a0a49b`, 2026-09-18
+**Verified against:** `origin/dev` at `ac6ffc4e`, 2026-10-13
 
-Single Go binary (`github.com/J3vb/OwnCord/Server`, Go 1.27). Pure-Go SQLite
-(`modernc.org/sqlite`, no CGO), chi router, `github.com/coder/websocket`,
-LiveKit for voice, Wazero for plugins (build-tag gated), optional OpenTelemetry
-(`-tags otel`). Roughly 42k LOC of production code and 71k LOC of tests.
+This page maps the Go server: its packages, how a REST request flows through
+them, and the pattern used to move a family of routes behind the service
+layer. Read it before you change where server code lives.
+
+The server is a single Go binary (`github.com/J3vb/OwnCord/Server`, Go 1.27).
+Its main building blocks are:
+
+- pure-Go SQLite (`modernc.org/sqlite`, no CGO);
+- the chi router and `github.com/coder/websocket`;
+- LiveKit for voice;
+- Wazero for plugins, behind a build tag;
+- optional OpenTelemetry (`-tags otel`).
+
+By `wc -l`, the code is about 98,000 lines of production Go (generated sqlc
+code excluded) and about 188,000 lines of tests.
 
 ## D2 — Package map
 
-Which of these packages may import `db`, and what every file above the domain
-layer does with it, is inventoried in
-[server-boundaries.md](server-boundaries.md) (B3-0) and enforced by the
-`db-import-boundary` rule in `Server/invariants/`.
+[server-boundaries.md](server-boundaries.md) (B3-0) lists which packages may
+import `db` and what every file above the domain layer does with it. The
+`db-import-boundary` rule in `Server/invariants/` enforces that list.
 
 ```mermaid
 flowchart TB
@@ -38,7 +48,7 @@ flowchart TB
     subgraph data ["Data"]
         DB[("db<br/>query methods (sqlc-backed),<br/>migration runner, models")]
         DBGEN["db/dbgen<br/>sqlc-generated queries"]
-        MIG["migrations<br/>001–028 embedded SQL"]
+        MIG["migrations<br/>001–059 embedded SQL"]
     end
 
     subgraph support ["Support"]
@@ -71,34 +81,40 @@ flowchart TB
     ADMIN -.->|"raw *db.DB"| DB
 ```
 
-**What this shows.** The layering is `api → service → db` (D3 removed the former
-`store` seam). The `service` layer depends on a narrow `service.Store` interface
-that `*db.DB` satisfies; `ws` and `plugin` depend on their own small interfaces
-(`ws.EventStore`, `plugin.PluginStore`) the same way. The `db` package's query
-methods delegate to the sqlc-generated `db/dbgen` code (D2), so sqlc is now the
-type-checked query layer rather than dead generated code. Two dashed edges mark
-the residual seam: many REST handlers still receive a raw `*db.DB` alongside
-`svc`, and twelve `admin` files import `db` — nine only name its types, and
-three (`backup_maintenance.go`, `handlers_backup.go`, `update_handlers.go`)
-make raw calls, each because it needs the handle itself. Consolidating those
-behind the service layer is the remaining work (audit A-2026-07-06 — resolved
-for the store seam itself; the residual consolidation is its backlog item 12);
-the per-file table is in [server-boundaries.md](server-boundaries.md). See
+**What this shows.** The layering is `api → service → db`. (D3 removed the
+old `store` layer.) The `service` layer depends on a narrow `service.Store`
+interface that `*db.DB` satisfies. `ws` and `plugin` depend on their own small
+interfaces (`ws.EventStore`, `plugin.PluginStore`) in the same way. The `db`
+package's query methods call the sqlc-generated `db/dbgen` code, so sqlc is the
+type-checked query layer.
+
+The two dashed edges mark where code still skips the service layer:
+
+- Many REST handlers still receive a raw `*db.DB` alongside `svc`.
+- Sixteen `admin` files import `db`. Most only name its types or pass the
+  handle on. A few make raw calls because they need the handle itself, mainly
+  the backup, archive, update and audit files.
+
+Moving those behind the service layer is the remaining work (audit
+A-2026-07-06, backlog item 12). The per-file table is in
+[server-boundaries.md](server-boundaries.md). See also
 [data-model.md](data-model.md).
 
-`app.StartRuntime` (`Server/internal/app/hub.go`) is the composition root: it
+`app.StartRuntime` (`Server/internal/app/hub.go`) is the _composition root_:
+the one place that builds the long-lived parts and wires them together. It
 builds the persistent rate limiter, `service.New`, the LiveKit client and its
-optional managed subprocess, and the `ws.Hub` through a validated
-`ws.HubOptions`, returning `api.Runtime`. `api.NewRouter`
-(`Server/api/router.go`) is then the route-mounting step: it loads the TOTP
-key, assembles the global middleware chain over the runtime it is handed,
-mounts the routes, owns the admin and plugin-admin handlers, and starts its
-own background goroutines (the rate-limiter cleanup ticker among them). It is
-invoked by `app.startRouter`. `main.go` performs only process-level wiring
-(config, TLS, DB, event persistence, HTTP server, shutdown).
+optional managed subprocess, and the `ws.Hub` (through a validated
+`ws.HubOptions`). It returns an `api.Runtime`.
 
-The `plugin` package is experimental and compiled out of release binaries;
-[plugins.md](plugins.md) records that boundary — what exists, what carries no
+`api.NewRouter` (`Server/api/router.go`) then mounts the routes. It loads the
+TOTP key, builds the global middleware chain, mounts the routes, owns the
+admin and plugin-admin handlers, and starts its own background goroutines,
+such as the rate-limiter cleanup ticker. `app.startRouter` calls it.
+`main.go` does only process-level wiring: config, TLS, the database, event
+persistence, the HTTP server and shutdown.
+
+The `plugin` package is experimental and compiled out of release binaries.
+[plugins.md](plugins.md) records that boundary: what exists, what carries no
 promise, and which core concerns will never move behind it.
 
 **Source of truth:** `Server/main.go`, `Server/api/router.go`, package import
@@ -118,9 +134,9 @@ sequenceDiagram
     participant DB as SQLite
 
     C->>MW: HTTPS request
-    Note over MW: RequestID → Recoverer → requestLogger<br/>→ telemetry → SecurityHeadersWithTLS<br/>→ MaxBodySizeUnless(uploads exempt)<br/>→ optional Coraza WAF
+    Note over MW: boundRequestID → RequestID → setRequestIDHeader<br/>→ telemetry → recoverer → requestLogger<br/>→ SecurityHeadersWithTLS<br/>→ MaxBodySizeUnless(uploads exempt)<br/>→ optional Coraza WAF
     MW->>RT: routed by chi
-    Note over RT: AuthMiddleware(database)<br/>+ per-route rate limits<br/>+ RequirePermission(...) where mounted
+    Note over RT: AuthMiddleware(svc.Sessions)<br/>+ per-route rate limits<br/>+ RequirePermission(...) where mounted
     RT->>H: authenticated request
     H->>S: domain call (svc.Messages, svc.Permissions, …)
     S->>ST: narrow Store interface method
@@ -132,25 +148,33 @@ sequenceDiagram
     end
 ```
 
-**What this shows.** The global chain is assembled in `NewRouter`, which
-`app.StartRuntime` invokes as its route-mounting step over the already-built
-runtime, so the chain is assembled at mount time rather than at construction;
-note that chi's `middleware.RealIP` is deliberately omitted — client IP is resolved via
-`clientip.Resolve` (extracted from `api/middleware.go` in SRE-11) against configured
-trusted proxies instead, so spoofed
-`X-Real-IP`/`X-Forwarded-For` headers are not trusted by default. The same resolver
-feeds the access log, the WebSocket handshake log and the `ws_connect` audit row, so
-the recommended reverse-proxy deployment records the client rather than the proxy hop
-on every path. Authentication
-is bearer-token (SHA-256-hashed opaque tokens); authorization is enforced at two
-deliberate scopes (D13): `RequirePermission` middleware gates the two
-channel-less routes on server-wide role permissions via
-`permissions.HasServerPerm` (channel overrides deliberately not consulted — a
-per-channel allow must never open a server-wide gate), while anything
-channel-scoped is checked in the service layer through `svc.Permissions` /
-`permissions.Checker`, which resolves overrides and fails closed if they cannot
-be fetched. The shaded region marks the remaining documented bypass of the
-domain layer; the auth routes left it in B3-2 (`MountAuthRoutes(r, svc,
+**What this shows.** `NewRouter` builds the global middleware chain when it
+mounts the routes (`routerMiddleware` in `Server/api/router.go`). The order is
+a security property, so keep it as written.
+
+**Client IP.** chi's `middleware.RealIP` is left out on purpose. The client IP
+comes from `clientip.Resolve`, which trusts `X-Real-IP` and `X-Forwarded-For`
+only from the configured trusted proxies. So spoofed headers are not trusted by
+default. The same resolver feeds the access log, the WebSocket handshake log
+and the `ws_connect` audit row. Behind the recommended reverse proxy, every
+path records the real client rather than the proxy.
+
+**Authentication** is a bearer token. The server stores only a SHA-256 hash of
+each opaque token.
+
+**Authorization** is checked at two levels on purpose (D13):
+
+- `RequirePermission` middleware gates the two routes that have no channel:
+  the invite routes and the connectivity diagnostics. It checks server-wide
+  role permissions through `permissions.HasServerPerm`. Channel overrides are
+  not consulted, because a per-channel allow must never open a server-wide
+  gate.
+- Anything channel-scoped is checked in the service layer through
+  `svc.Permissions` / `permissions.Checker`. That resolves overrides and fails
+  closed if it cannot read them.
+
+The shaded region marks where admin code still goes straight to the database.
+The auth routes left that region in B3-2 (`MountAuthRoutes(r, authSvc,
 requireAuth, …)` → `service.AuthService` → `Store`).
 
 **Source of truth:** `Server/api/router.go`, `Server/api/middleware.go`,
@@ -159,11 +183,14 @@ requireAuth, …)` → `service.AuthService` → `Store`).
 
 ## D4 — The vertical-slice pattern (B3-2; the rule for B3-8)
 
-The auth slice was the first domain family moved from "handler owns the
-database" to `api → service → db` behind a consumer-owned interface, with a
-frozen characterization set proving nothing changed. B3-8 repeats this per
-family. The steps, in commit order, each its own commit so the reviewer can
-diff the move separately from the rewrite:
+This section is for contributors moving a family of routes behind the service
+layer. The auth slice was the first family moved from "the handler owns the
+database" to `api → service → db`, behind an interface owned by the caller. A
+frozen set of characterization tests proved nothing changed. B3-8 repeats this
+for each family.
+
+Do the steps below in order. Make each one its own commit, so a reviewer can
+read the move separately from the rewrite.
 
 1. **Characterize first, in its own PR.** Table tests over the mounted
    router pin today's behaviour per route: status, code and message of every

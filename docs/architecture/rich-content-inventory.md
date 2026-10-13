@@ -1,37 +1,71 @@
 # Rich-content inventory
 
-This document is BPR-061's "existing provider/feature inventory" prerequisite
-and the artefact B7's native fetch broker implements against. It is a
-per-path map of every place OwnCord fetches content that was not chosen by
-the operator: who starts the fetch, which side of the client/server line
-performs it, what host class it can reach, and exactly what bounds — address,
-redirect, byte, time, type, concurrency, cache — apply today. Where a bound
-does not exist, the cell says so and names the phase that owes it, never
-`unknown`. Measured at `123b07d8`. B7-16 has since moved every desktop
-renderer row for external content behind the native broker; the current
-desktop policy is [trust-model.md](../trust-model.md) §C-09.
+This page lists every place OwnCord fetches content that the operator did not
+choose, such as link previews, GIFs and external images. For each path it
+says who starts the fetch, which side makes it, and what limits apply. Read it
+before you add a new kind of embed or outbound fetch.
 
-Two rules this document exists to keep visible. First, **link previews stay
-client-fetched** (plan decision 3): a server-side unfurl proxy would make the
-server dial attacker-chosen hosts on every message containing a link, which
-reverses the "your server does not phone home" property `egress-sites`
-enforces; the cost of that choice is that the _viewer's_ renderer, not the
-operator's server, is who a hostile link deanonymises, and closing that gap is
-C-09's job, owed to B7, not to the server. Second, **the server owns exactly
-one outbound content path that fetches attacker-influenced hosts**: the GIF
-proxy (`Server/api/gif_handler.go`), routed through `Server/safefetch` since
-B5-1. The plugin `http` capability (`Server/plugin/host_http.go`) shares the
-same `safefetch` boundary but is not "content" in the sense this inventory
-otherwise tracks — it is an operator-configured integration point with no
-caller wired into any build today — and two operator-triggered binary
-downloaders exist beside it for completeness. Every other row below is a
-**desktop renderer** fetch, made directly from TypeScript through
-`@tauri-apps/plugin-http` or the webview's own image loading, each with its
-own destination policy (or none), which is exactly the "not centralised at
-the native boundary" finding `docs/trust-model.md`'s C-09 contract exists to
-close in B7.
+**Checked against:** `origin/dev` at `ac6ffc4e`, 2026-10-13 for the "Current
+state" section. The detailed table further down is a dated snapshot.
 
-## The inventory table
+## Current state
+
+Since B7-16, the desktop renderer makes **no** direct fetch of external
+content. Two native owners split the work:
+
+- **The external-content broker** (`Client/src-tauri/src/external_content.rs`,
+  reached through `Client/src/platform/contracts/externalContent.ts`) fetches
+  link previews (Open Graph), YouTube oEmbed titles and thumbnails, inline
+  external images, sent GIFs, GIF-picker thumbnails and external avatars. It
+  allows `https` on port 443 only, checks every resolved address against the
+  same blocked-range list as the server (`Server/safefetch`), follows at most
+  3 redirects by hand, and bounds time (5 s for a page, 15 s for an image),
+  bytes, content type (sniffed for images; no SVG), concurrency (6) and
+  in-flight memory. The renderer gets back only a title, description, site
+  name, dimensions and an opaque image handle, never a remote URL.
+- **The cert-pinned HTTP proxy** (`Client/src-tauri/src/http_proxy.rs`)
+  fetches the connected server's own files: attachments, avatars and custom
+  emoji. It carries the session token and trusts only the pinned certificate.
+
+No broker call and no GIF-proxy query happens until the viewer has chosen,
+once per server, "Load automatically on this server" or "Ask each time"
+(`Client/src/features/content-consent/external.ts`). The YouTube player is
+the one deliberate exception to brokering: it is an iframe loaded on click,
+limited to its fixed host by the CSP's `frame-src` and by a sandbox.
+
+On the server, the GIF proxy (`Server/api/gif_handler.go`) and the plugin
+`http` capability (`Server/plugin/host_http.go`) go through `Server/safefetch`.
+Those rows in the table below are still current.
+
+The full policy is the C-09 contract in
+[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09--contract-for-b7).
+
+## Why previews stay client-side
+
+Two rules this document keeps visible.
+
+1. **Link previews stay client-fetched** (plan decision 3). A server-side
+   preview proxy would make the server dial hosts an attacker chose, every
+   time a message contains a link. That would break the "your server does not
+   phone home" property that `egress-sites` enforces. The cost is that a
+   hostile link reaches the _viewer's_ machine, not the operator's server.
+   The broker and the consent gate above are how the client limits that.
+2. **The server owns exactly one outbound content path that fetches
+   attacker-influenced hosts**: the GIF proxy, routed through
+   `Server/safefetch` since B5-1. The plugin `http` capability shares that
+   boundary, but it is an operator-configured integration point with no
+   caller wired into any build today. Two operator-triggered binary
+   downloaders are also listed for completeness.
+
+## The inventory table (snapshot at `123b07d8`, before B7-16)
+
+This table is BPR-061's "existing provider/feature inventory", written for
+B5-5 and measured at `123b07d8`. It is kept as the record B7's broker was
+built against. **The desktop renderer rows describe the code before B7-16**:
+those fetches now go through the broker or the HTTP proxy, as described in
+"Current state" above. The server rows (GIF proxy, plugin `http`, binary
+downloads) and the notifications row are still accurate. Where a bound did not
+exist, the cell says so and names the phase that owed it.
 
 | Path                                                                                | Starts from                                                                                                                                                                                                            | Fetched by                                                                                                                                   | Destination                                                                                                                                                             | Address policy                                                                                                                                                                                                                                                                                                                                               | Redirects                                                                                     | Size bound                                                                                                     | Time bound                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Type check                                                                                                                                                                                                                                                                  | Concurrency                                                                                                                                                                                     | Cache                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Offline / failure behaviour                                                                                                                                                                   | Boundary owner (phase)                                                                                                                      | Consent gate (phase)                       | Evidence                                                                                                                                                                                                                                     |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
