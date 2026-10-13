@@ -3453,6 +3453,27 @@ describe("VideoGrid", () => {
       expect(onStreamRemoved).toHaveBeenCalledTimes(1);
     });
 
+    it("an unpublish that unsubscribes first still shows the cover", () => {
+      // livekit-client (and the native room) emit TrackUnsubscribed before
+      // TrackUnpublished: the tile is offered back as Watch, then removed.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      vi.advanceTimersByTime(3000);
+      expect(cell()).toBeNull();
+    });
+
+    it("a stream you stopped watching goes at once when it ends", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      cell()!.querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()).toBeNull();
+    });
+
     it("a stream nobody watched, a camera, or your own share goes at once", () => {
       grid.addStream(SCREEN, "Otto (Screen)", null, screen);
       grid.addStream(2, "Otto", fakeStream(), { ...screen, isScreenshare: false });

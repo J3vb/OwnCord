@@ -331,6 +331,9 @@ interface CellEntry {
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
   view?: string;
+  /** Playing until the stream stopped arriving without the viewer's Stop
+   *  watching: an unpublish unsubscribes first, then removes the tile. */
+  lost?: boolean;
   /** The stream ended: the tile shows who ended it until this timer drops it. */
   ending?: ReturnType<typeof setTimeout>;
 }
@@ -1396,6 +1399,7 @@ export function createVideoGrid(): VideoGridComponent {
       entry.popout?.close();
       entry.mini?.close();
     }
+    if (!stopped) entry.lost = false;
     cell.classList.toggle("video-cell--stopped", stopped);
     syncViews();
     entry.video.hidden = stopped;
@@ -1528,11 +1532,15 @@ export function createVideoGrid(): VideoGridComponent {
       existing.trackCleanup = undefined;
       existing.video.srcObject = null;
       setTrackMuted(existing, false);
-      if (!existing.el.classList.contains("video-cell--stopped")) setStopped(userId, true, false);
+      if (!existing.el.classList.contains("video-cell--stopped")) {
+        existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
+        setStopped(userId, true, false);
+      }
       applyNames(existing, username, config?.name ?? username);
       return;
     }
     if (existing !== undefined && stream !== null) {
+      existing.lost = false;
       // Received only while watched: a stream on a tile showing Watch plays.
       if (
         existing.config?.isSelf !== true &&
@@ -1834,7 +1842,8 @@ export function createVideoGrid(): VideoGridComponent {
     pendingWatch.delete(userId);
     const entry = cells.get(userId);
     if (entry === undefined || entry.ending !== undefined) return;
-    if (entry.config?.isScreenshare !== true || !isPlayingHere(entry) || entry.mini !== undefined) {
+    const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
+    if (entry.config?.isScreenshare !== true || !watched) {
       dropTile(userId);
       return;
     }
