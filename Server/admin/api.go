@@ -379,7 +379,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
-			r.Patch("/settings", handlePatchSettings(settings, svc.Retention))
+			r.Patch("/settings", handlePatchSettings(settings, svc.Retention, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
 		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))

@@ -66,3 +66,50 @@ func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
 	defer h.settingsMu.RUnlock()
 	return h.settingsUpload
 }
+
+// uploadPolicyReadTimeout bounds BroadcastUploadPolicy's settings read.
+const uploadPolicyReadTimeout = 5 * time.Second
+
+// BroadcastUploadPolicy re-reads the upload file-type lists into the settings
+// cache and sends them to every connected client as upload_policy, so a list
+// the owner saves in the admin panel reaches open composers without a
+// reconnect. The cache is refreshed first, so an auth_ok built after the save
+// carries the new lists too. A failed read sends nothing: clients keep the
+// lists they have, and the upload route stays authoritative either way.
+//
+// Unsequenced, sent straight to each connected client: the lists are a
+// snapshot that auth_ok already carries on every connect and resume, so a
+// replayed older frame could only overwrite the newer lists auth_ok just
+// gave. A client whose queue is full is disconnected (trySendMsg) and gets
+// the current lists in its next auth_ok.
+//
+// Saves are serialised end to end, so two close together leave clients and
+// the cache on the later one. The admin HubBroadcaster interface carries no
+// context, so the read runs against Background with its own bound.
+func (h *Hub) BroadcastUploadPolicy() {
+	if h.uploadFileTypes == nil {
+		return
+	}
+	h.uploadPolicyMu.Lock()
+	defer h.uploadPolicyMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), uploadPolicyReadTimeout)
+	defer cancel()
+	p, err := h.uploadFileTypes.FileTypePolicy(ctx)
+	if err != nil {
+		slog.Warn("upload_policy: reading the upload file-type policy failed", "error", err)
+		return
+	}
+	h.settingsMu.Lock()
+	h.settingsUpload.BlockedExtensions, h.settingsUpload.AllowedExtensions = p.Blocked, p.Allowed
+	h.settingsMu.Unlock()
+	msg := buildUploadPolicy(p.Blocked, p.Allowed)
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		c.trySendMsg(msg)
+	}
+}

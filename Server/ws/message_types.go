@@ -71,6 +71,7 @@ const (
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
+	MsgTypeUploadPolicy        = "upload_policy" // the upload file-type lists after the owner saves them in the admin panel
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeModQueue            = "mod_queue"     // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
 	MsgTypeModAction           = "mod_action"    // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed

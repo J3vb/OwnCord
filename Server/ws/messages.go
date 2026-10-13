@@ -116,6 +116,13 @@ type emojiUpdatePayload struct {
 	Emoji []emojiInfo `json:"emoji"`
 }
 
+// uploadPolicyPayload is upload_policy's payload: the file-type lists in
+// force, as auth_ok's upload_policy carries them.
+type uploadPolicyPayload struct {
+	BlockedExtensions []string `json:"blocked_extensions"`
+	AllowedExtensions []string `json:"allowed_extensions"`
+}
+
 type chatSendOKPayload struct {
 	ClientMessageID string `json:"client_message_id,omitempty"`
 	Deduplicated    bool   `json:"deduplicated,omitempty"`
@@ -512,6 +519,22 @@ func buildEmojiUpdate(list []*db.Emoji) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeEmojiUpdate,
 		Payload: emojiUpdatePayload{Emoji: flat},
+	})
+}
+
+// buildUploadPolicy constructs an upload_policy broadcast carrying both
+// file-type lists, each always an array so an emptied list is [] and never
+// absent: the client replaces both lists wholesale.
+func buildUploadPolicy(blocked, allowed []string) []byte {
+	if blocked == nil {
+		blocked = []string{}
+	}
+	if allowed == nil {
+		allowed = []string{}
+	}
+	return buildJSON(wsMsg{
+		Type:    MsgTypeUploadPolicy,
+		Payload: uploadPolicyPayload{BlockedExtensions: blocked, AllowedExtensions: allowed},
 	})
 }
 
