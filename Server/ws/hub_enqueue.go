@@ -15,6 +15,9 @@ var contentEnqueueWait = time.Second
 // content-bearing frame waits up to contentEnqueueWait for room (never past
 // hub stop); any other frame, or one still without room, is dropped and
 // counted, with kind naming the dropped frame, and enqueue reports false.
+// A waiting content frame can be overtaken by another producer's frame that
+// takes the freed slot first, so delivery order across producers is not
+// guaranteed during the wait.
 func (h *Hub) enqueue(bm broadcastMsg, kind string) bool {
 	bm.enqueuedAt = time.Now()
 	select {

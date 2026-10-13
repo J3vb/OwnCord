@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,10 +106,37 @@ func TestEnqueue_MetadataFrameDoesNotWait(t *testing.T) {
 	}
 }
 
-// When the content gate cannot read the channel, it withholds the frame from
-// every subscriber; a resume at or behind that frame must take the full-ready
-// path so the message is refetched from the database (2A-4).
+// erroringAckListReader fails only the acknowledgement lookup of a labelled
+// channel, the gate's second fail-closed branch.
+type erroringAckListReader struct {
+	VisibilityReader
+}
+
+func (r *erroringAckListReader) ListNSFWAcknowledgedUserIDs(context.Context, int64) ([]int64, error) {
+	return nil, errors.New("simulated transient lookup failure")
+}
+
+// When the content gate cannot confirm who may see a frame, it withholds the
+// frame from every subscriber; a resume at or behind that frame must take the
+// full-ready path so the message is refetched from the database (2A-4).
 func TestNSFWGateLookupFailure_ForcesResync(t *testing.T) {
+	cases := []struct {
+		name     string
+		labelled bool
+		reader   func(VisibilityReader) VisibilityReader
+	}{
+		{"channel read fails", false, func(v VisibilityReader) VisibilityReader { return &erroringGetChannelReader{VisibilityReader: v} }},
+		{"acknowledgement read fails", true, func(v VisibilityReader) VisibilityReader { return &erroringAckListReader{VisibilityReader: v} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertGateFailureForcesResync(t, tc.labelled, tc.reader)
+		})
+	}
+}
+
+func assertGateFailureForcesResync(t *testing.T, labelled bool, wrap func(VisibilityReader) VisibilityReader) {
+	t.Helper()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 	subscriberID, err := database.CreateUser(ctx, "gate-fail-subscriber", "hash", 4)
@@ -119,11 +147,16 @@ func TestNSFWGateLookupFailure_ForcesResync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
+	if labelled {
+		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
+			t.Fatalf("label channel: %v", err)
+		}
+	}
 	hub := newTestHubWith(t, HubOptions{
 		DB:      database,
 		Limiter: auth.NewRateLimiter(),
 		Readers: HubReaders{
-			Visibility: &erroringGetChannelReader{VisibilityReader: database},
+			Visibility: wrap(database),
 			Ready:      database,
 			Members:    database,
 			Dispatch:   database,
