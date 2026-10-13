@@ -9,6 +9,7 @@ import {
   getLocalScreenshareFps as doGetLocalScreenshareFps,
 } from "../../lib/screenShare";
 import { parseUserId } from "./sessionState";
+import { isUnencryptedPublication } from "./mediaEncryption";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
@@ -137,7 +138,11 @@ export class RemoteTracks {
     else this.watched.delete(key);
     const sources =
       type === "screenshare" ? (["screenshare", "screen_share_audio"] as const) : [type];
-    for (const source of sources) this.publication(userId, source)?.setSubscribed(on);
+    for (const source of sources) {
+      const pub = this.publication(userId, source);
+      if (pub === undefined || (on && isUnencryptedPublication(pub))) continue;
+      pub.setSubscribed(on);
+    }
   }
 
   /** Forget watches whose stream the room does not publish. */

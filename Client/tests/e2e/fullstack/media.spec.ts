@@ -1,5 +1,8 @@
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { LIVEKIT_KEY_ID, LIVEKIT_API_SECRET } from "../support/server";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -535,3 +538,69 @@ for (const fault of ["missing", "wrong"] as const) {
     await expectDecodedMedia(bob, true);
   });
 }
+
+/** A LiveKit access token signed with the test SFU's own key pair. */
+function liveKitToken(grants: Record<string, unknown>): string {
+  const now = Math.floor(Date.now() / 1000);
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ iss: LIVEKIT_KEY_ID, nbf: now - 10, exp: now + 600, ...grants })}`;
+  const signature = createHmac("sha256", LIVEKIT_API_SECRET).update(unsigned).digest("base64url");
+  return `${unsigned}.${signature}`;
+}
+
+test("media published without end-to-end encryption is never played", async ({
+  alice,
+  server,
+  browser,
+  baseURL,
+}) => {
+  await joinVoice(alice);
+  await expect(alice.getByTestId("vw-secured")).not.toHaveClass(/vw-secured--degraded/);
+  const livekit = `127.0.0.1:${server.livekitPort}`;
+  const listed = (await (
+    await fetch(`http://${livekit}/twirp/livekit.RoomService/ListRooms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${liveKitToken({ video: { roomList: true } })}`,
+      },
+      body: "{}",
+    })
+  ).json()) as { rooms: Array<{ name: string }> };
+  const room = listed.rooms[0]?.name;
+  expect(room).toBeTruthy();
+
+  // A plain LiveKit client with no room key and no E2EE, under the identity
+  // of a user who is not in the call.
+  const context = await browser.newContext({ baseURL, permissions: ["microphone"] });
+  try {
+    const publisher = await context.newPage();
+    await publisher.goto("/");
+    await publisher.addScriptTag({
+      content: readFileSync("node_modules/livekit-client/dist/livekit-client.umd.js", "utf8"),
+    });
+    const token = liveKitToken({
+      sub: "user-2:plain",
+      video: { room, roomJoin: true, canPublish: true, canSubscribe: false },
+    });
+    await publisher.evaluate(
+      async ({ url, token }) => {
+        const { Room } = (window as unknown as { LivekitClient: typeof import("livekit-client") })
+          .LivekitClient;
+        const plain = new Room();
+        await plain.connect(url, token);
+        await plain.localParticipant.setMicrophoneEnabled(true);
+      },
+      { url: `ws://${livekit}`, token },
+    );
+
+    await expect(alice.getByTestId("vw-secured")).toHaveClass(/vw-secured--degraded/);
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      expect((await mediaStats(alice)).audioEnergy).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } finally {
+    await context.close();
+  }
+});

@@ -23,6 +23,7 @@ export const shards = {
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/remoteTracks.ts",
+    "src/features/voice/mediaEncryption.ts",
     "src/features/voice/videoCodec.ts",
     "src/features/voice/e2eeIdentity.ts",
     "src/features/voice/e2eeEpoch.ts",

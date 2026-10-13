@@ -126,6 +126,7 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
       messageList: { scrollToMessage, mount: vi.fn(), destroy: vi.fn() },
       mountChannel: vi.fn(),
       destroyChannel: vi.fn(),
+      destroy: vi.fn(),
       openFilePicker: vi.fn(),
     },
     scrollToMessage,
