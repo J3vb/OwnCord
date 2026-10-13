@@ -1,9 +1,15 @@
 # Credential storage
 
-The desktop client persists credentials, identity keys and pending message text
-through the verified secret store under the service name `com.owncord.client`.
-The OS credential store is tried first, with the encrypted fallback described
-below when a write fails or cannot be verified:
+This page explains where the desktop client keeps its secrets: saved logins,
+the voice identity key, and unsent message text. It also covers how to check
+the store on a machine and what to do when saving fails. It is for users
+debugging a lost login or identity key, and for contributors changing the
+secret store.
+
+The client saves these secrets through a verified secret store, under the
+service name `com.owncord.client`. It tries the OS credential store first.
+If a write fails or cannot be read back, it uses the encrypted fallback
+described below.
 
 | Secret                          | Account name                      | Contents                                             |
 | ------------------------------- | --------------------------------- | ---------------------------------------------------- |
@@ -12,15 +18,15 @@ below when a write fails or cannot be verified:
 | Pending message text            | `pending-messages:{owner_digest}` | JSON array of text drafts and stable send identities |
 
 For pending messages, `owner_digest` is the lowercase hexadecimal SHA-256 digest
-of JSON `[host, userId]`. The full host, including its port, and authenticated
-user ID partition the queue. Different accounts or server ports do not share
-drafts. Its save, load and delete commands use the same credential-store mutex,
-write verification and encrypted fallback as the other secrets.
+of JSON `[host, userId]`. So each queue belongs to one full host (port
+included) and one signed-in user. Different accounts or server ports never
+share drafts. Saving, loading and deleting the queue use the same lock, write
+check and encrypted fallback as the other secrets.
 
 ## The stored password never crosses IPC back to JavaScript
 
-The login credential blob carries a password only when the user ticked
-"Remember password". That plaintext stays inside the Rust backend:
+The saved login holds a password only when the user ticked "Remember
+password". That password stays inside the Rust backend:
 
 - `CredentialData.password` is `#[serde(skip)]`, so `load_credential` cannot
   return it to JavaScript. The frontend receives `has_password` instead and
@@ -113,8 +119,8 @@ is not the same one across a reconnect, the published key is not the key that
 signed, and peers correctly reject the announce** — voice E2EE key exchange then
 times out and the client log shows:
 
-```
-peer announce signature invalid - rejecting (MITM?)
+```text
+E2EE: peer announce signature invalid — rejecting (MITM?)
 ```
 
 That rejection is the fail-closed behaviour working as intended. The bug in that
@@ -142,7 +148,7 @@ persistence… there is no persistence other than in the entry itself", and its
 builder returns a fresh `MockCredential` for every `Entry::new`. Because each
 command built its own `Entry`, the sequence was:
 
-```
+```text
 save_identity_key -> Entry::new(..) -> set_password -> Ok(())    // Entry dropped here
 load_identity_key -> Entry::new(..) -> get_password -> NoEntry   // brand-new empty cell
 ```
@@ -189,7 +195,7 @@ Two guards keep this from regressing silently:
 The client logs its compiled backend at startup, to the rotating log file in the
 OS app-log dir:
 
-```
+```text
 credential store: OS keyring, persists until deleted (on disk)
 ```
 
@@ -201,16 +207,20 @@ Use `cmdkey`, **not** the Credential Manager control panel — the control panel
 filters out generic credentials written by applications, so it shows nothing
 even on a perfectly healthy machine.
 
-`keyring` composes the Windows target name as `{account}.{service}`, so the
-identity key for `test.example` is stored as:
+`keyring` composes the Windows target name as `{account}.{service}`. So the
+identity key of user 7 on `test.example` is stored as:
 
+```text
+identity:7@test.example.com.owncord.client
 ```
-identity:test.example.com.owncord.client
-```
+
+(Installs from before the key was scoped per user used the older
+`identity:{host}` account, for example `identity:test.example.com.owncord.client`.
+The client migrates it to the scoped account on first load.)
 
 Note the order: account first, service second. To check for a real entry:
 
-```
+```bat
 cmdkey /list | findstr /i owncord
 ```
 
@@ -225,8 +235,8 @@ while the client still fails, for two reasons:
 
 If you do want the exact repro:
 
-```
-cmdkey /generic:identity:test.example.com.owncord.client /user:x /pass:y
+```bat
+cmdkey /generic:identity:7@test.example.com.owncord.client /user:x /pass:y
 cmdkey /list | findstr /i owncord
 ```
 

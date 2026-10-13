@@ -1,13 +1,19 @@
 # Capacity
 
-What one OwnCord server is qualified to carry, on stated hardware, with the
-commands that reproduce the measurement.
+This page says how much one OwnCord server has been measured to carry, on
+stated hardware, and gives the commands to repeat the measurement. Read it to
+size a server, or before you change anything that could slow the server down.
+
+If you only want a sizing answer, read [The profile](#the-profile),
+[Reference hardware](#reference-hardware) and
+[Sizing for 1,000–2,000 online](#sizing-for-10002000-online). The rest of the
+page is the method and the measured results.
 
 > **The hardware and the commands in this document were published before the
-> first qualifying run.** That ordering is deliberate and is visible in
-> `git log`: reference hardware chosen after seeing results is hardware chosen
-> to fit the numbers. If a target is missed, the miss is published here and
-> recorded in the findings ledger — it is never re-run on a bigger machine.
+> first qualifying run.** That order is deliberate, and the commit history
+> shows it. Hardware chosen after seeing the results is hardware chosen to fit
+> the numbers. If a target is missed, the miss is published here and recorded
+> in the findings ledger. It is never re-run on a bigger machine.
 
 ## The profile
 

@@ -1,16 +1,27 @@
 # Voice and End-to-End Encryption
 
-**Verified against:** commit `5630aa1`, 2026-08-04
+**Verified against:** `origin/dev` at `ac6ffc4e`, 2026-10-13 (the D6 flow and
+the "Supporting pieces" list; the dated measurements below keep their own
+dates).
 
-Voice/video runs on LiveKit. The Go server issues short-lived scoped tokens and
-relays E2EE key-exchange messages; media flows client↔LiveKit directly. On the
-client, everything funnels through `src/lib/livekitSession.ts` (a facade over
-the `src/features/voice/` modules), and — because
-self-hosted servers commonly use self-signed certificates — the LiveKit
-connection is tunneled through a local Rust TLS proxy pinned to the same TOFU
-fingerprint as the main WebSocket. Like the REST tunnel (`http_proxy.rs`), it
-serves only request paths that start with its own random token, which the
-client puts in front of the LiveKit path.
+This page explains how voice, video and screen share work, and how they are
+end-to-end encrypted (E2EE). Read it before you change the voice state
+machine, the key exchange, or the Linux native voice backend. For who can read
+what, see [trust-model.md](../trust-model.md).
+
+The short version:
+
+- Voice and video run on LiveKit, a separate media server (an SFU).
+- The Go server issues short-lived, scoped LiveKit tokens and relays the E2EE
+  key-exchange messages. Media goes between the client and LiveKit; the
+  server never has the media key.
+- On the client, everything goes through `src/lib/livekitSession.ts`, a facade
+  over the `src/features/voice/` modules.
+- Self-hosted servers often use self-signed certificates. So the LiveKit
+  connection goes through a local Rust TLS proxy, pinned to the same TOFU
+  fingerprint as the main WebSocket. Like the REST tunnel (`http_proxy.rs`),
+  it serves only request paths that start with its own random token, which
+  the client puts in front of the LiveKit path.
 
 ## D6 — Voice join + E2EE key exchange
 
@@ -44,21 +55,37 @@ sequenceDiagram
     end
 ```
 
-**What this shows.** The server never holds the room key — it only relays
-announce/offer messages and tracks who the key holder is (deterministically the
-lowest user ID in the channel). Keys are wrapped per-recipient via ECDH, and
-the key holder rotates the room key when a participant leaves so departed
-members cannot decrypt future media. Voice permission enforcement happens twice:
-at `voice_join` (channel permission) and inside the LiveKit JWT itself
-(`CanPublishSources` restricts camera/screenshare per role permission).
+**What this shows.** The server never holds the room key. It only relays the
+announce and offer messages, and tracks who the key holder is. The key holder
+is always the participant with the lowest user ID in the channel.
+
+- Keys are wrapped for each recipient with ECDH.
+- When a participant leaves, the key holder rotates the room key, so people
+  who left cannot decrypt later media.
+- The key also rotates on a timer while the call runs.
+
+Voice permissions are enforced twice: at `voice_join` (the channel permission,
+plus the channel's user limit) and inside the LiveKit token itself, where
+`CanPublishSources` limits camera and screen share by role permission. A user
+who may moderate voice in that channel can join it even when it is full;
+everyone else gets `CHANNEL_FULL` (`Server/ws/voice_join_capacity.go`).
+
+**Unencrypted media is refused (webview voice path).** If LiveKit reports a
+remote track as not encrypted, the webview voice path never subscribes to it or
+plays it, and the call's
+security badge shows "Unsecured" for the rest of the session
+(`src/features/voice/mediaEncryption.ts`). A participant who republishes with
+encryption is subscribed again.
 
 Supporting pieces:
 
 - **Server:** `Server/ws/voice_e2ee.go` (relay + key-holder map),
   `Server/ws/livekit.go` (token minting), `Server/ws/livekit_process.go`
   (optional managed `livekit-server` subprocess),
-  `Server/ws/livekit_webhook.go` (webhook validated by LiveKit JWT and
-  admin-IP-restricted), `Server/api/livekit_proxy.go` (HTTP reverse proxy).
+  `Server/ws/livekit_webhook.go` (webhook, checked by its LiveKit JWT and
+  limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
+  `server.admin_allowed_cidrs`), `Server/api/livekit_proxy.go` (reverse proxy
+  for LiveKit signalling).
 - **Client:** `src/lib/livekitSession.ts` (facade owning the state machine:
   idle/connecting/connected/reconnecting), `src/features/voice/`
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
@@ -74,8 +101,11 @@ Supporting pieces:
   primitives, safety-number fingerprints, long-term identity keys),
   `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
-  `src/lib/screenShare.ts`, `src-tauri/src/livekit_proxy.rs` (tunnel),
-  `src-tauri/src/ptt.rs` (push-to-talk key polling).
+  `src/lib/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
+  screen-share codec: VP8 by default, H.264 or Auto by choice on Windows;
+  Linux native always publishes VP8), `src/lib/audioElements.ts` (per-user
+  volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
+  (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
 The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer`)
 is specified in [protocol.md](../protocol.md) (Voice End-to-End Encryption
@@ -244,7 +274,9 @@ settings tab hides the Input Volume control there with a note pointing at the
 system mixer. The sensitivity gate has since landed on that stage (below), so
 the Input Sensitivity slider shows on Linux too, without a live level in its
 bar; the processing toggles, Enhanced Noise Suppression included,
-apply at the next join. Per-user and output volume
+apply at the next join. The automatic input sensitivity option and the mic
+test in Voice & Audio settings are web-path features and are not offered on
+Linux (`components/settings/VoiceAudioTab.ts`). Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change
