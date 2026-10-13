@@ -72,6 +72,11 @@ describe("showUserVolumeMenu rendering", () => {
     expect(slider?.max).toBe("200");
   });
 
+  it("caps its width so a long notice wraps instead of widening the menu", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal, "a long notice");
+    expect(menuEl()?.style.maxWidth).toBe("240px");
+  });
+
   it("positions the menu at the supplied coordinates", () => {
     showUserVolumeMenu(7, "alice", 123, 456, new AbortController().signal);
 

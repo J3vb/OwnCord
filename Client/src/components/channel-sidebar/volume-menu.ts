@@ -60,7 +60,12 @@ export function showUserVolumeMenu(
     el.remove();
   });
 
-  const menu = createElement("div", { class: "context-menu user-vol-menu" });
+  // Discord-width: a long notice (moderation unavailable) wraps instead of
+  // stretching the menu.
+  const menu = createElement("div", {
+    class: "context-menu user-vol-menu",
+    style: "max-width:240px",
+  });
   // One owner for the menu's whole life, so the keyboard model and the
   // outside-click dismissal are torn down together (B9 A11Y-01).
   const dismiss = new Disposable();
