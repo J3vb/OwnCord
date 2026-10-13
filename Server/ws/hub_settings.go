@@ -66,3 +66,27 @@ func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
 	defer h.settingsMu.RUnlock()
 	return h.settingsUpload
 }
+
+// BroadcastUploadPolicy re-reads the upload file-type lists into the settings
+// cache and sends them to every connected client as upload_policy, so a list
+// the owner saves in the admin panel reaches open composers without a
+// reconnect. The cache is refreshed first, so an auth_ok built after the save
+// carries the new lists too. A failed read sends nothing: clients keep the
+// lists they have, and the upload route stays authoritative either way.
+//
+// The admin HubBroadcaster interface carries no context, so — like
+// BroadcastChannelCreate — the read runs against Background.
+func (h *Hub) BroadcastUploadPolicy() {
+	if h.uploadFileTypes == nil {
+		return
+	}
+	p, err := h.uploadFileTypes.FileTypePolicy(context.Background())
+	if err != nil {
+		slog.Warn("upload_policy: reading the upload file-type policy failed", "error", err)
+		return
+	}
+	h.settingsMu.Lock()
+	h.settingsUpload.BlockedExtensions, h.settingsUpload.AllowedExtensions = p.Blocked, p.Allowed
+	h.settingsMu.Unlock()
+	h.BroadcastToAll(buildUploadPolicy(p.Blocked, p.Allowed))
+}

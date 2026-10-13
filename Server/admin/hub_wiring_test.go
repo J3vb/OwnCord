@@ -27,3 +27,8 @@ var _ service.SessionDisconnector = (*ws.Hub)(nil)
 // optional capability, wired in wireAuth. A renamed or removed hub method
 // would otherwise leave an overturned ban broadcasting nothing at runtime.
 var _ service.AppealUnbanBroadcaster = (*ws.Hub)(nil)
+
+// handlePatchSettings reaches BroadcastUploadPolicy through a type assertion;
+// without this a renamed hub method would leave saved file-type lists
+// reaching clients only on reconnect, and nothing would fail.
+var _ uploadPolicyBroadcaster = (*ws.Hub)(nil)

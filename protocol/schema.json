@@ -89,6 +89,12 @@
     { "wire": "member_ban", "go": "MsgTypeMemberBan", "ts": "MEMBER_BAN" },
     { "wire": "roles_update", "go": "MsgTypeRolesUpdate", "ts": "ROLES_UPDATE" },
     { "wire": "emoji_update", "go": "MsgTypeEmojiUpdate", "ts": "EMOJI_UPDATE" },
+    {
+      "wire": "upload_policy",
+      "go": "MsgTypeUploadPolicy",
+      "ts": "UPLOAD_POLICY",
+      "note": "the upload file-type lists after the owner saves them in the admin panel"
+    },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     {
       "wire": "mod_queue",

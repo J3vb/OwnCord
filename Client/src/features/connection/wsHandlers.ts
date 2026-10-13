@@ -1,7 +1,7 @@
 // Auth, server-restart and connection-level error handlers — extracted from
 // lib/dispatcher.ts, which keeps every socket subscription and calls these
 // plain functions.
-import { authStore, setAuth, clearAuth } from "../../stores/auth.store";
+import { authStore, setAuth, clearAuth, setUploadFileTypes } from "../../stores/auth.store";
 import {
   setTransientError,
   setUpdateRequiredHost,
@@ -226,4 +226,11 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     return true;
   }
   return false;
+}
+
+/** upload_policy: the owner saved the upload file-type lists, so the
+ *  composer's pre-upload check follows them without a reconnect. A missing
+ *  list reads as empty, the same as auth_ok's omitted lists. */
+export function handleUploadPolicy(payload: Payload<"upload_policy">): void {
+  setUploadFileTypes(payload.blocked_extensions ?? [], payload.allowed_extensions ?? []);
 }
