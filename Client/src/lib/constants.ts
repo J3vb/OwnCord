@@ -7,3 +7,8 @@ export const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
  * copy exists so the picker can refuse a 12th selection without a round trip.
  */
 export const MAX_GROUP_DM_PARTICIPANTS = 10;
+
+/** Window event fired after a voice user's local Mute (or a volume of 0)
+ *  changes, so the sidebar row and the video tile that show it redraw
+ *  (mirrors CHANNEL_MUTE_CHANGED). Detail: `{ userId }`. */
+export const USER_LOCAL_MUTE_CHANGED = "owncord:user-local-mute-changed";

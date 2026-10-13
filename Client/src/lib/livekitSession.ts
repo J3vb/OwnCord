@@ -872,6 +872,14 @@ export class LiveKitSession {
     return this._media.getUserVolume(userId);
   }
 
+  setUserLocalMute(userId: number, muted: boolean): void {
+    this._media.setUserLocalMute(userId, muted);
+  }
+
+  getUserLocalMute(userId: number): boolean {
+    return this._media.getUserLocalMute(userId);
+  }
+
   setScreenshareAudioVolume(userId: number, volume: number): void {
     this._media.setScreenshareAudioVolume(userId, volume);
   }
@@ -1048,6 +1056,8 @@ export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);
 export const getUserVolume = session.getUserVolume.bind(session);
+export const setUserLocalMute = session.setUserLocalMute.bind(session);
+export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
