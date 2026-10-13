@@ -1192,9 +1192,10 @@ async fn forward_events(
             // socket and the webview.
             if !is_encrypted(publication.encryption_type()) {
                 publication.set_subscribed(false);
+                let identity = participant.identity().to_string();
                 log::warn!(
                     "[native_voice] refusing a track from {} published without end-to-end encryption",
-                    participant.identity()
+                    identity.split(':').next().unwrap_or_default()
                 );
                 continue;
             }
