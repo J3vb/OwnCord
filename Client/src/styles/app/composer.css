@@ -68,6 +68,11 @@
 .attachment-preview-item.uploading {
   opacity: 0.6;
 }
+.attachment-preview-item.expired {
+  opacity: 0.5;
+  outline: 2px solid var(--red);
+  outline-offset: -2px;
+}
 /* Upload progress on the chip: a native bar along the bottom edge, left
    indeterminate (a sweeping stripe) until the transport reports a first
    byte, then determinate. Its value/max announce the percentage. */
