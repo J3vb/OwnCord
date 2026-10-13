@@ -2846,6 +2846,31 @@ describe("VideoGrid", () => {
       grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
       expect(camera.disabled).toBe(true);
       expect(share.disabled).toBe(true);
+      expect(camera.title).toBe("Connecting…");
+
+      // The chat socket is down: frozen with the reason, like the voice widget.
+      grid.setCallState({
+        muted: false,
+        deafened: false,
+        listenOnly: false,
+        offline: "reconnecting",
+      });
+      expect(camera.disabled).toBe(true);
+      expect(share.title).toBe("Reconnecting…");
+
+      // A moderator's mute or deafen: that control is inert, with the reason.
+      grid.setCallState({
+        muted: true,
+        deafened: true,
+        listenOnly: false,
+        serverMuted: true,
+        serverDeafened: true,
+      });
+      expect(barButton("mute").disabled).toBe(true);
+      expect(barButton("mute").title).toBe("You were muted by a moderator");
+      expect(barButton("deafen").disabled).toBe(true);
+      expect(barButton("deafen").title).toBe("You were deafened by a moderator");
+      expect(camera.disabled).toBe(false);
     });
 
     it("offers camera and share on a full-screen tile too", async () => {

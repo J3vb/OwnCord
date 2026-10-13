@@ -1265,6 +1265,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       camera: false,
       screenshare: false,
       connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
     // Joined without a microphone: the controls read listen-only.
     voiceStore.setState((prev) => ({ ...prev, localMuted: false, listenOnly: true }));
@@ -1276,6 +1278,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       camera: false,
       screenshare: false,
       connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
     // The call view's control bar shows your camera and share state, and
     // holds them inert while the join is still connecting.
@@ -1294,6 +1298,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       camera: true,
       screenshare: true,
       connecting: true,
+      serverMuted: false,
+      serverDeafened: false,
     });
     // Its camera and share buttons run the same toggles as the voice widget.
     voiceStore.setState((prev) => ({
@@ -1302,6 +1308,23 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       localScreenshare: false,
       voiceStatus: "connected",
     }));
+    // A moderator mute and a dropped chat socket reach the bar too.
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ serverMuted: true }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offline: "reconnecting" }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offline: expect.anything() }),
+    );
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: false }));
     cbs.callControls.onCameraToggle();
     expect(lk.enableCamera).toHaveBeenCalledTimes(1);
     cbs.callControls.onScreenshareToggle();

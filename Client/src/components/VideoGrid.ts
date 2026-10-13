@@ -118,6 +118,11 @@ export interface CallState {
   readonly screenshare?: boolean;
   /** The join has not reached the room yet: camera and share are inert. */
   readonly connecting?: boolean;
+  /** A moderator muted or deafened you: that control is inert. */
+  readonly serverMuted?: boolean;
+  readonly serverDeafened?: boolean;
+  /** The chat socket is down: camera and share are inert until it is back. */
+  readonly offline?: "reconnecting" | "disconnected";
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -930,20 +935,28 @@ export function createVideoGrid(): VideoGridComponent {
 
   function drawCallState(bar: Element): void {
     const mute = bar.querySelector<HTMLButtonElement>("[data-call-control='mute']");
-    const deafen = bar.querySelector<HTMLElement>("[data-call-control='deafen']");
+    const deafen = bar.querySelector<HTMLButtonElement>("[data-call-control='deafen']");
     if (mute !== null) {
       mute.setAttribute("aria-pressed", String(callState.muted));
       mute.querySelector("svg")?.remove();
       mute.appendChild(createIcon(callState.muted || callState.listenOnly ? "mic-off" : "mic", 18));
-      mute.disabled = callState.listenOnly;
+      mute.disabled = callState.listenOnly || callState.serverMuted === true;
       mute.title = voiceText(
-        callState.listenOnly ? "widget.control.listenOnly" : "widget.control.mute",
+        callState.serverMuted === true
+          ? "widget.mutedByModerator"
+          : callState.listenOnly
+            ? "widget.control.listenOnly"
+            : "widget.control.mute",
       );
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(callState.deafened));
       deafen.querySelector("svg")?.remove();
       deafen.appendChild(createIcon(callState.deafened ? "headphones-off" : "headphones", 18));
+      deafen.disabled = callState.serverDeafened === true;
+      deafen.title = voiceText(
+        callState.serverDeafened === true ? "widget.deafenedByModerator" : "widget.control.deafen",
+      );
     }
     const camera = bar.querySelector<HTMLButtonElement>("[data-call-control='camera']");
     if (camera !== null) {
@@ -951,7 +964,7 @@ export function createVideoGrid(): VideoGridComponent {
       drawMediaButton(camera, on, on ? "camera-off" : "camera");
       const label = voiceText(on ? "widget.control.cameraOff" : "widget.control.cameraOn");
       camera.setAttribute("aria-label", label);
-      camera.title = label;
+      camera.title = mediaLockReason() ?? label;
     }
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
     if (share !== null) {
@@ -959,16 +972,25 @@ export function createVideoGrid(): VideoGridComponent {
       drawMediaButton(share, on, on ? "monitor-off" : "monitor");
       const label = voiceText(on ? "widget.control.shareStop" : "widget.control.shareStart");
       share.setAttribute("aria-label", label);
-      share.title = label;
+      share.title = mediaLockReason() ?? label;
     }
   }
 
-  /** Camera or share: pressed while on, inert until the join has connected. */
+  /** Why camera and share are inert now, or null: the chat socket is down,
+   *  or the join has not reached the room yet. */
+  function mediaLockReason(): string | null {
+    if (callState.offline === "reconnecting") return voiceText("status.reconnectingShort");
+    if (callState.offline === "disconnected") return voiceText("status.notConnected");
+    if (callState.connecting === true) return voiceText("status.joining");
+    return null;
+  }
+
+  /** Camera or share: pressed while on, inert while locked. */
   function drawMediaButton(btn: HTMLButtonElement, on: boolean, icon: IconName): void {
     btn.setAttribute("aria-pressed", String(on));
     btn.querySelector("svg")?.remove();
     btn.appendChild(createIcon(icon, 18));
-    btn.disabled = callState.connecting === true;
+    btn.disabled = mediaLockReason() !== null;
   }
 
   // --- Call view: view toggles and control bar --------------------------------

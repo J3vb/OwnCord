@@ -13,7 +13,7 @@ import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import type { CallState, VideoGridComponent } from "@components/VideoGrid";
 import { isConnecting } from "@components/VoiceWidget";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
@@ -36,6 +36,7 @@ import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
+import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -1481,6 +1482,32 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevSpeaking = "";
     let prevAudioState = "";
     let prevCallState = "";
+    /** Your call state for the grid's call controls, from the voice store and
+     *  the chat socket (camera and share freeze while it is down). */
+    const syncCallState = (state: VoiceState): void => {
+      const socket = uiStore.getState().connectionStatus;
+      const callState: CallState = {
+        muted: isSelfMuted(state),
+        deafened: state.localDeafened,
+        listenOnly: state.listenOnly,
+        camera: state.localCamera,
+        screenshare: state.localScreenshare,
+        connecting: isConnecting(state.voiceStatus),
+        serverMuted: state.localServerMuted === true,
+        serverDeafened: state.localServerDeafened === true,
+        ...(socket === "connected" ? {} : { offline: socket }),
+      };
+      const callKey = JSON.stringify(callState);
+      if (callKey === prevCallState) return;
+      prevCallState = callKey;
+      videoGrid?.setCallState(callState);
+    };
+    unsubscribers.push(
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        () => syncCallState(voiceStore.getState()),
+      ),
+    );
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, remote-tile identity changes and who is speaking.
@@ -1516,22 +1543,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
           }
-          const selfMuted = isSelfMuted(state);
-          const connecting = isConnecting(state.voiceStatus);
-          const callKey =
-            `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}|` +
-            `${String(state.localCamera)}|${String(state.localScreenshare)}|${String(connecting)}`;
-          if (callKey !== prevCallState) {
-            prevCallState = callKey;
-            videoGrid?.setCallState({
-              muted: selfMuted,
-              deafened: state.localDeafened,
-              listenOnly: state.listenOnly,
-              camera: state.localCamera,
-              screenshare: state.localScreenshare,
-              connecting,
-            });
-          }
+          syncCallState(state);
 
           // Seed the signature with the channel id so ANY voice-channel
           // switch changes it, even one where the camera/screenshare flags
