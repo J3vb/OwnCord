@@ -189,10 +189,12 @@ inside the window and keeps that spot for the session; **Return to stream** (or 
 Enter) reopens the stream view, Pop out moves it to its window, Stop watching ends the watch, and it
 closes when the stream ends. The grid's own **Show chat** control still closes the stream view
 without a mini-player, so the stream stops receiving video as before. The
-stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
+screen share you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
-stats, so it shows the resolution only.
+stats, so it shows the resolution only. A camera tile has no chip. In the grid a
+camera fills its tile, cropped at the edges; focused or full screen it shows the
+whole frame, and a screen share always does.
 Each remote tile asks only for what it shows (`setRemoteVideoView`, since
 `adaptiveStream` stays off for OC-0455): a tile no one can see (grid closed,
 app hidden or minimised, Stop watching) receives no video, a small tile gets
@@ -410,9 +412,11 @@ links back to the DM, and the DM list shows a phone glyph on a DM with a live ca
 
 While the open DM is the current call's DM, the panel is the call's only video
 surface: `VideoModeController` moves the shared `VideoGrid` into the panel's
-stage as soon as any camera or screen share is on (remote ones too, unlike the
-guild-channel rule that only your own video opens the grid; your own also while
-the call is still ringing or went unanswered), the chat stays visible below, and
+stage as soon as any camera or screen share is on (remote ones too, unlike a
+guild channel, where no video opens the grid on its own: turning on your camera
+or share while reading a text channel keeps the chat, and the call view shows
+it once opened; in the DM panel your own also while the call is still ringing
+or went unanswered), the chat stays visible below, and
 everyone without a camera is an avatar tile. Collapsed, the panel never reopens
 on its own; Expand shows the video. Anywhere else the grid behaves as in guild
 voice.

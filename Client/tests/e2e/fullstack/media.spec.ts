@@ -49,6 +49,13 @@ function captureFrames(transport: {
   return frames;
 }
 
+/** Open the call view: a second click on the joined voice channel. Your own
+ *  camera or share never opens it on its own (WP 1B-4). */
+async function openCall(page: Page, name = "voice-one"): Promise<void> {
+  await page.locator(".channel-item.voice", { hasText: name }).click();
+  await expect(page.locator("[data-testid='video-grid-slot']")).toBeVisible({ timeout: 10_000 });
+}
+
 /** Turn "Automatically play cameras" off, so a remote camera waits behind
  *  Watch stream like a screen share (WP 1B-3). Read when a camera publishes. */
 async function optOutOfCameraAutoPlay(page: Page): Promise<void> {
@@ -64,8 +71,9 @@ test("a real remote camera produces a labelled tile while the local self tile ha
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
-  // The local camera is the only path that auto-opens the grid; the self tile
-  // is deliberately control-free (you cannot mute yourself).
+  // In the open call view the self tile is deliberately control-free (you
+  // cannot mute yourself).
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   const gridSlot = alice.locator("[data-testid='video-grid-slot']");
   await expect(gridSlot).toBeVisible({ timeout: 10_000 });
@@ -102,6 +110,7 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   await expectDecodedMedia(alice);
 
   // Two tiles on alice: her own camera plus bob's remote camera.
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(alice.locator(".video-cell[data-user-id='1']")).toBeVisible({ timeout: 10_000 });
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
@@ -189,8 +198,8 @@ test("a remote camera sends no video while the grid is closed, and resumes when 
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
-  // Bob's camera becomes a tile in alice's grid, which stays closed: only a
-  // local camera opens it (BUG-105).
+  // Bob's camera becomes a tile in alice's grid, which stays closed: no video
+  // opens it on its own (BUG-105, WP 1B-4).
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   const gridSlot = alice.locator("[data-testid='video-grid-slot']");
   const bobTile = alice.locator(".video-cell[data-user-id='2']");
@@ -224,6 +233,7 @@ test("a tile's mute button and volume slider change the peer's real playback vol
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   const tile = alice.locator(".video-cell[data-user-id='2']");
@@ -277,16 +287,21 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   await shareBtn.click();
 
   // Local UI: the control reports sharing and a self screen tile (offset id)
-  // is published under the grid, which auto-opens for local video.
+  // is published under the grid. The grid stays closed, so the chat stays in
+  // view (WP 1B-4); opening the call view shows the tile.
   // The active state lives on the button itself (aria-pressed + the
   // active-control tint); the redesign removed the "Sharing" text label.
   await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
   await expect(shareBtn).toHaveClass(/active-ctrl/);
   const selfScreen = alice.locator(`.video-cell[data-user-id='${1 + SCREENSHARE_TILE_ID_OFFSET}']`);
+  await expect(selfScreen).toBeAttached({ timeout: 10_000 });
+  await expect(alice.locator("[data-testid='video-grid-slot']")).toBeHidden();
+  await openCall(alice);
   await expect(selfScreen).toBeVisible({ timeout: 10_000 });
   await expect(selfScreen).toHaveAttribute("data-stream-type", "screenshare");
   await expect(selfScreen.locator(".video-username")).toHaveText("alice (Screen)");
-  await expect(alice.locator("[data-testid='video-grid-slot']")).toBeVisible();
+  // Back to the chat before stopping, so the stop below closes nothing itself.
+  await alice.locator("[data-tile-control='exit-grid']").click();
   expect(
     outbound.some((f) => f.type === "voice_screenshare" && f.payload?.enabled === true),
     "starting a share must announce voice_screenshare(enabled: true)",

@@ -67,6 +67,8 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, calls follow the same rule in both directions: your microphone, camera and screen share are only sent end-to-end encrypted, and other members' media plays only when it arrives encrypted.
 - The green identity badge on a call participant now says what it checked: the key is the same one this device saw before. It points at comparing safety numbers to confirm who it is, instead of saying "Identity verified".
 - Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. Stop watching on a camera keeps it stopped until you leave voice. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Audio.
+- Turning on your camera or screen share while reading a text channel no longer hides the chat and opens the video grid. Open the call to see yourself.
+- In the call grid, cameras fill their tile instead of showing black bars; focus a camera to see the whole picture. The quality chip now shows only on screen shares.
 
 ### Added
 

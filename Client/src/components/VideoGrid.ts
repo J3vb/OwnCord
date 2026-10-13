@@ -1074,12 +1074,12 @@ export function createVideoGrid(): VideoGridComponent {
 
   // --- Stream info -------------------------------------------------------------
 
-  /** Poll the stream you are watching (focused or full screen), and only it. */
+  /** Poll the screen share you are watching (focused or full screen), and
+   *  only it: a camera tile has no quality chip. */
   function syncStatsPolling(): void {
     const target = fullscreenTile ?? theatreTile ?? focusedTileId;
     const entry = target === null ? undefined : cells.get(target);
-    const wanted =
-      entry !== undefined && entry.config !== undefined && !entry.config.isSelf ? target : null;
+    const wanted = entry?.config?.isScreenshare === true && !entry.config.isSelf ? target : null;
     if (wanted === statsTile) return;
     if (statsTimer !== null) {
       clearInterval(statsTimer);
@@ -1574,8 +1574,8 @@ export function createVideoGrid(): VideoGridComponent {
     if (config?.isScreenshare === true) {
       label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
-    if (config !== undefined && !config.isSelf) {
-      // Filled by the stats poll while you watch this stream.
+    if (config !== undefined && !config.isSelf && config.isScreenshare) {
+      // Filled by the stats poll while you watch this screen share.
       const chip = createElement("button", {
         type: "button",
         class: "video-quality",

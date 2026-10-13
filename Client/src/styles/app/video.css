@@ -95,6 +95,12 @@
   height: 100%;
   object-fit: contain;
 }
+/* A camera fills its grid tile, cropped at the edges as Discord does. Focused
+   or full screen it shows the whole frame again. Screen shares always do. */
+.video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
+  video {
+  object-fit: cover;
+}
 
 /* Your own camera is mirrored, as every call app shows it; others see it
    unmirrored. A screen share never carries this class. */
