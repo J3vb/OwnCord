@@ -15,6 +15,7 @@ import { loadPref, savePref, STORAGE_PREFIX } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "../features/voice/sessionState";
+import { isUnencryptedPublication } from "../features/voice/mediaEncryption";
 import { onRoom } from "../features/voice/releaseRoom";
 import { voiceStore } from "@stores/voice.store";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
@@ -525,6 +526,7 @@ export class AudioElements {
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
         if (publication.source === Track.Source.ScreenShareAudio) continue;
+        if (isUnencryptedPublication(publication)) continue;
         publication.setSubscribed(!deafened);
       }
     }

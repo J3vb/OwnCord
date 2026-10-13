@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DisconnectReason, RoomEvent, Track } from "livekit-client";
+import { DisconnectReason, Encryption_Type, RoomEvent, Track } from "livekit-client";
 import type {
   LocalTrackPublication,
   Participant,
@@ -547,6 +547,107 @@ describe("handleTrackPublished (opt-in watching)", () => {
     expect(camera.setSubscribed).toHaveBeenCalledWith(false);
     expect(mic.setSubscribed).toHaveBeenCalledWith(true);
     expect(h.spies.onRemoteVideo).toHaveBeenCalledWith(7, null, false);
+  });
+});
+
+// ── end-to-end encryption of remote media ─────────────────────────────────
+
+function withEncryption<T extends RemoteTrackPublication>(
+  publication: T,
+  encryption: Encryption_Type,
+): T {
+  return Object.assign(publication, { trackInfo: { encryption } });
+}
+
+describe("remote publications without end-to-end encryption", () => {
+  it("never subscribes one and marks the call not secured", () => {
+    const h = build();
+    const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.NONE);
+
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+    expectConsole("warn", /without end-to-end encryption/);
+
+    expect(mic.setSubscribed).toHaveBeenCalledWith(false);
+    expect(mic.setSubscribed).not.toHaveBeenCalledWith(true);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("subscribes an encrypted voice as before and leaves the call secured", () => {
+    const h = build();
+    const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.GCM);
+
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
+  });
+
+  it("applies to everyone already in the room on connect", () => {
+    const h = build();
+    h.spies.isWatched.mockReturnValue(true);
+    const camera = withEncryption(remotePub(Track.Source.Camera), Encryption_Type.NONE);
+    const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.GCM);
+    const room = {
+      remoteParticipants: new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            trackPublications: new Map([
+              ["c", camera],
+              ["m", mic],
+            ]),
+          },
+        ],
+      ]),
+    } as unknown as Room;
+
+    h.handlers.handleConnected(room);
+    expectConsole("warn", /without end-to-end encryption/);
+
+    expect(camera.setSubscribed).toHaveBeenCalledWith(false);
+    expect(camera.setSubscribed).not.toHaveBeenCalledWith(true);
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+    expect(mic.setSubscribed).toHaveBeenCalledWith(true);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("drops a subscription that arrives anyway, without attaching it", () => {
+    const h = build();
+    const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.NONE);
+
+    h.handlers.handleTrackSubscribed(audioTrack(), mic, participant("user-7:tok"));
+    expectConsole("warn", /without end-to-end encryption/);
+
+    expect(mic.setSubscribed).toHaveBeenCalledWith(false);
+    expect(h.audioElements.handleTrackSubscribedAudio).not.toHaveBeenCalled();
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("subscribes the same participant again once they republish encrypted", () => {
+    const h = build();
+    h.handlers.handleTrackPublished(
+      withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.NONE),
+      participant("user-7:tok"),
+    );
+    expectConsole("warn", /without end-to-end encryption/);
+    const republished = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.GCM);
+
+    h.handlers.handleTrackPublished(republished, participant("user-7:tok"));
+
+    expect(republished.setSubscribed).toHaveBeenLastCalledWith(true);
+    // The call already carried unprotected media this session: it stays flagged.
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("treats a publication with no track info as encrypted (the worker drops its frames)", () => {
+    const h = build();
+    const mic = remotePub(Track.Source.Microphone);
+
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
   });
 });
 
