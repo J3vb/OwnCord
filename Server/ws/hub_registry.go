@@ -42,6 +42,8 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
+// The handshake callers hold h.voiceLock(c.userID); the test-only Register
+// event path on the hub goroutine does not.
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
@@ -353,7 +355,7 @@ type clientEvent struct {
 func (h *Hub) DisconnectUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
-		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user", "user_id", userID)
@@ -375,7 +377,7 @@ func (h *Hub) DisconnectUser(userID int64) {
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
-		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)

@@ -256,6 +256,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 
 	// Clean up voice state if the user disconnected from LiveKit
 	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
+	defer h.voiceLock(userID)()
 	h.mu.RLock()
 	c, exists := h.clients[userID]
 	h.mu.RUnlock()

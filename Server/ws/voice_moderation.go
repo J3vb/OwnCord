@@ -621,6 +621,7 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 // disconnect and channel-switch paths. Reports false when the user has no
 // connection on this node.
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
+	defer h.voiceLock(userID)()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
@@ -639,6 +640,7 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 // callers already treat as "user is not connected". reason is the caller's
 // voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
+	defer h.voiceLock(userID)()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)

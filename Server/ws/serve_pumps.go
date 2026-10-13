@@ -255,24 +255,29 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// Teardown DB writes must still complete — a dead connection must not
 		// cancel its own cleanup — so detach cancellation but keep values.
 		cleanupCtx := context.WithoutCancel(ctx)
-		// Snapshot voice state BEFORE unregister to avoid TOCTOU with replacement connections.
+		// Snapshot voice state BEFORE unregister to avoid TOCTOU with
+		// replacement connections. The voice lock spans snapshot to park, so
+		// a reconnect's transfer (inheritParkedVoice) runs wholly before or
+		// after this teardown (WP 1D-10).
+		unlockVoice := hub.voiceLock(c.userID)
 		voiceChID := c.getVoiceChID()
 		replaced := hub.unregisterNow(c)
+		// Clean up voice state only when this was the user's final
+		// connection. A replacement connection owns the (transferred)
+		// voice session, and the join_token guard cannot tell the
+		// difference — the transfer keeps the same joined_at — so
+		// cleaning here would delete the replacement's DB row whenever
+		// teardown snapshots voiceChID before the transfer zeroes it.
+		//
+		// RT-8: a completed membership is parked in the grace window
+		// (voice_grace.go) instead of torn down at once, so a resuming
+		// socket can inherit the call. leaveVoiceOnDisconnect runs the
+		// immediate teardown for an incomplete join or a disabled window.
+		if c.user != nil && voiceChID != 0 && !replaced {
+			hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
+		}
+		unlockVoice()
 		if c.user != nil {
-			// Clean up voice state only when this was the user's final
-			// connection. A replacement connection owns the (transferred)
-			// voice session, and the join_token guard cannot tell the
-			// difference — the transfer keeps the same joined_at — so
-			// cleaning here would delete the replacement's DB row whenever
-			// teardown snapshots voiceChID before the transfer zeroes it.
-			//
-			// RT-8: a completed membership is parked in the grace window
-			// (voice_grace.go) instead of torn down at once, so a resuming
-			// socket can inherit the call. leaveVoiceOnDisconnect runs the
-			// immediate teardown for an incomplete join or a disabled window.
-			if voiceChID != 0 && !replaced {
-				hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
-			}
 			c.mu.Lock()
 			received := c.msgsReceived
 			sent := c.msgsSent

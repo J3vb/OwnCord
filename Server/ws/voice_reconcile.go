@@ -199,6 +199,7 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 // the row, broadcasts voice_leave with the leaver included, and re-elects the
 // key holder.
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
+	defer h.voiceLock(userID)()
 	c := h.GetClient(userID)
 	if c != nil && h.clearExactJoin(c, channelID, joinedAt) {
 		tailCtx, cancelTail := h.sweepTailCtx(ctx)
@@ -224,9 +225,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	defer cancelTail()
 	h.broadcastVoiceEventWithLeaver(tailCtx, channelID, buildVoiceLeave(channelID, userID), userID)
 	h.updateKeyHolder(channelID)
-	if h.livekit != nil {
-		_ = h.livekit.RemoveParticipant(tailCtx, channelID, userID, joinedAt)
-	}
+	h.removeLiveKitParticipantAsync(tailCtx, channelID, userID, joinedAt, "reconcileReap")
 	slog.Warn("voice reconcile: reaped voice membership with no SFU participant",
 		"user_id", userID, "channel_id", channelID)
 }

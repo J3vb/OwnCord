@@ -198,7 +198,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		defaultVoiceQuality: defaultVoiceQuality,
 		settingsUpload:      opts.UploadPolicy,
 		uploadFileTypes:     opts.UploadFileTypes,
-		voiceMod:            newVoiceModLocks(),
+		voiceMod:            newUserLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
 		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),

@@ -66,6 +66,7 @@ func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
 //
 // reason is the machine-readable cause, logged on the "voice leave" line; it is
 // one of the voiceLeaveReason* constants (SRE-M2). Callers must never pass "".
+// The caller holds h.voiceLock(c.userID).
 func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client, reason string) {
 	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
 	if oldChID == 0 {
@@ -81,6 +82,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client, reason string) {
 // revocation sweep's DB-backed permission check) must not clear a newer
 // membership committed while the decision was in flight — the same rule
 // LeaveVoiceChannelIfMatch applies to the DB row.
+// The caller holds h.voiceLock(c.userID).
 func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64, reason string) bool {
 	oldJoinToken, ok := c.clearVoiceStateIfMatch(chID)
 	if !ok {
@@ -95,6 +97,7 @@ func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int
 // client's voice state and topic subscription are cleared: DB row removal
 // (with retry), voice_leave broadcast, key-holder re-election and LiveKit
 // participant removal.
+// The caller holds h.voiceLock(c.userID).
 func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken, reason string) {
 	username := ""
 	if c.user != nil {
