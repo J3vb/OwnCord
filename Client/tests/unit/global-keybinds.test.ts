@@ -130,7 +130,9 @@ describe("global keybinds", () => {
     composer.remove();
   });
 
-  it("ignores voice shortcuts outside a voice channel", () => {
+  // WP 1D-1: mute and deafen work outside a call (they set the state the next
+  // join starts with); the camera still needs a call.
+  it("toggles mute and deafen outside a voice channel, but not the camera", () => {
     const h = makeHandlers();
     detach = attachGlobalKeybinds(h);
 
@@ -138,13 +140,37 @@ describe("global keybinds", () => {
     const deafen = press("d");
     const camera = press("V", { shiftKey: true });
 
+    expect(h.onToggleMute).toHaveBeenCalledOnce();
+    expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+    expect(h.onToggleCamera).not.toHaveBeenCalled();
+    expect(mute.defaultPrevented).toBe(true);
+    expect(deafen.defaultPrevented).toBe(true);
+    // An untouched key keeps its default behaviour.
+    expect(camera.defaultPrevented).toBe(false);
+  });
+
+  it("leaves Ctrl+M and Ctrl+D to a text field", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+
+    const d = new KeyboardEvent("keydown", {
+      key: "d",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    composer.dispatchEvent(d);
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "m", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+
     expect(h.onToggleMute).not.toHaveBeenCalled();
     expect(h.onToggleDeafen).not.toHaveBeenCalled();
-    expect(h.onToggleCamera).not.toHaveBeenCalled();
-    // Untouched keys keep their default behaviour.
-    expect(mute.defaultPrevented).toBe(false);
-    expect(deafen.defaultPrevented).toBe(false);
-    expect(camera.defaultPrevented).toBe(false);
+    expect(d.defaultPrevented).toBe(false);
+    composer.remove();
   });
 
   it("fires voice shortcuts while connected to voice", () => {
@@ -264,15 +290,18 @@ describe("global keybinds", () => {
       expect(h.onToggleMute).toHaveBeenCalledTimes(2);
     });
 
-    it("leaves Ctrl+Shift+M alone outside a voice channel", () => {
+    it("toggles mute on Ctrl+Shift+M outside a voice channel too", () => {
       mockVoiceGetState.mockReturnValue({ currentChannelId: null });
       const h = makeHandlers();
       detach = attachGlobalKeybinds(h);
 
       const mute = press("M", { shiftKey: true, code: "KeyM" });
+      const deafen = press("D", { shiftKey: true, code: "KeyD" });
 
-      expect(h.onToggleMute).not.toHaveBeenCalled();
-      expect(mute.defaultPrevented).toBe(false);
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+      expect(mute.defaultPrevented).toBe(true);
+      expect(deafen.defaultPrevented).toBe(true);
     });
 
     it("does not treat an unbound Ctrl+Shift key as a voice shortcut", () => {

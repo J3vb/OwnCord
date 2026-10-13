@@ -16,6 +16,7 @@ import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
+import { loadPref, savePref } from "@lib/preferences";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -481,6 +482,36 @@ export function setLocalDeafened(deafened: boolean): void {
     ...prev,
     localDeafened: deafened,
     moderatorDeafened: deafened && prev.moderatorDeafened === true,
+  }));
+}
+
+const SELF_MUTED_PREF = "localMuted";
+const SELF_DEAFENED_PREF = "localDeafened";
+const MUTED_BEFORE_DEAFEN_PREF = "mutedBeforeDeafen";
+
+/** Save the member's own mute and deafen so they survive a restart. Called
+ *  after the member's own toggles only. A moderator's deafen is not saved,
+ *  and while a moderator's mute holds the saved mute keeps its last value. */
+export function saveSelfVoiceState(): void {
+  const state = voiceStore.getState();
+  if (state.localServerMuted !== true) savePref(SELF_MUTED_PREF, state.localMuted);
+  savePref(SELF_DEAFENED_PREF, state.localDeafened && state.moderatorDeafened !== true);
+  savePref(MUTED_BEFORE_DEAFEN_PREF, state.mutedBeforeDeafen === true);
+}
+
+/** Load the saved mute and deafen into the store at session start. Outside a
+ *  call only: a live call already carries the state its join applied. */
+export function restoreSavedSelfVoiceState(): void {
+  if (voiceStore.getState().currentChannelId !== null) return;
+  const deafened = loadPref<boolean>(SELF_DEAFENED_PREF, false);
+  setVoiceDeafened(deafened);
+  voiceStore.setState((prev) => ({
+    ...prev,
+    // A deafen always mutes, as the deafen toggle does.
+    localMuted: deafened || loadPref<boolean>(SELF_MUTED_PREF, false),
+    localDeafened: deafened,
+    moderatorDeafened: false,
+    mutedBeforeDeafen: loadPref<boolean>(MUTED_BEFORE_DEAFEN_PREF, false),
   }));
 }
 

@@ -50,10 +50,9 @@ test.describe("Voice Widget", () => {
     await navigateToMainPage(page);
 
     await emitWsMessage(page, VOICE_STATE_EVENT);
-    const controls = page.locator(".vw-controls");
-    await expect(controls).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
-    const muteBtn = controls.locator("button[aria-label='Mute']");
+    const muteBtn = page.locator(".user-bar button[aria-label='Mute']");
     const hadActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
     await muteBtn.click();
     const hasActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
@@ -66,10 +65,9 @@ test.describe("Voice Widget", () => {
     await navigateToMainPage(page);
 
     await emitWsMessage(page, VOICE_STATE_EVENT);
-    const controls = page.locator(".vw-controls");
-    await expect(controls).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
-    const deafenBtn = controls.locator("button[aria-label='Deafen']");
+    const deafenBtn = page.locator(".user-bar button[aria-label='Deafen']");
     const hadActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
     await deafenBtn.click();
     const hasActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));

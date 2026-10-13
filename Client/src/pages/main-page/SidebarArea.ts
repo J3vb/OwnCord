@@ -934,8 +934,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const voiceWidgetSlot = createElement("div", {});
+  const { onDisconnect, onCameraToggle, onScreenshareToggle } = createVoiceWidgetCallbacks(
+    ws,
+    limiters,
+  );
   const voiceWidget = createVoiceWidget({
-    ...createVoiceWidgetCallbacks(ws, limiters),
+    onDisconnect,
+    onCameraToggle,
+    onScreenshareToggle,
     onOpenCall: (channelId) => {
       const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
       if (dm !== undefined) {
@@ -1028,7 +1034,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const userBarSlot = createElement("div", {});
-  const userBar = createUserBar({ onDisconnect: openQuickSwitch, ws, presenceSender });
+  const selfVoiceCallbacks = createVoiceWidgetCallbacks(ws, limiters);
+  const userBar = createUserBar({
+    onDisconnect: openQuickSwitch,
+    ws,
+    presenceSender,
+    onMuteToggle: selfVoiceCallbacks.onMuteToggle,
+    onDeafenToggle: selfVoiceCallbacks.onDeafenToggle,
+  });
   userBar.mount(userBarSlot);
   children.push(userBar);
   sidebarWrapper.appendChild(userBarSlot);

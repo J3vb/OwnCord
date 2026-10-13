@@ -41,7 +41,6 @@ import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
-import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -107,8 +106,6 @@ describe("VoiceWidget", () => {
   it("renders hidden when not connected to a voice channel", () => {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -147,8 +144,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -186,8 +181,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -235,8 +228,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -248,23 +239,19 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("calls onMuteToggle when mute button is clicked", () => {
-    const onMuteToggle = vi.fn();
+  it("has no mute or deafen button: they live in the user panel", () => {
     setVoiceChannel(1, []);
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle,
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
     widget.mount(container);
 
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn).not.toBeNull();
-    muteBtn.click();
-    expect(onMuteToggle).toHaveBeenCalledOnce();
+    expect(container.querySelector('[aria-label="Disconnect"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Mute"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Deafen"]')).toBeNull();
 
     widget.destroy?.();
   });
@@ -275,8 +262,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect,
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -290,91 +275,12 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("toggles mute active state based on store", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
-
-    widget.destroy?.();
-  });
-
-  // Rewritten: PTT no longer writes localMuted (its gate closes inside the mic
-  // processor), so the idle gate is pttGated && !localMuted.
-  it("reads an idle PTT gate as not muted, with its own affordance", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localMuted: false, pttGated: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
-    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
-
-    // A genuine self-mute (no PTT gate) still paints muted.
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: false }));
-    voiceStore.flush();
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
-    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
-
-    widget.destroy?.();
-  });
-
-  it("paints a PTT user's own mute as muted while the key is up", () => {
-    // The user's own mute wins over the idle gate: no ptt-gated affordance.
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
-    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
-
-    // Unmuting while the key is still up reads as the idle gate.
-    voiceStore.setState((prev) => ({ ...prev, localMuted: false }));
-    voiceStore.flush();
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
-    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
-
-    widget.destroy?.();
-  });
-
   it("toggles screenshare active state based on store", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -393,8 +299,6 @@ describe("VoiceWidget", () => {
   it("cleans up on destroy", () => {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -407,35 +311,12 @@ describe("VoiceWidget", () => {
     expect(container.querySelector('[data-testid="voice-widget"]')).toBeNull();
   });
 
-  it("calls onDeafenToggle when deafen button is clicked", () => {
-    const onDeafenToggle = vi.fn();
-    setVoiceChannel(1, []);
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle,
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
-    expect(deafenBtn).not.toBeNull();
-    deafenBtn.click();
-    expect(onDeafenToggle).toHaveBeenCalledOnce();
-
-    widget.destroy?.();
-  });
-
   it("calls onCameraToggle when camera button is clicked", () => {
     const onCameraToggle = vi.fn();
     setVoiceChannel(1, []);
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle,
       onScreenshareToggle: vi.fn(),
     });
@@ -455,8 +336,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle,
     });
@@ -470,34 +349,12 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("toggles deafen active state based on store", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
-    expect(deafenBtn.classList.contains("active-ctrl")).toBe(true);
-    expect(deafenBtn.getAttribute("aria-pressed")).toBe("true");
-
-    widget.destroy?.();
-  });
-
   it("toggles camera active state based on store", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localCamera: true }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -531,8 +388,6 @@ describe("VoiceWidget", () => {
     const onOpenCall = vi.fn();
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
       onOpenCall,
@@ -587,8 +442,6 @@ describe("VoiceWidget", () => {
     setVoiceChannel(999, []);
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -604,8 +457,6 @@ describe("VoiceWidget", () => {
     setVoiceChannel(1, []);
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -635,8 +486,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -654,8 +503,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -675,8 +522,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -688,55 +533,12 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("does not paint the mic button as unmuted while joined listen-only", () => {
-    // Listen-only means no microphone track is published; the button must not
-    // read "unmuted" as if the user were hot. It is disabled with no active
-    // state, matching the "Grant Microphone" call to action.
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true, localMuted: false }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.disabled).toBe(true);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
-    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
-    expect(muteBtn.classList.contains("vw-listen-only")).toBe(true);
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
-    expect(muteBtn.title).toBe("Listening only — no microphone access");
-    // jsdom applies no stylesheet: the class must carry a disabled look and
-    // cancel the hover highlight in the parsed app.css.
-    expect(keyword(cascadedDeclaration(".vw-controls button.vw-listen-only", "opacity"))).toBe(
-      "0.5",
-    );
-    expect(
-      varToken(cascadedDeclaration(".vw-controls button.vw-listen-only:hover", "background")),
-    ).toBe("--bg-active");
-
-    // A granted microphone clears it.
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
-    voiceStore.flush();
-    expect(muteBtn.classList.contains("vw-listen-only")).toBe(false);
-    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
-
-    widget.destroy?.();
-  });
-
   it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -767,8 +569,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -796,8 +596,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -821,8 +619,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -868,8 +664,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -887,8 +681,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -908,8 +700,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -932,8 +722,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -948,31 +736,6 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("reacts to voice store changes for mute toggle", () => {
-    setVoiceChannel(1, []);
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
-
-    // Toggle mute in store
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
-    voiceStore.flush();
-
-    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
-
-    widget.destroy?.();
-  });
-
   // --- E2EE / voice-session status (docs/architecture/ux/voice-and-e2ee.md §2) ---
 
   it("shows 'Connecting…' during the joining phase, no secured badge", () => {
@@ -980,8 +743,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1002,8 +763,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1025,8 +784,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1052,8 +809,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1079,8 +834,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1104,8 +857,6 @@ describe("VoiceWidget", () => {
     const onDisconnect = vi.fn();
     const widget = createVoiceWidget({
       onDisconnect,
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1130,8 +881,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1147,100 +896,11 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("keeps mute and deafen usable while the WS socket is down", () => {
-    setVoiceChannel(1, []);
-    const onMuteToggle = vi.fn();
-    const onDeafenToggle = vi.fn();
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle,
-      onDeafenToggle,
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-
-    setConnectionStatus("reconnecting");
-    uiStore.flush();
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
-    expect(muteBtn.disabled).toBe(false);
-    expect(muteBtn.title).toBe("");
-    expect(deafenBtn.disabled).toBe(false);
-    muteBtn.click();
-    deafenBtn.click();
-    expect(onMuteToggle).toHaveBeenCalledOnce();
-    expect(onDeafenToggle).toHaveBeenCalledOnce();
-
-    widget.destroy?.();
-  });
-
-  it("re-enables mute and deafen once a moderator restriction is lifted", () => {
-    setVoiceChannel(1, []);
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    const deafenBtn = container.querySelector('[aria-label="Deafen"]') as HTMLButtonElement;
-
-    voiceStore.setState((prev) => ({
-      ...prev,
-      localServerMuted: true,
-      localServerDeafened: true,
-    }));
-    voiceStore.flush();
-    expect(muteBtn.disabled).toBe(true);
-    expect(deafenBtn.disabled).toBe(true);
-
-    voiceStore.setState((prev) => ({
-      ...prev,
-      localServerMuted: false,
-      localServerDeafened: false,
-    }));
-    voiceStore.flush();
-    expect(muteBtn.disabled).toBe(false);
-    expect(muteBtn.title).toBe("");
-    expect(deafenBtn.disabled).toBe(false);
-    expect(deafenBtn.title).toBe("");
-
-    widget.destroy?.();
-  });
-
-  it("keeps mute disabled for a moderator mute while the socket is down", () => {
-    setVoiceChannel(1, []);
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
-    voiceStore.flush();
-
-    setConnectionStatus("reconnecting");
-    uiStore.flush();
-
-    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
-    expect(muteBtn.disabled).toBe(true);
-
-    widget.destroy?.();
-  });
-
   it("re-enables voice controls when the WS socket reconnects", () => {
     setVoiceChannel(1, []);
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1266,8 +926,6 @@ describe("VoiceWidget", () => {
     setVoiceStatus("joining");
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
@@ -1301,8 +959,6 @@ describe("VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });

@@ -128,7 +128,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
-  "keybinds.voiceHint": "Voice shortcuts apply while you are connected to a voice channel.",
+  "keybinds.voiceHint":
+    "Mute and Deafen work anywhere; the camera shortcut applies while you are connected to a voice channel.",
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":

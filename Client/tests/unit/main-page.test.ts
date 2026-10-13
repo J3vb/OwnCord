@@ -1370,7 +1370,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     supported.mockRestore();
   });
 
-  it("ignores a global shortcut outside a voice channel (U6)", async () => {
+  // WP 1D-1: outside a call the shortcut toggles the local, saved state and
+  // sends nothing; the next join restates it to the server.
+  it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {
+    const lk = await import("@lib/livekitSession");
     const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
     const onShortcut = vi
       .spyOn(desktop.globalShortcuts, "onShortcut")
@@ -1388,16 +1391,16 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }));
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
+    vi.mocked(lk.setMuted).mockClear();
+    vi.mocked(lk.setDeafened).mockClear();
 
-    for (const handler of shortcutHandlers) {
-      handler("mute");
-      handler("deafen");
-    }
+    for (const handler of shortcutHandlers) handler("mute");
+    expect(lk.setMuted).toHaveBeenCalledWith(true);
+    for (const handler of shortcutHandlers) handler("deafen");
+    expect(lk.setDeafened).toHaveBeenCalledWith(true);
 
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
-    expect(voiceStore.getState().localMuted).toBe(false);
-    expect(voiceStore.getState().localDeafened).toBe(false);
 
     onShortcut.mockRestore();
     start.mockRestore();

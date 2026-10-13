@@ -111,10 +111,10 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
       await waitFor(app, ".voice-widget.visible", "Voice Connected", 60_000);
       const pressed = () =>
         app.evaluate<string | null>(
-          `() => document.querySelector(".voice-widget.visible button[aria-label='Mute']")?.getAttribute("aria-pressed") ?? null`,
+          `() => document.querySelector(".user-bar button[aria-label='Mute']")?.getAttribute("aria-pressed") ?? null`,
         );
       expect(await pressed()).toBe("false");
-      await app.click(".voice-widget.visible button[aria-label='Mute']");
+      await app.click(".user-bar button[aria-label='Mute']");
       await expect.poll(pressed).toBe("true");
       await app.click(".voice-widget.visible button[aria-label='Disconnect']");
       await expect

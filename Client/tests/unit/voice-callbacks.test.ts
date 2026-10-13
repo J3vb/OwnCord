@@ -9,6 +9,7 @@ const {
   mockJoinVoiceChannel,
   mockLeaveVoiceChannel,
   mockSetMutedBeforeDeafen,
+  mockSaveSelfVoiceState,
   mockVoiceSessionLeave,
   mockSetMuted,
   mockSetDeafened,
@@ -23,6 +24,7 @@ const {
   mockJoinVoiceChannel: vi.fn(),
   mockLeaveVoiceChannel: vi.fn(),
   mockSetMutedBeforeDeafen: vi.fn(),
+  mockSaveSelfVoiceState: vi.fn(),
   mockVoiceSessionLeave: vi.fn(),
   mockSetMuted: vi.fn(),
   mockSetDeafened: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
   setMutedBeforeDeafen: mockSetMutedBeforeDeafen,
+  saveSelfVoiceState: mockSaveSelfVoiceState,
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
 }));
 
@@ -175,6 +178,40 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetMuted).toHaveBeenCalledWith(true);
       expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
+    });
+
+    // WP 1D-1: outside a call the toggle changes the local (saved) state only;
+    // the next join restates it to the server.
+    it("mutes and unmutes outside a call without sending anything", () => {
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+      expect(mockSetMuted).toHaveBeenLastCalledWith(true);
+
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: null, localMuted: true, localDeafened: true }),
+      );
+      cbs.onMuteToggle();
+      expect(mockSetMuted).toHaveBeenLastCalledWith(false);
+      expect(mockSetDeafened).toHaveBeenLastCalledWith(false);
+
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not save a refused unmute under a moderator's mute", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localServerMuted: true }),
+      );
+      const cbs = createVoiceWidgetCallbacks(makeWs(), makeLimiters());
+
+      cbs.onMuteToggle();
+
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).not.toHaveBeenCalled();
     });
 
     it("unmutes and undeafens when muted+deafened", () => {
@@ -299,6 +336,21 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetDeafened).toHaveBeenCalledWith(true);
       expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
+    });
+
+    it("deafens outside a call without sending anything", () => {
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetMutedBeforeDeafen).toHaveBeenCalledWith(false);
+      expect(mockSetDeafened).toHaveBeenCalledWith(true);
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
     });
 
     it("undeafens and unmutes when deafened", () => {

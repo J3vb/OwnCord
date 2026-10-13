@@ -103,6 +103,14 @@ All four are optimistic with rollback; each also emits a WS control message.
 | **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                            | `voice_camera{enabled}`       | revert on failure + toast                    |
 | **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                                      | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
 
+Mute and deafen live in the user panel (`components/UserBar.ts`, next to
+Settings), not the voice widget. They, their keys and the tray work outside a
+call too: there they change only the local state and send nothing. The
+member's own mute and deafen are saved (`saveSelfVoiceState`, never a
+moderator's deafen) and loaded when the main page starts
+(`restoreSavedSelfVoiceState`); the next join applies them and restates them
+to the server. Deafen outside a call does not silence app sounds.
+
 `stopMicTrackOnMute` carries the SDK's own documented tradeoff: with a Bluetooth
 headset connected, stopping and re-acquiring the capture track makes the device
 switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
@@ -113,7 +121,7 @@ the accepted cost.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
 | deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the widget's own mute/deafen controls are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/VoiceWidget.ts`                                       |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/UserBar.ts`                                            |
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
@@ -432,6 +440,7 @@ never silences message chimes for the rest of the session.
 `src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
 `src/lib/ptt.ts`, `src/lib/inputMode.ts`, `src/lib/noiseFloor.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/components/UserBar.ts` (mute and deafen buttons),
 `src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/components/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,

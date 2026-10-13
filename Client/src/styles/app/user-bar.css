@@ -89,6 +89,16 @@
 .user-bar .ub-controls button.active-ctrl {
   color: var(--red);
 }
+/* Listen-only: there is no microphone to mute, so the control is visibly
+   inert rather than a hot mic that ignores clicks. */
+.user-bar .ub-controls button.ub-listen-only {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.user-bar .ub-controls button.ub-listen-only:hover {
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
 
 /* Status picker: the root is the inline anchor (trigger dot lives here and
    must always be visible); the popup chrome + its display:none/open toggle

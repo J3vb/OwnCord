@@ -76,10 +76,9 @@ test.describe("Voice Channel Items", () => {
 
   test("mute button toggles active state on click", async ({ page }) => {
     await joinVoiceChannelByName(page);
-    const controls = page.locator(".vw-controls");
-    await expect(controls).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5000 });
 
-    const muteBtn = controls.locator("button[aria-label='Mute']");
+    const muteBtn = page.locator(".user-bar button[aria-label='Mute']");
     const hadActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
     await muteBtn.click();
 
@@ -90,10 +89,9 @@ test.describe("Voice Channel Items", () => {
 
   test("deafen button toggles active state on click", async ({ page }) => {
     await joinVoiceChannelByName(page);
-    const controls = page.locator(".vw-controls");
-    await expect(controls).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5000 });
 
-    const deafenBtn = controls.locator("button[aria-label='Deafen']");
+    const deafenBtn = page.locator(".user-bar button[aria-label='Deafen']");
     const hadActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
     await deafenBtn.click();
 
@@ -106,8 +104,11 @@ test.describe("Voice Channel Items", () => {
     const controls = page.locator(".vw-controls");
     await expect(controls).toBeVisible({ timeout: 5000 });
 
-    await expect(controls.locator("button[aria-label='Mute']")).toBeVisible();
-    await expect(controls.locator("button[aria-label='Deafen']")).toBeVisible();
+    // Mute and deafen live in the user panel (WP 1D-1), the rest in the widget.
+    const userBar = page.locator(".user-bar");
+    await expect(userBar.locator("button[aria-label='Mute']")).toBeVisible();
+    await expect(userBar.locator("button[aria-label='Deafen']")).toBeVisible();
+    await expect(controls.locator("button[aria-label='Mute']")).toHaveCount(0);
     await expect(controls.locator("button[aria-label='Camera']")).toBeVisible();
     await expect(controls.locator("button[aria-label='Screenshare']")).toBeVisible();
     await expect(controls.locator("button[aria-label='Disconnect']")).toBeVisible();

@@ -45,6 +45,7 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.pttGated": "Push-to-talk — hold your key to talk",
   "widget.control.listenOnly": "Listening only — no microphone access",
   "widget.control.deafen": "Deafen",
+  "widget.control.undeafen": "Undeafen",
   "widget.control.camera": "Camera",
   "widget.control.screenshare": "Screenshare",
   "widget.control.cameraOn": "Turn on camera",

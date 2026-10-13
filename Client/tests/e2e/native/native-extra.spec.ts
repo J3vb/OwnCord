@@ -453,7 +453,7 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
     const widget = page.locator(".voice-widget.visible");
     // Same budget as voice-controls.spec.ts: three connect attempts.
     await expect(widget).toContainText("Voice Connected", { timeout: 60_000 });
-    const mute = widget.getByRole("button", { name: "Mute", exact: true });
+    const mute = page.locator(".user-bar").getByRole("button", { name: "Mute", exact: true });
 
     // Each edge is a separate PowerShell start (about a second), which also
     // keeps these mute changes inside the server's two-per-second budget.

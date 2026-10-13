@@ -11,6 +11,7 @@ import {
   leaveVoiceChannel,
   isSelfMuted,
   setMutedBeforeDeafen,
+  saveSelfVoiceState,
 } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
@@ -89,9 +90,10 @@ export function createVoiceWidgetCallbacks(
       // unmute, so don't spend the round-trip (keybinds reach here too, not
       // just the disabled button).
       if (state.localServerMuted === true) return;
-      // Mute and deafen apply locally whatever the chat socket is doing; the
-      // frame goes out only on a live socket, and the reconnect restates it.
-      const live = socketLive();
+      // Mute and deafen apply locally whatever the chat socket is doing, in a
+      // call or not; the frame goes out only in a call on a live socket, and
+      // the reconnect or the next join restates it.
+      const live = socketLive() && state.currentChannelId !== null;
       if (isSelfMuted(state)) {
         // With the push-to-talk key up the gate inside the mic processor
         // stays closed, so lifting the mute never opens a live mic.
@@ -109,12 +111,13 @@ export function createVoiceWidgetCallbacks(
         voiceSessionSetMuted(true);
         if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
       }
+      saveSelfVoiceState();
     },
     onDeafenToggle: () => {
       if (!limiters.voice.tryConsume()) return;
       const state = voiceStore.getState();
       if (state.localServerDeafened === true) return;
-      const live = socketLive();
+      const live = socketLive() && state.currentChannelId !== null;
       if (state.localDeafened) {
         voiceSessionSetDeafened(false);
         if (live) ws.send({ type: "voice_deafen", payload: { deafened: false } });
@@ -136,6 +139,7 @@ export function createVoiceWidgetCallbacks(
           if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
         }
       }
+      saveSelfVoiceState();
     },
     onCameraToggle: () => {
       if (!limiters.voiceVideo.tryConsume()) return;

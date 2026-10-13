@@ -83,8 +83,6 @@ describe("Voice disconnect — VoiceWidget", () => {
 
     const widget = createVoiceWidget({
       onDisconnect,
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
     });
