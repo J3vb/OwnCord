@@ -36,7 +36,7 @@ func TestVoiceJoin_ChannelFullAfterMove_PreservesPendingModStash(t *testing.T) {
 	hub.HandleMessageForTest(fillerClient, voiceJoinMsg(chanID))
 	drainChanTimeout(fillerSend, 30*time.Millisecond)
 
-	target := seedVoiceOwner(t, database, "oc0420-target")
+	target := seedVoiceMember(t, database, "oc0420-target")
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, target, chanID, send)
 	hub.Register(c)

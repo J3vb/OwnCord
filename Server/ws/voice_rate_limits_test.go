@@ -45,7 +45,7 @@ func TestVoiceJoinPrecheck_RateLimited(t *testing.T) {
 	payload := json.RawMessage(`{"channel_id":"not-an-int"}`)
 
 	for i := range voiceJoinRateLimit + 1 {
-		if _, _, ok := h.voiceJoinPrecheck(context.Background(), c, payload, ""); ok {
+		if _, _, _, ok := h.voiceJoinPrecheck(context.Background(), c, payload, ""); ok {
 			t.Fatalf("call %d: precheck passed on a malformed payload", i)
 		}
 	}

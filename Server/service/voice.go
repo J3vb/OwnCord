@@ -70,15 +70,17 @@ func (s *VoiceService) CountInChannel(ctx context.Context, channelID int64) (int
 
 // ── Membership ──────────────────────────────────────────────────────────────
 
-// Join persists userID's membership of channelID. maxUsers is the channel's
-// voice_max_users; a positive value takes the capacity-checked insert, which
-// counts and inserts in one statement so two joins racing for the last slot
-// cannot both win, and returns ErrVoiceChannelFull when the cap is met. Zero
-// or negative means the channel is uncapped and takes the plain upsert.
+// Join persists userID's membership of channelID. maxUsers is the cap that
+// applies to this joiner: the channel's voice_max_users, or 0 for a voice
+// moderator there (ws.voiceJoinCapacity). A positive value takes the
+// capacity-checked insert, which counts and inserts in one statement so two
+// joins racing for the last slot cannot both win, and returns
+// ErrVoiceChannelFull when the cap is met. Zero or negative takes the plain
+// upsert.
 //
-// The two forms are one method because the choice belongs to the row, not to
-// the caller: a handler that reads a cap and then picks the unchecked insert
-// would silently defeat the limit.
+// The two forms are one method so a caller cannot read a cap and then pick
+// the unchecked insert for a capped joiner: the only way past the cap is to
+// pass 0, which is the moderator decision made in one place.
 func (s *VoiceService) Join(ctx context.Context, userID, channelID int64, maxUsers int) error {
 	if maxUsers > 0 {
 		err := s.st.JoinVoiceChannelIfCapacity(ctx, userID, channelID, maxUsers)
