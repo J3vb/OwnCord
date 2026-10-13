@@ -71,8 +71,8 @@ Three rules. The files enforce the first two. You must follow the third:
 
 Undoing a schema change is cheap. Undoing what the migration made possible
 usually is not. Each file explains its own cost in a comment. These are the
-ones to know before you start. A reversal not listed here has no cost worth
-noting beyond its schema change.
+ones to know before you start. The list is not complete, so read the comment
+at the top of each file before you run it.
 
 | Reversal                             | What it costs                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
