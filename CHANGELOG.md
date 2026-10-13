@@ -74,6 +74,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- A mention in a channel you are not looking at now shows a desktop notification ("You were mentioned in #channel"); clicking it opens the channel.
 - The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
 - Settings → About has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
 - Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
