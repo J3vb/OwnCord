@@ -1,6 +1,6 @@
 # Agent instructions
 
-Condensed from the sources listed at the end, at commit `7732f969` (2026-09-25). On conflict, the source documents win.
+Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the source documents win.
 
 Instructions for AI coding agents (Codex, Cursor and similar) working in this repository. Claude Code reads [CLAUDE.md](CLAUDE.md) instead of this file when both exist; CLAUDE.md carries the same rules plus Claude-specific skills and hooks. Codex's repository baseline config lives in `.codex/`.
 
@@ -134,7 +134,7 @@ Rust (from `Client/src-tauri/`): `cargo fmt --all -- --check`, `cargo test --lib
 
 ### Optional tools
 
-None is required to build or test. The last four are also CI checks, and each fails closed on a new finding: actionlint runs on every PR (Repository Hygiene); zizmor runs when `.github/**`, `scripts/**` or another shared CI input changes; osv-scanner and cargo-deny run when a manifest, a lockfile, `osv-scanner.toml` or `Client/src-tauri/deny.toml` changes. Run the matching one locally before pushing that kind of change.
+None is required to build or test. The last four are also CI checks, and each fails closed on a new finding: actionlint runs on every PR (Repository Hygiene); zizmor runs when `.github/**`, `scripts/**` or another shared CI input changes; osv-scanner and cargo-deny run when a manifest, a lockfile, `osv-scanner.toml` or `Client/src-tauri/deny.toml` changes, and weekly on `main` (`weekly-supply-chain.yml`). Workflow Security Lint and Supply-chain Scan are required checks on `dev`. Run the matching one locally before pushing that kind of change.
 
 | Tool               | Reach for it when                                                        |
 | ------------------ | ------------------------------------------------------------------------ |
