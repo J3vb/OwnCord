@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice**
 
 - Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Before, the app used Ctrl+M / Ctrl+D while focused, so a rebind changed only the unfocused keys. Ctrl+M and Ctrl+D still work for now. A focused press toggles once, never twice.
+- A call plays another member's audio, camera and screen share only when it arrives end-to-end encrypted. Anything else is not played, and the call's security badge shows Unsecured.
 
 ### Added
 
@@ -119,6 +120,7 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
+- An attachment still uploading when you switched channels was cancelled and gone when you came back. It now keeps uploading and is still there.
 
 ## v2.2.0-beta.3
 

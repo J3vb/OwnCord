@@ -19,6 +19,7 @@ import {
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
+import { isUnencryptedPublication } from "../features/voice/mediaEncryption";
 import { detachRoom } from "../features/voice/releaseRoom";
 import {
   markFirstRemoteTrackSubscribed,
@@ -267,6 +268,22 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     publishSpeakers(channelId);
   }
 
+  /** A remote publication without E2EE stays unsubscribed and marks the call
+   *  not secured until the session ends. */
+  function refuseUnencrypted(
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ): void {
+    publication.setSubscribed(false);
+    clearDecryptQuietTimer();
+    degradedBy = "other";
+    setEncryptionDegraded(true);
+    log.warn("Refusing a remote track published without end-to-end encryption", {
+      userId: parseUserId(participant.identity),
+      source: publication.source,
+    });
+  }
+
   function removeAutoplayUnlock(): void {
     if (autoplayUnlockHandler !== null) {
       document.removeEventListener("click", autoplayUnlockHandler);
@@ -294,6 +311,10 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
+    if (isUnencryptedPublication(publication)) {
+      refuseUnencrypted(publication, participant);
+      return;
+    }
     // SRE-M2: join-relative ms for the first remote track subscription.
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
@@ -347,6 +368,10 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
+    if (isUnencryptedPublication(publication)) {
+      refuseUnencrypted(publication, participant);
+      return;
+    }
     const userId = parseUserId(participant.identity);
     const isVideo = publication.kind === Track.Kind.Video;
     if (!isVideo && publication.source !== Track.Source.ScreenShareAudio) {

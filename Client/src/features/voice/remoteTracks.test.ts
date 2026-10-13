@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { VideoQuality, type Room } from "livekit-client";
+import { Encryption_Type, VideoQuality, type Room } from "livekit-client";
 
 vi.mock("../../lib/screenShare", () => ({
   getLocalCameraStream: vi.fn(() => "camera"),
@@ -198,6 +198,20 @@ describe("RemoteTracks", () => {
       tracks.watch(7, "camera", true);
       expect(pub("camera")).toHaveBeenCalledWith(true);
       expect(pub("screen_share")).not.toHaveBeenCalled();
+    });
+
+    it("never subscribes a stream published without end-to-end encryption", () => {
+      const setSubscribed = vi.fn();
+      const tracks = new RemoteTracks(() =>
+        roomWithPublication("user-7", "camera", {
+          setSubscribed,
+          trackInfo: { encryption: Encryption_Type.NONE },
+        }),
+      );
+      tracks.watch(7, "camera", true);
+      expect(setSubscribed).not.toHaveBeenCalled();
+      tracks.watch(7, "camera", false);
+      expect(setSubscribed).toHaveBeenCalledWith(false);
     });
 
     it("remembers a watch made before the stream is published, with no room", () => {

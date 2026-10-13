@@ -177,6 +177,7 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
     return {
       mountChannel: mockMountChannel,
       destroyChannel: mockDestroyChannel,
+      destroy: () => mockDestroyChannel(),
       openFilePicker: vi.fn(),
       currentChannelId: 0,
       messageList: null,
