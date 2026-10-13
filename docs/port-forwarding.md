@@ -1,273 +1,314 @@
 # Port Forwarding Guide
 
-How to make your OwnCord server reachable from outside your LAN — and how to
-recognise the cases where it cannot be made to work at all.
+This guide is for server owners who want people outside their home network to
+reach their OwnCord server. It shows which ports to forward on your router. It
+also explains the cases where port forwarding cannot work, and how to spot
+them.
 
 ## Before You Start
 
-If you want a simpler remote-access path, use [Tailscale](tailscale.md) and skip
-manual forwarding. It works in the CGNAT case below, where port forwarding
-cannot.
+**There is an easier option.** [Tailscale](tailscale.md) gives remote access
+without any port forwarding. It also works behind CGNAT (see below), where port
+forwarding cannot work at all.
 
-**A reverse proxy is not required.** OwnCord terminates its own TLS and proxies
-LiveKit signalling through its own port. If you want to put nginx or Caddy in
-front anyway, see [Reverse Proxy Topology](deployment.md#reverse-proxy-topology)
-— but nothing here needs one.
+**You do not need a reverse proxy.** OwnCord handles its own HTTPS. It also
+passes voice signalling through its own port. If you want nginx or Caddy in
+front anyway, see
+[Reverse Proxy Topology](deployment.md#reverse-proxy-topology). Nothing on this
+page needs one.
 
 ## What the server can and cannot tell you
 
-The server reports the kind of address it is running on, in the startup banner,
-every time it starts:
+Every time it starts, the server prints what kind of address it is running
+on, in the start-up banner. For example:
 
 ```
     Address  LAN only — this host has no public address. Remote access needs port
              forwarding or a tunnel: see docs/port-forwarding.md.
 ```
 
-That is as far as it can honestly go. **A server cannot test its own inbound
-reachability from inside its own network.** Proving that something outside can
-reach you requires something outside to try, and OwnCord contacts no such
-service — diagnostics stay local and the server reports no telemetry
-(BPR-055). So everything in the table below is yours to check, and the guide
-tells you how.
+That is as far as it can honestly go. **A server cannot test, from inside your
+network, whether the outside world can reach it.** Only something outside can
+prove that. OwnCord does not contact any outside service to test this. Its
+diagnostics stay local, and it sends no telemetry. So you have to check the
+items below yourself. This guide shows you how.
 
-| Limit                          | Can the server detect it? | Why not                                                    |
-| ------------------------------ | ------------------------- | ---------------------------------------------------------- |
-| Port forwarded correctly       | **No**                    | Needs an outside connection back in                        |
-| ISP blocking a port            | **No**                    | Looks identical to a missing forwarding rule from in here  |
-| CGNAT                          | **No**                    | This host cannot see your router's WAN address             |
-| Hairpin NAT                    | **No**                    | A property of your router, for an address it does not know |
-| Public IP changed              | **No**                    | The server never learns its public address                 |
-| Which address class it has     | Yes                       | It can read its own interfaces                             |
-| Whether voice is misconfigured | Partly                    | It warns when `voice.node_ip` is not a public address      |
+| What you want to know          | Can the server tell? | Why not                                               |
+| ------------------------------ | -------------------- | ----------------------------------------------------- |
+| Port forwarded correctly       | **No**               | It needs a connection from outside                    |
+| ISP blocking a port            | **No**               | From inside, this looks the same as a missing rule    |
+| CGNAT                          | **No**               | It cannot see your router's internet-side address     |
+| Hairpin NAT                    | **No**               | It is how your router behaves, for an unknown address |
+| Public IP changed              | **No**               | The server never learns its public address            |
+| What kind of address it has    | Yes                  | It can read its own network interfaces                |
+| Whether voice is misconfigured | Partly               | It warns when `voice.node_ip` is not a public address |
 
-To run the check, open the admin panel's **Dashboard** and press **Run check**
-under **Connectivity check** (administrators only). It shows whether the voice
-server answers, the voice node IP, and the address and address class this
-server sees your own connection coming from. The same report is
-`GET /api/v1/diagnostics/connectivity` for an administrator, as JSON.
+### The connectivity check
 
-An owner who also wants the ports to forward and the list of what the server
-cannot determine can switch on `server.reachability_report_enabled`; the
-Dashboard card then shows both, and the JSON gains a `reachability` block with
-an `undeterminable` list. It is off by default because it enumerates every
-address on every interface.
+In the admin panel, open the **Dashboard**. Under **Connectivity check**,
+press **Run check**. Only administrators can do this.
+
+It shows:
+
+- whether the voice server answers
+- the voice node IP
+- the address your own connection comes from, and what kind of address it is
+
+The same report is available as JSON at
+`GET /api/v1/diagnostics/connectivity`, for administrators.
+
+**Optional extra detail.** The Owner can turn on
+`server.reachability_report_enabled`. The Dashboard card then also shows the
+ports to forward, and a list of what the server cannot work out. The JSON gains
+a `reachability` block with an `undeterminable` list. This is off by default,
+because it lists every address on every network interface. It does not contact
+anything on the network.
 
 ## Required Ports
 
-The complete list is the canonical table in
-[deployment.md](deployment.md#firewall-and-ports); these are the rows this
-guide's instructions touch:
+The full list is the main port table in
+[deployment.md](deployment.md#firewall-and-ports). These are the rows this
+guide uses.
 
 ### Always required
 
-| Port   | Protocol | Purpose                                           |
-| ------ | -------- | ------------------------------------------------- |
-| `8443` | TCP      | OwnCord HTTPS + WebSocket                         |
-| `80`   | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
+| Port   | Protocol | Purpose                                             |
+| ------ | -------- | --------------------------------------------------- |
+| `8443` | TCP      | OwnCord HTTPS and WebSocket                         |
+| `80`   | TCP      | ACME HTTP-01 challenge (only with `tls.mode: acme`) |
 
-### Required only for voice/video
+### Required only for voice and video
 
 | Port          | Protocol | Purpose              |
 | ------------- | -------- | -------------------- |
 | `7881`        | TCP      | LiveKit TCP fallback |
 | `50000-60000` | UDP      | LiveKit media        |
 
-You do **not** need to expose `7880/TCP`: clients tunnel LiveKit signalling
-through OwnCord's own `:8443/livekit` proxy (see
-[deployment.md](deployment.md#reverse-proxy-topology)). Forwarding it only exposes
-LiveKit's API endpoint unnecessarily.
+**Do not forward `7880/TCP`.** Clients reach LiveKit's signalling through
+OwnCord's own `:8443/livekit` path (see
+[deployment.md](deployment.md#reverse-proxy-topology)). Forwarding 7880 only
+exposes LiveKit's API for no reason.
 
-**This is where port forwarding actually goes wrong.** Chat needs one TCP port
-and is easy to get right. Voice needs a UDP port for media, and forgetting it
-produces the most confusing failure in the whole system: joining a voice channel
-**succeeds**, because signalling travels over OwnCord's own port — and then
-nobody hears anything, because the media never arrives.
+### The voice port is where things go wrong
 
-By default that is the 10,000-port range `50000-60000/UDP`. If your firewall or
-router makes a range awkward, set **`voice.udp_port`** in `config.yaml` (for
-example `7882`) to carry all media on a **single** UDP port: OwnCord writes
-`rtc.udp_port: 7882` into the generated `livekit.yaml`, and you forward just
-that one port. On the Docker stack, edit `livekit.yaml` directly — replace
-`port_range_start`/`port_range_end` with `udp_port: 7882` and publish
-`7882/udp` in `docker-compose.yml` in place of the range, then set
-`OWNCORD_VOICE_UDP_PORT: "7882"` on the `owncord` service (it ships as `"0"`)
-so the admin connectivity report names that port rather than the range.
-LiveKit ignores the range once `udp_port` is set, so use one form or the
-other, never both.
+Chat needs one TCP port, and it is easy to get right. Voice also needs UDP
+ports for the sound and video itself ("media"). Forgetting them causes the most
+confusing failure in OwnCord:
 
-Two things are needed together:
+1. Joining a voice channel **works**, because signalling uses OwnCord's own
+   port.
+2. Then **nobody hears anything**, because the media never arrives.
 
-1. Forward the media port(s) — `50000-60000/UDP` by default, or your single
-   `udp_port` — plus `7881/TCP` to the server.
-2. Give LiveKit a routable media address. With `voice.node_ip` **left empty**,
-   OwnCord's generated `livekit.yaml` sets `use_external_ip: true` and LiveKit
-   detects the public address itself when it starts — the right choice on a
-   dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). On the Docker
-   stack LiveKit reads your own `livekit.yaml` instead: keep the example's
-   `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: replace
-   `rtc.use_external_ip` with `rtc.node_ip`, since LiveKit overwrites a
-   `node_ip` while detection is on) only when auto-detection cannot work (a tailnet-only host, or a NAT where
-   LiveKit's lookup is blocked): it is the address LiveKit advertises in its
-   ICE candidates, so a private value hands remote clients something they
-   cannot route to. The server warns at start-up if it is not a public address.
+### Using one UDP port instead of a range
 
-A reverse proxy cannot carry UDP media. No HTTP proxy can.
+By default the media uses the range `50000-60000/UDP`, which is 10,000 ports.
+If your router or firewall makes a range awkward, use a single UDP port
+instead.
+
+**When OwnCord runs LiveKit** (the normal case outside Docker):
+
+1. Set `voice.udp_port` in `config.yaml`, for example `7882`.
+2. OwnCord writes `rtc.udp_port: 7882` into the `livekit.yaml` it generates.
+3. Forward just that one port.
+
+**On the Docker compose stack**, you edit LiveKit's file yourself:
+
+1. In `livekit.yaml`, replace `port_range_start` and `port_range_end` with
+   `udp_port: 7882`.
+2. In `docker-compose.yml`, publish `7882/udp` in place of the range.
+3. On the `owncord` service, set `OWNCORD_VOICE_UDP_PORT: "7882"`. It ships as
+   `"0"`. This makes the admin connectivity report name that port instead of
+   the range.
+
+The single-container Docker image and the Unraid template already use one UDP
+port, `7882`.
+
+LiveKit ignores the range once `udp_port` is set. Use one form or the other,
+never both.
+
+### Two things voice needs together
+
+1. **Forward the media ports.** That is `50000-60000/UDP` by default, or your
+   single UDP port. Also forward `7881/TCP`.
+2. **Give LiveKit an address that remote clients can reach.** LiveKit tells
+   clients this address in its connection offers (ICE candidates).
+   - **Best: leave `voice.node_ip` empty.** OwnCord's generated `livekit.yaml`
+     then sets `use_external_ip: true`, and LiveKit finds your public address
+     itself when it starts. This is the right choice on a changing IP (see
+     [Dynamic public IP](#dynamic-public-ip)).
+   - **On the Docker stack**, LiveKit reads your own `livekit.yaml`. Keep the
+     example's `rtc.use_external_ip: true` there.
+   - **Set `voice.node_ip` only when detection cannot work**, for example on a
+     Tailscale-only host, or a network that blocks LiveKit's lookup. On Docker,
+     replace `rtc.use_external_ip` with `rtc.node_ip`. While detection is on,
+     LiveKit overwrites `node_ip` with what it detects.
+   - A private address here gives remote clients an address they cannot reach.
+     The server warns at start-up if `voice.node_ip` is not a public address.
+
+A reverse proxy cannot carry voice media. No HTTP proxy can.
 
 ## Router Steps
 
-1. Open your router admin page (often `192.168.1.1` or `192.168.0.1`).
-2. Find the port forwarding section (sometimes called NAT, virtual server, or
-   firewall rules).
-3. Set a static/reserved LAN IP for your server machine.
-4. Add a forwarding rule for `8443/TCP` to that LAN IP.
-5. If using voice/video, add `7881/TCP` and `50000-60000/UDP` (or your single
-   `voice.udp_port` instead of the range).
-6. Save and apply rules.
+1. Open your router's admin page. It is often at `192.168.1.1` or
+   `192.168.0.1`.
+2. Find the port forwarding section. It may be called NAT, virtual server, or
+   firewall rules.
+3. Give your server machine a fixed (static or reserved) LAN address.
+4. Add a rule that forwards `8443/TCP` to that address.
+5. For voice and video, also forward `7881/TCP` and `50000-60000/UDP`. Or
+   forward your single UDP port instead of the range.
+6. Save and apply the rules.
 
 ## Connect Address to Share
 
-Share `https://<your-public-ip>:8443` (or your DNS name) with users.
+Give your users `https://<your-public-ip>:8443`, or your DNS name.
 
-**Test it from a network that is not yours.** A phone on mobile data with Wi-Fi
-switched off is the reliable check. Testing from inside your own LAN proves
-nothing, and can fail for a reason that has nothing to do with your forwarding
-rules — see hairpin NAT below.
+**Test it from a network that is not yours.** A phone on mobile data, with
+Wi-Fi turned off, is a reliable test. A test from inside your own network
+proves nothing. It can even fail for reasons that have nothing to do with your
+rules. See hairpin NAT below.
 
 ## When It Does Not Work
 
 ### Blocked ports
 
-Many residential ISPs block inbound `80` and `443`. High ports like `8443` are
-usually left alone, which is why that is the default.
+Many home internet providers block incoming traffic on ports `80` and `443`.
+High ports like `8443` are usually left alone. That is why `8443` is the
+default.
 
-- **Symptom:** everything looks right, nothing connects from outside.
-- **Check:** if a high port works and `443` does not, that is your ISP, not your
-  configuration.
-- **Note:** `tls.mode: acme` needs inbound `80` for the HTTP-01 challenge. If
-  your ISP blocks `80`, ACME cannot issue a certificate — the server logs the
-  failure at the first connection attempt.
+- **Symptom:** everything looks right, but nothing connects from outside.
+- **Check:** if a high port works and `443` does not, your provider is blocking
+  it. Your setup is fine.
+- **Note:** `tls.mode: acme` needs incoming port `80` for its HTTP-01
+  challenge. If your provider blocks `80`, ACME cannot get a certificate. The
+  server logs the failure at the first connection attempt.
 
 ### CGNAT (carrier-grade NAT)
 
-Your ISP puts many customers behind one public address. **You have no public
-address of your own, so no port forwarding rule can ever work.** This is common
-on mobile broadband, Starlink, and many fibre and cable plans.
+With CGNAT, your provider puts many customers behind one shared public
+address. **You have no public address of your own, so no port forwarding rule
+can ever work.** It is common on mobile broadband, Starlink, and many fibre and
+cable plans.
 
-- **Check:** compare the WAN address on your router's status page against what a
-  what-is-my-IP page reports. If they differ, you are behind CGNAT. A router WAN
-  address inside `100.64.0.0/10` is the same conclusion.
-- **Fix:** use [Tailscale](tailscale.md), or ask your ISP for a public IP
-  address — many offer one on request, sometimes for a fee.
-- **The server cannot detect this for you.** It sees only its own LAN address;
-  your router's WAN address is not visible from the server. If the server itself
-  holds a `100.64.0.0/10` address it says so, but even then it cannot tell you
-  whether that is carrier NAT or Tailscale, because both use that range.
+- **Check:** compare the internet-side (WAN) address on your router's status
+  page with what a "what is my IP" website shows. If they differ, you are
+  behind CGNAT. A router WAN address inside `100.64.0.0/10` means the same.
+- **Fix:** use [Tailscale](tailscale.md). Or ask your provider for a public IP
+  address. Many offer one on request, sometimes for a fee.
+- **The server cannot detect this for you.** It only sees its own LAN address,
+  not your router's WAN address. If the server itself has an address in
+  `100.64.0.0/10`, it says so. But even then it cannot tell whether that is
+  carrier NAT or Tailscale, because both use that range.
 
 ### Hairpin NAT (NAT loopback)
 
-Remote users connect fine, but devices on your own LAN cannot reach your public
-address. The router will not route a packet back into the network it came from.
+Remote users connect fine, but devices on your own network cannot reach your
+public address. Some routers will not send traffic back into the network it
+came from.
 
-- **Symptom:** works on mobile data, fails on your own Wi-Fi.
-- **Fix:** give LAN clients the server's local address, or run split-horizon DNS
-  so your hostname resolves to the LAN address inside the house and the public
-  address outside.
-- **The server cannot detect this for you.** It is behaviour of your router,
-  for a public address the server does not know.
+- **Symptom:** it works on mobile data, but fails on your own Wi-Fi.
+- **Fix:** give users on your network the server's local address. Or use
+  split-horizon DNS, so your hostname points to the local address at home and
+  the public address everywhere else.
+- **The server cannot detect this for you.** It depends on your router, and on
+  a public address the server does not know.
 
 ### Dynamic public IP
 
-Most residential connections get a new public address periodically — after a
-reboot, an outage, or on the ISP's own schedule. Two things can break at once:
-the address clients type, and the media address LiveKit advertises.
+Most home connections get a new public address from time to time: after a
+reboot, an outage, or on the provider's own schedule. Two things can break at
+once: the address clients type, and the media address LiveKit tells clients.
 
-- **Clients:** use dynamic DNS and share a hostname rather than an IP literal.
-- **Media (`voice.node_ip`):** leave it **empty** on a dynamic address. OwnCord's
-  auto-generated `livekit.yaml` then sets `use_external_ip: true`, so LiveKit detects
-  its public address itself — but only when it starts. After an IP change,
-  restart the OwnCord server so LiveKit picks up the new address; until then
-  it keeps advertising the old one. A pinned `voice.node_ip` goes stale
-  silently when the address changes: the call connects — signalling still works
-  — and then nobody hears anything, because the ICE candidate names an address
-  no longer yours. If you did pin it, clear it (or update it) after an IP
-  change and restart the server so `livekit.yaml` is rewritten.
-- **Media on the Docker stack:** LiveKit runs from your own `livekit.yaml` and
+- **For clients:** use dynamic DNS, and share a hostname rather than an IP
+  address.
+- **For media (`voice.node_ip`):** leave it **empty** on a changing address.
+  - OwnCord's generated `livekit.yaml` then sets `use_external_ip: true`, so
+    LiveKit finds its public address itself. But it only does this when it
+    starts.
+  - **After an IP change, restart the OwnCord server.** LiveKit then picks up
+    the new address. Until then it keeps using the old one.
+  - A pinned `voice.node_ip` goes out of date silently when the address
+    changes. Calls connect, because signalling still works, and then nobody
+    hears anything. If you pinned it, clear or update it after an IP change,
+    then restart the server so `livekit.yaml` is written again.
+- **For media on the Docker stack:** LiveKit uses your own `livekit.yaml` and
   never reads `voice.node_ip`. Use `rtc.use_external_ip: true` there (the
-  example's default) rather than a pinned `rtc.node_ip`, then
-  `docker compose restart livekit` after an IP change.
-- **The server cannot detect this for you.** It never learns its public address,
-  so it cannot notice the address changing and will not restart LiveKit for
-  you. The restart above is what makes an address change recoverable without
-  editing any config.
+  example's default), not a pinned `rtc.node_ip`. After an IP change, run
+  `docker compose restart livekit`.
+- **The server cannot detect this for you.** It never learns its public
+  address, so it cannot notice a change and will not restart LiveKit for you.
+  The restart above is what fixes an address change without editing any
+  config.
 
 ### Firewalls
 
-There are usually two, and both have to allow the traffic:
+There are usually two firewalls, and both must allow the traffic:
 
-- the **router** firewall, which the forwarding rule normally opens; and
-- the **host** firewall on the machine running OwnCord (`ufw`, `firewalld`,
-  Windows Defender Firewall).
+- the **router** firewall, which a forwarding rule normally opens
+- the **host** firewall on the machine running OwnCord, such as `ufw`,
+  `firewalld` or Windows Defender Firewall
 
-On Windows, the first run often prompts for firewall access — a declined prompt
-looks exactly like a bad forwarding rule.
+On Windows, the first run often asks for firewall access. If you declined that
+prompt, it looks exactly like a bad forwarding rule.
 
 ## What this build does not do
 
-Stated plainly so it is not discovered at the worst moment. The certificate work
-(B6-3 – B6-5) is deferred to the release, so:
+These limits are stated plainly, so you do not discover them at a bad moment.
+The certificate work is planned for a later release. Until then:
 
-- **No HTTPS on a bare public IP.** `tls.mode: acme` requires a hostname and
-  rejects an IP address. Let's Encrypt has issued IP certificates since January
+- **No HTTPS on a bare public IP.** `tls.mode: acme` needs a hostname and
+  refuses an IP address. Let's Encrypt has issued IP certificates since January
   2026, but this build's ACME client cannot request them. On a raw IP, use
-  `tls.mode: manual` with your own certificate, or stay on `self_signed` and
-  accept it on each client.
-- **Domain ACME is implemented but not qualified at release quality.** It works;
-  it has not been exercised against certificate expiry, rotation and restart the
-  way the release will require.
-- **No guided LAN or offline device-trust install.** Trusting a self-signed
-  certificate is a manual, per-device step today.
-- **No qualified certificate lifecycle.** Hot reload and renewal-state survival
-  across restart are not yet proven.
-- **The server never verifies inbound reachability.** By design, not omission —
-  see the table at the top.
+  `tls.mode: manual` with your own certificate. Or stay on `self_signed`, and
+  accept it once on each client.
+- **Domain ACME works, but is not tested at release quality.** It has not been
+  tested against certificate expiry, rotation and restart the way the release
+  will require.
+- **No guided trust setup for LAN or offline devices.** Trusting a self-signed
+  certificate is a manual step on each device today.
+- **Certificate lifecycle is not fully tested.** Hot reload, and keeping
+  renewal state across a restart, are not yet proven.
+- **The server never checks whether it can be reached from outside.** This is
+  by design, not an oversight. See the table at the top.
 
 ## Outbound traffic
 
-OwnCord sends no telemetry, but it is not connection-free. The complete
-inventory of outbound paths — what opens each one and what leaves the machine —
-is in [diagnostics.md](architecture/diagnostics.md#egress-inventory); the rows an
-offline operator is most likely to meet are:
+OwnCord sends no telemetry. But it does make some outgoing connections. The
+full list of outgoing connections, with what triggers each one and what it
+sends, is in
+[diagnostics.md](architecture/diagnostics.md#egress-inventory). The ones an
+offline owner is most likely to meet:
 
-- **`livekit-server` STUN at start-up.** A default install with voice enabled
-  queries a public STUN server (`use_external_ip: true`) to discover its
-  external address. That is the SFU's own behaviour, not OwnCord reporting
-  anything about you.
-- **LiveKit binary download at first boot**, if `voice.auto_download_livekit`
-  is on and no `voice.livekit_binary` is set — one checksum-pinned download from
-  GitHub.
-- **`api.github.com` on an update check** — an admin asking the panel to check,
-  or a client polling for its own update. Optional, and rate-limit-only if you
-  set `github.token`.
+- **LiveKit's STUN lookup at start-up.** With voice on, a default install asks
+  a public STUN server for its external address (`use_external_ip: true`).
+  That is LiveKit's own behaviour. OwnCord reports nothing about you.
+- **The LiveKit download on first start.** Only if
+  `voice.auto_download_livekit` is on and no `voice.livekit_binary` is set. It
+  is one checksum-checked download from GitHub.
+- **`api.github.com` on an update check.** This happens when an admin checks
+  for updates, or when a client checks for its own update. It is optional.
+  Setting `github.token` only raises the rate limit.
 
-Nothing here is automatic product telemetry: every row is a feature the
-operator switched on, an admin action, or the LiveKit server's own behaviour.
+None of this is automatic product telemetry. Each item is a feature you turned
+on, an admin action, or LiveKit's own behaviour.
 
 ## Troubleshooting Checklist
 
-- Confirm the server is listening on `8443`.
-- Confirm the router rules point to the correct LAN IP.
-- Confirm the **host** firewall allows the forwarded ports, not just the router.
-- Confirm your ISP is not blocking the port — try a high port if `443` fails.
-- Confirm you are not behind CGNAT — compare the router WAN address with a
-  what-is-my-IP page.
-- Test from a different network (mobile hotspot), never from the same LAN.
-- For voice, confirm `50000-60000/UDP` (or your single `voice.udp_port`) is
-  forwarded **and** `voice.node_ip` is
-  your public address. "Joins but no audio" is almost always one of these two.
+- Check the server is listening on `8443`.
+- Check the router rules point to the right LAN address.
+- Check the **host** firewall allows the forwarded ports, not just the router.
+- Check your provider is not blocking the port. Try a high port if `443` fails.
+- Check you are not behind CGNAT. Compare the router's WAN address with a
+  "what is my IP" website.
+- Test from a different network, such as a phone hotspot. Never test from the
+  same network.
+- For voice, check that `50000-60000/UDP` (or your single UDP port) is
+  forwarded, **and** that LiveKit advertises your current public address.
+  Leave `voice.node_ip` empty, or set it to your current public IP. "Joins but
+  no sound" is almost always one of these two.
 
 ## See Also
 
 - [Tailscale Guide](tailscale.md) — works behind CGNAT, no forwarding needed
-- [Deployment Guide](deployment.md) — TLS modes, firewall table, reverse proxy
+- [Deployment Guide](deployment.md) — TLS modes, port table, reverse proxy
 - [LiveKit Setup](livekit-setup.md) — voice configuration in detail
