@@ -49,6 +49,7 @@ const {
       content: string;
       replyTo: { messageId: number; username: string } | null;
       attachments: { id: string; filename: string }[];
+      uploads?: { filename: string; owner: { destroy(): void } }[];
     }
   >(() => ({ content: "", replyTo: null, attachments: [] })),
   mockRestoreDraft: vi.fn(),
@@ -307,6 +308,7 @@ import {
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { loadLastChannel } from "@lib/last-channel";
+import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -571,6 +573,46 @@ describe("createChannelController", () => {
         replyTo: null,
         attachments: [{ id: "srv-2", filename: "b.pdf" }],
       });
+    });
+
+    it("keeps a draft that holds only an upload still in flight", () => {
+      const opts = makeOpts();
+      const owner = new Disposable();
+      const upload = { filename: "big.zip", owner };
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      mockGetDraft.mockReturnValue({
+        content: "",
+        replyTo: null,
+        attachments: [],
+        uploads: [upload],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith(expect.objectContaining({ uploads: [upload] }));
+      expect(owner.signal.aborted).toBe(false);
+    });
+
+    it("cancels uploads left in stashed drafts when the controller is destroyed", () => {
+      const opts = makeOpts();
+      const owner = new Disposable();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetDraft.mockReturnValue({
+        content: "",
+        replyTo: null,
+        attachments: [],
+        uploads: [{ filename: "big.zip", owner }],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+
+      ctrl.destroy();
+
+      expect(owner.signal.aborted).toBe(true);
     });
 
     it("does not restore a draft into a channel with none", () => {
