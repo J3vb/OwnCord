@@ -349,7 +349,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *
    * Suppressed while the window is detached (jumped to an old message): the
    * loaded slice is then not the tail, so "the last N messages" would put the
-   * line somewhere arbitrary.
+   * line somewhere arbitrary. The count is still kept for the whole visit —
+   * a jump into another channel mounts this list before its around-window
+   * lands, so detachment is re-read at every placement
+   * (resolveNewDividerIndex), and returning to the tail restores the line.
    *
    * A count at UNREAD_COUNT_CAP is only a lower bound, so it reads as "every
    * loaded message is unread": the divider stays at the top of the loaded
@@ -392,6 +395,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
       return messages.findIndex((m) => m.id === newDividerAnchorId);
+    }
+    // An around-window centred on a jumped-to message is not the tail: counting
+    // back from its end would mark an arbitrary row. Detachment is read here,
+    // not at mount, because a cross-channel jump detaches after the mount.
+    if (isWindowDetached(options.channelId)) {
+      newDividerDeferred = false;
+      // No divider will exist to open at, and a pending open left armed would
+      // scroll the reader up to the line once the tail returns.
+      openAtDividerPending = false;
+      return -1;
     }
     // A revisit renders the cached window while its tail is refetched (DP-10).
     // Those rows predate what arrived while away, so counting back from their
@@ -557,7 +570,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function updateUnreadBar(): void {
     if (unreadBar === null || unreadBarLabel === null) return;
     let text = "";
-    if (!unreadBarDismissed && unreadOnOpen > 0) {
+    // A detached window draws no NEW line, so the bar (which counts toward it)
+    // stays hidden until the tail returns.
+    if (!unreadBarDismissed && unreadOnOpen > 0 && !isWindowDetached(options.channelId)) {
       const shown = formatBadgeCount(openedUnread);
       if (unreadOnOpen === Infinity) {
         text = messagingText("unreadBar.capped", { shown });
@@ -1618,6 +1633,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (s) => s.detachedChannels.has(options.channelId),
         () => {
           updateJumpToPresentPill();
+          updateUnreadBar();
         },
       ),
     );
