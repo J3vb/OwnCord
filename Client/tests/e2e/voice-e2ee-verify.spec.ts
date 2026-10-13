@@ -186,7 +186,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
     await expect(badge).toHaveClass(/verified/);
-    await expect(badge).toHaveAttribute("title", /^Identity verified · Safety number: /);
+    await expect(badge).toHaveAttribute("title", /^Same key as first seen · Safety number: /);
 
     // TOFU: the first verified sighting pins the peer's identity key.
     const pins = await invokesOf(page, "store_identity_pin");
@@ -330,7 +330,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     // stayed un-keyed for the rest of the call while the UI showed nothing.
     await expect(badge).toBeVisible();
     await expect(badge).toHaveClass(/verified/);
-    await expect(badge).toHaveAttribute("title", /^Identity verified · Safety number: /);
+    await expect(badge).toHaveAttribute("title", /^Same key as first seen · Safety number: /);
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
     expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
