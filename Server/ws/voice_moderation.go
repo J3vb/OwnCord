@@ -451,14 +451,16 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	// Advisory capacity check with JoinVoiceChannelIfCapacity's semantics. The
 	// atomic one still runs on the re-join; this one keeps the common case from
-	// dropping the target into a channel that is already full.
-	if dest.VoiceMaxUsers > 0 {
+	// dropping the target into a channel that is already full. The cap is the
+	// one the target's own re-join is held to, so a target who moderates voice
+	// there is not refused a move their join would be admitted to.
+	if destCap := voiceJoinCapacity(targetSub, dest.VoiceMaxUsers); destCap > 0 {
 		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID)
 		if cErr != nil {
 			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID)
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
 		}
-		if count >= dest.VoiceMaxUsers {
+		if count >= destCap {
 			return Result{Error: ClientError{Code: ErrCodeChannelFull, Message: "voice channel is full"}}
 		}
 	}

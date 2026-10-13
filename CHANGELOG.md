@@ -78,6 +78,7 @@ and only when it changes something a contributor or fork holder must do
 - When voice reconnects after a dropped connection, a message now says your camera or screen share stopped, with a **Turn on again** (or **Share again**) button. Before, they were just off afterwards.
 - A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
+- People who can mute and move others in a voice channel (the Mute Members permission, or Administrator) can now join it when it is full. Everyone else still gets "voice channel is full".
 
 ### Fixed
 

@@ -1487,6 +1487,11 @@ only exempts the join from a moderator's rejoin block (see `voice_mod_kick`).
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
 
+A channel with `voice_max_users` set refuses a join with `CHANNEL_FULL` once it
+holds that many users, except for a caller with `can_moderate_voice` in that
+channel (`permissions.AuthorizeVoiceModerator`): a voice moderator joins a full
+channel. Older servers apply the cap to everyone.
+
 On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
@@ -1712,7 +1717,8 @@ the moderator did and restates it with `voice_deafen`.
 
 The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
 DM, `READ_MESSAGES` (a move must not place someone where they could not go
-themselves) and against the destination's `voice_max_users`. The server then
+themselves) and against the destination's `voice_max_users` (skipped when the
+target is a voice moderator there, as their own `voice_join` would be). The server then
 runs its voice-leave routine for the target — `voice_leave` is broadcast, the
 LiveKit participant is removed, the row deleted — and sends the target
 `voice_moved`. The target's client answers with an ordinary `voice_join` for
