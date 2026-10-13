@@ -72,7 +72,9 @@ input,select,textarea{font-family:inherit;border:none}
 .topbar-menu svg{width:22px;height:22px}
 .topbar-server{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
 .topbar-server-name{font-size:15px;font-weight:700;color:var(--header-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.topbar-version{font-size:12px;color:var(--text-muted);font-family:var(--font-mono);white-space:nowrap}
+.topbar-version{font-size:12px;color:var(--text-muted);font-family:var(--font-mono);white-space:nowrap;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px}
+.topbar-version:hover{color:var(--text-normal)}
+.topbar-version:empty{display:none}
 .user-menu-wrap{position:relative;flex-shrink:0}
 .user-menu-btn{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 8px;border-radius:var(--radius-sm);background:transparent;color:var(--text-normal)}
 .user-menu-btn:hover{background:var(--bg-hover)}
@@ -619,3 +621,18 @@ code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;wor
 .notice-dismiss:hover{color:var(--header-primary);background:var(--bg-card-hover,rgba(255,255,255,.06))}
 .notice-dismiss:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .update-strip .notice-dismiss{align-self:center}
+
+/* What's new: the bundled release notes */
+.whats-new-repo{color:var(--text-link);font-weight:600;white-space:nowrap}
+.whats-new-link,.changelog-body a{color:var(--text-link)}
+.changelog-body{font-size:14px;line-height:1.5;color:var(--text-normal);overflow-wrap:anywhere}
+.changelog-body p,.changelog-body ul{margin:0 0 8px}
+.changelog-body ul{padding-left:20px}
+.changelog-body li{margin:2px 0}
+.changelog-body .changelog-heading{margin:12px 0 4px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.changelog-body .changelog-subheading{margin:8px 0 4px;font-size:14px;font-weight:700;color:var(--header-primary)}
+.changelog-body code{font-family:var(--font-mono);font-size:.9em;padding:0 3px;border-radius:var(--radius-sm);background:var(--bg-input)}
+.changelog-body a{color:var(--text-link)}
+.whats-new-history details.disclose{border-top:1px solid var(--border);padding:8px 0}
+.whats-new-history details.disclose:first-child{border-top:0}
+.whats-new-history details.disclose>.changelog-body{padding:8px 0 4px 22px}

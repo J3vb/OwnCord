@@ -19,12 +19,18 @@ test("a documentation-only change runs no application job", () => {
       "M\tdocs/plans/b7-plan-2026-09-20.md",
       "A\tdocs/architecture/diagnostics.md",
       "M\tREADME.md",
-      "M\tCHANGELOG.md",
     ].join("\n"),
   );
   for (const cap of CAPABILITIES) {
     assert.equal(sel[cap], false, `${cap} must not run for a prose-only change`);
   }
+});
+
+test("a CHANGELOG.md edit runs the server and client jobs, which both ship it", () => {
+  const sel = picked("M\tCHANGELOG.md");
+  assert.equal(sel.server, true);
+  assert.equal(sel.client, true);
+  assert.equal(sel.rust, false);
 });
 
 test("a prose change still leaves the two always-on jobs alone", () => {
