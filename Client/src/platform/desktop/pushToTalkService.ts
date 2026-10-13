@@ -22,6 +22,7 @@ import { loadPref, savePref } from "@lib/preferences";
 import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/ptt";
+import { inputMode } from "@lib/inputMode";
 import type { PushToTalk } from "../contracts/pushToTalk";
 
 const log = createLogger("ptt");
@@ -78,10 +79,11 @@ function ungateMic(): void {
     .catch((e) => log.warn("Failed to open the mic gate after clearing PTT", e));
 }
 
-/** Start listening for PTT state changes from the Rust backend. */
+/** Start listening for PTT state changes from the Rust backend. A key bound
+ *  in Voice Activity mode stays saved but never gates the mic. */
 async function initPtt(): Promise<void> {
   const vk = loadPref<number>("pttVk", 0);
-  if (vk === 0) return;
+  if (vk === 0 || inputMode() !== "ptt") return;
   await startBinding(vk, false);
 }
 
@@ -240,11 +242,16 @@ async function stopBinding(clearKey: boolean): Promise<void> {
   }
 }
 
-/** Update the PTT key and restart polling. */
+/** Update the PTT key and restart polling. In Voice Activity mode the key is
+ *  only saved; switching to Push to Talk calls this again to arm it. */
 async function updatePttKey(vk: number): Promise<void> {
   savePref("pttVk", vk);
   if (vk === 0) {
     await stopBinding(true);
+    return;
+  }
+  if (inputMode() !== "ptt") {
+    if (binding !== null || nativeStarted) await stopPtt();
     return;
   }
   const attempt = binding;

@@ -119,6 +119,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.pressKey": "Press a supported key...",
   "keybinds.pttHint":
     "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
+  "keybinds.pttModeOff":
+    "Push to Talk is off, so this key does nothing. Turn it on in Voice & Audio under Input Mode.",
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
   "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
@@ -316,6 +318,10 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.connectionRefused":
     "The server could not be reached through the normal certificate-checked connection. Check the server address and any certificate prompt, then retry.",
 
+  "voiceAudio.card.inputMode": "Input Mode",
+  "voiceAudio.inputMode": "Input Mode",
+  "voiceAudio.inputMode.vad": "Voice Activity",
+  "voiceAudio.inputMode.ptt": "Push to Talk",
   "voiceAudio.card.microphone": "Microphone",
   "voiceAudio.card.speakers": "Speakers",
   "voiceAudio.card.camera": "Camera & screen share",

@@ -1280,3 +1280,75 @@ describe("ptt release delay", () => {
     expect(gateCalls()).toEqual([false]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: Input Mode (WP 1D-2) — a key bound in Voice Activity mode never gates
+// ---------------------------------------------------------------------------
+
+describe("Input Mode: Voice Activity keeps a bound key idle", () => {
+  beforeEach(async () => {
+    resetAll();
+    await stopPtt();
+    resetAll();
+  });
+
+  const commands = (): unknown[] => mockInvoke.mock.calls.map((c) => c[0]);
+
+  it("init does not start polling for a key bound in Voice Activity mode", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "vad");
+
+    await initPtt();
+
+    expect(commands()).not.toContain("ptt_start");
+    expect(mockListen).not.toHaveBeenCalled();
+    expect(mockPttPollingLive).toBe(false);
+  });
+
+  it("binding a key mid-call in Voice Activity mode saves it but does not gate the mic", async () => {
+    testPrefs.set("inputMode", "vad");
+    mockCurrentChannelId = 7;
+
+    await updatePttKey(0x41);
+
+    expect(testPrefs.get("pttVk")).toBe(0x41);
+    expect(commands()).not.toContain("ptt_start");
+    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+  });
+
+  it("binding a key in Voice Activity mode stops a poller left running", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "ptt");
+    await initPtt();
+    expect(commands()).toContain("ptt_start");
+    testPrefs.set("inputMode", "vad");
+    mockInvoke.mockClear();
+
+    await updatePttKey(0x42);
+
+    expect(commands()).toContain("ptt_stop");
+    expect(mockPttPollingLive).toBe(false);
+  });
+
+  it("re-arming the saved key after switching to Push to Talk gates the mic mid-call", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "vad");
+    mockCurrentChannelId = 7;
+    await initPtt();
+    expect(commands()).not.toContain("ptt_start");
+
+    testPrefs.set("inputMode", "ptt");
+    await updatePttKey(0x41);
+
+    expect(commands()).toContain("ptt_start");
+    expect(mockSetPttGated).toHaveBeenCalledWith(true);
+  });
+
+  it("a profile from before Input Mode with a bound key still arms (no saved mode)", async () => {
+    testPrefs.set("pttVk", 0x41);
+
+    await initPtt();
+
+    expect(commands()).toContain("ptt_start");
+  });
+});

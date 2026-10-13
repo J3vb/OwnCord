@@ -22,6 +22,7 @@ import {
   type MicProcessor,
 } from "@lib/micProcessor";
 import { voiceText } from "../i18n/voice";
+import { effectiveVoiceSensitivity } from "@lib/inputMode";
 
 const log = createLogger("audioPipeline");
 
@@ -239,6 +240,12 @@ interface VoiceGatedRoom {
 export class AudioPipeline {
   private room: Room | null = null;
   private processor: MicProcessor | null = null;
+
+  /** `pttPollingLive` reports whether a Push to Talk key can gate the mic
+   *  right now (the voice store's isPttPollingLive), injected so this module
+   *  stays off the store graph. */
+  constructor(private readonly pttPollingLive: () => boolean = () => false) {}
+
   /** Bumped on every teardown so an attach that outlived it is discarded. */
   private generation = 0;
   private vad: VadDetector | null = null;
@@ -266,7 +273,7 @@ export class AudioPipeline {
 
   /** Hand the saved sensitivity to a room that gates its own capture. */
   private applyRoomVoiceGate(): void {
-    const sensitivity = loadPref<number>("voiceSensitivity", 50);
+    const sensitivity = effectiveVoiceSensitivity(this.pttPollingLive());
     (this.room as Partial<VoiceGatedRoom> | null)?.setVoiceGate?.(
       vadThreshold(sensitivity),
       (speaking) => this.onGateSpeaking?.(speaking),
@@ -453,6 +460,14 @@ export class AudioPipeline {
     log.debug("Voice sensitivity updated", { sensitivity: clamped });
   }
 
+  /** Re-run the sensitivity gate after the input mode or the PTT poller
+   *  changed: a live Push to Talk key runs none, otherwise the saved
+   *  sensitivity gates. */
+  applyInputMode(): void {
+    this.startVadPolling();
+    this.applyRoomVoiceGate();
+  }
+
   // --- VAD ---
 
   /** (Re)start the detector on the live processor for the saved sensitivity. */
@@ -460,7 +475,7 @@ export class AudioPipeline {
     void this.stopVadPolling();
     const processor = this.processor;
     if (processor === null || processor.analyser === null) return;
-    const sensitivity = loadPref<number>("voiceSensitivity", 50);
+    const sensitivity = effectiveVoiceSensitivity(this.pttPollingLive());
     if (sensitivity >= 100) {
       processor.setLookahead(0);
       return;

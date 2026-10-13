@@ -8,11 +8,24 @@ const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
 const mockGetLocalMicSettings = vi.fn((): MediaTrackSettings | null => null);
+const mockApplyInputMode = vi.fn();
+const mockPttStop = vi.fn(async () => {});
+const mockPttUpdateKey = vi.fn(async (_vk: number) => {});
+
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: {
+    supported: async () => true,
+    captureKeyPress: async () => 0,
+    stop: () => mockPttStop(),
+    updateKey: (vk: number) => mockPttUpdateKey(vk),
+  },
+}));
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
   switchOutputDevice: (...args: unknown[]) => mockSwitchOutputDevice(...args),
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
+  applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
@@ -34,6 +47,9 @@ import {
   FakeAudioWorkletNode,
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
+
+/** The volume sliders, not the Push to Talk release delay in the input mode card. */
+const VOLUME_SLIDERS = 'input[type="range"]:not([data-testid="ptt-release-delay"])';
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -275,8 +291,10 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]');
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
+    // ...plus the Push to Talk release delay, under the input mode.
+    expect(el.querySelectorAll('input[type="range"]').length).toBe(3);
     ac.abort();
   });
 
@@ -287,7 +305,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const inputSlider = sliders[0]!;
     inputSlider.value = "75";
     inputSlider.dispatchEvent(new Event("input"));
@@ -303,7 +321,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const outputSlider = sliders[1]!;
     outputSlider.value = "80";
     outputSlider.dispatchEvent(new Event("input"));
@@ -320,7 +338,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[0]!.value).toBe("75");
     ac.abort();
   });
@@ -333,7 +351,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[1]!.value).toBe("60");
     ac.abort();
   });
@@ -739,10 +757,11 @@ describe("VoiceAudioTab UI structure", () => {
         (c) => c.querySelector(".settings-card-head h3")!.textContent === title,
       )!;
 
-    it("groups the tab into Microphone, Speakers, Camera & screen share and Voice processing", () => {
+    it("groups the tab into Input Mode, Microphone, Speakers, Camera & screen share and Voice processing", () => {
       const { el, ac } = build();
       const titles = [...el.querySelectorAll(".settings-card-head h3")].map((h) => h.textContent);
       expect(titles).toEqual([
+        "Input Mode",
         "Microphone",
         "Speakers",
         "Camera & screen share",
@@ -1655,6 +1674,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
         },
+        pushToTalk: { supported: async () => true },
       },
     }));
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
@@ -1959,5 +1979,100 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(startCameraPreview).toHaveBeenCalledTimes(1);
     expect(stopCameraPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe("VoiceAudioTab input mode (WP 1D-2)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    installFakeAudio({ worklets: true });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    mockApplyInputMode.mockClear();
+    mockPttStop.mockClear();
+    mockPttUpdateKey.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mount(): { el: HTMLElement; ac: AbortController } {
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    return { el, ac };
+  }
+  const option = (el: HTMLElement, mode: string): HTMLButtonElement =>
+    el.querySelector<HTMLButtonElement>(`[data-testid="input-mode-${mode}"]`)!;
+  const pttBox = (el: HTMLElement): HTMLElement =>
+    el.querySelector<HTMLElement>('[data-testid="ptt-controls"]')!;
+  const sensitivityShown = (el: HTMLElement): boolean =>
+    !el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden;
+
+  it("opens on Voice Activity with the sensitivity row and no key controls", () => {
+    const { el, ac } = mount();
+    expect(option(el, "vad").getAttribute("aria-checked")).toBe("true");
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("false");
+    expect(pttBox(el).hidden).toBe(true);
+    expect(sensitivityShown(el)).toBe(true);
+    ac.abort();
+  });
+
+  it("Push to Talk shows the key and release delay and hides the sensitivity row", () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    const { el, ac } = mount();
+
+    option(el, "ptt").click();
+
+    expect(localStorage.getItem("owncord:settings:inputMode")).toBe('"ptt"');
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
+    expect(pttBox(el).hidden).toBe(false);
+    expect(pttBox(el).querySelector('[data-testid="ptt-release-delay"]')).not.toBeNull();
+    expect(sensitivityShown(el)).toBe(false);
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(mockPttUpdateKey).toHaveBeenCalledWith(65);
+    ac.abort();
+  });
+
+  it("switching back to Voice Activity stops push to talk and restores the sensitivity row", () => {
+    localStorage.setItem("owncord:settings:inputMode", '"ptt"');
+    const { el, ac } = mount();
+    expect(sensitivityShown(el)).toBe(false);
+
+    option(el, "vad").click();
+
+    expect(localStorage.getItem("owncord:settings:inputMode")).toBe('"vad"');
+    expect(pttBox(el).hidden).toBe(true);
+    expect(sensitivityShown(el)).toBe(true);
+    expect(mockPttStop).toHaveBeenCalledTimes(1);
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    ac.abort();
+  });
+
+  it("does not arm push to talk with no key bound, and ignores a click on the current mode", () => {
+    const { el, ac } = mount();
+    option(el, "vad").click();
+    expect(mockApplyInputMode).not.toHaveBeenCalled();
+
+    option(el, "ptt").click();
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(mockPttUpdateKey).not.toHaveBeenCalled();
+    ac.abort();
+  });
+
+  it("shows Push to Talk for a profile from before Input Mode with a bound key", () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    const { el, ac } = mount();
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
+    expect(pttBox(el).hidden).toBe(false);
+    ac.abort();
   });
 });

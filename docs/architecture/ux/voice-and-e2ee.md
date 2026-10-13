@@ -196,16 +196,26 @@ has no web microphone to gate: there the same `setPttGated` flips the Rust
 session's own gate (`NativeRoom.setPttGated` → `nativeVoice.setPttGated`),
 which zeroes the open capture's processed frames, so the capture also stays
 open across presses; every enable sends the gate before the capture opens.
-Only a mute or deafen closes the capture, on both paths. **Target UX:**
+Only a mute or deafen closes the capture, on both paths.
 
-| State               | Presentation                                                                                                                                                                                                   |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate |
-| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                        |
-| release delay       | Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                            |
-| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                          |
-| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                      |
-| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                        |
+The saved Input Mode (`inputMode`, `lib/inputMode.ts`) decides whether a bound
+key gates at all. In Voice Activity mode the poller never starts and a bound key
+is only kept for later. In Push to Talk mode the poller arms the key, and the
+input-sensitivity gate steps aside only while the poller is live with a key
+bound (`effectiveVoiceSensitivity`); with no key, or on a host that cannot read
+key state, the saved sensitivity keeps gating. A profile saved before Input Mode
+existed starts in Push to Talk when it has a key bound (`migrateInputMode` in
+`main.ts`). **Target UX:**
+
+| State               | Presentation                                                                                                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| input mode          | Voice & Audio opens with an "Input Mode" choice: Voice Activity (shows Input Sensitivity) or Push to Talk (shows the key and release delay, hides Input Sensitivity); the Keybinds tab notes the key does nothing in Voice Activity mode |
+| PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate                           |
+| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                                                  |
+| release delay       | Voice & Audio (Push to Talk) and Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
+| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                                                    |
+| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                                                |
+| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                                                  |
 
 ---
 
@@ -412,7 +422,7 @@ never silences message chimes for the rest of the session.
 
 `src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
-`src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/lib/ptt.ts`, `src/lib/inputMode.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
 `src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/components/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,

@@ -31,6 +31,9 @@ const mockVoiceState = vi.hoisted(() => ({
 /** A roster in which the server still holds every membership. */
 const membershipHeld = { get: () => ({ has: () => true }) };
 
+/** Listeners livekitSession registers with the mocked voice.store at import. */
+const pttPollingListeners = vi.hoisted((): Array<() => void> => []);
+
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
  *  hoisted mock factory can mutate it after hoisting. */
 const mockPttPollingLive = vi.hoisted(() => ({ value: false }));
@@ -141,6 +144,10 @@ vi.mock("@stores/voice.store", () => ({
     mockPttPollingLive.value = live;
   }),
   isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+  onPttPollingLiveChange: vi.fn((listener: () => void) => {
+    pttPollingListeners.push(listener);
+    return () => {};
+  }),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
@@ -1254,6 +1261,38 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(setLocalMuted).not.toHaveBeenCalledWith(true);
+      expect(setPttGated).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("re-runs the sensitivity gate whenever the PTT poller goes live or stops", () => {
+      expect(pttPollingListeners).toHaveLength(1);
+      const listener = pttPollingListeners[0]!;
+      // The listener drives the app's session, not this test's instance.
+      const applySpy = vi.spyOn(
+        Object.getPrototypeOf((session as any)._audioPipeline),
+        "applyInputMode",
+      );
+
+      listener();
+
+      expect(applySpy).toHaveBeenCalledTimes(1);
+      applySpy.mockRestore();
+    });
+
+    it("does not close the gate at join for a key bound in Voice Activity mode", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "pttVk" ? 0x41 : key === "inputMode" ? "vad" : defaultVal,
+      );
+      setPttPollingLive(true);
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(gateSpy).toHaveBeenCalledWith(false);
+      expect(gateSpy).not.toHaveBeenCalledWith(true);
       expect(setPttGated).toHaveBeenCalledWith(false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });

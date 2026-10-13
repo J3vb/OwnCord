@@ -9,6 +9,7 @@ import {
   switchInputDevice,
   switchOutputDevice,
   setVoiceSensitivity,
+  applyInputMode,
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
@@ -35,6 +36,9 @@ import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { inputMode, type InputMode } from "@lib/inputMode";
+import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
 
@@ -143,8 +147,8 @@ function buildVoiceAudioTabInner(
   // the engine's playout mixer applies it with each user's volume.
   const nativeAudio = isLinuxDesktop();
 
-  // Four cards: what you speak into, what you hear, what you show, and how
-  // your voice is processed.
+  // Five cards: when you transmit, what you speak into, what you hear, what
+  // you show, and how your voice is processed.
   const card = (title: string): HTMLElement => {
     const el = createElement("section", { class: "settings-card" });
     const head = createElement("div", { class: "settings-card-head" });
@@ -153,6 +157,7 @@ function buildVoiceAudioTabInner(
     section.appendChild(el);
     return el;
   };
+  const inputModeCard = card(t("voiceAudio.card.inputMode"));
   const micCard = card(t("voiceAudio.card.microphone"));
   const speakersCard = card(t("voiceAudio.card.speakers"));
   const cameraCard = card(t("voiceAudio.card.camera"));
@@ -259,6 +264,62 @@ function buildVoiceAudioTabInner(
   micCard.appendChild(meterWrap);
 
   let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
+
+  // ── Input mode: Voice Activity gates on the sensitivity above, Push to Talk
+  // on a held key (whose controls show only in that mode).
+  const modeGroup = createElement("div", {
+    class: "level-options input-mode-options",
+    role: "radiogroup",
+    "aria-label": t("voiceAudio.inputMode"),
+    "data-testid": "input-mode",
+  });
+  const pttBox = createElement("div", { class: "input-mode-ptt", "data-testid": "ptt-controls" });
+  pttBox.append(...buildPttControls(signal));
+  const modeButtons = new Map<InputMode, HTMLButtonElement>();
+  const paintMode = (): void => {
+    const mode = inputMode();
+    for (const [value, button] of modeButtons) {
+      button.classList.toggle("active", value === mode);
+      button.setAttribute("aria-checked", String(value === mode));
+    }
+    pttBox.hidden = mode !== "ptt";
+    sensitivityHeader.hidden = mode === "ptt";
+    meterWrap.hidden = mode === "ptt";
+  };
+  const chooseMode = (mode: InputMode): void => {
+    if (mode === inputMode()) return;
+    savePref("inputMode", mode);
+    paintMode();
+    applyInputMode();
+    const vk = loadPref<number>("pttVk", 0);
+    if (mode === "vad") void desktop.pushToTalk.stop();
+    else if (vk !== 0) void desktop.pushToTalk.updateKey(vk);
+  };
+  const modeLabels: Record<InputMode, string> = {
+    vad: t("voiceAudio.inputMode.vad"),
+    ptt: t("voiceAudio.inputMode.ptt"),
+  };
+  for (const mode of ["vad", "ptt"] as const) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `input-mode-${mode}`,
+      },
+      modeLabels[mode],
+    );
+    button.addEventListener("click", () => chooseMode(mode), { signal });
+    modeButtons.set(mode, button);
+    modeGroup.appendChild(button);
+  }
+  paintMode();
+  setRovingTabindex(modeGroup, "[role='radio']");
+  enableRovingNavigation(modeGroup, "[role='radio']", signal);
+  appendChildren(inputModeCard, modeGroup, pttBox);
 
   function updateThresholdIndicator(sensitivity: number): void {
     // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),

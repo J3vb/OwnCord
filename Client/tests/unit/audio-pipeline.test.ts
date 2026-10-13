@@ -220,6 +220,69 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("input mode", () => {
+    let pttLive = false;
+    const setPttPollingLive = (live: boolean): void => {
+      pttLive = live;
+    };
+    afterEach(() => setPttPollingLive(false));
+
+    it("a live Push to Talk key runs no sensitivity gate; Voice Activity restarts it", async () => {
+      prefs.set("voiceSensitivity", 30);
+      prefs.set("inputMode", "ptt");
+      prefs.set("pttVk", 0x41);
+      setPttPollingLive(true);
+      const pipeline = new AudioPipeline(() => pttLive);
+      const track = micTrack();
+      await pipeline.attach(track);
+      const ctx = contextOf(track);
+      expect(ctx.node("delay").delayTime.value).toBe(0);
+      expect(ctx.audioWorklet.addModule).not.toHaveBeenCalled();
+
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      prefs.set("inputMode", "vad");
+      pipeline.applyInputMode();
+      await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+      const worklet = FakeAudioWorkletNode.instances[0]!;
+      expect(worklet.port.postMessage).toHaveBeenCalledWith({
+        type: "config",
+        threshold: vadThreshold(30),
+      });
+      worklet.emit({ type: "gate", gated: true });
+      expect(outputGain(ctx).value).toBe(0);
+
+      prefs.set("inputMode", "ptt");
+      pipeline.applyInputMode();
+      expect(pipeline.isVadGated).toBe(false);
+      expect(outputGain(ctx).value).toBe(1);
+      expect(worklet.port.postMessage).toHaveBeenCalledWith({ type: "stop" });
+    });
+
+    it("keeps the sensitivity gate in Push to Talk mode until a key can gate the mic", () => {
+      prefs.set("voiceSensitivity", 70);
+      prefs.set("inputMode", "ptt");
+      const pipeline = new AudioPipeline(() => pttLive);
+      const setVoiceGate = vi.fn();
+      const room = { localParticipant: { getTrackPublication: () => undefined }, setVoiceGate };
+
+      // No key bound: nothing else gates, so the sensitivity still does.
+      setPttPollingLive(true);
+      pipeline.setRoom(room as never);
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+
+      // Key bound, but this host cannot report key state (macOS, Wayland).
+      prefs.set("pttVk", 0x41);
+      setPttPollingLive(false);
+      pipeline.applyInputMode();
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+
+      // The poller goes live: Push to Talk takes over.
+      setPttPollingLive(true);
+      pipeline.applyInputMode();
+      expect(setVoiceGate).toHaveBeenLastCalledWith(0, expect.any(Function));
+    });
+  });
+
   describe("local speaking verdict", () => {
     it("reports the sensitivity gate itself, so the ring follows the slider", async () => {
       FakeAudioContext.workletsLoad = true;

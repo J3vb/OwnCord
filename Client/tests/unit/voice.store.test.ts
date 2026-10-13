@@ -27,6 +27,7 @@ import {
   setLocalSessionFingerprint,
   setPttPollingLive,
   isPttPollingLive,
+  onPttPollingLiveChange,
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
@@ -1018,6 +1019,19 @@ describe("voice store", () => {
     it("setPttPollingLive(true) flips isPttPollingLive() to true", () => {
       setPttPollingLive(true);
       expect(isPttPollingLive()).toBe(true);
+    });
+
+    it("tells listeners when the poller goes live or stops, once per change", () => {
+      const listener = vi.fn();
+      const off = onPttPollingLiveChange(listener);
+      setPttPollingLive(true);
+      setPttPollingLive(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      setPttPollingLive(false);
+      expect(listener).toHaveBeenCalledTimes(2);
+      off();
+      setPttPollingLive(true);
+      expect(listener).toHaveBeenCalledTimes(2);
     });
 
     it("resetVoiceStore() does not clear it — process-wide platform capability, not per-session voice state", () => {

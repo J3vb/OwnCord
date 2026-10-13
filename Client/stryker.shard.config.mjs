@@ -53,6 +53,7 @@ export const shards = {
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
+    "src/lib/inputMode.ts",
     "src/lib/voiceTokenManager.ts",
     "src/lib/media-visibility.ts",
   ], // 1954 mutants
