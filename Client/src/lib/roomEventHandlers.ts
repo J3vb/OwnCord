@@ -279,7 +279,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     degradedBy = "other";
     setEncryptionDegraded(true);
     log.warn("Refusing a remote track published without end-to-end encryption", {
-      identity: participant.identity,
+      userId: parseUserId(participant.identity),
       source: publication.source,
     });
   }
