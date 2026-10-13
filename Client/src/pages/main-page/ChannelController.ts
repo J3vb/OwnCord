@@ -101,6 +101,9 @@ export interface ChannelController {
   mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void;
   /** Destroy current channel components and reset state. */
   destroyChannel(): void;
+  /** destroyChannel(), then drop every stashed draft and cancel the uploads
+   *  still running in them. For page teardown. */
+  destroy(): void;
   /** Currently mounted channel ID, or null. */
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
@@ -150,7 +153,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let composerGatingUnsubs: (() => void)[] = [];
 
   // UX-1: unsent composer state per channel, so switching away and back keeps
-  // the text, the reply target and the staged upload ids. Controller-scoped
+  // the text, the reply target, the staged upload ids and any upload still in
+  // flight (it keeps running in the draft until restored). Controller-scoped
   // (not per-mount) because the whole point is to outlive a channel switch.
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
@@ -331,7 +335,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // typed leaves no entry behind.
       if (currentChannelId !== null) {
         const draft = messageInput.getDraft();
-        if (draft.content !== "" || draft.replyTo !== null || draft.attachments.length > 0) {
+        if (
+          draft.content !== "" ||
+          draft.replyTo !== null ||
+          draft.attachments.length > 0 ||
+          (draft.uploads?.length ?? 0) > 0
+        ) {
           draftByChannel.set(currentChannelId, draft);
         } else {
           draftByChannel.delete(currentChannelId);
@@ -1329,9 +1338,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
   }
 
+  function destroy(): void {
+    destroyChannel();
+    for (const draft of draftByChannel.values()) {
+      for (const upload of draft.uploads ?? []) upload.owner.destroy();
+    }
+    draftByChannel.clear();
+  }
+
   return {
     mountChannel,
     destroyChannel,
+    destroy,
     openFilePicker: () => messageInput?.openFilePicker(),
     get currentChannelId() {
       return currentChannelId;
