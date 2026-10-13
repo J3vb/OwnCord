@@ -1,5 +1,29 @@
-import { defineConfig } from "vite";
+import { readFileSync } from "node:fs";
+import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
+
+const CHANGELOG_ID = "virtual:owncord-changelog";
+const CHANGELOG_PATH = resolve(import.meta.dirname, "../CHANGELOG.md");
+
+/**
+ * The repository's CHANGELOG.md as a module exporting its text, for the About
+ * tab and the "What's new" dialog. A virtual module rather than a `?raw`
+ * import: the file sits outside this package, where the dev server serves
+ * `/@fs/` paths as plain files instead of transforming them.
+ */
+export function changelogModule(): Plugin {
+  return {
+    name: "owncord-changelog",
+    resolveId(id) {
+      return id === CHANGELOG_ID ? "\0" + CHANGELOG_ID : undefined;
+    },
+    load(id) {
+      if (id !== "\0" + CHANGELOG_ID) return undefined;
+      this.addWatchFile(CHANGELOG_PATH);
+      return `export default ${JSON.stringify(readFileSync(CHANGELOG_PATH, "utf8"))};`;
+    },
+  };
+}
 
 /**
  * Target-neutral config. Settings that exist only because the Tauri desktop
@@ -7,6 +31,7 @@ import { resolve } from "path";
  * assume a target. Plain `vite build` on this file is the non-desktop build.
  */
 export default defineConfig({
+  plugins: [changelogModule()],
   build: {
     modulePreload: { polyfill: false },
     cssCodeSplit: false,

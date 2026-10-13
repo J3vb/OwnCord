@@ -84,6 +84,7 @@ import type { VideoModeController, VideoPanelHost } from "./main-page/VideoModeC
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
+import { createWhatsNewPrompt } from "../features/whats-new/whatsNewPrompt";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
@@ -1608,6 +1609,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       updateNotifier.mount(root);
       children.push(updateNotifier);
     }
+
+    // Release notes, once, on the first start after an update.
+    const whatsNewPrompt = createWhatsNewPrompt();
+    whatsNewPrompt.mount(root);
+    children.push(whatsNewPrompt);
 
     container.appendChild(root);
 

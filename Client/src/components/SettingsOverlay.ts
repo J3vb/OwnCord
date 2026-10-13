@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs, About.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -30,6 +30,7 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
+import { buildAboutTab } from "./settings/AboutTab";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,7 +104,8 @@ export type TabName =
   | "Voice & Audio"
   | "Keybinds"
   | "Advanced"
-  | "Logs";
+  | "Logs"
+  | "About";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
@@ -116,6 +118,7 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Keybinds: "keyboard",
   Advanced: "settings",
   Logs: "scroll-text",
+  About: "info",
 };
 
 // i18n-exempt: TabName key; its label is settingsText("tabs.safety")
@@ -135,6 +138,7 @@ const TAB_LABEL_KEYS = {
   Keybinds: "tabs.keybinds",
   Advanced: "tabs.advanced",
   Logs: "tabs.logs",
+  About: "tabs.about",
 } as const satisfies Record<TabName, string>;
 
 function tabLabel(name: TabName): string {
@@ -229,6 +233,7 @@ export function createSettingsOverlay(
     Keybinds: (signal) => buildKeybindsTab(signal),
     Advanced: (signal) => buildAdvancedTab(signal),
     Logs: (signal) => logsTab.build(signal),
+    About: (signal) => buildAboutTab(signal),
   };
 
   // ---- Core methods ---------------------------------------------------------

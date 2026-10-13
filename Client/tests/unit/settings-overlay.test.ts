@@ -141,6 +141,7 @@ describe("SettingsOverlay", () => {
       "Keybinds",
       "Advanced",
       "Diagnostics & logs",
+      "About",
     ]);
 
     overlay.destroy?.();
