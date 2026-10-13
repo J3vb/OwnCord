@@ -301,7 +301,10 @@ function buildVoiceAudioTabInner(
   // ── Mic test: plays the meter's processed microphone, after the voice gate,
   // through the chosen output, so you hear what a call would send. The native
   // engine's capture never reaches the webview, so there is nothing to play.
-  const micTestRow = createElement("div", { class: "setting-row", "data-testid": "mic-test" });
+  const micTestRow = createElement("div", {
+    class: "setting-row mic-test-row",
+    "data-testid": "mic-test",
+  });
   const micTestInfo = createElement("div", {});
   appendChildren(
     micTestInfo,
