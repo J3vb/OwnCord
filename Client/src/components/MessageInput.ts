@@ -1508,6 +1508,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Capture the unsent state for a channel switch. Settled attachments carry
    *  their server id; an upload still in flight is handed to the draft, and
    *  destroy() then leaves it running for the composer that restores it.
+   *  The caller owns those uploads: store the draft or destroy each owner.
    *  Mid-edit this is the draft the edit displaced: the edit text itself is
    *  never stashed, since restored outside edit mode it would send as a
    *  duplicate new message. */
@@ -1564,7 +1565,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       scheduleExpiry(restored);
     }
     for (const handle of draft.uploads ?? []) {
-      if (attachmentPreviewBar === null || handle.owner.signal.aborted) continue;
+      if (handle.owner.signal.aborted) continue;
+      if (attachmentPreviewBar === null) {
+        handle.owner.destroy();
+        continue;
+      }
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, handle.filename);
       appendRemoveButton(item, handle.filename);
