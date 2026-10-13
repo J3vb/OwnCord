@@ -329,6 +329,12 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.mic.hearing": "Hearing you",
   "voiceAudio.mic.noInput": "No input",
   "voiceAudio.mic.noAccess": "No microphone access",
+  "voiceAudio.micTest.label": "Mic Test",
+  "voiceAudio.micTest.desc":
+    "Hear yourself the way others will, through your output device. Use headphones to avoid echo.",
+  "voiceAudio.micTest.start": "Let's Check",
+  "voiceAudio.micTest.stop": "Stop Testing",
+  "voiceAudio.micTest.linux": "The mic test is not available on Linux yet.",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
   "voiceAudio.gstreamerMissing":

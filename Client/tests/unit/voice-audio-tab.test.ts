@@ -36,6 +36,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
 import { vadThreshold } from "@lib/audioPipeline";
+import { GATE_LOOKAHEAD_S } from "@lib/micProcessor";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,
@@ -1074,7 +1075,9 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const settingRows = el.querySelectorAll(".setting-row:not([data-testid='auto-sensitivity'])");
+    const settingRows = el.querySelectorAll(
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test'])",
+    );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
     ac.abort();
@@ -1882,6 +1885,16 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
   });
 
+  it("offers no mic test: the engine's capture never reaches the webview", async () => {
+    const tab = await mount();
+    const row = tab.element.querySelector<HTMLElement>('[data-testid="mic-test"]')!;
+    expect(row.textContent).toContain("not available on Linux yet");
+    const button = row.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!;
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(button.textContent).toBe("Let's Check");
+  });
+
   it("tells the user the processing toggles apply on the next join", async () => {
     const tab = await mount();
     const descs = [...tab.element.querySelectorAll(".setting-desc")].map((d) => d.textContent);
@@ -2170,6 +2183,168 @@ describe("VoiceAudioTab input mode (WP 1D-2)", () => {
     const { el, ac } = mount();
     expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
     expect(pttBox(el).hidden).toBe(false);
+    ac.abort();
+  });
+});
+
+describe("VoiceAudioTab mic test (WP 1D-4)", () => {
+  /** The audio elements the tab started playing, newest last. */
+  let played: HTMLMediaElement[] = [];
+  const pause = vi.fn();
+  const setSinkId = vi.fn(async (_id: string) => {});
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    installFakeAudio({ worklets: true });
+    played = [];
+    pause.mockClear();
+    setSinkId.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
+      this: HTMLMediaElement,
+    ) {
+      played.push(this);
+      return Promise.resolve();
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(pause);
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+      value: setSinkId,
+      configurable: true,
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+          getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+        }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (HTMLMediaElement.prototype as Partial<{ setSinkId: unknown }>).setSinkId;
+    vi.unstubAllGlobals();
+  });
+
+  async function mount(): Promise<{
+    el: HTMLElement;
+    ac: AbortController;
+    tab: ReturnType<typeof createVoiceAudioTab>;
+  }> {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+    );
+    return { el, ac, tab };
+  }
+  const button = (el: HTMLElement): HTMLButtonElement =>
+    el.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!;
+  const tracksOf = (audio: HTMLMediaElement): MediaStreamTrack[] =>
+    (audio.srcObject as MediaStream).getTracks();
+  /** The meter processor's voice gate: the GainNode after the lookahead delay. */
+  const gateOf = (ctx: FakeAudioContext) =>
+    ctx.node("delay").outputs[0] as unknown as {
+      gain: { value: number };
+    };
+
+  it("plays the meter's processed output on Let's Check, and stops on Stop Testing", async () => {
+    localStorage.setItem("owncord:settings:audioOutputDevice", '"spk-1"');
+    localStorage.setItem("owncord:settings:outputVolume", "60");
+    const { el, ac } = await mount();
+    expect(button(el).textContent).toBe("Let's Check");
+    expect(played).toHaveLength(0);
+
+    button(el).click();
+
+    expect(button(el).textContent).toBe("Stop Testing");
+    expect(played).toHaveLength(1);
+    const audio = played[0]!;
+    expect(tracksOf(audio)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
+    expect(setSinkId).toHaveBeenCalledWith("spk-1");
+    expect(audio.volume).toBeCloseTo(0.6);
+
+    button(el).click();
+
+    expect(button(el).textContent).toBe("Let's Check");
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(audio.srcObject).toBeNull();
+    ac.abort();
+  });
+
+  type Teardown = (tab: ReturnType<typeof createVoiceAudioTab>, ac: AbortController) => void;
+  it.each<[string, Teardown]>([
+    ["switching tabs or closing settings (cleanup)", (tab) => tab.cleanup()],
+    ["the overlay being destroyed (abort)", (_tab, ac) => ac.abort()],
+  ])("stops on %s", async (_label, teardown) => {
+    const { el, ac, tab } = await mount();
+    button(el).click();
+    const audio = played[0]!;
+
+    teardown(tab, ac);
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(audio.srcObject).toBeNull();
+    ac.abort();
+  });
+
+  it("keeps playing when a processing toggle reopens the meter's microphone", async () => {
+    const { el, ac } = await mount();
+    button(el).click();
+    const first = played[0]!;
+    const contexts = FakeAudioContext.instances.length;
+
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+
+    await vi.waitFor(() => expect(played).toHaveLength(2));
+    expect(first.srcObject).toBeNull();
+    expect(FakeAudioContext.instances.length).toBe(contexts + 1);
+    expect(tracksOf(played[1]!)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
+    expect(button(el).textContent).toBe("Stop Testing");
+    ac.abort();
+  });
+
+  it("gates the playback on the detector in Voice Activity, and not in Push to Talk", async () => {
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    const { el, ac } = await mount();
+    const ctx = FakeAudioContext.instances.at(-1)!;
+    const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+    button(el).click();
+    expect(ctx.node("delay").delayTime.value).toBe(GATE_LOOKAHEAD_S);
+
+    worklet.emit({ type: "gate", gated: true });
+    expect(gateOf(ctx).gain.value).toBe(0);
+    worklet.emit({ type: "gate", gated: false });
+    expect(gateOf(ctx).gain.value).toBe(1);
+
+    worklet.emit({ type: "gate", gated: true });
+    el.querySelector<HTMLButtonElement>('[data-testid="input-mode-ptt"]')!.click();
+    expect(gateOf(ctx).gain.value).toBe(1);
+    expect(ctx.node("delay").delayTime.value).toBe(0);
+    ac.abort();
+  });
+
+  it("follows the output device and volume chosen while testing", async () => {
+    const { el, ac } = await mount();
+    button(el).click();
+    const audio = played[0]!;
+    setSinkId.mockClear();
+
+    const output = el.querySelector<HTMLSelectElement>('select[aria-label="Output Device"]')!;
+    output.appendChild(Object.assign(document.createElement("option"), { value: "spk-2" }));
+    output.value = "spk-2";
+    output.dispatchEvent(new Event("change"));
+    expect(setSinkId).toHaveBeenCalledWith("spk-2");
+
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    volume.value = "25";
+    volume.dispatchEvent(new Event("input"));
+    expect(audio.volume).toBeCloseTo(0.25);
     ac.abort();
   });
 });
