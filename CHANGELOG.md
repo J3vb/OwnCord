@@ -75,7 +75,9 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
-- Settings → Logs has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
+- Settings → About has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
+- Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
+- After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after the one that adds it, and a fresh install does not show it.
 
 **Voice**
 

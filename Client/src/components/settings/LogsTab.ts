@@ -16,7 +16,6 @@ import { getSessionDebugInfo } from "@lib/livekitSession";
 import { savePref, readMigratedStringPref } from "./helpers";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
-import { buildUpdateCheckRow } from "../../features/updates/UpdateCheckRow";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 
@@ -368,25 +367,6 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     voiceTools.appendChild(diagRefresh);
     appendChildren(voice.details, voiceTools, diagPanel);
     section.appendChild(voice.details);
-
-    // Version, last and quiet: support asks for it, nobody else needs it.
-    const versionEl = createElement("p", { class: "setting-desc" }, t("logs.version.loading"));
-    section.appendChild(versionEl);
-    void desktop.appMetadata
-      .getVersion()
-      .then((v) => {
-        // A host that answers without a version (a browser mock) reads as
-        // unknown, never "vnull".
-        versionEl.textContent =
-          typeof v === "string" && v !== ""
-            ? t("logs.version.known", { version: v })
-            : t("logs.version.unknown");
-      })
-      .catch(() => {
-        versionEl.textContent = t("logs.version.unknown");
-      });
-
-    section.appendChild(buildUpdateCheckRow(buildSignal));
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();
