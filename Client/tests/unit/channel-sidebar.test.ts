@@ -2608,7 +2608,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(badge!.classList.contains("changed")).toBe(true);
     expect(badge!.getAttribute("title")).toContain("Security key changed");
     expect(badge!.getAttribute("title")).toContain("AB12 CD34");
-    expect(badge!.getAttribute("title")).not.toContain("Same key as first seen");
+    expect(badge!.getAttribute("title")).not.toContain("Same key as before");
   });
 
   it("shows a mismatch badge for a blocked peer", () => {

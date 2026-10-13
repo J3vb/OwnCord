@@ -660,7 +660,7 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
     const badge = shield(root, OTTO)!;
     expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-check");
     expect(badge.title).toBe(
-      "Same key as first seen · Safety number: 1234 5678 · Compare it with them to confirm it is them",
+      "Same key as before · Safety number: 1234 5678 · Compare it with them to confirm it is them",
     );
     expect(badge.tagName).toBe("SPAN");
     expect(shield(root, SELF)).toBeNull();

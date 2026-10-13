@@ -104,9 +104,9 @@ export const shellText = defineCatalog("shell", {
   "slowMode.seconds": "{count} seconds",
 
   "identity.verified":
-    "Same key as first seen · Compare safety numbers with them to confirm it is them",
+    "Same key as before · Compare safety numbers with them to confirm it is them",
   "identity.verifiedWithNumber":
-    "Same key as first seen · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
+    "Same key as before · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
   "identity.mismatch":
     "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
   "identity.keyChanged": "Security key changed · Safety number: {safetyNumber}",

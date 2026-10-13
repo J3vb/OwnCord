@@ -277,7 +277,7 @@ announces are verified against the pinned identity keys (`lib/identity.ts`).
 
 | State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `verified`   | Green shield; title "Same key as first seen · Safety number: {n} · Compare it with them to confirm it is them"                 | none needed                               |
+| `verified`   | Green shield; title "Same key as before · Safety number: {n} · Compare it with them to confirm it is them"                     | none needed                               |
 | `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
 | `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce    |
 | `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal  |
