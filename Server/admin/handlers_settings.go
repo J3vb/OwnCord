@@ -117,7 +117,14 @@ func runningLogLevel(value string) string {
 	return levelName(level)
 }
 
-func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService) http.HandlerFunc {
+// uploadPolicyBroadcaster is the hub capability that sends the saved upload
+// file-type lists to connected clients; *ws.Hub implements it
+// (hub_wiring_test.go pins that).
+type uploadPolicyBroadcaster interface {
+	BroadcastUploadPolicy()
+}
+
+func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
@@ -169,6 +176,16 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update settings")
 			return
+		}
+		// Composers check the file-type lists before uploading, from what
+		// auth_ok gave them; without this a saved list only reached a client
+		// on its next connect.
+		_, blocked := updates[service.UploadBlockedExtensionsKey]
+		_, allowed := updates[service.UploadAllowedExtensionsKey]
+		if blocked || allowed {
+			if b, ok := hub.(uploadPolicyBroadcaster); ok {
+				b.BroadcastUploadPolicy()
+			}
 		}
 		writeJSON(w, http.StatusOK, all)
 	}

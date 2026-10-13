@@ -44,6 +44,37 @@ func TestUploadFileTypeSettings_OwnerOnly(t *testing.T) {
 	}
 }
 
+// Saving a file-type list sends it to connected clients, whose composers
+// check it before uploading; a refused save or an unrelated setting does not.
+func TestUploadFileTypeSettings_SaveBroadcastsPolicy(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "bcmanager")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "bcowner")
+
+	steps := []struct {
+		token string
+		body  map[string]string
+		code  int
+		want  int
+	}{
+		{ownerToken, map[string]string{"upload_blocked_extensions": "", "upload_allowed_extensions": ""}, http.StatusOK, 1},
+		{ownerToken, map[string]string{"upload_allowed_extensions": "png"}, http.StatusOK, 2},
+		{ownerToken, map[string]string{"motd": "hello"}, http.StatusOK, 2},
+		{ownerToken, map[string]string{"upload_blocked_extensions": "tar.gz"}, http.StatusBadRequest, 2},
+		{manageToken, map[string]string{"upload_blocked_extensions": ""}, http.StatusForbidden, 2},
+	}
+	for i, s := range steps {
+		if w := doRequest(t, handler, http.MethodPatch, "/settings", s.token, s.body); w.Code != s.code {
+			t.Fatalf("step %d: PATCH %v = %d, want %d; body: %s", i, s.body, w.Code, s.code, w.Body.String())
+		}
+		if hub.uploadPolicyBroadcasts != s.want {
+			t.Fatalf("step %d: PATCH %v: %d upload_policy broadcasts, want %d", i, s.body, hub.uploadPolicyBroadcasts, s.want)
+		}
+	}
+}
+
 // The Settings page shows config.yaml's lists until the owner saves one, so
 // GET /config reports them.
 func TestAdminAPI_GetConfigFacts_UploadFileTypes(t *testing.T) {

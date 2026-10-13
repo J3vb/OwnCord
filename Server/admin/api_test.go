@@ -1691,6 +1691,8 @@ type mockHub struct {
 	// onVoiceCleanup lets a test observe DB state at cleanup time (ordering
 	// vs. the channel-delete cascade).
 	onVoiceCleanup func(channelID int64)
+	// uploadPolicyBroadcasts counts BroadcastUploadPolicy calls.
+	uploadPolicyBroadcasts int
 }
 
 type memberUpdateCall struct {
@@ -1744,6 +1746,10 @@ func (m *mockHub) RefreshAllChannelVisibility() {
 
 func (m *mockHub) BroadcastRolesUpdate(roles []*db.Role) {
 	m.rolesUpdates = append(m.rolesUpdates, roles)
+}
+
+func (m *mockHub) BroadcastUploadPolicy() {
+	m.uploadPolicyBroadcasts++
 }
 
 func (m *mockHub) ClientCount() int {

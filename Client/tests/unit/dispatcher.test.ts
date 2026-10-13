@@ -3295,6 +3295,42 @@ describe("WS Dispatcher", () => {
     expect(listCustomEmoji()).toEqual([]);
   });
 
+  it("wires upload_policy to replace the file-type lists and keep the rest of the policy", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      uploadPolicy: {
+        max_upload_bytes: 10 << 20,
+        blocked_extensions: ["bat", "html"],
+        allowed_extensions: ["png"],
+        thumbnails: true,
+      },
+    }));
+
+    mock.dispatch("upload_policy", { blocked_extensions: [], allowed_extensions: [] });
+
+    expect(authStore.getState().uploadPolicy).toEqual({
+      max_upload_bytes: 10 << 20,
+      blocked_extensions: [],
+      allowed_extensions: [],
+      thumbnails: true,
+    });
+  });
+
+  it("treats an upload_policy with missing lists as empty lists", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      uploadPolicy: { max_upload_bytes: 10 << 20, blocked_extensions: ["bat"] },
+    }));
+
+    mock.dispatch("upload_policy", {} as { blocked_extensions: []; allowed_extensions: [] });
+
+    expect(authStore.getState().uploadPolicy).toEqual({
+      max_upload_bytes: 10 << 20,
+      blocked_extensions: [],
+      allowed_extensions: [],
+    });
+  });
+
   it("wires voice_state and auto-joins if current user", () => {
     authStore.setState((prev) => ({
       ...prev,
