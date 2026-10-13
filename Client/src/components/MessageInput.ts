@@ -63,7 +63,28 @@ export interface ComposerDraft {
     readonly filename: string;
     /** Date.now() when the upload settled; ages the chip on restore. */
     readonly uploadedAt: number;
+    /** The picked file, so a restored chip past its age can re-upload. */
+    readonly file?: File;
   }[];
+  /** Uploads still running when the composer was torn down. They keep going
+   *  and the composer that restores the draft shows them again. */
+  readonly uploads?: readonly DraftUpload[];
+}
+
+/** One running upload, owned by the draft between composers. */
+export interface DraftUpload {
+  readonly filename: string;
+  readonly file: File;
+  /** Destroying it cancels the upload. */
+  readonly owner: Disposable;
+  /** Resolves with the server's id; rejects on failure or cancel. */
+  readonly result: Promise<{ readonly id: string; readonly filename: string }>;
+  /** Date.now() when `result` resolved, else undefined. */
+  readonly settledAt: number | undefined;
+  /** Last reported progress, null before the first tick. */
+  readonly fraction: number | null;
+  /** The chip showing this upload sets this to drive its progress bar. */
+  onProgress: ((fraction: number) => void) | null;
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -307,25 +328,27 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Index of the ":" the open emoji popup is completing; -1 when closed. */
   let emojiStart = -1;
 
-  /** Pending attachment IDs to send with the next message. `owner` is set
+  /** Pending attachment IDs to send with the next message. `upload` is set
    *  exactly while the upload is in flight, which blocks Send (as does a chip
-   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying it cancels that
-   *  upload when the user removes the preview, and
-   *  it is detached once the upload succeeds. A `Disposable` rather than a raw
-   *  AbortController keeps the upload token in the lifecycle primitives,
-   *  matching MessageList's per-row owner. */
+   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying its owner cancels
+   *  that upload when the user removes the preview, and it is detached once
+   *  the upload succeeds. A `Disposable` rather than a raw AbortController
+   *  keeps the upload token in the lifecycle primitives, matching
+   *  MessageList's per-row owner. */
   const pendingAttachments: {
     id: string;
     filename: string;
     readonly previewEl: HTMLDivElement;
-    owner?: Disposable;
+    upload?: DraftUpload;
     uploadedAt?: number;
     /** The picked file, kept so a chip past ATTACHMENT_TTL_MS can re-upload.
-     *  Absent on chips restored from a draft. */
+     *  Absent on chips restored from an older draft. */
     file?: File;
     /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
     expired?: boolean;
   }[] = [];
+  /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
+  const handedOff = new Set<DraftUpload>();
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
   /** Timer IDs for cleanup on destroy. */
@@ -674,7 +697,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     // Block send while uploads are still in flight
-    if (pendingAttachments.some((a) => a.owner)) {
+    if (pendingAttachments.some((a) => a.upload !== undefined)) {
       showUploadError(messagingText("error.uploadsPending"));
       return;
     }
@@ -734,7 +757,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Re-upload a stale chip from its file, or mark it expired when there is none. */
   function refreshStale(a: (typeof pendingAttachments)[number]): void {
-    if (a.owner !== undefined || a.expired === true) return;
+    if (a.upload !== undefined || a.expired === true) return;
     if (a.file !== undefined) {
       void runUpload(a, a.file);
       return;
@@ -765,7 +788,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       // SRV-05: removing an in-flight attachment cancels its upload and frees
       // Send immediately, instead of leaving a doomed request running and the
       // composer blocked on it until the request settles.
-      att.owner?.destroy();
+      att.upload?.owner.destroy();
       const img = att.previewEl.querySelector("img");
       if (img !== null && img.src.startsWith("blob:")) {
         URL.revokeObjectURL(img.src);
@@ -899,6 +922,40 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     await runUpload(pending, file);
   }
 
+  /** Start uploading `file`; the returned upload outlives any one chip. */
+  function startUpload(
+    upload: NonNullable<MessageInputOptions["onUploadFile"]>,
+    file: File,
+  ): DraftUpload {
+    const owner = new Disposable();
+    let settledAt: number | undefined;
+    let fraction: number | null = null;
+    const result = upload(file, owner.signal, (f) => {
+      fraction = f;
+      handle.onProgress?.(f);
+    });
+    // Also keeps a rejection in a draft that is never restored from
+    // surfacing as unhandled; whichever chip follows the upload reads it.
+    result.then(
+      () => (settledAt = Date.now()),
+      () => {},
+    );
+    const handle: DraftUpload = {
+      filename: file.name,
+      file,
+      owner,
+      get settledAt() {
+        return settledAt;
+      },
+      get fraction() {
+        return fraction;
+      },
+      onProgress: null,
+      result,
+    };
+    return handle;
+  }
+
   /** Upload `file` for `pending`'s chip; also re-uploads a stale chip. */
   async function runUpload(
     pending: (typeof pendingAttachments)[number],
@@ -906,46 +963,49 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   ): Promise<void> {
     const upload = options.onUploadFile;
     if (upload === undefined) return;
+    await followUpload(pending, startUpload(upload, file));
+  }
+
+  /** Show `handle` on `pending`'s chip until it settles. */
+  async function followUpload(
+    pending: (typeof pendingAttachments)[number],
+    handle: DraftUpload,
+  ): Promise<void> {
     const item = pending.previewEl;
     // A native progress bar on the chip: indeterminate (no value) while the
     // transport reports nothing, determinate from its first tick.
-    const progressBar = createElement("progress", { "aria-label": file.name });
+    const progressBar = createElement("progress", { "aria-label": handle.filename });
+    if (handle.fraction !== null) progressBar.value = handle.fraction;
     item.insertBefore(progressBar, item.querySelector(".attachment-preview-remove"));
     item.classList.add("uploading");
-    const uploadOwner = new Disposable();
-    pending.owner = uploadOwner;
+    pending.upload = handle;
+    handle.onProgress = (fraction) => (progressBar.value = fraction);
     /** Set when refreshing a stale chip; a failed refresh keeps the chip. */
     const staleUploadedAt = pending.uploadedAt;
     pending.uploadedAt = undefined;
+    // Removed preview (cancelled) or composer torn down (handed to a draft).
+    const abandoned = (): boolean => handle.owner.signal.aborted || signal.aborted;
 
-    // Upload in background
     try {
-      // A late tick after the preview is removed writes a detached node only.
-      const result = await upload(
-        file,
-        uploadOwner.signal,
-        (fraction) => (progressBar.value = fraction),
-      );
-      // Replace temp ID with real server ID, unless the preview was removed
-      if (!uploadOwner.signal.aborted) {
-        pending.id = result.id;
-        pending.filename = result.filename;
-        pending.owner = undefined;
-        pending.uploadedAt = Date.now();
-        item.classList.remove("uploading");
-        progressBar.remove();
-        if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
-          clearUploadError();
-        }
+      const result = await handle.result;
+      if (abandoned()) return;
+      pending.id = result.id;
+      pending.filename = result.filename;
+      pending.upload = undefined;
+      pending.uploadedAt = handle.settledAt ?? Date.now();
+      item.classList.remove("uploading");
+      progressBar.remove();
+      if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
+        clearUploadError();
       }
     } catch (err) {
       // A user-cancelled upload (removed preview) is not a failure: the
       // preview is already gone and there is nothing to report.
-      if (uploadOwner.signal.aborted) return;
+      if (abandoned()) return;
       if (staleUploadedAt !== undefined) {
         // A failed refresh keeps the chip stale, so the next Send retries it
         // and still never sends the old id.
-        pending.owner = undefined;
+        pending.upload = undefined;
         pending.uploadedAt = staleUploadedAt;
         item.classList.remove("uploading");
         progressBar.remove();
@@ -1417,9 +1477,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
-    // SRV-05: a channel switch or unmount must not leave an upload running
-    // against a composer that no longer exists.
-    for (const att of pendingAttachments) att.owner?.destroy();
+    // SRV-05: an unmount must not leave an upload running against a composer
+    // that no longer exists, unless getDraft() handed it to the draft.
+    for (const att of pendingAttachments) {
+      if (att.upload === undefined) continue;
+      att.upload.onProgress = null;
+      if (!handedOff.has(att.upload)) att.upload.owner.destroy();
+    }
+    handedOff.clear();
     disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
@@ -1440,27 +1505,43 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     openPicker?.();
   }
 
-  /** Capture the unsent state for a channel switch. Only settled attachments
-   *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
-   *  it on unmount). Mid-edit this is the draft the edit displaced: the edit
-   *  text itself is never stashed, since restored outside edit mode it would
-   *  send as a duplicate new message. */
+  /** Capture the unsent state for a channel switch. Settled attachments carry
+   *  their server id; an upload still in flight is handed to the draft, and
+   *  destroy() then leaves it running for the composer that restores it.
+   *  Mid-edit this is the draft the edit displaced: the edit text itself is
+   *  never stashed, since restored outside edit mode it would send as a
+   *  duplicate new message. */
   function getDraft(): ComposerDraft {
     const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
+    const uploads: DraftUpload[] = [];
+    for (const a of pendingAttachments) {
+      if (a.upload === undefined) continue;
+      handedOff.add(a.upload);
+      uploads.push(a.upload);
+    }
     return {
       content: stashed.text,
       replyTo: stashed.replyTo,
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
-          : [{ id: a.id, filename: a.filename, uploadedAt: a.uploadedAt }],
+          : [
+              {
+                id: a.id,
+                filename: a.filename,
+                uploadedAt: a.uploadedAt,
+                ...(a.file === undefined ? {} : { file: a.file }),
+              },
+            ],
       ),
+      ...(uploads.length === 0 ? {} : { uploads }),
     };
   }
 
-  /** Restore a captured draft into this (fresh) composer: text, reply bar and
-   *  a ready chip (no spinner) per still-live upload, so its id sends without
-   *  re-uploading. */
+  /** Restore a captured draft into this (fresh) composer: text, reply bar, a
+   *  ready chip (no spinner) per still-live upload, so its id sends without
+   *  re-uploading, and an uploading chip per upload still in flight. A chip
+   *  past its age with its file stays and re-uploads at Send. */
   function restoreDraft(draft: ComposerDraft): void {
     if (textarea !== null) {
       textarea.value = draft.content;
@@ -1468,7 +1549,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
     const now = Date.now();
-    const live = draft.attachments.filter((a) => now - a.uploadedAt < ATTACHMENT_TTL_MS);
+    const live = draft.attachments.filter(
+      (a) => a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
+    );
     for (const att of live) {
       if (attachmentPreviewBar === null) break;
       const item = createElement("div", { class: "attachment-preview-item" });
@@ -1479,6 +1562,22 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const restored = { ...att, previewEl: item };
       pendingAttachments.push(restored);
       scheduleExpiry(restored);
+    }
+    for (const handle of draft.uploads ?? []) {
+      if (attachmentPreviewBar === null || handle.owner.signal.aborted) continue;
+      const item = createElement("div", { class: "attachment-preview-item" });
+      appendFileLabel(item, handle.filename);
+      appendRemoveButton(item, handle.filename);
+      attachmentPreviewBar.classList.add("visible");
+      attachmentPreviewBar.appendChild(item);
+      const pending: (typeof pendingAttachments)[number] = {
+        id: `pending-${++previewCounter}`,
+        filename: handle.filename,
+        previewEl: item,
+        file: handle.file,
+      };
+      pendingAttachments.push(pending);
+      void followUpload(pending, handle);
     }
     if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));

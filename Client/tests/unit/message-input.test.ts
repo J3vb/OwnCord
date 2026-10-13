@@ -804,7 +804,7 @@ describe("MessageInput", () => {
       expect(draft.content).toBe("half-written");
       expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
       expect(draft.attachments).toEqual([
-        { id: "srv-1", filename: "a.png", uploadedAt: expect.any(Number) },
+        { id: "srv-1", filename: "a.png", uploadedAt: expect.any(Number), file: expect.any(File) },
       ]);
       comp.destroy?.();
     });
