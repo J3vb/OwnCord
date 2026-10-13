@@ -1456,6 +1456,7 @@ mod tests {
 
     #[test]
     fn releasing_a_withdrawn_video_empties_only_its_own_slot() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
         let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(7)));
         assert_eq!(release_slot(&mut slot, &sid("TR_b")), None);
         assert!(slot.is_some());
