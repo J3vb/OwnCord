@@ -295,7 +295,9 @@ return tauriFetch(url)` for external images, then `res.arrayBuffer()` with
    no byte cap. [trust-model.md](../trust-model.md) names all three renderer
    files, plus "the webview's own image loading", as C-09's subject; the first
    draft of this section named only the first, which is the error C-09 clause 1
-   exists to prevent.
+   exists to prevent. (Since B7-16 all three renderer paths go through the
+   native external-content broker instead; see
+   [rich-content-inventory.md](rich-content-inventory.md), "Current state".)
 
 B5-1 moved the dialling out of both call sites, which was an inventory change
 and not just a refactor — `TestEgressAllowIsLive` fails a listed file that
