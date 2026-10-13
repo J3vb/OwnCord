@@ -74,7 +74,8 @@ function clampPercent(v: number): number {
 
 /** Where a remote voice track plays above 100%: its <audio> element stays
  *  attached (Chromium feeds a remote WebRTC track to Web Audio only while an
- *  element plays it) but muted, and the sound goes through this gain. */
+ *  element plays it) but muted, and the sound goes through this gain. At or
+ *  below 100% the element plays it directly, as before. */
 interface MicGraph {
   readonly userId: number;
   readonly audioEl: HTMLAudioElement;
@@ -134,13 +135,14 @@ function parseStoredVolume(raw: string): number | null {
 export class AudioElements {
   private room: Room | null = null;
 
-  /** Shared by every remote voice track's gain node while in a web room;
-   *  closed on leave so no context outlives the call. */
+  /** Shared by the gain nodes of boosted voice tracks. Created the first time
+   *  a gain above 1 is needed in a web room and closed on leave, so a call
+   *  nobody boosts never opens one. */
   private audioCtx: SinkableContext | null = null;
   /** Gain graphs keyed by track SID. */
   private micGraphs = new Map<string, MicGraph>();
-  /** Every subscribed remote voice track, so a context that starts or stops
-   *  running later can move them onto or off their gain nodes. */
+  /** Every subscribed remote voice track, so a gain crossing 1 or a context
+   *  that starts or stops running can move them onto or off their gain nodes. */
   private micTracks = new Map<
     string,
     { track: RemoteTrack; userId: number; audioEl: HTMLAudioElement }
@@ -175,8 +177,7 @@ export class AudioElements {
       this.closeAudioContext();
       return;
     }
-    // Created here, close to the join click, so the autoplay policy lets it run.
-    if (this.ensureAudioContext() === null) return;
+    if (typeof AudioContext === "undefined") return;
     // Every output switch (settings, hot-plug fallback, join) goes through
     // room.switchActiveDevice, which only moves the elements; the context
     // that actually plays follows it here. detachRoom removes the listener
@@ -198,7 +199,14 @@ export class AudioElements {
     const ctx = this.audioCtx;
     // The context is closed on leave, which ends the listener with it.
     ctx.addEventListener("statechange", () => this.onContextState(ctx));
-    this.setContextSink(loadPref<string>("audioOutputDevice", ""));
+    // The device the room's elements use now; a hot-plug fallback moves them
+    // without changing the saved setting.
+    const room = this.room;
+    const active =
+      room !== null && typeof room.getActiveDevice === "function"
+        ? room.getActiveDevice("audiooutput")
+        : undefined;
+    this.setContextSink(active ?? loadPref<string>("audioOutputDevice", ""));
     this.audioCtx.resume().catch((err) => log.warn("AudioContext resume failed", err));
     return this.audioCtx;
   }
@@ -208,19 +216,12 @@ export class AudioElements {
    *  hands them back to their elements so nobody goes silent. */
   private onContextState(ctx: SinkableContext): void {
     if (this.audioCtx !== ctx || ctx.state === "closed") return;
-    const moved = new Set<number>();
-    if (ctx.state === "running") {
-      for (const [sid, t] of this.micTracks) {
-        if (this.micGraphs.has(sid)) continue;
-        if (this.buildMicGraph(sid, t.userId, t.track, t.audioEl) !== null) moved.add(t.userId);
-      }
-    } else {
-      for (const [sid, graph] of this.micGraphs) {
-        this.dropMicGraph(sid, true);
-        moved.add(graph.userId);
-      }
+    if (ctx.state !== "running") {
+      for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid, true);
     }
-    for (const userId of moved) this.applyGainOf(userId, this.getEffectiveVolume(userId));
+    const users = new Set<number>();
+    for (const t of this.micTracks.values()) users.add(t.userId);
+    for (const userId of users) this.applyGainOf(userId, this.getEffectiveVolume(userId));
   }
 
   private setContextSink(deviceId: string): void {
@@ -246,7 +247,8 @@ export class AudioElements {
   }
 
   /** Route a remote voice track through a gain node. Null (the element plays
-   *  it, at most 100%) when there is no running context or a step throws. */
+   *  it, at most 100%) when there is no running context or a step throws; a
+   *  context that starts later brings it back through onContextState. */
   private buildMicGraph(
     sid: string,
     userId: number,
@@ -266,6 +268,8 @@ export class AudioElements {
       gain.connect(ctx.destination);
       // Both, as LiveKit's own Web Audio attach does: Room.startAudio()
       // unmutes every attached element, and volume 0 keeps this one silent.
+      // The track still reaches the source node; only the element's inbound
+      // audio level reads 0 while it plays here.
       audioEl.muted = true;
       audioEl.volume = 0;
       const graph = { userId, audioEl, source, gain };
@@ -288,19 +292,37 @@ export class AudioElements {
     if (restore) graph.audioEl.muted = false;
   }
 
-  /** Play a participant's voice at `gain` (0-2): through their gain node
-   *  when they have one, unclamped on the native mixer, else on the element,
-   *  where LiveKit's setVolume must never see more than 1. */
+  /** Play a participant's voice at `gain` (0-2). The native mixer takes it
+   *  as is. On the web the element plays it up to 1, where LiveKit's
+   *  setVolume must never see more; above 1 every one of their tracks moves
+   *  to a gain node, or stays on its element at 1 while no context runs. */
   private applyUserGain(participant: RemoteParticipant, gain: number): void {
-    const userId = parseUserId(participant.identity);
-    let routed = false;
-    for (const graph of this.micGraphs.values()) {
-      if (graph.userId !== userId) continue;
-      graph.gain.gain.value = gain;
-      routed = true;
+    if (hasNativePlayout(this.room)) {
+      participant.setVolume(gain);
+      return;
     }
-    if (routed) return;
-    participant.setVolume(hasNativePlayout(this.room) ? gain : Math.min(1, gain));
+    const userId = parseUserId(participant.identity);
+    const graphs: MicGraph[] = [];
+    let unrouted = false;
+    for (const [sid, t] of this.micTracks) {
+      if (t.userId !== userId) continue;
+      if (gain <= 1) {
+        this.dropMicGraph(sid, true);
+        continue;
+      }
+      const graph = this.micGraphs.get(sid) ?? this.buildMicGraph(sid, userId, t.track, t.audioEl);
+      if (graph === null) unrouted = true;
+      else graphs.push(graph);
+    }
+    if (unrouted) {
+      for (const [sid, graph] of this.micGraphs) {
+        if (graph.userId === userId) this.dropMicGraph(sid, true);
+      }
+    } else if (graphs.length > 0) {
+      for (const graph of graphs) graph.gain.gain.value = gain;
+      return;
+    }
+    participant.setVolume(Math.min(1, gain));
   }
 
   /** Get the current output volume multiplier. */
@@ -406,7 +428,6 @@ export class AudioElements {
         this.remoteMicAudioElements.set(track.sid, audioEl);
         this.micTracks.set(track.sid, { track, userId, audioEl });
         this.dropMicGraph(track.sid);
-        if (!hasNativePlayout(this.room)) this.buildMicGraph(track.sid, userId, track, audioEl);
       }
       this.applyUserGain(participant, this.getEffectiveVolume(userId));
       const savedOutput = loadPref<string>("audioOutputDevice", "");
