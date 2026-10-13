@@ -67,6 +67,8 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, calls follow the same rule in both directions: your microphone, camera and screen share are only sent end-to-end encrypted, and other members' media plays only when it arrives encrypted.
 - The green identity badge on a call participant now says what it checked: the key is the same one this device saw before. It points at comparing safety numbers to confirm who it is, instead of saying "Identity verified".
 - Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. Stop watching on a camera keeps it stopped until you leave voice. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Audio.
+- Turning on your camera or screen share while reading a text channel no longer hides the chat and opens the video grid. Open the call to see yourself.
+- In the call grid, cameras fill their tile instead of showing black bars; focus a camera to see the whole picture. The quality chip now shows only on screen shares.
 
 ### Added
 
@@ -98,6 +100,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice**
 
 - Joining, leaving, a moderator removing you and the server's own cleanup no longer step on each other for the same person. Rarely, a join that landed at the same moment as a cleanup left you shown in voice with no seat in the channel, or a moderator's disconnect missed you.
+- When someone loses the Video or Share Screen permission during a call, their camera or screen share now shows as off for everyone within a minute, and a camera stops counting toward the channel's video limit. Before, it stayed shown as on until they left voice.
 - Undeafening no longer unmutes you if you were muted before you deafened.
 - After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
 - Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.

@@ -159,7 +159,7 @@ describe("createVideoModeController", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("checkVideoMode auto-opens when local camera is on (BUG-105)", () => {
+  it("turning on your camera while reading chat stays in chat (WP 1B-4)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -175,7 +175,7 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    expect(ctrl.isVideoMode()).toBe(true);
+    expect(ctrl.isVideoMode()).toBe(false);
   });
 
   it("adds local self-view tile when local camera is on", () => {
@@ -365,7 +365,7 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
-  it("checkVideoMode auto-opens when local screenshare is on (BUG-105)", () => {
+  it("turning on your screen share while reading chat stays in chat (WP 1B-4)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -384,7 +384,8 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(ctrl.isVideoMode()).toBe(true);
+    expect(ctrl.isVideoMode()).toBe(false);
+    expect(slots.messagesSlot.style.display).toBe("");
   });
 
   it("adds local screenshare self-view tile when local screenshare is on", () => {
@@ -592,138 +593,121 @@ describe("createVideoModeController", () => {
     expect(ctrl.getFocusedTileId()).toBeNull();
   });
 
-  describe("sticky video-grid dismissal (v048)", () => {
-    it("showChat while local video is on stays dismissed through a later checkVideoMode", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({
-          currentChannelId: 10,
-          localCamera: true,
-          voiceUsers: new Map([[10, users]]),
-        }),
+  describe("your own video never takes over the chat (WP 1B-4)", () => {
+    const me = () =>
+      new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+
+    it("camera on while reading chat stays in chat, and the tile waits in the grid", () => {
+      const fakeStream = {} as MediaStream;
+      mockGetLocalCameraStream.mockReturnValue(fakeStream);
+      const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
+      mockVoiceStoreGetState.mockReturnValue(state);
+      const slots = makeSlots();
+      const videoGrid = makeVideoGrid();
+      const ctrl = createVideoModeController({ slots, videoGrid, getCurrentUserId: () => 1 });
+      ctrl.checkVideoMode();
+
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(videoGrid.addStream).toHaveBeenCalledWith(1, expect.any(String), fakeStream, {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: false,
+      });
+
+      // Opening the call view shows it.
+      ctrl.openCall();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("camera on in the open call view shows there, and the call stays open", () => {
+      const fakeStream = {} as MediaStream;
+      mockGetLocalCameraStream.mockReturnValue(fakeStream);
+      const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
+      mockVoiceStoreGetState.mockReturnValue(state);
+      const videoGrid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.openCall();
+
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(videoGrid.addStream).toHaveBeenCalledWith(
+        1,
+        expect.any(String),
+        fakeStream,
+        expect.objectContaining({ isSelf: true }),
       );
 
+      // Camera off again: still the call view.
+      mockVoiceStoreGetState.mockReturnValue(state);
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("Show chat while your camera is on stays in chat through later changes", () => {
+      const state = makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, me()]]),
+      });
+      mockVoiceStoreGetState.mockReturnValue(state);
       const slots = makeSlots();
       const ctrl = createVideoModeController({
         slots,
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
-
-      // Auto-opens because local camera is on.
-      ctrl.checkVideoMode();
+      ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
-      // User switches to a text channel — explicit dismissal.
+      // User switches to a text channel.
       ctrl.showChat();
       expect(ctrl.isVideoMode()).toBe(false);
 
-      // A remote peer's camera toggling re-invokes checkVideoMode(); local
-      // video is still on, but the dismissal must stick.
+      // A remote peer's camera toggling re-invokes checkVideoMode().
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(false);
       expect(slots.messagesSlot.style.display).toBe("");
-    });
 
-    it("re-arms auto-open once local video turns off after a dismissal", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      const state = makeVoiceState({
-        currentChannelId: 10,
-        localCamera: true,
-        voiceUsers: new Map([[10, users]]),
-      });
-      mockVoiceStoreGetState.mockReturnValue(state);
-
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
-
-      ctrl.checkVideoMode();
-      ctrl.showChat();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // Local camera turns off entirely — dismissal is cleared.
+      // Camera off and on again: still chat.
       mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: false });
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // Local camera turns back on — auto-open fires again since there is
-      // nothing left to have dismissed.
-      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      mockVoiceStoreGetState.mockReturnValue(state);
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(true);
-    });
-
-    it("explicit showVideoGrid clears a prior dismissal", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({
-          currentChannelId: 10,
-          localCamera: true,
-          voiceUsers: new Map([[10, users]]),
-        }),
-      );
-
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
-
-      ctrl.checkVideoMode();
-      ctrl.showChat();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // User manually re-opens the grid.
-      ctrl.showVideoGrid();
-      expect(ctrl.isVideoMode()).toBe(true);
-
-      ctrl.showChat();
-      ctrl.checkVideoMode();
-      // Dismissal was cleared by showVideoGrid, but showChat() re-set it —
-      // so this exercises that the flag responds to the most recent call.
       expect(ctrl.isVideoMode()).toBe(false);
     });
 
-    it("does not treat leaving the channel as a dismissal (v048)", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+    it("leaving and joining again with the camera on stays in chat", () => {
       const inChannel = makeVoiceState({
         currentChannelId: 10,
         localCamera: true,
-        voiceUsers: new Map([[10, users]]),
+        voiceUsers: new Map([[10, me()]]),
       });
       mockVoiceStoreGetState.mockReturnValue(inChannel);
-
       const ctrl = createVideoModeController({
         slots: makeSlots(),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
-
-      ctrl.checkVideoMode();
+      ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
-      // leaveVoice() clears currentChannelId before localCamera goes false,
-      // and this checkVideoMode() returns early — closing the grid here must
-      // not record a dismissal that outlives the session.
+      // leaveVoice() clears currentChannelId before localCamera goes false.
       mockVoiceStoreGetState.mockReturnValue({ ...inChannel, currentChannelId: null });
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(false);
 
-      // Next session, camera on again: auto-open must still work.
       mockVoiceStoreGetState.mockReturnValue(inChannel);
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(false);
     });
   });
 
