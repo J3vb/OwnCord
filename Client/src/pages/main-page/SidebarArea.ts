@@ -124,6 +124,8 @@ export interface SidebarAreaResult {
   readonly forgetChannel: () => void;
   /** The Q2 back path: leave DM mode for the channel the user came from. */
   readonly returnToChannel: () => void;
+  /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
+  readonly messageUser: (userId: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,5 +1100,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       channelBeforeDm = null;
     },
     returnToChannel,
+    messageUser: (userId) => void handleCreateDm(userId, dmDeps),
   };
 }

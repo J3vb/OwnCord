@@ -95,6 +95,7 @@ import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
+import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -1481,6 +1482,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl?.showVideoGrid();
         videoModeCtrl?.setFocus(tileId);
       },
+      // A tile's Message opens the DM in the chat, out of the call view.
+      tileMenu: createTileMenuActions(ws, (userId) => {
+        videoModeCtrl?.showChat();
+        sidebar.messageUser(userId);
+      }),
     });
 
     let prevVideoSignature = "";
