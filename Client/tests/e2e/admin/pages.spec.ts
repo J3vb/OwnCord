@@ -7,7 +7,7 @@ import { Q1, findUnnamedControls, textContrast } from "../support/b9-accessibili
 // journey in admin-panel.spec.ts covers setup, the dashboard, channel CRUD,
 // the audit log, support bundles and login. These fill the remaining
 // destinations — Members, Roles, Emoji, Settings, Retention, Backups, Updates,
-// Logs, Tokens, Plugins — each against a fresh real server and database, so a
+// What's new, Logs, Tokens, Plugins — each against a fresh real server and database, so a
 // page that silently loses its data path fails here rather than in the field.
 
 // A valid 1×1 PNG: the emoji route sniffs the type from the bytes, so a
@@ -233,6 +233,28 @@ test("Updates: the page reports the current version and rechecks", async ({
   );
   await page.getByRole("button", { name: /Check for updates/ }).click();
   await recheck;
+});
+
+test("What's new: the embedded release notes load from the top bar version", async ({
+  page,
+  seededAdminServer,
+}) => {
+  await signInAsOwner(page, seededAdminServer);
+  const notes = page.waitForResponse((res) => res.url().endsWith("/admin/changelog.md"));
+  await page.locator("#topbarVersion").click();
+  expect((await notes).status()).toBe(200);
+
+  await expect(page.locator(".page-title")).toHaveText("What's new");
+  await expect(page.locator(".status-line-title")).toContainText("This server runs OwnCord");
+  // A dev build has no notes of its own, so every release is in the history.
+  const history = page.locator(".whats-new-history details");
+  expect(await history.count()).toBeGreaterThan(3);
+  await history.first().locator("summary").click();
+  await expect(history.first().locator(".changelog-body li").first()).toBeVisible();
+  await expect(page.locator(".whats-new-repo")).toHaveAttribute(
+    "href",
+    "https://github.com/J3vb/OwnCord",
+  );
 });
 
 test("Server logs: the live stream connects", async ({ page, seededAdminServer }) => {
