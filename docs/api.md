@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 190 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 191 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -194,6 +194,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/search`                                                     |
 | GET     | `/api/v1/server-info`                                                |
 | POST    | `/api/v1/uploads`                                                    |
+| DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | GET     | `/api/v1/users/me/moderation`                                        |
@@ -2102,6 +2103,24 @@ Before any of its bytes are read, the file name is checked against the server's 
 ```
 
 `width` and `height` are only present for image files.
+
+---
+
+### DELETE /api/v1/uploads/{id}
+
+Withdraw a file you uploaded and never sent. The file and its row are deleted
+and its size stops counting against `upload.user_quota_mb` at once, instead of
+when the hourly sweep of unsent uploads removes it. The client calls this when
+you remove an attachment from the composer, and before it re-uploads one that
+has been waiting too long.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+| Status | Code        | When                                                                                                 |
+| ------ | ----------- | ---------------------------------------------------------------------------------------------------- |
+| 404    | `NOT_FOUND` | No such upload, it belongs to someone else, a message already holds it, or it is your current avatar |
 
 ---
 

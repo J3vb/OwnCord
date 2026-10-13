@@ -90,6 +90,28 @@ func (s *UploadService) Unrecord(ctx context.Context, fileID string, userID int6
 	return s.recountLocked(ctx, userID)
 }
 
+// Discard withdraws a file userID uploaded and never sent: it deletes the
+// unlinked row (never a live avatar) and recounts the user's counter, so the
+// quota is free for the next upload at once instead of at the orphan sweep.
+// It returns the stored file name for the caller to delete, or ErrNotFound
+// when there is no such file, it is someone else's, or a message already
+// holds it.
+func (s *UploadService) Discard(ctx context.Context, fileID string, userID int64) (string, error) {
+	s.quota.mu.Lock()
+	defer s.quota.mu.Unlock()
+	storedAs, found, err := s.st.DiscardUnlinkedAttachment(ctx, fileID, userID)
+	if err != nil {
+		return "", fmt.Errorf("%w: failed to discard attachment: %w", ErrInternal, err)
+	}
+	if !found {
+		return "", fmt.Errorf("upload not found%.0w", ErrNotFound)
+	}
+	if rcErr := s.recountLocked(ctx, userID); rcErr != nil {
+		return storedAs, fmt.Errorf("discard recount: %w", rcErr)
+	}
+	return storedAs, nil
+}
+
 // Resolve looks up the attachment behind fileID and applies the checks that
 // make a file unservable regardless of who is asking.
 //

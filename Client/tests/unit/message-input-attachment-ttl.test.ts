@@ -224,4 +224,91 @@ describe("MessageInput staged attachment age limit", () => {
     );
     comp.destroy?.();
   });
+  it("withdraws the old copy before re-uploading a stale chip, so the quota has room", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const order: string[] = [];
+    let n = 0;
+    const onUploadFile = vi.fn(async (file: File) => {
+      n += 1;
+      order.push(`upload srv-${n}`);
+      return { id: `srv-${n}`, url: `/f/${n}`, filename: file.name };
+    });
+    const onDiscardUpload = vi.fn(async (id: string) => {
+      order.push(`discard ${id}`);
+    });
+    const opts = makeOptions({ onUploadFile, onDiscardUpload });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+    vi.setSystemTime(Date.now() + 51 * MIN);
+    send(container);
+    expect(container.querySelector(".uploading")).not.toBeNull();
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    expect(order).toEqual(["upload srv-1", "discard srv-1", "upload srv-2"]);
+
+    vi.setSystemTime(Date.now() + 1000);
+    send(container);
+    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-2"]);
+    comp.destroy?.();
+  });
+
+  it("still re-uploads when withdrawing the old copy fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onUploadFile = uploader();
+    const onDiscardUpload = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const opts = makeOptions({ onUploadFile, onDiscardUpload });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+    vi.setSystemTime(Date.now() + 51 * MIN);
+    send(container);
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    expect(errorText(container)).toBe("");
+
+    vi.setSystemTime(Date.now() + 1000);
+    send(container);
+    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-2"]);
+    comp.destroy?.();
+  });
+
+  it("withdraws a ready chip's upload when it is removed, but not one still uploading", async () => {
+    let release: (() => void) | undefined;
+    let n = 0;
+    const onUploadFile = vi.fn((file: File) => {
+      n += 1;
+      const id = `srv-${n}`;
+      if (n === 2) {
+        return new Promise<{ id: string; url: string; filename: string }>((resolve) => {
+          release = () => resolve({ id, url: "/f", filename: file.name });
+        });
+      }
+      return Promise.resolve({ id, url: "/f", filename: file.name });
+    });
+    const onDiscardUpload = vi.fn(async () => {});
+    const comp = createMessageInput(makeOptions({ onUploadFile, onDiscardUpload }));
+    comp.mount(container);
+
+    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    queueFile(container, new File(["y"], "b.pdf", { type: "application/pdf" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).not.toBeNull());
+
+    const removes = container.querySelectorAll<HTMLButtonElement>(".attachment-preview-remove");
+    removes[1]!.click();
+    expect(onDiscardUpload).not.toHaveBeenCalled();
+    release?.();
+
+    removes[0]!.click();
+    expect(onDiscardUpload).toHaveBeenCalledExactlyOnceWith("srv-1");
+    comp.destroy?.();
+  });
 });

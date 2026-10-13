@@ -1,22 +1,30 @@
 # Diagnostics, egress and the support-bundle contract
 
-B4-8 (BPR-055, the server half of BG-15). This page answers three questions
-an operator or a reviewer has about a self-hosted OwnCord server: **what can
-I look at when something is wrong**, **what does the server ever send off
-this machine**, and **what a support bundle contains**. The server-side support bundle is
-implemented in the admin panel; all three are checked by tests on every CI run.
-The desktop client's own local bundle (B7-15c) is described in
-[Desktop client support bundle](#desktop-client-support-bundle); broader B6/B9
-recovery qualification remains separate work.
+This page is for operators and reviewers of a self-hosted OwnCord server. It
+answers three questions:
 
-The short version: OwnCord sends no automatic product or usage telemetry.
-Every outbound network path in the server is one of three things — an
-action an admin or user took, a feature an operator switched on by
-configuration, or a connection to this machine itself — and each is listed
-below with its trigger and its gate. The list is enforced by the
-`egress-sites` invariant, and a runtime capture proves the compiled defaults
-open nothing beyond loopback across startup, registration, sign-in,
-messaging, upload, idle and shutdown.
+1. **What can I look at when something is wrong?**
+2. **What does the server ever send off this machine?**
+3. **What does a support bundle contain?**
+
+Tests check all three on every CI run. The server's support bundle is built
+into the admin panel. The desktop client has its own local bundle, described
+in [Desktop client support bundle](#desktop-client-support-bundle).
+
+**The short version.** OwnCord sends no automatic product or usage telemetry.
+Every outbound network path in the server is one of three things:
+
+- an action an admin or a user took;
+- a feature an operator switched on in the configuration;
+- a connection to this machine itself.
+
+Each path is listed below with what triggers it and what controls it. The
+`egress-sites` invariant enforces that list. A runtime capture also proves
+that the default settings open nothing beyond loopback during start-up,
+registration, sign-in, messaging, upload, idle time and shutdown.
+
+(Background: this page is B4-8, the server half of BG-15, and satisfies
+BPR-055.)
 
 ## Diagnostic surfaces (all local)
 
@@ -32,7 +40,7 @@ messaging, upload, idle and shutdown.
 | Support bundle               | Admin panel **Diagnostics**, `/admin/api/support-bundles/*`              | `ADMINISTRATOR` with a current login session; explicit preview and confirmation | local download only, never uploaded                                                                                                                                  |
 | Audit log                    | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                                | no                                                                                                                                                                   |
 | Backups                      | `backup.dir` (scheduled and on demand)                                   | the process owner only (`ownerOnly` on every backup route)                      | no                                                                                                                                                                   |
-| Healthcheck CLI              | `chatserver healthcheck` probes this server's `/health`                  | the orchestrator                                                                | loopback only                                                                                                                                                        |
+| Healthcheck CLI              | the `chatserver healthcheck` subcommand probes this server's `/health`   | the orchestrator                                                                | loopback only                                                                                                                                                        |
 | pprof profiler               | `server.pprof_enabled`, a **separate** listener at `127.0.0.1:6060`      | whoever can reach the loopback address                                          | no — loopback-only socket, off by default, never on the main router; in Docker, the container's own loopback (reach it with `docker run --network container:<name>`) |
 
 Log content is governed by `logging.level`; usernames, ids and client
@@ -99,7 +107,7 @@ syntactic and correctly refuses to make an exception it cannot see.
 | `safefetch/policy.go` — `New`, `defaultDial`                                                                        | config   | only a destination a caller passed in, and only an address `ClassifyAddr` accepted                         | the caller's gate: `gif.api_key`, `plugins.http_allowlist`, or `push.dispatch_enabled` with `push.enabled`                   | nothing of its own — the shared client, transport and dialer; `Fetcher.dial` connects to the vetted addresses and to nothing else                                                                         |
 | `safefetch/fetch.go` — `(*Fetcher).roundTrip`                                                                       | config   | the same, one redirect hop at a time                                                                       | the caller's gate: `gif.api_key`, `plugins.http_allowlist`, or `push.dispatch_enabled` with `push.enabled`                   | the GIF proxy's search terms, whatever a plugin asks, or a Web Push message — bounded by the C-09 ceilings below                                                                                          |
 | `service/push_dispatch.go` — `(*PushDispatcher).attemptOne`                                                         | config   | the push service named in each stored subscription's `endpoint`                                            | `push.dispatch_enabled` **and** `push.enabled` (both false by default)                                                       | a Web Push message: an encrypted `{"t":"activity"}` payload (RFC 8291) and a VAPID `Authorization` header — no message text, channel name or sender                                                       |
-| `internal/app/healthcheck.go` — `RunHealthcheckCLI`                                                                 | loopback | this server's `/health`                                                                                    | the `--healthcheck` flag                                                                                                     | nothing                                                                                                                                                                                                   |
+| `internal/app/healthcheck.go` — `RunHealthcheckCLI`                                                                 | loopback | this server's `/health`                                                                                    | the `healthcheck` subcommand                                                                                                 | nothing                                                                                                                                                                                                   |
 | `cmd/smoke/fixture.go` — file scope, `request`, `fetchAttachment`                                                   | loopback | this harness's own server (`defaultBaseURL`, `https://127.0.0.1:8443`)                                     | someone invoking `cmd/smoke`                                                                                                 | the rehearsal fixture's own setup, upload, backup and re-download calls, to a server this harness launched moments earlier                                                                                |
 | `cmd/smoke/docker.go` — `serving`                                                                                   | loopback | the same address, published on `127.0.0.1` by the container under test                                     | someone invoking `cmd/smoke`                                                                                                 | one `/health` probe confirming the drained container stopped answering                                                                                                                                    |
 | `cmd/smoke/drills.go` — `healthOf`, `authenticated`, `dialWS`, `readWhileRestoring`, `uploadStatus`, `backupStatus` | loopback | the same address, plus the `/api/v1/ws` that upgrades on it (`defaultBaseURL`, `https://127.0.0.1:8443`)   | someone invoking `cmd/smoke`                                                                                                 | the recovery drills' own probes: `/health` under disk pressure, an authenticated read, a WebSocket dial, a read while a restore runs underneath it, and the upload and backup routes the rehearsals drive |
@@ -120,19 +128,26 @@ generically ("only a destination a caller passed in").
 
 Since B5-1 the two `safefetch/*.go` rows are the _only_ outbound content path
 in the server. `api/gif_handler.go` and `plugin/host_http.go` used to dial for
-themselves and had rows of their own; both now go through `Server/safefetch`,
-which owns the whole per-fetch policy — scheme and port allowlists, no
-embedded credentials, every A and AAAA answer classified before any connect,
-a connect bound to those validated addresses with no second lookup, automatic
-redirects off with each hop re-checked and scheme downgrades refused, a total
-deadline, a streaming byte ceiling and a separate decompressed-size ceiling,
-a content-type allowlist checked against the sniffed type as well as the
-declared one, with the two required to be compatible, and a per-process concurrency cap. Their gates did not move:
-with no `gif.api_key` the route is not mounted, and with an empty
-`plugins.http_allowlist` every host is denied. B5-11's push dispatch joined
-them behind `push.dispatch_enabled` and `push.enabled`, both false by default,
-so the compiled defaults still reach nowhere. The policy is written out as a contract in
-[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09-—-contract-for-b7),
+themselves and had rows of their own. Both now go through `Server/safefetch`,
+which owns the whole per-fetch policy:
+
+- scheme and port allowlists, and no credentials embedded in the URL;
+- every A and AAAA answer classified before any connect;
+- a connect bound to those checked addresses, with no second lookup;
+- no automatic redirects: each hop is re-checked, and a scheme downgrade is
+  refused;
+- a total deadline, a streaming byte ceiling and a separate ceiling after
+  decompression;
+- a content-type allowlist, checked against both the declared and the sniffed
+  type, which must agree;
+- a concurrency cap for the whole process.
+
+Their gates did not move. With no `gif.api_key`, the GIF routes answer
+`503 GIF_DISABLED` and make no upstream call. With an empty
+`plugins.http_allowlist`, every host is denied. B5-11's push dispatch joined
+them behind `push.dispatch_enabled` and `push.enabled`, both false by default.
+So the compiled defaults still reach nowhere. The policy is written out as a contract in
+[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09--contract-for-b7),
 clauses 2 through 6.
 
 Two things are deliberately **not** in the table. The startup banner used to
@@ -140,9 +155,12 @@ learn the machine's address by opening a UDP socket to a public DNS server
 (no packet was sent, but a capture showed the connect at every start); it
 now reads the interface table. And the desktop client's own update check
 goes to the **server** it is connected to (`/api/v1/client-update`), which
-answers from GitHub release metadata under the `updater` rows — the client
-never talks to GitHub itself, and its Tauri updater has no endpoints
-configured.
+answers from GitHub release metadata under the `updater` rows. The client
+never polls GitHub itself, and its Tauri updater has no endpoints
+configured. When the server names an update, the client downloads that
+installer from GitHub's release assets and checks its signature
+(`Client/src-tauri/src/update_commands.rs`). That download is the client's,
+not the server's, so it is not a row here.
 
 What the update rows send deserves stating plainly, since "update check" is
 on BPR-055's capture list: a GET for the latest release of the configured
