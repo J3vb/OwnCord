@@ -53,8 +53,7 @@ export interface MessageInputOptions {
 
 /** A channel's unsent composer state, captured before a channel switch and
  *  restored when the user returns (UX-1). Uploads settled before the switch
- *  keep their server id; an upload still in flight is not carried (it is
- *  cancelled on unmount, per SRV-05). */
+ *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: { readonly messageId: number; readonly username: string } | null;
