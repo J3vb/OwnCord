@@ -48,7 +48,7 @@ describe("createTileMenuActions (WP 1B-5)", () => {
 
   it("builds the roster's moderation section for a person in your server voice channel", () => {
     inCall(VOICE, [7]);
-    const actions = createTileMenuActions(ws, vi.fn());
+    const actions = createTileMenuActions(ws, vi.fn(), vi.fn());
 
     expect(actions.moderation?.(7)).toBe("mod-options");
     const [channelId, user] = mockBuildVoiceModOptions.mock.calls[0]!;
@@ -57,7 +57,7 @@ describe("createTileMenuActions (WP 1B-5)", () => {
   });
 
   it("offers no moderation in a DM call, out of a call, or for someone not in the roster", () => {
-    const actions = createTileMenuActions(ws, vi.fn());
+    const actions = createTileMenuActions(ws, vi.fn(), vi.fn());
     inCall(DM, [7]);
     expect(actions.moderation?.(7)).toBeUndefined();
     inCall(null, []);
@@ -69,7 +69,8 @@ describe("createTileMenuActions (WP 1B-5)", () => {
 
   it("opens the profile at the click with a working Message, and Message opens the DM", () => {
     const messageUser = vi.fn();
-    const actions = createTileMenuActions(ws, messageUser);
+    const showChat = vi.fn();
+    const actions = createTileMenuActions(ws, messageUser, showChat);
 
     actions.onProfile?.(7, 30, 40);
     const opts = mockOpenProfile.mock.calls[0]![0] as {
@@ -84,5 +85,19 @@ describe("createTileMenuActions (WP 1B-5)", () => {
 
     actions.onMessage?.(9);
     expect(messageUser).toHaveBeenLastCalledWith(9);
+    expect(showChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes an open profile and drops a loading one when the page goes", () => {
+    const close = vi.fn();
+    mockOpenProfile.mockReturnValue(close);
+    const actions = createTileMenuActions(ws, vi.fn(), vi.fn());
+    actions.onProfile?.(7, 0, 0);
+    const { signal } = mockOpenProfile.mock.calls[0]![0] as { signal: AbortSignal };
+    expect(signal.aborted).toBe(false);
+
+    actions.destroy();
+    expect(signal.aborted).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

@@ -1441,6 +1441,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
+    const tileMenu = createTileMenuActions(ws, sidebar.messageUser, () =>
+      videoModeCtrl?.showChat(),
+    );
+    unsubscribers.push(tileMenu.destroy);
     // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
       onStopSharing: () => {
@@ -1482,11 +1486,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl?.showVideoGrid();
         videoModeCtrl?.setFocus(tileId);
       },
-      // A tile's Message opens the DM in the chat, out of the call view.
-      tileMenu: createTileMenuActions(ws, (userId) => {
-        videoModeCtrl?.showChat();
-        sidebar.messageUser(userId);
-      }),
+      tileMenu,
     });
 
     let prevVideoSignature = "";

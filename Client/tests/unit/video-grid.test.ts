@@ -3242,6 +3242,21 @@ describe("VideoGrid", () => {
       }
     });
 
+    it("lets a menu taller than the window scroll instead of running off it", async () => {
+      const height = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(window.innerHeight + 200);
+      try {
+        grid.addStream(OTTO, "Otto", fakeStream(), remote());
+        await openMenu(OTTO);
+        expect(menu()!.style.maxHeight).toBe(`${window.innerHeight - 16}px`);
+        expect(menu()!.style.overflowY).toBe("auto");
+        expect(menu()!.style.top).toBe("8px");
+      } finally {
+        height.mockRestore();
+      }
+    });
+
     it("Stop watching in the menu stops the stream", async () => {
       grid.addStream(OTTO, "Otto", fakeStream(), remote());
       await openMenu(OTTO);

@@ -164,6 +164,12 @@ function openMenu(
 
   (document.fullscreenElement ?? document.body).appendChild(menu);
   const margin = 8;
+  // A long menu in a small window scrolls rather than running off the bottom.
+  const room = window.innerHeight - 2 * margin;
+  if (menu.offsetHeight > room) {
+    menu.style.maxHeight = `${room}px`;
+    menu.style.overflowY = "auto";
+  }
   const left = Math.min(x, window.innerWidth - menu.offsetWidth - margin);
   const top = Math.min(y, window.innerHeight - menu.offsetHeight - margin);
   menu.style.left = `${Math.max(margin, left)}px`;
