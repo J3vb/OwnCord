@@ -1223,7 +1223,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as {
       setWindowFullscreen: (on: boolean) => Promise<void>;
-      callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
+      callControls: {
+        onMuteToggle: () => void;
+        onDeafenToggle: () => void;
+        onLeave: () => void;
+        onCameraToggle: () => void;
+        onScreenshareToggle: () => void;
+      };
       getStreamStats: (tileId: number) => Promise<unknown>;
       getLocalShareFps: () => Promise<number | null>;
       setStreamView: (tileId: number, view: { enabled: boolean }) => void;
@@ -1257,6 +1263,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       muted: true,
       deafened: false,
       listenOnly: false,
+      camera: false,
+      screenshare: false,
+      connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
     // Joined without a microphone: the controls read listen-only.
     voiceStore.setState((prev) => ({ ...prev, localMuted: false, listenOnly: true }));
@@ -1265,7 +1276,60 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       muted: false,
       deafened: false,
       listenOnly: true,
+      camera: false,
+      screenshare: false,
+      connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
+    // The call view's control bar shows your camera and share state, and
+    // holds them inert while the join is still connecting.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      listenOnly: false,
+      localCamera: true,
+      localScreenshare: true,
+      voiceStatus: "joining",
+    }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: false,
+      deafened: false,
+      listenOnly: false,
+      camera: true,
+      screenshare: true,
+      connecting: true,
+      serverMuted: false,
+      serverDeafened: false,
+    });
+    // Its camera and share buttons run the same toggles as the voice widget.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localCamera: false,
+      localScreenshare: false,
+      voiceStatus: "connected",
+    }));
+    // A moderator mute and a dropped chat socket reach the bar too.
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ serverMuted: true }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offline: "reconnecting" }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offline: expect.anything() }),
+    );
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: false }));
+    cbs.callControls.onCameraToggle();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    cbs.callControls.onScreenshareToggle();
+    expect(lk.enableScreenshare).toHaveBeenCalledTimes(1);
     setFullscreen.mockRestore();
   });
 
