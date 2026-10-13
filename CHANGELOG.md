@@ -77,6 +77,8 @@ and only when it changes something a contributor or fork holder must do
 - While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
 - When voice reconnects after a dropped connection, a message now says your camera or screen share stopped, with a **Turn on again** (or **Share again**) button. Before, they were just off afterwards.
 - A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
+- Voice volume goes to 200 % again: each person's volume (right-click them in the voice channel, or on their video tile) and Settings → Voice & Audio → Output Volume. Screen-share audio still tops out at 100 %.
+- Right-clicking someone in a voice channel offers **Mute**, which silences them for you only and keeps their volume for when you unmute. Their row shows a speaker-off icon while muted, and the mute button on their video tile is the same setting.
 - Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 
 ### Fixed
