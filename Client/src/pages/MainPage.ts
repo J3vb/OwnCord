@@ -14,6 +14,7 @@ import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { VideoGridComponent } from "@components/VideoGrid";
+import { isConnecting } from "@components/VoiceWidget";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
@@ -1450,6 +1451,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
         onLeave: () => voiceKeybindActions.onDisconnect(),
+        onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
@@ -1514,13 +1517,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             videoGrid?.setUserAudioState(audioState);
           }
           const selfMuted = isSelfMuted(state);
-          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}`;
+          const connecting = isConnecting(state.voiceStatus);
+          const callKey =
+            `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}|` +
+            `${String(state.localCamera)}|${String(state.localScreenshare)}|${String(connecting)}`;
           if (callKey !== prevCallState) {
             prevCallState = callKey;
             videoGrid?.setCallState({
               muted: selfMuted,
               deafened: state.localDeafened,
               listenOnly: state.listenOnly,
+              camera: state.localCamera,
+              screenshare: state.localScreenshare,
+              connecting,
             });
           }
 
