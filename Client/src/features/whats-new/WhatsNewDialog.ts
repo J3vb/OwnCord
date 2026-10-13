@@ -63,7 +63,14 @@ export function showWhatsNewDialog(
   closeBtn.addEventListener("click", close, { signal: disposable.signal });
   appendChildren(header, heading, closeBtn);
 
-  const body = createElement("div", { class: "modal-body whats-new-body" });
+  // Focusable so the keyboard can scroll long notes (WebKitGTK does not
+  // scroll an overflow box that has no focusable content).
+  const body = createElement("div", {
+    class: "modal-body whats-new-body",
+    tabindex: "0",
+    role: "region",
+    "aria-labelledby": "whats-new-title",
+  });
   body.appendChild(renderChangelogBody(entry.body));
 
   const footer = createElement("div", { class: "modal-footer whats-new-footer" });

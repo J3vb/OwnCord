@@ -46,6 +46,10 @@ describe("What's new prompt", () => {
     expect(dialog()!.textContent).toContain("Updated to 2.1.0");
     expect(dialog()!.textContent).toContain("New thing");
     expect(dialog()!.textContent).not.toContain("Old thing");
+    const body = dialog()!.querySelector<HTMLElement>(".whats-new-body")!;
+    expect(body.tabIndex).toBe(0);
+    expect(body.getAttribute("role")).toBe("region");
+    expect(body.getAttribute("aria-labelledby")).toBe("whats-new-title");
 
     (dialog()!.querySelector(".whats-new-actions .ac-btn:not(.secondary)") as HTMLElement).click();
     expect(dialog()).toBeNull();

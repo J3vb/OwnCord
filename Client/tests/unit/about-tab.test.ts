@@ -36,6 +36,11 @@ describe("About tab", () => {
       expect(el.querySelector("[data-testid=about-notes]")!.textContent).toContain("New thing"),
     );
     expect(el.textContent).toContain("What's new in 2.1.0");
+    // Long notes scroll from the keyboard: the box is a named, focusable region.
+    const notes = el.querySelector<HTMLElement>("[data-testid=about-notes]")!;
+    expect(notes.tabIndex).toBe(0);
+    expect(notes.getAttribute("role")).toBe("region");
+    expect(notes.getAttribute("aria-label")).toBe("Release notes");
     expect(el.querySelector(".update-check-btn")).not.toBeNull();
     const repo = el.querySelector<HTMLAnchorElement>(".about-repo-link")!;
     expect(repo.getAttribute("href")).toBe("https://github.com/J3vb/OwnCord");

@@ -75,7 +75,14 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(buildUpdateCheckRow(signal));
 
   const notesTitle = createElement("h3", { class: "setting-group-title" });
-  const notes = createElement("div", { class: "about-notes", "data-testid": "about-notes" });
+  // Focusable so the keyboard can scroll long notes, as in the What's new window.
+  const notes = createElement("div", {
+    class: "about-notes",
+    "data-testid": "about-notes",
+    tabindex: "0",
+    role: "region",
+    "aria-label": t("about.notesLabel"),
+  });
   const historyTitle = createElement("h3", { class: "setting-group-title" }, t("about.history"));
   const history = createElement("div", {});
   appendChildren(section, notesTitle, notes, historyTitle, history);

@@ -7,6 +7,7 @@ export const whatsNewText = defineCatalog("whatsNew", {
   "about.desktop": "Desktop app",
   "about.github": "OwnCord on GitHub",
   "about.notesFor": "What's new in {version}",
+  "about.notesLabel": "Release notes",
   "about.history": "Version history",
   "about.historyEmpty": "No earlier versions are listed.",
   "about.notesMissing": "This build has no release notes. See the releases on GitHub.",
