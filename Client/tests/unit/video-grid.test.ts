@@ -3413,4 +3413,79 @@ describe("VideoGrid", () => {
       });
     });
   });
+  describe("stream ended cover (WP 1C-4)", () => {
+    const SCREEN = 2 + 1_000_000;
+    const screen: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };
+    const cell = () =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${SCREEN}']`);
+    let onStreamRemoved: ReturnType<typeof vi.fn<() => void>>;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      onStreamRemoved = vi.fn();
+      grid.setCallbacks({ onStreamRemoved });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a watched stream that ends says so for 3 s, then its tile goes", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      expect(cell()!.querySelector("video")!.srcObject).toBeNull();
+      expect(grid.hasStreams()).toBe(true);
+      // Nothing under the cover can be clicked or tabbed to.
+      const under = [...cell()!.children].filter((c) => !c.classList.contains("video-ended"));
+      expect(under.length).toBeGreaterThan(0);
+      expect(under.every((c) => c.hasAttribute("inert"))).toBe(true);
+      // A second removal (track ended, then unsubscribed) changes nothing.
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2999);
+      expect(cell()).not.toBeNull();
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(cell()).toBeNull();
+      expect(grid.hasStreams()).toBe(false);
+      expect(onStreamRemoved).toHaveBeenCalledTimes(1);
+    });
+
+    it("a stream nobody watched, a camera, or your own share goes at once", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.addStream(2, "Otto", fakeStream(), { ...screen, isScreenshare: false });
+      grid.addStream(9, "You", fakeStream(), { ...screen, isSelf: true });
+      grid.removeStream(SCREEN);
+      grid.removeStream(2);
+      grid.removeStream(9);
+
+      expect(container.querySelectorAll(".video-cell")).toHaveLength(0);
+      expect(container.querySelector(".video-ended")).toBeNull();
+    });
+
+    it("the same person streaming again replaces the cover", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      const again = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+
+      expect(cell()!.querySelector(".video-ended")).toBeNull();
+      expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+      vi.advanceTimersByTime(3000);
+      expect(cell()).not.toBeNull();
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+
+    it("leaving the call drops the cover at once", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      grid.clearStreams();
+
+      expect(cell()).toBeNull();
+      vi.advanceTimersByTime(3000);
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+  });
 });

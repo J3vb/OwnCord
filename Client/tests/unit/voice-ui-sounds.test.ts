@@ -30,6 +30,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setPttGated,
+  setLocalScreenshare,
   resetVoiceStore,
   joinVoiceChannel,
   leaveVoiceChannel,
@@ -198,6 +199,93 @@ describe("voice UI sounds", () => {
     voiceStore.flush();
 
     expect(playVoiceSound).not.toHaveBeenCalled();
+  });
+
+  describe("stream start and end (WP 1C-4)", () => {
+    const member = { ...SELF, userId: 2, username: "peer" };
+    beforeEach(() => {
+      authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceUsers: new Map([
+          [
+            10,
+            new Map([
+              [1, SELF],
+              [2, member],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+    });
+
+    it("plays the stream sounds when a member in your channel starts and stops sharing", () => {
+      updateVoiceState({ ...voiceState(10, 2), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 2), screenshare: false });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["streamStart"], ["streamEnd"]]);
+    });
+
+    it("plays only the join for a member who joins already sharing, and only the leave for one who leaves sharing", () => {
+      updateVoiceState({ ...voiceState(10, 3), screenshare: true });
+      voiceStore.flush();
+      removeVoiceUser({ channel_id: 10, user_id: 3 });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["join"], ["leave"]]);
+    });
+
+    it("plays nothing for a share in another channel, or a camera", () => {
+      updateVoiceState({ ...voiceState(20, 4), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 2), camera: true });
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing when a reconnect replays a member already sharing", () => {
+      setVoiceStates([
+        { channel_id: 10, user_id: 1, muted: false, deafened: false },
+        { channel_id: 10, user_id: 2, muted: false, deafened: false, screenshare: true },
+      ]);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays the stream sounds when the server has your own share start and stop", () => {
+      updateVoiceState({ ...voiceState(10, 1), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 1), screenshare: false });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["streamStart"], ["streamEnd"]]);
+    });
+
+    it("plays nothing for a share the server never had (picker cancelled)", () => {
+      setLocalScreenshare(true);
+      voiceStore.flush();
+      setLocalScreenshare(false);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing for a share while deafened", () => {
+      setLocalDeafened(true);
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+      updateVoiceState({ ...voiceState(10, 2), screenshare: true });
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
   });
 
   it("plays the mute and unmute sounds on the local mute edge", () => {
