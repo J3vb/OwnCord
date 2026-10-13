@@ -1732,7 +1732,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // torn-down connection cannot leave the next page's dialog pointed at a
       // dead one (a share with none registered resolves to cancelled).
       setScreenSourcePicker(null);
-      channelCtrl?.destroyChannel();
+      channelCtrl?.destroy();
       channelCtrl = null;
 
       reactionCtrl?.destroy();
