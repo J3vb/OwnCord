@@ -2343,6 +2343,7 @@ tables below add per-type behavioral notes.
 | `member_ban`          | Yes      | All clients                                                             |
 | `roles_update`        | Yes      | All clients (full role list)                                            |
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
+| `upload_policy`       | Yes      | All clients (both upload file-type lists)                               |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
 | `dm_request`          | No       | Direct to recipient (B5-6)                                              |

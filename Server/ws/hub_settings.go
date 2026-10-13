@@ -67,6 +67,9 @@ func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
 	return h.settingsUpload
 }
 
+// uploadPolicyReadTimeout bounds BroadcastUploadPolicy's settings read.
+const uploadPolicyReadTimeout = 5 * time.Second
+
 // BroadcastUploadPolicy re-reads the upload file-type lists into the settings
 // cache and sends them to every connected client as upload_policy, so a list
 // the owner saves in the admin panel reaches open composers without a
@@ -74,13 +77,18 @@ func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
 // carries the new lists too. A failed read sends nothing: clients keep the
 // lists they have, and the upload route stays authoritative either way.
 //
-// The admin HubBroadcaster interface carries no context, so — like
-// BroadcastChannelCreate — the read runs against Background.
+// Saves are serialised end to end, so two close together leave clients and
+// the cache on the later one. The admin HubBroadcaster interface carries no
+// context, so the read runs against Background with its own bound.
 func (h *Hub) BroadcastUploadPolicy() {
 	if h.uploadFileTypes == nil {
 		return
 	}
-	p, err := h.uploadFileTypes.FileTypePolicy(context.Background())
+	h.uploadPolicyMu.Lock()
+	defer h.uploadPolicyMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), uploadPolicyReadTimeout)
+	defer cancel()
+	p, err := h.uploadFileTypes.FileTypePolicy(ctx)
 	if err != nil {
 		slog.Warn("upload_policy: reading the upload file-type policy failed", "error", err)
 		return
