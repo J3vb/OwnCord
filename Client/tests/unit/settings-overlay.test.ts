@@ -392,9 +392,10 @@ describe("SettingsOverlay", () => {
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    // 5 toggles: automatic input sensitivity, echo cancellation, noise
-    // suppression, auto gain control, enhanced noise suppression (RNNoise)
-    expect(toggles.length).toBe(5);
+    // 6 toggles: automatic input sensitivity, automatically play cameras,
+    // echo cancellation, noise suppression, auto gain control, enhanced noise
+    // suppression (RNNoise)
+    expect(toggles.length).toBe(6);
 
     overlay.destroy?.();
   });
