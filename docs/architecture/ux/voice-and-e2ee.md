@@ -331,6 +331,15 @@ trust action entirely (a blind accept is refused).
   the same processor over a microphone opened with the call's capture settings
   and the same detector at the same threshold: the bar is the loudest smoothed
   level it saw, on the threshold handle's axis.
+- **Automatic input sensitivity:** on by default (`autoInputSensitivity`,
+  `lib/inputMode.ts`); a profile whose slider was moved off 50 keeps manual
+  mode (`migrateAutoInputSensitivity` in `main.ts`). The detector then runs the
+  threshold 10 dB above the room's noise floor, the quietest level of the last
+  8 s (`lib/noiseFloor.ts`), clamped between -60 dBFS and the default
+  threshold, and moves it on the worklet without reopening the gate. Digital
+  silence (a mute) never becomes the floor, and an Input Volume change
+  relearns it. Settings hides the threshold handle and keeps the meter. The
+  Linux native engine gates on the manual slider and shows no switch.
 - **Push-to-talk:** the key only opens and closes the processor's second gate
   (`livekitSession.setPttGated`; `pushToTalkService.ts`). The microphone
   stays published and its capture stays open across presses, the store's
@@ -422,7 +431,7 @@ never silences message chimes for the rest of the session.
 
 `src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
-`src/lib/ptt.ts`, `src/lib/inputMode.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/lib/ptt.ts`, `src/lib/inputMode.ts`, `src/lib/noiseFloor.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
 `src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/components/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
