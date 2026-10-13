@@ -28,7 +28,7 @@ import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
-import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
+import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
@@ -1613,6 +1613,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       updateNotifier.mount(root);
       children.push(updateNotifier);
     }
+
+    // Release notes, once, on the first start after an update. Loaded on
+    // demand so the prompt stays out of the eager MainPage chunk (bundle budget).
+    const promptHost = root;
+    void import("../features/whats-new/whatsNewPrompt").then(({ createWhatsNewPrompt }) => {
+      if (tornDown) return;
+      // i18n-exempt: settings tab key, not shown text
+      const whatsNewPrompt = createWhatsNewPrompt(() => openSettings("About"));
+      whatsNewPrompt.mount(promptHost);
+      unsubscribers.push(() => whatsNewPrompt.destroy?.());
+    });
 
     container.appendChild(root);
 

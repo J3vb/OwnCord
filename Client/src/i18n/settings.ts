@@ -17,6 +17,7 @@ export const settingsText = defineCatalog("settings", {
   "tabs.keybinds": "Keybinds",
   "tabs.advanced": "Advanced",
   "tabs.logs": "Diagnostics & logs",
+  "tabs.about": "About",
 
   "common.unknown": "Unknown",
   "common.save": "Save",
@@ -225,9 +226,6 @@ export const settingsText = defineCatalog("settings", {
   "logs.errors": { one: "{count} error", other: "{count} errors" },
   "logs.clientLogs": "Client logs",
   "logs.getHelp": "Get help",
-  "logs.version.loading": "Client version: loading...",
-  "logs.version.known": "Client version: v{version}",
-  "logs.version.unknown": "Client version: unknown",
   "updates.label": "Updates",
   "updates.desc": "Look for a newer OwnCord client on your server.",
   "updates.check": "Check for updates",

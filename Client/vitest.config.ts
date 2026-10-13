@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from "vitest/config";
 import { readFileSync } from "node:fs";
 import { resolve } from "path";
+import { changelogModule } from "./vite.config.ts";
 
 // D7 of the check-reliability pain-points report: the aggregate statements floor
 // lived in two places, and they disagreed — `coverage-floor.json` said 93.0 for
@@ -31,6 +32,7 @@ if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
 }
 
 export default defineConfig({
+  plugins: [changelogModule()],
   resolve: {
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),
