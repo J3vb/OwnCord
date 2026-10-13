@@ -20,7 +20,8 @@
 
 /* The always-present way out of video/focus mode. Pinned top-left so it stays
    reachable when the focus layout has scrolled the focused tile's own nav off. */
-.video-grid__exit {
+.video-grid__exit,
+.video-grid__view {
   position: absolute;
   top: 8px;
   left: 8px;
@@ -38,11 +39,38 @@
   cursor: pointer;
 }
 
-.video-grid__exit:hover {
+.video-grid__exit:hover,
+.video-grid__view:hover {
   background: var(--scrim-hover);
 }
 
-.video-grid__exit[hidden] {
+.video-grid__exit[hidden],
+.video-grid__view[hidden] {
+  display: none;
+}
+
+/* The call view's view toggles, beside the exit control. */
+.video-grid__views {
+  position: absolute;
+  top: 8px;
+  left: 44px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
+.video-grid__view {
+  position: static;
+}
+.video-grid__view[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+/* Room below the tiles (and the focus strip) for the call view's control bar. */
+.video-grid--call {
+  padding-bottom: 64px;
+}
+.video-grid .video-cell[hidden],
+.video-focus-strip[hidden] {
   display: none;
 }
 
@@ -431,6 +459,11 @@
 }
 .video-fs-btn[aria-pressed="true"] {
   background: var(--danger-fill);
+}
+.video-fs-btn[data-call-control="camera"][aria-pressed="true"],
+.video-fs-btn[data-call-control="share"][aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 .video-fs-btn:disabled {
   opacity: 0.5;

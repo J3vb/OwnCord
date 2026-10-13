@@ -133,7 +133,13 @@ filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
 headphone-slash badge for a muted or deafened user are on camera tiles. A
 **Show chat** control in the grid's header leaves the grid or focus view for
-the chat without leaving the call.
+the chat without leaving the call. In the guild call view the header also has
+**Show non-video participants**, **Show my camera** (hides only your own
+camera tile, here) and, in focus view, **Show participant strip**; each is a
+saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
+and none applies while the DM call panel hosts the grid. A control bar at the
+bottom of the call view, in grid and focus view, has mute, deafen, camera,
+share and disconnect; camera and share are inert until the join has connected.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
@@ -156,7 +162,7 @@ chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
 WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
-theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
+theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps the same call controls at hand. **Pop out**
 moves the tile's own video into a desktop window of its own (Discord-style; `window.open`
 accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's process, so no
 second subscription), which can be maximised or go full screen from its own control, F or a

@@ -2734,4 +2734,301 @@ describe("VideoGrid", () => {
       expect(container.contains(document.activeElement)).toBe(true);
     });
   });
+
+  describe("call view: control bar and view toggles (WP 1B-2)", () => {
+    const person = (userId: number, label: string) => ({
+      userId,
+      label,
+      content: document.createElement("div"),
+    });
+    const controls = () => ({
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onLeave: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    const root = () => container.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+    const bar = () => root().querySelector<HTMLElement>(":scope > .video-grid__controls");
+    const barButton = (id: string) =>
+      bar()!.querySelector<HTMLButtonElement>(`[data-call-control='${id}']`)!;
+    const toggle = (key: string) =>
+      root().querySelector<HTMLButtonElement>(`[data-view-toggle='${key}']`)!;
+    const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
+    const tile = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const SELF = 1;
+    const selfCfg = makeTileConfig({ isSelf: true, audioUserId: SELF });
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("shows the control bar in the call view, in grid and focus mode", () => {
+      grid.setCallbacks({ callControls: controls() });
+      expect(bar()).toBeNull();
+
+      grid.setExitVisible(true);
+      expect(bar()).not.toBeNull();
+      expect(bar()!.getAttribute("role")).toBe("toolbar");
+      expect(root().classList.contains("video-grid--call")).toBe(true);
+      expect(
+        [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
+          (b) => b.dataset["callControl"],
+        ),
+      ).toEqual(["mute", "deafen", "camera", "share", "leave"]);
+
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.setFocusedTile(2);
+      expect(root().classList.contains("focus-mode")).toBe(true);
+      expect(bar()).not.toBeNull();
+      grid.setFocusedTile(null);
+      expect(bar()).not.toBeNull();
+
+      // Leaving the call view (another host shows the grid) takes it down.
+      grid.setExitVisible(false);
+      expect(bar()).toBeNull();
+      expect(root().classList.contains("video-grid--call")).toBe(false);
+    });
+
+    it("runs the matching call action from each button", () => {
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      grid.setExitVisible(true);
+
+      barButton("mute").click();
+      barButton("deafen").click();
+      barButton("camera").click();
+      barButton("share").click();
+      barButton("leave").click();
+      expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onDeafenToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it("builds the bar from callbacks set after the call view opened", () => {
+      grid.setExitVisible(true);
+      expect(bar()).toBeNull();
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      barButton("camera").click();
+      expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("draws your camera and share state, inert while the join connects", () => {
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const camera = barButton("camera");
+      const share = barButton("share");
+      expect(camera.getAttribute("aria-pressed")).toBe("false");
+      expect(camera.getAttribute("aria-label")).toBe("Turn on camera");
+      expect(share.getAttribute("aria-label")).toBe("Share your screen");
+
+      grid.setCallState({
+        muted: true,
+        deafened: false,
+        listenOnly: false,
+        camera: true,
+        screenshare: true,
+      });
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+      expect(camera.getAttribute("aria-pressed")).toBe("true");
+      expect(camera.getAttribute("aria-label")).toBe("Turn off camera");
+      expect(camera.querySelector("svg")!.getAttribute("data-icon")).toBe("camera-off");
+      expect(share.getAttribute("aria-pressed")).toBe("true");
+      expect(share.getAttribute("aria-label")).toBe("Stop sharing");
+      expect(share.querySelector("svg")!.getAttribute("data-icon")).toBe("monitor-off");
+      expect(camera.disabled).toBe(false);
+
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
+      expect(camera.disabled).toBe(true);
+      expect(share.disabled).toBe(true);
+      expect(camera.title).toBe("Connecting…");
+
+      // The chat socket is down: frozen with the reason, like the voice widget.
+      grid.setCallState({
+        muted: false,
+        deafened: false,
+        listenOnly: false,
+        offline: "reconnecting",
+      });
+      expect(camera.disabled).toBe(true);
+      expect(share.title).toBe("Reconnecting…");
+
+      // A moderator's mute or deafen: that control is inert, with the reason.
+      grid.setCallState({
+        muted: true,
+        deafened: true,
+        listenOnly: false,
+        serverMuted: true,
+        serverDeafened: true,
+      });
+      expect(barButton("mute").disabled).toBe(true);
+      expect(barButton("mute").title).toBe("You were muted by a moderator");
+      expect(barButton("deafen").disabled).toBe(true);
+      expect(barButton("deafen").title).toBe("You were deafened by a moderator");
+      expect(camera.disabled).toBe(false);
+    });
+
+    it("offers camera and share on a full-screen tile too", async () => {
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      tile(2).querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']")!.click();
+      await Promise.resolve();
+      const fs = tile(2).querySelector<HTMLElement>(".video-fs-calls")!;
+      fs.querySelector<HTMLButtonElement>("[data-call-control='share']")!.click();
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides avatar tiles without Show non-video participants, and saves it", () => {
+      grid.setExitVisible(true);
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      expect(avatarTiles().filter((t) => !t.hidden)).toHaveLength(2);
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("true");
+
+      toggle("nonVideo").click();
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("false");
+      expect(avatarTiles().every((t) => t.hidden)).toBe(true);
+      expect(localStorage.getItem("owncord:settings:callShowNonVideo")).toBe("false");
+      // A person who joins later stays hidden too.
+      grid.setPeople([person(2, "Otto"), person(3, "Sam"), person(4, "Ana")]);
+      expect(avatarTiles().every((t) => t.hidden)).toBe(true);
+
+      toggle("nonVideo").click();
+      expect(avatarTiles().some((t) => t.hidden)).toBe(false);
+    });
+
+    it("hides only your own camera tile without Show my camera", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(SELF + 1_000_000, "Your screen", fakeStream(), {
+        ...selfCfg,
+        isScreenshare: true,
+      });
+
+      toggle("selfCamera").click();
+      expect(tile(SELF).hidden).toBe(true);
+      expect(tile(2).hidden).toBe(false);
+      expect(tile(SELF + 1_000_000).hidden).toBe(false);
+      expect(localStorage.getItem("owncord:settings:callShowSelfCamera")).toBe("false");
+
+      toggle("selfCamera").click();
+      expect(tile(SELF).hidden).toBe(false);
+    });
+
+    it("leaves focus mode when the focused tile is your hidden camera", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.setFocusedTile(SELF);
+
+      toggle("selfCamera").click();
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(root().classList.contains("focus-mode")).toBe(false);
+      expect(tile(2).parentElement).toBe(root());
+    });
+
+    it("offers the strip toggle only in focus view, and hides the strip with it", () => {
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      expect(toggle("strip").hidden).toBe(true);
+
+      grid.setFocusedTile(2);
+      expect(toggle("strip").hidden).toBe(false);
+      expect(root().querySelector(".video-focus-strip")).not.toBeNull();
+
+      toggle("strip").click();
+      // Hidden, not detached: a video taken out of the document pauses.
+      const strip = root().querySelector<HTMLElement>(".video-focus-strip")!;
+      expect(strip.hidden).toBe(true);
+      expect(strip.contains(tile(3))).toBe(true);
+      expect(tile(2).parentElement!.classList.contains("video-focus-main")).toBe(true);
+      expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
+
+      toggle("strip").click();
+      expect(root().querySelector<HTMLElement>(".video-focus-strip")!.hidden).toBe(false);
+    });
+
+    it("moves focus past your hidden camera when the focused stream ends", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      toggle("selfCamera").click();
+      grid.setFocusedTile(2);
+
+      grid.removeStream(2);
+      expect(grid.getFocusedTileId()).toBe(3);
+    });
+
+    it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {
+      document.body.appendChild(container);
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.setFocusedTile(2);
+
+      barButton("camera").focus();
+      grid.setPeople([person(4, "Ana")]);
+      expect(document.activeElement).toBe(barButton("camera"));
+
+      toggle("strip").focus();
+      toggle("strip").click();
+      expect(document.activeElement).toBe(toggle("strip"));
+      // The grid's own controls stay after the tiles.
+      expect(root().lastElementChild).toBe(bar());
+      container.remove();
+    });
+
+    it("reads the saved toggles when the grid mounts", () => {
+      localStorage.setItem("owncord:settings:callShowNonVideo", "false");
+      localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
+      localStorage.setItem("owncord:settings:callShowStrip", "false");
+      grid.destroy?.();
+      container = document.createElement("div");
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setExitVisible(true);
+      grid.setPeople([person(2, "Otto")]);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("false");
+      expect(toggle("selfCamera").getAttribute("aria-pressed")).toBe("false");
+      expect(toggle("strip").getAttribute("aria-pressed")).toBe("false");
+      expect(avatarTiles()[0]!.hidden).toBe(true);
+      expect(tile(SELF).hidden).toBe(true);
+    });
+
+    it("hides nothing outside the call view (the DM call panel hosts the grid)", () => {
+      localStorage.setItem("owncord:settings:callShowNonVideo", "false");
+      localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
+      grid.destroy?.();
+      container = document.createElement("div");
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setPeople([person(2, "Otto")]);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+
+      expect(root().querySelector(".video-grid__views")).toBeNull();
+      expect(avatarTiles()[0]!.hidden).toBe(false);
+      expect(tile(SELF).hidden).toBe(false);
+
+      grid.setExitVisible(true);
+      expect(tile(SELF).hidden).toBe(true);
+      grid.setExitVisible(false);
+      expect(tile(SELF).hidden).toBe(false);
+      expect(avatarTiles()[0]!.hidden).toBe(false);
+    });
+
+    it("leaves room below the tiles for the bar (CSS)", () => {
+      expect(cascadedDeclaration(".video-grid--call", "padding-bottom")).toBeDefined();
+    });
+  });
 });
