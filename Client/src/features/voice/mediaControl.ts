@@ -299,6 +299,14 @@ export class MediaControl {
     return this._audioElements.getUserVolume(userId);
   }
 
+  setUserLocalMute(userId: number, muted: boolean): void {
+    this._audioElements.setUserLocalMute(userId, muted);
+  }
+
+  getUserLocalMute(userId: number): boolean {
+    return this._audioElements.getUserLocalMute(userId);
+  }
+
   setScreenshareAudioVolume(userId: number, volume: number): void {
     this._audioElements.setScreenshareAudioVolume(userId, volume);
   }

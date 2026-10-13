@@ -12,6 +12,7 @@ import { createMenuItem, enableMenuKeyboard } from "@lib/context-menu";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
+  getUserLocalMute,
   getUserVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
@@ -128,11 +129,11 @@ export function showTileMenu(opts: TileMenuOptions): void {
       t("tile.menuVoice", { name }),
       t("tile.voiceVolume", { name }),
       "voice",
-      100,
+      200,
       getUserVolume(id),
       (v) => {
         setUserVolume(id, v);
-        opts.onVolumeChange(false, v, v === 0);
+        opts.onVolumeChange(false, v, v === 0 || getUserLocalMute(id));
       },
     ),
   );

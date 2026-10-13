@@ -4,6 +4,7 @@
 // per-user volume, screenshare audio volume/mute, and output device routing.
 
 import {
+  RoomEvent,
   Track,
   type Room,
   type RemoteTrack,
@@ -14,7 +15,9 @@ import { loadPref, savePref, STORAGE_PREFIX } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "../features/voice/sessionState";
+import { onRoom } from "../features/voice/releaseRoom";
 import { voiceStore } from "@stores/voice.store";
+import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 
 const log = createLogger("audioElements");
 
@@ -42,20 +45,54 @@ function userVolumeKey(userId: number): string {
   return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
 }
 
-// setUserVolume always clamps to 0-100, so -1 is safe as a "nothing saved" sentinel.
-const VOLUME_NOT_SET = -1;
-
-/** 100% is the ceiling: without LiveKit's webAudioMix, setVolume writes
- *  HTMLMediaElement.volume, which throws above 1 and failed voice joins. */
-const MAX_VOLUME_PERCENT = 100;
-
-/** Clamp a stored or requested percentage into 0-100 (NaN reads as 100). */
-function clampPercent(v: number): number {
-  return Number.isNaN(v) ? MAX_VOLUME_PERCENT : Math.max(0, Math.min(MAX_VOLUME_PERCENT, v));
+function userLocalMuteKey(userId: number): string {
+  const key = `userLocalMute_${userId}`;
+  // i18n-exempt: localStorage key, not display text
+  return currentHost === null ? key : `${key}:${currentHost}`;
 }
 
-/** Get saved per-user volume (0-100 range, default 100; a larger value saved
- *  by an older build reads as 100). On a miss at the host-scoped key, migrates
+function announceLocalMute(userId: number): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(USER_LOCAL_MUTE_CHANGED, { detail: { userId } }));
+}
+
+// setUserVolume always clamps to 0-200, so -1 is safe as a "nothing saved" sentinel.
+const VOLUME_NOT_SET = -1;
+
+/** Per-user and output volume sliders go to 200%. Above 100% a voice track
+ *  needs its gain node: LiveKit's web setVolume writes HTMLMediaElement.volume,
+ *  which throws above 1 and failed voice joins (#2192). */
+const MAX_VOLUME_PERCENT = 200;
+
+/** Per-user volume times output volume never plays louder than double. */
+const MAX_GAIN = 2;
+
+/** Clamp a stored or requested percentage into 0-200 (NaN reads as 100). */
+function clampPercent(v: number): number {
+  return Number.isNaN(v) ? 100 : Math.max(0, Math.min(MAX_VOLUME_PERCENT, v));
+}
+
+/** Where a remote voice track plays above 100%: its <audio> element stays
+ *  attached (Chromium feeds a remote WebRTC track to Web Audio only while an
+ *  element plays it) but muted, and the sound goes through this gain. */
+interface MicGraph {
+  readonly userId: number;
+  readonly audioEl: HTMLAudioElement;
+  readonly source: MediaStreamAudioSourceNode;
+  readonly gain: GainNode;
+}
+
+/** AudioContext.setSinkId is not in TypeScript's DOM lib yet; WKWebView has
+ *  none at all. */
+type SinkableContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> };
+
+/** The native room plays voice in its own mixer, which takes gains above 1. */
+function hasNativePlayout(room: Room | null): boolean {
+  return room !== null && "nativePlayout" in room;
+}
+
+/** Get saved per-user volume (0-200 range, default 100; a larger value reads
+ *  as 200). On a miss at the host-scoped key, migrates
  *  the pre-scoping unscoped value through `migrateLegacyValue`, which moves
  *  it under the scoped key of the FIRST host that misses and no other. User
  *  ids are per-server autoincrement integers: a legacy value left readable
@@ -97,6 +134,12 @@ function parseStoredVolume(raw: string): number | null {
 export class AudioElements {
   private room: Room | null = null;
 
+  /** Shared by every remote voice track's gain node while in a web room;
+   *  closed on leave so no context outlives the call. */
+  private audioCtx: SinkableContext | null = null;
+  /** Gain graphs keyed by track SID. */
+  private micGraphs = new Map<string, MicGraph>();
+
   /** Remote microphone audio elements keyed by track SID for cleanup on disconnect. */
   private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
   /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
@@ -120,7 +163,106 @@ export class AudioElements {
   }
 
   setRoom(room: Room | null): void {
+    if (room === this.room) return;
     this.room = room;
+    if (room === null || hasNativePlayout(room)) {
+      this.closeAudioContext();
+      return;
+    }
+    // Created here, close to the join click, so the autoplay policy lets it run.
+    if (this.ensureAudioContext() === null) return;
+    // Every output switch (settings, hot-plug fallback, join) goes through
+    // room.switchActiveDevice, which only moves the elements; the context
+    // that actually plays follows it here. detachRoom removes the listener
+    // when the room is released.
+    onRoom(room, RoomEvent.ActiveDeviceChanged, (kind, deviceId) => {
+      if (this.room === room && kind === "audiooutput") this.setContextSink(deviceId);
+    });
+  }
+
+  private ensureAudioContext(): SinkableContext | null {
+    if (this.audioCtx !== null) return this.audioCtx;
+    if (typeof AudioContext === "undefined") return null;
+    try {
+      this.audioCtx = new AudioContext();
+    } catch (err) {
+      log.warn("AudioContext unavailable — voice volume stays at most 100%", err);
+      return null;
+    }
+    this.setContextSink(loadPref<string>("audioOutputDevice", ""));
+    this.audioCtx.resume().catch((err) => log.warn("AudioContext resume failed", err));
+    return this.audioCtx;
+  }
+
+  private setContextSink(deviceId: string): void {
+    const ctx = this.audioCtx;
+    if (ctx === null || typeof ctx.setSinkId !== "function") return;
+    // Web Audio has no "default" device id; the empty string is the default.
+    const sinkId = deviceId === "default" ? "" : deviceId;
+    ctx.setSinkId(sinkId).catch((err) => {
+      log.warn("Failed to set output device on the voice audio context", err);
+    });
+  }
+
+  private closeAudioContext(): void {
+    for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid);
+    const ctx = this.audioCtx;
+    this.audioCtx = null;
+    if (ctx !== null) {
+      ctx.close().catch((err) => log.warn("AudioContext close failed", err));
+    }
+  }
+
+  /** Route a remote voice track through a gain node. Null (the element plays
+   *  it, at most 100%) when there is no running context or a step throws. */
+  private buildMicGraph(
+    sid: string,
+    userId: number,
+    track: RemoteTrack,
+    audioEl: HTMLAudioElement,
+  ): MicGraph | null {
+    const ctx = this.ensureAudioContext();
+    if (ctx === null) return null;
+    if (ctx.state !== "running") {
+      ctx.resume().catch((err) => log.warn("AudioContext resume failed", err));
+      return null;
+    }
+    try {
+      const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+      const gain = ctx.createGain();
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      audioEl.muted = true;
+      const graph = { userId, audioEl, source, gain };
+      this.micGraphs.set(sid, graph);
+      return graph;
+    } catch (err) {
+      log.warn("Voice gain node failed — voice volume stays at most 100%", err);
+      return null;
+    }
+  }
+
+  private dropMicGraph(sid: string): void {
+    const graph = this.micGraphs.get(sid);
+    if (graph === undefined) return;
+    this.micGraphs.delete(sid);
+    graph.source.disconnect();
+    graph.gain.disconnect();
+  }
+
+  /** Play a participant's voice at `gain` (0-2): through their gain node
+   *  when they have one, unclamped on the native mixer, else on the element,
+   *  where LiveKit's setVolume must never see more than 1. */
+  private applyUserGain(participant: RemoteParticipant, gain: number): void {
+    const userId = parseUserId(participant.identity);
+    let routed = false;
+    for (const graph of this.micGraphs.values()) {
+      if (graph.userId !== userId) continue;
+      graph.gain.gain.value = gain;
+      routed = true;
+    }
+    if (routed) return;
+    participant.setVolume(hasNativePlayout(this.room) ? gain : Math.min(1, gain));
   }
 
   /** Get the current output volume multiplier. */
@@ -128,10 +270,16 @@ export class AudioElements {
     return this.outputVolumeMultiplier;
   }
 
-  /** Compute the effective volume for a participant: per-user volume * master output. */
+  /** Compute the effective gain for a participant: per-user volume * master
+   *  output, capped at 2; 0 while the user is locally muted. */
   getEffectiveVolume(userId: number): number {
-    const userVol = userId > 0 ? getSavedUserVolume(userId) : 100;
-    return Math.min(1, (userVol / 100) * this.outputVolumeMultiplier);
+    if (userId <= 0) return this.gainOf(100, false);
+    return this.gainOf(getSavedUserVolume(userId), this.getUserLocalMute(userId));
+  }
+
+  private gainOf(userVolumePercent: number, muted: boolean): number {
+    if (muted) return 0;
+    return Math.min(MAX_GAIN, (userVolumePercent / 100) * this.outputVolumeMultiplier);
   }
 
   /** Effective element volume for a user's screenshare audio: per-user volume
@@ -218,9 +366,10 @@ export class AudioElements {
       // Track mic audio elements for cleanup on abnormal disconnect
       if (track.sid !== undefined) {
         this.remoteMicAudioElements.set(track.sid, audioEl);
+        this.dropMicGraph(track.sid);
+        if (!hasNativePlayout(this.room)) this.buildMicGraph(track.sid, userId, track, audioEl);
       }
-      // Apply saved per-user volume (getEffectiveVolume is already within 0-1)
-      participant.setVolume(this.getEffectiveVolume(userId));
+      this.applyUserGain(participant, this.getEffectiveVolume(userId));
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
         audioEl.setSinkId(savedOutput).catch((err) => {
@@ -251,7 +400,10 @@ export class AudioElements {
       });
     } else {
       for (const el of track.detach()) el.remove();
-      if (track.sid !== undefined) this.remoteMicAudioElements.delete(track.sid);
+      if (track.sid !== undefined) {
+        this.remoteMicAudioElements.delete(track.sid);
+        this.dropMicGraph(track.sid);
+      }
       log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
     }
   }
@@ -282,24 +434,40 @@ export class AudioElements {
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       const userId = parseUserId(participant.identity);
-      participant.setVolume(this.getEffectiveVolume(userId));
+      this.applyUserGain(participant, this.getEffectiveVolume(userId));
+    }
+  }
+
+  private applyGainOf(userId: number, gain: number): void {
+    if (this.room === null) return;
+    for (const participant of this.room.remoteParticipants.values()) {
+      if (parseUserId(participant.identity) === userId) this.applyUserGain(participant, gain);
     }
   }
 
   setUserVolume(userId: number, volume: number): void {
     const clamped = clampPercent(volume);
+    const wasSilent = getSavedUserVolume(userId) === 0;
     savePref(userVolumeKey(userId), clamped);
-    if (this.room !== null) {
-      for (const participant of this.room.remoteParticipants.values()) {
-        if (parseUserId(participant.identity) === userId) {
-          participant.setVolume((clamped / 100) * this.outputVolumeMultiplier);
-        }
-      }
-    }
+    this.applyGainOf(userId, this.gainOf(clamped, this.getUserLocalMute(userId)));
+    // A level of 0 shows as muted too, so moving to or from it is announced.
+    if (wasSilent !== (clamped === 0)) announceLocalMute(userId);
   }
 
   getUserVolume(userId: number): number {
     return getSavedUserVolume(userId);
+  }
+
+  /** Silence one user for this client only. Their volume is left as it was,
+   *  so unmuting brings back the saved level. */
+  setUserLocalMute(userId: number, muted: boolean): void {
+    savePref(userLocalMuteKey(userId), muted);
+    this.applyGainOf(userId, this.gainOf(getSavedUserVolume(userId), muted));
+    announceLocalMute(userId);
+  }
+
+  getUserLocalMute(userId: number): boolean {
+    return loadPref<boolean>(userLocalMuteKey(userId), false) === true;
   }
 
   setOutputVolume(volume: number): void {
@@ -363,6 +531,7 @@ export class AudioElements {
       el.remove();
     }
     this.remoteMicAudioElements.clear();
+    for (const sid of this.micGraphs.keys()) this.dropMicGraph(sid);
     for (const audioEls of this.screenshareAudioElements.values()) {
       for (const el of audioEls) {
         el.pause();
@@ -376,6 +545,7 @@ export class AudioElements {
   /** Full cleanup including screenshare mute/volume state — used on intentional leave. */
   cleanupAllAudioElementsFull(): void {
     this.cleanupAllAudioElements();
+    this.closeAudioContext();
     this.screenshareAudioMutedByUser.clear();
     this.screenshareVolumeByUser.clear();
   }

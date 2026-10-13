@@ -12,6 +12,8 @@ const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
+const mockGetUserLocalMute = vi.fn((_userId?: unknown) => false);
+const mockSetUserLocalMute = vi.fn();
 
 const mockShowToast = vi.hoisted(() => vi.fn());
 vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
@@ -23,6 +25,8 @@ vi.mock("@lib/livekitSession", () => ({
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
   getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
+  getUserLocalMute: (userId: unknown) => mockGetUserLocalMute(userId),
+  setUserLocalMute: (...args: unknown[]) => mockSetUserLocalMute(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -462,17 +466,47 @@ describe("VideoGrid", () => {
       expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(99, false);
     });
 
-    it("mute button toggles mic audio when isScreenshare=false", () => {
+    it("mute button toggles the user's local Mute when isScreenshare=false (WP 1D-5)", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 55, isScreenshare: false });
       grid.addStream(55, "charlie", fakeStream(), config);
 
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
 
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(55, 0);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(55, true);
+      // The saved level is kept under the Mute, not overwritten with 0.
+      expect(mockSetUserVolume).not.toHaveBeenCalledWith(55, 0);
 
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(55, 100);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(55, false);
+    });
+
+    it("a voice tile starts muted when the user is locally muted", () => {
+      mockGetUserLocalMute.mockReturnValueOnce(true);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 56, isScreenshare: false });
+      grid.addStream(56, "erin", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      // Shows the kept level until it is muted from here (as before).
+      expect(slider.value).toBe("100");
+    });
+
+    it("a Mute set from the sidebar menu updates the open voice tile", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 57, isScreenshare: false });
+      grid.addStream(57, "finn", fakeStream(), config);
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
+
+      mockGetUserLocalMute.mockImplementation((id) => id === 57);
+      window.dispatchEvent(
+        new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 57 } }),
+      );
+      mockGetUserLocalMute.mockImplementation(() => false);
+
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      expect((container.querySelector(".tile-volume-slider") as HTMLInputElement).value).toBe("0");
     });
 
     it("mute button icon swaps between volume and volume-x SVGs on click", () => {
@@ -626,12 +660,12 @@ describe("VideoGrid", () => {
       expect(overlay!.classList.contains("muted")).toBe(true);
     });
 
-    it("mic slider tops out at 100%", () => {
+    it("mic slider tops out at 200% (WP 1D-5)", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
       grid.addStream(77, "dave", fakeStream(), config);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
-      expect(slider.max).toBe("100");
+      expect(slider.max).toBe("200");
     });
 
     it("mute button unmutes with previous volume when currentVolume was non-zero", () => {
@@ -646,14 +680,14 @@ describe("VideoGrid", () => {
       slider.dispatchEvent(new Event("input"));
       mockSetUserVolume.mockClear();
 
-      // Mute via button
+      // Mute via button: the local Mute, the slider shows 0
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 0);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(77, true);
       expect(slider.value).toBe("0");
 
       // Unmute via button — should restore to 70
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 70);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(77, false);
       expect(slider.value).toBe("70");
     });
   });
@@ -1243,7 +1277,7 @@ describe("VideoGrid", () => {
       expect(stream.getAttribute("aria-label")).toBe("Otto stream volume");
       expect(stream.max).toBe("100");
       expect(voice.getAttribute("aria-label")).toBe("Otto voice volume");
-      expect(voice.max).toBe("100");
+      expect(voice.max).toBe("200");
 
       voice.value = "70";
       voice.dispatchEvent(new Event("input"));

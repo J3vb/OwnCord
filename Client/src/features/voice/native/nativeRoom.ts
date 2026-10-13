@@ -198,6 +198,9 @@ export class NativeRoom {
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   readonly name = "";
   readonly canPlaybackAudio = true;
+  /** Voice plays in the session's own mixer, so per-user gains above 1 are
+   *  fine here (audioElements checks for this marker). */
+  readonly nativePlayout = true;
   /** connectionStats/connectionDiagnostics read `engine.pcManager`; native
    *  has no browser peer connection, so they see "no transports". */
   readonly engine = { pcManager: undefined, client: { ws: undefined } };

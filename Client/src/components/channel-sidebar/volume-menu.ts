@@ -7,7 +7,13 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createMenuItem, enableMenuKeyboard, clampMenuToViewport } from "@lib/context-menu";
-import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { createIcon } from "@lib/icons";
+import {
+  setUserVolume,
+  getUserVolume,
+  setUserLocalMute,
+  getUserLocalMute,
+} from "@lib/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 /** No-op default until the keyboard model installs the real restorer. */
@@ -101,7 +107,7 @@ export function showUserVolumeMenu(
     type: "range",
     class: "settings-slider",
     min: "0",
-    max: "100",
+    max: "200",
     value: String(currentVol),
     style: "flex:1",
   });
@@ -132,6 +138,31 @@ export function showUserVolumeMenu(
     setText(volLabel, t("volume.resetFull"));
   });
   menu.appendChild(resetBtn);
+
+  // Local Mute: silences this user for you only and keeps the slider's level,
+  // so unchecking it brings that level back. The menu stays open.
+  const muteItem = createMenuItem(t("volume.mute"), "context-menu-item");
+  muteItem.setAttribute("role", "menuitemcheckbox");
+  muteItem.setAttribute("data-action", "local-mute");
+  muteItem.style.display = "flex";
+  muteItem.style.alignItems = "center";
+  const muteCheck = createElement("span", {
+    "aria-hidden": "true",
+    style: "margin-left:auto;display:inline-flex",
+  });
+  muteCheck.appendChild(createIcon("check", 14));
+  muteItem.appendChild(muteCheck);
+  const renderMute = (muted: boolean): void => {
+    muteItem.setAttribute("aria-checked", String(muted));
+    muteCheck.style.visibility = muted ? "visible" : "hidden";
+  };
+  renderMute(getUserLocalMute(userId));
+  muteItem.addEventListener("click", () => {
+    const next = !getUserLocalMute(userId);
+    setUserLocalMute(userId, next);
+    renderMute(next);
+  });
+  menu.appendChild(muteItem);
 
   if (typeof mod === "string") {
     menu.appendChild(createElement("div", { class: "context-menu-sep" }));

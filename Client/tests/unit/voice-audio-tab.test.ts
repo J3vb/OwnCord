@@ -2333,12 +2333,23 @@ describe("VoiceAudioTab mic test (WP 1D-4)", () => {
   it.each([
     ["a corrupt", '"loud"', 1],
     ["a negative", "-20", 0],
+    ["a boosted (150%)", "150", 1],
   ])("plays with %s saved output volume instead of failing", async (_label, saved, volume) => {
     localStorage.setItem("owncord:settings:outputVolume", saved);
     const { el, ac } = await mount();
     button(el).click();
     expect(played).toHaveLength(1);
     expect(played[0]!.volume).toBe(volume);
+    ac.abort();
+  });
+
+  it("lets Output Volume go to 200% and shows a saved 150% as 150% (WP 1D-5)", async () => {
+    localStorage.setItem("owncord:settings:outputVolume", "150");
+    const { el, ac } = await mount();
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    expect(volume.max).toBe("200");
+    expect(volume.value).toBe("150");
+    expect(volume.parentElement?.querySelector(".slider-val")?.textContent).toBe("150%");
     ac.abort();
   });
 

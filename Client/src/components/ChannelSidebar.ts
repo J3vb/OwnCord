@@ -21,9 +21,10 @@ import { safetyStore } from "../features/safety/store";
 import { formatUntil, safetyText } from "../i18n/safety";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
-import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
+import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
@@ -426,12 +427,24 @@ function renderVoiceChannelItem(
         row.appendChild(muteIcon);
       }
 
+      // Muted for this client only (the volume menu's Mute, a tile mute, or
+      // an older build's volume of 0).
+      const currentUser = getCurrentUser();
+      const isSelf = currentUser !== null && currentUser.id === user.userId;
+      if (!isSelf && (getUserLocalMute(user.userId) || getUserVolume(user.userId) === 0)) {
+        const localMuteIcon = createElement("span", {
+          class: "vu-muted vu-local-muted",
+          title: shellText("channel.locallyMuted"),
+        });
+        localMuteIcon.appendChild(createIcon("volume-x", 14));
+        row.appendChild(localMuteIcon);
+      }
+
       // The local user's own session fingerprint (OC-0003): what a peer who
       // sees us as unverified compares against, so show it where it can be
       // read out. The local user is never in peerVerifications.
-      const currentUser = getCurrentUser();
       const ownFingerprint = voiceStore.select((st) => st.localSessionFingerprint ?? null);
-      if (currentUser !== null && currentUser.id === user.userId && ownFingerprint !== null) {
+      if (isSelf && ownFingerprint !== null) {
         const own = createElement("span", { class: "vu-verify vu-session-fp" });
         own.style.color = "var(--text-muted, #949ba4)";
         own.title = shellText("channel.ownSessionFingerprint", { fingerprint: ownFingerprint });
@@ -948,11 +961,19 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     renderChannels();
   }
 
+  /** A voice user's local Mute changed: rebuild the voice rows that show it. */
+  function handleUserLocalMuteChanged(): void {
+    renderChannels(true);
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
     // The event is dispatched on window by the mute store, so every writer
     // (context menu, Settings unmute) redraws the rows (F16).
     window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
+    window.addEventListener(USER_LOCAL_MUTE_CHANGED, handleUserLocalMuteChanged, {
+      signal: disposable.signal,
+    });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });

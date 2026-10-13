@@ -11,10 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setUserVolume = vi.fn();
 const getUserVolume = vi.fn();
+const setUserLocalMute = vi.fn();
+const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
 
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
   getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
+  setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
+  getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
 }));
 
 const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
@@ -37,6 +41,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   setUserVolume.mockReset();
   getUserVolume.mockReset().mockReturnValue(100);
+  setUserLocalMute.mockReset();
+  getUserLocalMute.mockReset().mockReturnValue(false);
   document.body.innerHTML = "";
 });
 
@@ -51,7 +57,7 @@ afterEach(() => {
 // ── rendering ──────────────────────────────────────────────────────────────
 
 describe("showUserVolumeMenu rendering", () => {
-  it("renders the username, the current volume and a 0-100 slider", () => {
+  it("renders the username, the current volume and a 0-200 slider", () => {
     getUserVolume.mockReturnValue(80);
 
     showUserVolumeMenu(7, "alice", 10, 20, new AbortController().signal);
@@ -63,7 +69,7 @@ describe("showUserVolumeMenu rendering", () => {
     const slider = sliderEl();
     expect(slider?.value).toBe("80");
     expect(slider?.min).toBe("0");
-    expect(slider?.max).toBe("100");
+    expect(slider?.max).toBe("200");
   });
 
   it("positions the menu at the supplied coordinates", () => {
@@ -145,6 +151,42 @@ describe("reset button", () => {
     expect(sliderEl()?.value).toBe("100");
     expect(itemTexts()).toContain("User Volume: 100%");
     expect(document.querySelector(".slider-val")?.textContent).toBe("100%");
+  });
+});
+
+describe("local Mute (WP 1D-5)", () => {
+  function muteItem(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('.user-vol-menu [data-action="local-mute"]');
+  }
+
+  it("is an unchecked checkbox row while the user is not muted", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("toggles the Mute, keeps the menu open and leaves the volume alone", () => {
+    getUserVolume.mockReturnValue(150);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+
+    getUserLocalMute.mockReturnValue(false);
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(setUserLocalMute).toHaveBeenLastCalledWith(7, true);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+    expect(menuEl()).not.toBeNull();
+
+    getUserLocalMute.mockReturnValue(true);
+    muteItem()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(setUserLocalMute).toHaveBeenLastCalledWith(7, false);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("false");
+    expect(setUserVolume).not.toHaveBeenCalled();
+    expect(sliderEl()?.value).toBe("150");
+  });
+
+  it("opens checked for a user already muted", () => {
+    getUserLocalMute.mockReturnValue(true);
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
   });
 });
 
