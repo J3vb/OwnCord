@@ -10,7 +10,7 @@ import (
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
 // re-runs the voice join gate (permissions.CanJoinVoice) for every client
 // currently in voice, evicts the ones it now refuses, and reconciles active
-// media source permissions.
+// media source permissions and flags.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable
 	// companion cannot hold the hub loop for one network timeout per user.
@@ -51,6 +51,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 			continue
 		}
 		if allowed {
+			h.clearRevokedVoiceMedia(ctx, c, chID)
 			if h.livekit != nil && mediaCtx.Err() == nil {
 				curChID, joinToken := c.getVoiceState()
 				if curChID == chID && joinToken != "" {
