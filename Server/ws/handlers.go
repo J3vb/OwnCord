@@ -114,7 +114,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		// LeaveVoice alongside its error when the join gate now refuses, so the
 		// user is removed from the SFU rather than merely denied a new token.
 		if result.LeaveVoice {
-			h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
+			h.leaveVoiceLocked(c, result.LeaveVoiceReason)
 		}
 		return
 	}
@@ -231,10 +231,11 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		c.setE2EEPubKey(*result.SetE2EEPubKey, sig)
 	}
 	if result.SetVoiceJoinToken != nil {
-		chID := c.getVoiceChID()
-		if chID != 0 {
+		unlock := h.voiceLock(c.userID)
+		if chID := c.getVoiceChID(); chID != 0 {
 			c.setVoiceState(chID, *result.SetVoiceJoinToken)
 		}
+		unlock()
 	}
 	if result.Reply != nil {
 		c.sendMsg(result.Reply)
@@ -252,7 +253,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
 	// from the already-validated envelope payload.
 	if result.LeaveVoice {
-		h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
+		h.leaveVoiceLocked(c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
 		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)

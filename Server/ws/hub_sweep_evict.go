@@ -66,7 +66,9 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
 		tailCtx, cancelTail := h.sweepTailCtx(ctx)
+		unlockVoice := h.voiceLock(c.userID)
 		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
+		unlockVoice()
 		cancelTail()
 		if !evicted {
 			continue

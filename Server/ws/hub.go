@@ -208,10 +208,12 @@ type Hub struct {
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
 	// DB transition with its paired LiveKit call (round 4, Codex review
-	// Part B) — see voice_mod_lock.go. Always non-nil (initialized in
+	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod *voiceModLocks
+	voiceMod *userLocks
+	// voiceMember is the per-user voice membership lock (voiceLock); see user_locks.go.
+	voiceMember userLocks
 
 	settingsMu         syncutil.RWMutex
 	settingsName       string
