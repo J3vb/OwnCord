@@ -24,6 +24,7 @@ import {
   handleConnectionError,
   handleRestartDrop,
   handleServerRestart,
+  handleUploadPolicy,
   rejoinVoiceAfterRestart,
 } from "../features/connection/wsHandlers";
 import {
@@ -278,6 +279,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.ROLES_UPDATE, handleRolesUpdate));
 
   unsubs.push(ws.on(S.EMOJI_UPDATE, handleEmojiUpdate));
+
+  unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
 
   unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
 

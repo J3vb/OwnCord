@@ -694,6 +694,16 @@ export interface EmojiUpdatePayload {
   readonly emoji: readonly EmojiResponse[];
 }
 
+/**
+ * `upload_policy` — the file-type lists in force after the owner saves them in
+ * the admin panel. Both are always present (`[]` when emptied) and replace the
+ * lists auth_ok gave; the size cap and thumbnails stay as auth_ok set them.
+ */
+export interface UploadPolicyPayload {
+  readonly blocked_extensions: readonly string[];
+  readonly allowed_extensions: readonly string[];
+}
+
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
@@ -987,6 +997,7 @@ export type ServerMessage =
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
+  | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })
