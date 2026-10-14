@@ -292,7 +292,8 @@ pub fn get_window_prefs(prefs: State<'_, WindowPrefs>) -> WindowPrefsDto {
 }
 
 /// Persist one preference, then publish it to the live state. The disk write
-/// goes first: a failed save leaves the running app and the file in agreement.
+/// goes first: a failed save leaves the running app, the shared store and the
+/// file in agreement.
 #[tauri::command]
 pub fn set_window_pref(
     app: AppHandle,
@@ -302,10 +303,19 @@ pub fn set_window_pref(
 ) -> Result<(), String> {
     let store = json_store::open(&app, SETTINGS_STORE)
         .map_err(|e| format!("failed to open settings store: {e}"))?;
+    let previous = store.get(pref.store_key());
     store.set(pref.store_key(), serde_json::Value::Bool(enabled));
-    store
-        .save()
-        .map_err(|e| format!("failed to persist settings: {e}"))?;
+    if let Err(e) = store.save() {
+        // The store is shared: undo the in-memory change so a later save of
+        // another key does not persist the rejected value.
+        match previous {
+            Some(value) => store.set(pref.store_key(), value),
+            None => {
+                store.delete(pref.store_key());
+            }
+        }
+        return Err(format!("failed to persist settings: {e}"));
+    }
     match pref {
         WindowPref::MinimizeToTray => prefs.minimize_to_tray.store(enabled, Ordering::Relaxed),
         WindowPref::StartMinimized => prefs.start_minimized.store(enabled, Ordering::Relaxed),
