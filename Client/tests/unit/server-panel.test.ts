@@ -206,7 +206,7 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false);
+      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false, false);
     });
 
     it("calls onServerClick with host AND username for full profiles", () => {
@@ -218,7 +218,7 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false);
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
     });
 
     it("calls onServerClick with autoConnect true when the profile has it enabled", () => {
@@ -230,7 +230,7 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", true);
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", true, true);
     });
 
     it("calls onServerClick with autoConnect false when the profile has it disabled", () => {
@@ -242,7 +242,40 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false);
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
+    });
+
+    it("passes the profile's rememberPassword so the form never re-opts in", () => {
+      const onServerClick = vi.fn();
+      const fp = fullProfile({ autoConnect: false, rememberPassword: true });
+      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
+    });
+
+    it("does not read the credential store for a profile that opted out of remembering", () => {
+      vi.mocked(loadCredential).mockClear();
+      const panel = createServerPanel(makeOpts(), [fullProfile({ rememberPassword: false })]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      expect(loadCredential).not.toHaveBeenCalled();
+    });
+
+    it("leaves the defaults to the form for an unsaved placeholder row", () => {
+      const onServerClick = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick }), [
+        { name: "Local", host: "localhost:8443", synthetic: true },
+      ]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".server-item") as HTMLElement).click();
+
+      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, undefined, undefined);
     });
 
     it("attempts to load credentials from credential store on click", async () => {
@@ -482,7 +515,7 @@ describe("ServerPanel", () => {
       expect(item.getAttribute("role")).toBe("button");
       expect(item.getAttribute("tabindex")).toBe("0");
       item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false);
+      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false, false);
     });
 
     it("Enter on the row's delete button is left to the button, not the row (#19)", () => {

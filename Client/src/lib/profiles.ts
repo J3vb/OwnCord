@@ -379,7 +379,7 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
           return p.autoConnect ? { ...p, autoConnect: false } : p;
         }
         if (p.id === id) {
-          return { ...p, autoConnect: true, rememberPassword: true };
+          return { ...p, autoConnect: true };
         }
         // Clear auto-login on all other profiles
         return p.autoConnect ? { ...p, autoConnect: false } : p;

@@ -56,7 +56,16 @@ function getIconInitials(name: string): string {
 export interface ServerPanelOptions {
   readonly signal: AbortSignal;
   /** Called immediately when the user clicks a server profile. */
-  readonly onServerClick: (host: string, username?: string, autoConnect?: boolean) => void;
+  /**
+   * `autoConnect` / `rememberPassword` are the saved profile's own settings;
+   * both are undefined for an unsaved placeholder row.
+   */
+  readonly onServerClick: (
+    host: string,
+    username?: string,
+    autoConnect?: boolean,
+    rememberPassword?: boolean,
+  ) => void;
   /** Called after async credential lookup succeeds (may set password). */
   readonly onCredentialLoaded: (host: string, username: string, hasPassword?: boolean) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
@@ -281,7 +290,13 @@ export function createServerPanel(
           row.classList.toggle("active", row === item);
         }
         // Immediately fill host + username from profile
-        onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
+        const saved = profile.synthetic !== true;
+        onServerClick(
+          profile.host,
+          fullProfile.username,
+          saved ? fullProfile.autoConnect === true : undefined,
+          saved ? fullProfile.rememberPassword === true : undefined,
+        );
         // Auto-fill credentials from credential store (async)
         const requestedHost = profile.host;
         // Two profiles can share a host (same server, different accounts),
@@ -292,6 +307,9 @@ export function createServerPanel(
         // no longer visible now that the password box shows identical dots.
         credentialLoadSeq += 1;
         const seq = credentialLoadSeq;
+        // A profile that opted out must not pick up a stored credential that
+        // outlived the opt-out.
+        if (fullProfile.rememberPassword === false) return;
         void (async () => {
           try {
             const cred = await loadCredential(requestedHost);

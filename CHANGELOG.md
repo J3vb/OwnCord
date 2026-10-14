@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Login & connection**
+
+- New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
+
 **Channels**
 
 - A collapsed category now still shows its unread and mentioned channels, the channel you are in and voice channels with people in them. A muted channel with unread messages stays hidden, and the category header shows a small dot.

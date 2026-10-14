@@ -100,6 +100,8 @@ export interface LoginFormOptions {
   /** The host box settled (debounced) in register mode, or register mode was
    *  entered with a host typed; lets the owner fetch that host's mode. */
   readonly onHostSettled?: (host: string) => void;
+  /** The host box was edited; the owner may apply a matching saved profile's settings. */
+  readonly onHostInput?: (host: string) => void;
 }
 
 export interface LoginFormApi {
@@ -130,8 +132,10 @@ export interface LoginFormApi {
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
   getAutoConnect(): boolean;
-  /** Set the auto-connect checkbox (also forces remember-password on). */
+  /** Set the auto-connect (stay signed in) checkbox. Independent of remember-password. */
   setAutoConnect(enabled: boolean): void;
+  /** Set the remember-password checkbox. */
+  setRememberPassword(enabled: boolean): void;
   getPassword(): string;
   /** Set the host input value (called when ServerPanel clicks a server). */
   setHost(host: string): void;
@@ -191,6 +195,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     getRegistrationMode,
     getRetentionNotice,
     onHostSettled,
+    onHostInput,
   } = opts;
 
   // Debounce token: only the latest scheduled host-settled call fires.
@@ -382,6 +387,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       () => {
         updateRegistrationUi();
         scheduleHostSettled();
+        onHostInput?.(hostInput.value.trim());
       },
       { signal },
     );
@@ -423,6 +429,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Auto connect checkbox
     const autoConnectGroup = createElement("div", { class: "form-group remember-password-group" });
     autoConnectCheckbox = createElement("input", { type: "checkbox", id: "auto-connect" });
+    // Stay signed in by default; a saved profile overrides it.
+    autoConnectCheckbox.checked = true;
     const autoConnectLabel = createElement(
       "label",
       {
@@ -445,17 +453,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // swallow a typed character.
     passwordInput.addEventListener("beforeinput", clearSavedPasswordPlaceholder, { signal });
     passwordInput.addEventListener("input", clearSavedPasswordPlaceholder, { signal });
-
-    autoConnectCheckbox.addEventListener(
-      "change",
-      () => {
-        // Auto-connect replays the saved token, which only exists when the
-        // password is remembered — so the pairing is enforced, not suggested.
-        if (autoConnectCheckbox.checked) rememberPasswordCheckbox.checked = true;
-        rememberPasswordCheckbox.disabled = autoConnectCheckbox.checked;
-      },
-      { signal },
-    );
 
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", connectText("login.inviteLabel"), "text", "");
@@ -1365,8 +1362,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setAutoConnect(enabled: boolean): void {
       autoConnectCheckbox.checked = enabled;
-      if (enabled) rememberPasswordCheckbox.checked = true;
-      rememberPasswordCheckbox.disabled = enabled;
+    },
+
+    setRememberPassword(enabled: boolean): void {
+      rememberPasswordCheckbox.checked = enabled;
     },
 
     getPassword(): string {
