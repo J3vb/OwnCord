@@ -20,14 +20,20 @@ vi.mock("../../stores/voice.store", () => ({
 }));
 vi.mock("../../lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
+  savePref: vi.fn(),
 }));
 vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../lib/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
-vi.mock("../../lib/screenShare", () => ({}));
+vi.mock("../../lib/screenShare", () => ({
+  enableCamera: vi.fn(async () => undefined),
+  disableCamera: vi.fn(async () => undefined),
+}));
 
 import { setLocalMuted, setListenOnly } from "../../stores/voice.store";
+import { savePref } from "../../lib/preferences";
+import { enableCamera, disableCamera } from "../../lib/screenShare";
 import { MediaControl, type MediaControlHost } from "./mediaControl";
 
 type Permissions = { canPublish: boolean; canPublishSources: number[] } | undefined;
@@ -38,7 +44,10 @@ function fakeRoom(permissions: Permissions = undefined): Room {
   } as unknown as Room;
 }
 
-function setup(room: Room | null = fakeRoom()) {
+function setup(
+  room: Room | null = fakeRoom(),
+  camera: { manualCameraTrack: unknown } = { manualCameraTrack: null },
+) {
   let pending: Room | null = null;
   const audioPipeline = { setupAudioPipeline: vi.fn(), teardownAudioPipeline: vi.fn() };
   const audioElements = { applyRemoteAudioSubscriptionState: vi.fn() };
@@ -51,7 +60,7 @@ function setup(room: Room | null = fakeRoom()) {
     getAudioPipeline: () => audioPipeline,
     getAudioElements: () => audioElements,
     getDeviceManager: () => ({}),
-    getCameraState: () => ({ manualCameraTrack: null }),
+    getCameraState: () => camera,
     getScreenState: () => ({ manualScreenTracks: [] }),
     getPendingMicrophoneRoom: () => pending,
     setPendingMicrophoneRoom: (r: Room | null) => {
@@ -164,5 +173,126 @@ describe("applyMicMuteState(false)", () => {
     expect(setListenOnly).toHaveBeenCalledWith(true);
     expect(setLocalMuted).toHaveBeenCalledWith(true);
     expect(onError).toHaveBeenCalledWith("Microphone unavailable — you are muted");
+  });
+});
+
+function webTrack() {
+  let mst = { addEventListener: vi.fn() };
+  const track = {
+    get mediaStreamTrack() {
+      return mst;
+    },
+    setDeviceId: vi.fn(async (_id: string): Promise<boolean> => {
+      mst = { addEventListener: vi.fn() };
+      return true;
+    }),
+  };
+  return track;
+}
+
+describe("switchVideoDevice", () => {
+  beforeEach(() => {
+    vi.mocked(savePref).mockClear();
+    vi.mocked(enableCamera).mockClear();
+    vi.mocked(disableCamera).mockClear();
+  });
+
+  it("camera off: only saves the choice", async () => {
+    const { media } = setup();
+    await media.switchVideoDevice("cam-2");
+    expect(savePref).toHaveBeenCalledWith("videoInputDevice", "cam-2");
+    expect(enableCamera).not.toHaveBeenCalled();
+  });
+
+  it("camera on: moves the live track with setDeviceId and re-arms unplug detection", async () => {
+    const track = webTrack();
+    const onCameraEnded = vi.fn();
+    const { media } = setup(fakeRoom(), { manualCameraTrack: track, onCameraEnded } as never);
+    await media.switchVideoDevice("cam-2");
+    expect(savePref).toHaveBeenCalledWith("videoInputDevice", "cam-2");
+    expect(track.setDeviceId).toHaveBeenCalledWith("cam-2");
+    expect(track.mediaStreamTrack.addEventListener).toHaveBeenCalledWith("ended", onCameraEnded, {
+      once: true,
+    });
+    expect(enableCamera).not.toHaveBeenCalled();
+  });
+
+  it("native camera on: starts the capture again on the new device", async () => {
+    const { media } = setup(fakeRoom(), { manualCameraTrack: { capture: 1 } });
+    await media.switchVideoDevice("/dev/video2");
+    expect(enableCamera).toHaveBeenCalledTimes(1);
+    expect(disableCamera).not.toHaveBeenCalled();
+  });
+
+  it("native restart that fails tells the server the camera is off", async () => {
+    const camera: { manualCameraTrack: unknown } = { manualCameraTrack: { capture: 1 } };
+    // enableCamera stopped the old capture, then failed to start the new one.
+    vi.mocked(enableCamera).mockImplementationOnce(async () => {
+      camera.manualCameraTrack = null;
+    });
+    const { media } = setup(fakeRoom(), camera);
+    await media.switchVideoDevice("/dev/video9");
+    expect(disableCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed switch turns the camera off and says so", async () => {
+    const track = webTrack();
+    track.setDeviceId.mockRejectedValueOnce(new Error("busy"));
+    const { media, onError } = setup(fakeRoom(), { manualCameraTrack: track });
+    await media.switchVideoDevice("cam-2");
+    expect(disableCamera).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it("runs switches one at a time, in order", async () => {
+    const track = webTrack();
+    const order: string[] = [];
+    let release: (() => void) | null = null;
+    track.setDeviceId.mockImplementationOnce(
+      (id: string) =>
+        new Promise<boolean>((r) => {
+          order.push(`start ${id}`);
+          release = () => {
+            order.push(`end ${id}`);
+            r(true);
+          };
+        }),
+    );
+    track.setDeviceId.mockImplementationOnce(async (id: string) => {
+      order.push(`start ${id}`);
+      return true;
+    });
+    const { media } = setup(fakeRoom(), { manualCameraTrack: track });
+    const first = media.switchVideoDevice("a");
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = media.switchVideoDevice("b");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(["start a"]);
+    (release as (() => void) | null)?.();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["start a", "end a", "start b"]);
+  });
+
+  it("skips a queued pick that a newer pick replaced", async () => {
+    const track = webTrack();
+    let release: (() => void) | null = null;
+    track.setDeviceId.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((r) => {
+          release = () => r(true);
+        }),
+    );
+    const { media } = setup(fakeRoom(), { manualCameraTrack: track });
+    const first = media.switchVideoDevice("a");
+    await Promise.resolve();
+    await Promise.resolve();
+    const skipped = media.switchVideoDevice("b");
+    const last = media.switchVideoDevice("c");
+    (release as (() => void) | null)?.();
+    await Promise.all([first, skipped, last]);
+    expect(track.setDeviceId.mock.calls.map((c) => c[0])).toEqual(["a", "c"]);
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "c");
   });
 });

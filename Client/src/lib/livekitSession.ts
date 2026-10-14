@@ -877,6 +877,10 @@ export class LiveKitSession {
     return this._media.switchOutputDevice(deviceId);
   }
 
+  async switchVideoDevice(deviceId: string): Promise<void> {
+    return this._media.switchVideoDevice(deviceId);
+  }
+
   setUserVolume(userId: number, volume: number): void {
     this._media.setUserVolume(userId, volume);
   }
@@ -1075,6 +1079,7 @@ export const setScreenshareQuality = session.setScreenshareQuality.bind(session)
 export const getScreenshareQuality = session.getScreenshareQuality.bind(session);
 export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
+export const switchVideoDevice = session.switchVideoDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);
 export const getUserVolume = session.getUserVolume.bind(session);
 export const setUserLocalMute = session.setUserLocalMute.bind(session);

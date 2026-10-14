@@ -490,6 +490,10 @@
 .video-fs-btn--leave:hover {
   background: var(--danger-fill-hover);
 }
+.video-fs-btn--device {
+  width: 24px;
+  margin-left: -6px;
+}
 /* The quality chip shows on the stream you are watching. */
 .video-quality {
   flex-shrink: 0;

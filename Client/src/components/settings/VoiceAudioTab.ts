@@ -9,6 +9,7 @@ import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/au
 import {
   switchInputDevice,
   switchOutputDevice,
+  switchVideoDevice,
   setVoiceSensitivity,
   applyInputMode,
   setInputVolume,
@@ -957,7 +958,7 @@ function buildVoiceAudioTabInner(
   videoSelect.addEventListener(
     "change",
     () => {
-      savePref("videoInputDevice", videoSelect.value);
+      void switchVideoDevice(videoSelect.value);
       stopCameraPreview();
       stopNativeCameraPreview();
       if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
