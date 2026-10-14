@@ -2,7 +2,7 @@ import { defineCatalog } from "./format";
 
 /**
  * Settings copy (B9-3 Accessibility tab; B9-20 extends it): tab labels,
- * Appearance, Notifications, Text & Images, Voice & Audio, Keybinds,
+ * Appearance, Notifications, Text & Images, Voice & Video, Keybinds,
  * Advanced, Logs and the connection-diagnostics panel. Loads with the lazily
  * loaded settings overlay, so none of it is in the startup chunk.
  */
@@ -13,7 +13,7 @@ export const settingsText = defineCatalog("settings", {
   "tabs.notifications": "Notifications",
   "tabs.textImages": "Text & Images",
   "tabs.accessibility": "Accessibility",
-  "tabs.voice": "Voice & Audio",
+  "tabs.voice": "Voice & Video",
   "tabs.keybinds": "Keybinds",
   "tabs.advanced": "Advanced",
   "tabs.logs": "Diagnostics & logs",
@@ -122,7 +122,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.pttHint":
     "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
   "keybinds.pttModeOff":
-    "Push to Talk is off, so this key does nothing. Turn it on in Voice & Audio under Input Mode.",
+    "Push to Talk is off, so this key does nothing. Turn it on in Voice & Video under Input Mode.",
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
   "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
@@ -289,7 +289,7 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.micTimeout":
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
-    "The selected microphone could not open. Check Voice & Audio settings and reconnect your device.",
+    "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":

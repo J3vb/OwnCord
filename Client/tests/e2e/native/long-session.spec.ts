@@ -76,7 +76,7 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
     "Notifications",
     "Text & Images",
     "Accessibility",
-    "Voice & Audio",
+    "Voice & Video",
     "Keybinds",
     "Advanced",
     "Logs",

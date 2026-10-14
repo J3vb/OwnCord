@@ -75,9 +75,10 @@ and only when it changes something a contributor or fork holder must do
 - A call plays another member's audio, camera and screen share only when it arrives end-to-end encrypted. Anything else is not played, and the call's security badge shows Unsecured.
 - On Linux, calls follow the same rule in both directions: your microphone, camera and screen share are only sent end-to-end encrypted, and other members' media plays only when it arrives encrypted.
 - The green identity badge on a call participant now says what it checked: the key is the same one this device saw before. It points at comparing safety numbers to confirm who it is, instead of saying "Identity verified".
-- Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. Stop watching on a camera keeps it stopped until you leave voice. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Audio.
+- Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. Stop watching on a camera keeps it stopped until you leave voice. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Video.
 - Turning on your camera or screen share while reading a text channel no longer hides the chat and opens the video grid. Open the call to see yourself.
 - In the call grid, cameras fill their tile instead of showing black bars; focus a camera to see the whole picture. The quality chip now shows only on screen shares.
+- Settings → Voice & Audio is now called Voice & Video.
 
 ### Added
 
@@ -101,10 +102,11 @@ and only when it changes something a contributor or fork holder must do
 - While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
 - When voice reconnects after a dropped connection, a message now says your camera or screen share stopped, with a **Turn on again** (or **Share again**) button. Before, they were just off afterwards.
 - A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
-- Voice volume goes to 200 % again: each person's volume (right-click them in the voice channel, or on their video tile) and Settings → Voice & Audio → Output Volume. Screen-share audio still tops out at 100 %.
+- Voice volume goes to 200 % again: each person's volume (right-click them in the voice channel, or on their video tile) and Settings → Voice & Video → Output Volume. Screen-share audio still tops out at 100 %.
 - Right-clicking someone in a voice channel offers **Mute**, which silences them for you only and keeps their volume for when you unmute. Their row shows a speaker-off icon while muted, and the mute button on their video tile is the same setting.
-- Settings → Voice & Audio has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
+- Settings → Voice & Video has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
 - People who can mute and move others in a voice channel (the Mute Members permission, or Administrator) can now join it when it is full. Everyone else still gets "voice channel is full".
+- The voice panel has a noise suppression button beside the connection quality. It turns Enhanced Noise Suppression on or off during a call, the same setting as in Settings → Voice & Video. On Linux the change applies the next time you join.
 - Right-clicking someone's video tile now gives the full menu: Profile, Message, their volume, **Mute** (for you only), Focus, Full screen, Pop out, Stop watching and, if you can moderate voice, Server Mute, Server Deafen, Move to and Disconnect. Your own camera tile has **Hide my camera** and **Turn off camera**.
 
 ### Fixed

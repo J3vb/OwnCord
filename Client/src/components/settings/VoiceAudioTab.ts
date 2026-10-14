@@ -1,5 +1,5 @@
 /**
- * Voice & Audio settings tab — input/output device, sensitivity, audio processing.
+ * Voice & Video settings tab — input/output device, sensitivity, audio processing.
  */
 
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
