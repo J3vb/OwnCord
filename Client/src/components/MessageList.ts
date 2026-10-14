@@ -118,6 +118,9 @@ const SCROLL_BOTTOM_VIEWPORTS = 2;
 /** After a failed older-page fetch, scrolling inside the trigger zone waits
  *  this long before retrying, unless the reader leaves the zone first. */
 const OLDER_RETRY_COOLDOWN_MS = 5000;
+/** How long a send waits for a detached window's tail reload before it stops
+ *  pulling the reader to the bottom. */
+const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
 
@@ -517,6 +520,24 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
   // Scroll helpers
   // ---------------------------------------------------------------------------
+
+  // Set by the reader's own send; held while the window is detached, until
+  // the live tail lands and the next render scrolls to it. It lapses if the
+  // tail never lands, so a later reattach cannot pull the reader down.
+  let followOwnSendUntil = 0;
+  const ownSends = (list: readonly Message[]): number =>
+    list.filter(
+      (m) =>
+        m.id === 0 &&
+        m.user.id === options.currentUserId &&
+        (m.status === "pending" || m.status === "failed") &&
+        !(m.correlationId?.startsWith("recovered:") ?? false),
+    ).length;
+  const followOwnSend = (): boolean =>
+    performance.now() < followOwnSendUntil && !isWindowDetached(options.channelId);
+  // Once attached, a newer page in flight can no longer land, so it does not
+  // veto the reader's own send.
+  const keepBottom = (): boolean => (isNearBottom() && !loadingNewer) || followOwnSend();
 
   function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD): boolean {
     if (root === null) return true;
@@ -1056,7 +1077,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // A newer history page landing below the reader is not a live arrival:
     // the reader keeps their place instead of being carried to the new bottom.
-    const atBottom = isNearBottom() && !loadingNewer;
+    const atBottom = keepBottom();
     // Record the rendered rows' heights under their current keys before the
     // items change, and the topmost visible message row that stays as the
     // anchor: a divider is no anchor, since the NEW line can move.
@@ -1199,7 +1220,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAllRunning = true;
     try {
       log.debug("renderAll START", { count: renderAllCount });
-      wasAtBottom = isNearBottom() && !loadingNewer;
+      wasAtBottom = keepBottom();
 
       // When scrolled away from the bottom, remember which message is
       // topmost in the viewport *before* rebuildItems() swaps virtualItems
@@ -1636,10 +1657,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           // The loaded-and-empty welcome state was on screen, so a first row
           // is a live arrival and not the first page landing.
           const firstLive = prevLast === 0 && loadedEmptyShown;
-          const wasBottom = isNearBottom();
+          if (ownSends(getChannelMessages(options.channelId)) > ownSends(allMessages)) {
+            followOwnSendUntil = performance.now() + FOLLOW_OWN_SEND_MS;
+          }
+          const wasBottom = isNearBottom() || followOwnSend();
           if (!patchRows()) {
             renderAll();
           }
+          if (followOwnSend()) followOwnSendUntil = 0;
           // Only an append counts: a window swap drops the previous last row.
           const appended =
             firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
@@ -1684,6 +1709,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         () => {
           updateJumpToPresentPill();
           updateUnreadBar();
+          // A tail reload that changed no rows reattaches without a messages
+          // update, so the reader's pending own send follows here instead.
+          if (followOwnSend()) {
+            followOwnSendUntil = 0;
+            scrollToBottom();
+            updateScrollToBottomBtn();
+          }
         },
       ),
     );
