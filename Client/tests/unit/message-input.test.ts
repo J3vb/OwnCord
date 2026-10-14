@@ -223,6 +223,29 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("keeps the dismiss button, and its focus, when the shown reason changes", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode: wait 5s");
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    const dismiss = container.querySelector(
+      ".attachment-upload-error-dismiss",
+    ) as HTMLButtonElement;
+    dismiss.focus();
+
+    comp.setSendGate("Slow mode: wait 4s");
+
+    expect(container.querySelector(".attachment-upload-error")?.textContent).toBe(
+      "Slow mode: wait 4s",
+    );
+    expect(container.querySelector(".attachment-upload-error-dismiss")).toBe(dismiss);
+    expect(document.activeElement).toBe(dismiss);
+
+    comp.destroy?.();
+  });
+
   it("refuses an over-long edit through the same guard", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);

@@ -586,14 +586,19 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // One persistent refusal line: the user needs to read it after the fact,
     // so it is not removed on a timer (A11Y-05). It is cleared by its own
     // dismiss button, the next edit or a successful send (clearUploadError).
-    clearUploadError();
-    uploadErrorEl = createElement(
-      "div",
-      {
-        class: "attachment-upload-error",
-        id: uploadErrorId,
-      },
-      message,
+    // A line already showing only swaps its text, so a ticking reason (slow
+    // mode refreshes every second) never takes focus off the dismiss button.
+    const shownText = uploadErrorEl?.querySelector(".attachment-upload-error-text");
+    if (shownText) {
+      shownText.textContent = message;
+      return;
+    }
+    uploadErrorEl = createElement("div", {
+      class: "attachment-upload-error",
+      id: uploadErrorId,
+    });
+    uploadErrorEl.appendChild(
+      createElement("span", { class: "attachment-upload-error-text" }, message),
     );
     const dismissBtn = createElement("button", {
       class: "attachment-upload-error-dismiss",
