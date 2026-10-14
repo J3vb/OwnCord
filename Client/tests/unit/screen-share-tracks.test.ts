@@ -60,6 +60,8 @@ const {
 } = await import("@lib/screenShare");
 
 type VideoTrackDeps = Parameters<typeof enableCamera>[1];
+type CameraTrackState = Parameters<typeof stopManualCameraTrack>[0];
+type ScreenTrackState = Parameters<typeof stopManualScreenTracks>[0];
 
 const { voiceStore } = await import("@stores/voice.store");
 const { setScreenSourcePicker } = await import("../../src/features/voice/native/screenPickerSlot");
@@ -184,6 +186,16 @@ describe("stopManualCameraTrack", () => {
     expect(rig.unpublishTrack).toHaveBeenCalledWith(track.mediaStreamTrack);
     expect(track.stop).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBeNull();
+  });
+
+  it("forgets the announced track, so the left room is not kept reachable", () => {
+    const rig = fakeRoom();
+    const track = fakeVideoTrack();
+    const state: CameraTrackState = { manualCameraTrack: track, announced: track };
+
+    stopManualCameraTrack(state, rig.room);
+
+    expect(state.announced).toBeUndefined();
   });
 
   it("is a no-op with no track", () => {
@@ -716,6 +728,19 @@ describe("stopManualScreenTracks", () => {
     expect(video.stop).toHaveBeenCalled();
     expect(audio.stop).toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([]);
+  });
+
+  it("forgets the announced track, so the left room is not kept reachable", () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const state: ScreenTrackState = {
+      manualScreenTracks: [video] as LocalTrack[],
+      announced: video,
+    };
+
+    stopManualScreenTracks(state, rig.room);
+
+    expect(state.announced).toBeUndefined();
   });
 
   it("is a no-op with no tracks", () => {
