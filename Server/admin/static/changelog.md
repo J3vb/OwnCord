@@ -6,7 +6,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 ### Highlights
 
-- **A real call view**: click the voice channel you are in to see a tile for everyone, with a control bar, view toggles, a full right-click menu on each tile and a Pop out call button.
+- **A real call view**: click the voice channel you are in to see a tile for everyone, with a control bar, view toggles, a full right-click menu on video tiles and a Pop out call button.
 - **Voice settings like Discord**: an Input Mode choice (Voice Activity or Push to Talk), automatic input sensitivity, a Let's Check mic test, Push to Talk on Ctrl, Shift, Alt, Caps Lock or the key left of 1, and mute and deafen in the user panel, remembered across restarts.
 - **Better streaming**: a stream card with Change source and Quality that keeps your viewers watching, stream start and end sounds, cameras that play without a click, and switching camera mid-call.
 - **What's new**: the app and the admin panel show the release notes of the version you run, and the app checks for updates while it runs.
