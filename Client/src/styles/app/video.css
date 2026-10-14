@@ -58,11 +58,10 @@
 .video-grid__view[aria-pressed="false"] {
   opacity: 0.55;
 }
-/* Too narrow to centre the control bar clear of them: it moves left. */
+/* Too narrow for both in one row (a small pop-out): they stack above it. */
 @container (max-width: 680px) {
-  .video-grid .video-grid__controls {
-    left: 12px;
-    transform: none;
+  .video-grid .video-grid__views {
+    bottom: 60px;
   }
 }
 
