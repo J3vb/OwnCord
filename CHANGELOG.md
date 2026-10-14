@@ -68,7 +68,7 @@ and only when it changes something a contributor or fork holder must do
 **Messaging**
 
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
-**Voice and video**
+  **Voice and video**
 
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 
