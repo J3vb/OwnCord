@@ -55,9 +55,9 @@ func (h *Hub) broadcastChannelEvent(ctx context.Context, senderID int64, e Chann
 // nsfwDispatchResolveRaceHook: a revocation or relabelling that has completed
 // by this point is honoured by this event; one landing after it cannot recall
 // frames already authorized, and nothing here claims it can.
-func (h *Hub) resolveChannelContentGate(channelID int64) (allow func(userID int64) bool, labelled bool) {
+func (h *Hub) resolveChannelContentGate(channelID int64) (allow func(userID int64) bool, labelled, unconfirmed bool) {
 	if channelID == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	if nsfwDispatchResolveRaceHook != nil {
 		nsfwDispatchResolveRaceHook(channelID)

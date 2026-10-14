@@ -132,6 +132,7 @@ and only when it changes something a contributor or fork holder must do
 - A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
+- When the server was too busy to send an update (a deleted or edited message, a reaction, a member change), the app could miss it until a restart. The server now waits briefly before giving up on a new message, and an app that was offline when an update was skipped fetches everything fresh when it reconnects.
 
 **Messages & files**
 
