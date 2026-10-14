@@ -116,6 +116,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Channels**
+
+- Switching channels quickly (holding Alt+Down) no longer leaves you on a channel that never receives new messages.
+
 **Voice**
 
 - Joining, leaving, a moderator removing you and the server's own cleanup no longer step on each other for the same person. Rarely, a join that landed at the same moment as a cleanup left you shown in voice with no seat in the channel, or a moderator's disconnect missed you.

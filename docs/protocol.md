@@ -2270,7 +2270,7 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Channel focus                            | 5     | 1 second                                   | Silently dropped     |
+| Channel focus                            | 5     | 1 second                                   | Deferred             |
 | Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
 | Ping                                     | 2     | 1 second                                   | Silently dropped     |
 
@@ -2279,6 +2279,14 @@ rotation fires one offer per peer in a single burst, so the limit is sized to
 a whole rotation rather than to a single frame. Within that outer budget an
 inner cap of 5 per second per (sender, channel, target) stops any single
 recipient from being flooded.
+
+A `channel_focus` over its budget is deferred rather than dropped: the server
+remembers the latest refused channel and applies it (subscription and read
+state) as soon as the window frees, so a burst of channel switches ends on the
+channel the user landed on. A newer `channel_focus` supersedes a pending one,
+whether it succeeds or fails. If the user can no longer read the deferred
+channel when it is applied, the reply is a `FORBIDDEN` error carrying that
+frame's `id`.
 
 ---
 
@@ -2300,7 +2308,7 @@ tables below add per-type behavioral notes.
 | `reaction_add`        | 5/sec                                |                                                                 |
 | `reaction_remove`     | 5/sec                                |                                                                 |
 | `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
-| `channel_focus`       | 5/sec (silently dropped)             | Updates read state                                              |
+| `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
 | `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus                         |
 | `presence_update`     | 1/10sec                              |                                                                 |
 | `voice_join`          | 5/sec                                |                                                                 |

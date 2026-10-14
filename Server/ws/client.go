@@ -106,6 +106,21 @@ type Client struct {
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
 
+	// focusMu serialises every channel_focus APPLY (the readPump applier and the
+	// deferred-focus drain goroutine), so an older deferred intent can never land
+	// after a newer one. Lock order: focusMu before mu.
+	focusMu syncutil.Mutex
+	// focusSeq is bumped on every focus intent, deferred or applied; guarded by mu.
+	focusSeq uint64
+	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
+	pendingFocusChID int64
+	// pendingFocusReqID is the req_id of the deferred frame, echoed on an error; guarded by mu.
+	pendingFocusReqID string
+	// pendingFocusSeq is the focusSeq the pending intent was assigned; guarded by mu.
+	pendingFocusSeq uint64
+	// focusDrainActive is true while a drainDeferredFocus goroutine is running; guarded by mu.
+	focusDrainActive bool
+
 	// presence is the status and custom status this connection last stamped
 	// (applyConnectStatus) or chose (presence_update); nil until the connect
 	// stamp. presentableMembers and presence snapshots read it from other
