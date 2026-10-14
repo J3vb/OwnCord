@@ -45,6 +45,7 @@ export type IconName =
   | "chevron-up"
   | "chevron-right"
   | "x"
+  | "message-square"
   | "eye"
   | "eye-off"
   | "layout-grid"
@@ -165,6 +166,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // X / close
   x: `<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`,
+  "message-square": `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>`,
 
   // Eye open
   eye: `<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>`,

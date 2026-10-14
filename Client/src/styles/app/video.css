@@ -16,16 +16,23 @@
   justify-content: center;
   background: var(--bg-primary);
   position: relative;
+  container-type: inline-size;
 }
 
-/* The always-present way out of video/focus mode. Pinned top-left so it stays
-   reachable when the focus layout has scrolled the focused tile's own nav off. */
+/* The call view's own controls (view toggles, pop-out, show chat) sit bottom
+   right, beside the control bar, as Discord's do, so they never cover a
+   tile's name or its own top-right nav. Show chat stays reachable when the
+   focus layout has scrolled the focused tile's nav off. */
+.video-grid__views {
+  position: absolute;
+  right: 12px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
 .video-grid__exit,
 .video-grid__view {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -48,21 +55,14 @@
 .video-grid__view[hidden] {
   display: none;
 }
-
-/* The call view's view toggles, beside the exit control. */
-.video-grid__views {
-  position: absolute;
-  top: 8px;
-  left: 44px;
-  z-index: 5;
-  display: flex;
-  gap: 4px;
-}
-.video-grid__view {
-  position: static;
-}
 .video-grid__view[aria-pressed="false"] {
   opacity: 0.55;
+}
+/* Too narrow for both in one row (a small pop-out): they stack above it. */
+@container (max-width: 680px) {
+  .video-grid .video-grid__views {
+    bottom: 60px;
+  }
 }
 
 /* Room below the tiles (and the focus strip) for the call view's control bar. */

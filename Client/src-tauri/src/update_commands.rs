@@ -489,8 +489,15 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             // Any return (an error, or Linux/macOS success awaiting the
             // frontend relaunch) leaves this process serving the user, so clear
             // the flag or every later forwarded launch is swallowed until restart.
+            // The restart copies this process's argv; make it show its window.
+            #[cfg(desktop)]
+            crate::window_prefs::set_show_next_launch(&app, true);
             let installed = u.install(&bytes);
             INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
+            #[cfg(desktop)]
+            if installed.is_err() {
+                crate::window_prefs::set_show_next_launch(&app, false);
+            }
             installed.map_err(|e| format!("download/install failed: {e}"))?;
             install_guard.installed();
             Ok(())

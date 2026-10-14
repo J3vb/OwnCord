@@ -9,6 +9,13 @@ import type { AppProcess } from "../contracts/appProcess";
 
 export const appProcess: AppProcess = {
   async relaunch(): Promise<void> {
+    // The restart copies this process's `--minimized`; ask the host to show
+    // the window next time. A failure only risks a hidden restart.
+    try {
+      await invoke("show_next_launch");
+    } catch {
+      // The relaunch itself still goes ahead.
+    }
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   },

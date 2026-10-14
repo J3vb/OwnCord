@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Desktop UI**
+
+- Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
+
 ### Changed
 
 **Login & connection**
@@ -62,6 +68,10 @@ and only when it changes something a contributor or fork holder must do
 **Login & connection**
 
 - An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
+
+**Voice and video**
+
+- In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 
 ## v2.3.0-beta.1
 

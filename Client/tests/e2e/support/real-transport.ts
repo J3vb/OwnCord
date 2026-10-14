@@ -190,6 +190,12 @@ export async function installRealTransport(page: Page, server: TestServer) {
           return;
         case "check_client_update":
           return { available: false, version: null, body: null };
+        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        case "get_window_prefs":
+          return { minimizeToTray: true, startMinimized: false };
+        case "set_window_pref":
+        case "show_next_launch":
+          return null;
         case "plugin:path|resolve_directory":
           return "/test-logs";
         case "plugin:path|join":
