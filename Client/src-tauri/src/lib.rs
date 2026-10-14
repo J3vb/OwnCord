@@ -264,6 +264,8 @@ pub fn run() {
             native_voice::native_voice_publish_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_stop_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_change_screen,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

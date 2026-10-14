@@ -126,9 +126,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
   on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
   `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
-  video only (no screen-share audio on Linux). Keep the state machine
-  platform-blind: a Linux-only behaviour belongs in the adapter or the Rust
-  session, never as a branch in `joinOrchestration`/`mediaControl`. The interop proof is
+  video only (no screen-share audio on Linux). Change source there is the
+  track's own (`NativeScreenTrack.changeSource`, the host's
+  `native_voice_change_screen`), reached through `lib/screenShare.ts`'s
+  capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
+  Keep the state machine platform-blind: a Linux-only behaviour belongs in
+  the adapter or the Rust session, never as a branch in
+  `joinOrchestration`/`mediaControl`. The interop proof is
   `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
   `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
   (built with `cargo build --example native_voice_interop`); it covers audio,

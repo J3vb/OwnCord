@@ -595,6 +595,10 @@ pub struct NativeSession {
     /// self-view preview reads it back over the frame socket's `camera` route.
     camera_capture: Option<CameraShare>,
     screen: Option<ScreenShare>,
+    /// A capture started to replace the published share's source; it takes
+    /// over the publication once its first frame arrives
+    /// (`finish_screen_change`), until then the live share is untouched.
+    screen_change: Option<ScreenShare>,
     screen_publication: VideoSlot,
     next_capture: u64,
     next_camera: u64,
@@ -669,6 +673,7 @@ impl NativeSession {
             camera,
             camera_capture: None,
             screen: None,
+            screen_change: None,
             screen_publication,
             next_capture: 0,
             next_camera: 0,
@@ -1021,10 +1026,77 @@ impl NativeSession {
         Ok(sid.to_string())
     }
 
+    /// Start capturing `target` to replace the published share's source,
+    /// leaving the live capture and its publication running. Returns the
+    /// new capture's id and its first-frame receiver, as `start_screen`;
+    /// the caller awaits it without holding the session, then calls
+    /// `finish_screen_change` (or `stop_screen` to give up).
+    pub fn start_screen_change(
+        &mut self,
+        target: Target,
+        options: CaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        if !self.screen_published() {
+            return Err("no published screen share to change".into());
+        }
+        self.screen_change.take();
+        self.next_capture += 1;
+        let id = self.next_capture;
+        let on_event = self.on_event.clone();
+        let (capture, started) = ScreenCapture::start(target, options, move || {
+            on_event(Event::ScreenCaptureEnded { capture: id })
+        })?;
+        self.screen_change = Some(ScreenShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Move the published share onto capture `capture` (started by
+    /// `start_screen_change`): same publication and sid, same preview socket,
+    /// and the old capture is released. Fails, changing nothing, when a stop,
+    /// a new share or another change came first.
+    pub fn finish_screen_change(&mut self, capture: u64) -> Result<(), String> {
+        let next = self
+            .screen_change
+            .take_if(|c| c.id == capture)
+            .ok_or("the screen source change was superseded")?;
+        if !self.screen_published() {
+            return Err("the screen share stopped during the source change".into());
+        }
+        let Some(live) = self.screen.as_mut() else {
+            return Err("the screen share stopped during the source change".into());
+        };
+        // The source keeps the size it was published at: the encoder follows
+        // each frame's own size, but the layer sizes the server was told stay
+        // (as on the web path's replaceTrack).
+        next.capture.take_over(&live.capture);
+        if let Some(publication) = self.screen_publication.lock().unwrap().as_mut() {
+            publication.capture = Some(next.id);
+        }
+        // Dropping the old share joins its capture thread (and, on Wayland,
+        // closes its portal session); the preview lives on in `next`.
+        drop(std::mem::replace(live, next));
+        Ok(())
+    }
+
+    /// Whether the running capture is the one published as the screen share.
+    fn screen_published(&self) -> bool {
+        let live = self.screen.as_ref().map(|s| s.id);
+        live.is_some()
+            && self
+                .screen_publication
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| p.capture == live)
+    }
+
     /// Stop capture `capture` if it is still the running one (a stale id is
     /// a no-op): unpublish it, and release the capturer and, on Wayland, the
-    /// portal session.
+    /// portal session. A pending source change's capture is only dropped.
     pub async fn stop_screen(&mut self, capture: u64) {
+        if self.screen_change.as_ref().is_some_and(|s| s.id == capture) {
+            self.screen_change.take();
+        }
         if self.screen.as_ref().is_some_and(|s| s.id == capture) {
             self.release_screen().await;
         }
@@ -1048,6 +1120,7 @@ impl NativeSession {
     }
 
     async fn release_screen(&mut self) {
+        self.screen_change.take();
         self.unpublish_screen().await;
         self.frames.set_screen(None);
         // Dropping joins the capture thread.

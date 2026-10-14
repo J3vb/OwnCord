@@ -920,6 +920,10 @@ export class LiveKitSession {
     return this._media.getScreenshareQuality();
   }
 
+  canChangeScreenshareSource(): boolean {
+    return this._media.canChangeScreenshareSource();
+  }
+
   async switchInputDevice(deviceId: string): Promise<void> {
     return this._media.switchInputDevice(deviceId);
   }
@@ -1129,6 +1133,7 @@ export const reconcileVideoFlags = session.reconcileVideoFlags.bind(session);
 export const changeScreenshareSource = session.changeScreenshareSource.bind(session);
 export const setScreenshareQuality = session.setScreenshareQuality.bind(session);
 export const getScreenshareQuality = session.getScreenshareQuality.bind(session);
+export const canChangeScreenshareSource = session.canChangeScreenshareSource.bind(session);
 export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
 export const switchVideoDevice = session.switchVideoDevice.bind(session);

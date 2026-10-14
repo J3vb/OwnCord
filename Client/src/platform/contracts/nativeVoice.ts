@@ -308,6 +308,17 @@ export interface NativeVoice {
   /** Unpublish and stop capture `capture`, releasing the capturer and any
    *  portal session; a stale id is a no-op. */
   stopScreen(session: number, capture: number): Promise<void>;
+  /** Share `source` instead under the live, published share: a new capture
+   *  starts beside it and takes the publication over (same sid) once its
+   *  first frame arrives, then the old capture stops. Resolves with the new
+   *  capture, which `stopScreen` then names; rejects, leaving the live share
+   *  untouched, as `startScreen` does (a portal closed without a pick is
+   *  "screen capture portal did not start"), or when no share is published. */
+  changeScreen(
+    session: number,
+    source: string,
+    capture: NativeVoiceScreenCapture,
+  ): Promise<NativeVoiceScreenStarted>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;

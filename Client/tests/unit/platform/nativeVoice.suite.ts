@@ -36,6 +36,8 @@ export interface NativeControl {
     started: NativeVoiceScreenStarted,
     sid: string,
   ): void;
+  /** The host refuses the next screen source change with this reason. */
+  refusesScreenChange(reason: string): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
@@ -196,6 +198,28 @@ export function describeNativeVoiceSuite(
         ["native_voice_start_screen", { session: 7, source: "screen:1", capture }],
         ["native_voice_publish_screen", { session: 7, capture: 2, options: publish }],
         ["native_voice_stop_screen", { session: 7, capture: 2 }],
+      ]);
+    });
+
+    check("changes a live share's source and reports a refusal as an Error", async () => {
+      const capture = { fps: 30, maxWidth: 0, maxHeight: 0 };
+      ctx.native.sharesScreenAs(
+        { portal: true, sources: [] },
+        { capture: 3, width: 1280, height: 720 },
+        "TR_screen",
+      );
+      await expect(ctx.subject.changeScreen(7, "window:9", capture)).resolves.toEqual({
+        capture: 3,
+        width: 1280,
+        height: 720,
+      });
+      ctx.native.refusesScreenChange("screen capture portal did not start");
+      const refused = ctx.subject.changeScreen(7, "portal", capture);
+      await expect(refused).rejects.toBeInstanceOf(Error);
+      await expect(refused).rejects.toThrow("screen capture portal did not start");
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_change_screen", { session: 7, source: "window:9", capture }],
+        ["native_voice_change_screen", { session: 7, source: "portal", capture }],
       ]);
     });
 

@@ -570,6 +570,48 @@ pub async fn native_voice_start_screen(
     })
 }
 
+/// Share `source` instead under the live screen share's publication (its sid
+/// stays, so viewers keep watching): a new capture starts beside the live
+/// one, and only once its first frame arrives does it take the publication
+/// over and the old capture stop. Until then, and on any failure (a portal
+/// dialog closed without a pick, a stop or leave meanwhile), the live share
+/// is untouched. Resolves with the new capture's id, which the webview then
+/// names to stop it.
+#[tauri::command]
+pub async fn native_voice_change_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    source: String,
+    capture: screen::CaptureOptions,
+) -> Result<ScreenStarted, String> {
+    let target = screen::Target::parse(&source)?;
+    let (id, started) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .start_screen_change(target, capture)?;
+    let started = started
+        .await
+        .map_err(|_| "screen capture stopped before it started".to_string())
+        .and_then(|r| r);
+    let mut inner = state.inner.lock().await;
+    let s = inner.current(session)?;
+    let finished = started.and_then(|size| s.finish_screen_change(id).map(|()| size));
+    let (width, height) = match finished {
+        Ok(size) => size,
+        Err(e) => {
+            s.stop_screen(id).await;
+            return Err(e);
+        }
+    };
+    Ok(ScreenStarted {
+        capture: id,
+        width,
+        height,
+    })
+}
+
 /// Publish running capture `capture` as the screen share; returns its sid.
 #[tauri::command]
 pub async fn native_voice_publish_screen(
