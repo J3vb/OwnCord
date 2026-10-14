@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 import { dialogOpen } from "@lib/dialogOpen";
@@ -57,11 +58,19 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     // Checked before the Ctrl/Meta guard below, which rejects any Alt combo.
     // A plain Alt+Arrow is not a text-editing shortcut, but AltGr arrives as
     // ctrlKey+altKey and the composer's own Alt use must win, so Ctrl/Meta or
-    // a text field disqualifies the step rather than swallowing the key.
+    // a text field disqualifies the step rather than swallowing the key. The
+    // message composer is the exception: like Discord, the step works while
+    // typing there (an IME composition still keeps the key).
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-      if (dialogOpen() || isTypingTarget(e.target)) return;
+      // A mention or emoji popup in the composer claims the arrows first.
+      if (dialogOpen() || e.isComposing || e.defaultPrevented) return;
+      const fromComposer = isComposer(e.target);
+      if (isTypingTarget(e.target) && !fromComposer) return;
       const direction = e.key === "ArrowDown" ? 1 : -1;
       runGlobal(e, "step-channel", () => handlers.onStepChannel(direction, e.shiftKey));
+      // The switch rebuilds the composer once the store notifies (a microtask
+      // later); keep typing in the new one unless focus has moved on since.
+      if (fromComposer) setOwnedTimeout(owner.signal, focusNewComposer, 0);
       return;
     }
 
@@ -134,6 +143,17 @@ function isTypingTarget(target: EventTarget | null): boolean {
     target instanceof HTMLTextAreaElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
+}
+
+function focusNewComposer(): void {
+  const active = document.activeElement;
+  if (active !== null && active !== document.body) return;
+  document.querySelector<HTMLTextAreaElement>("textarea.msg-textarea")?.focus();
+}
+
+/** The message composer's textarea, where Alt+↑/↓ still steps channels. */
+function isComposer(target: EventTarget | null): boolean {
+  return target instanceof HTMLTextAreaElement && target.classList.contains("msg-textarea");
 }
 
 /** Prevent the default and report any handler error rather than let it escape. */
