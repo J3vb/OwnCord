@@ -772,9 +772,7 @@ describe("DmCallPanel — controls while the call connects (D-08)", () => {
     patchVoice({ voiceStatus: "connected", shareDenied: true });
     const { root } = mount();
     expect(q(root, "dcp-share")!.disabled).toBe(true);
-    expect(q(root, "dcp-share")!.title).toBe(
-      "You don't have permission to share your screen here",
-    );
+    expect(q(root, "dcp-share")!.title).toBe("You don't have permission to share your screen here");
     expect(q(root, "dcp-camera")!.disabled).toBe(false);
 
     patchVoice({ shareDenied: false });
