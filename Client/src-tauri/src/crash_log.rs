@@ -452,7 +452,13 @@ mod tests {
     fn lines_match_the_log_plugins_utc_format() {
         let mut buf = [0u8; 256];
         // 2026-10-02T16:27:19Z
-        let n = format_line(&mut buf, 1_790_958_439, libc::SIGABRT, b"owncord-screen", None);
+        let n = format_line(
+            &mut buf,
+            1_790_958_439,
+            libc::SIGABRT,
+            b"owncord-screen",
+            None,
+        );
         assert_eq!(
             std::str::from_utf8(&buf[..n]).unwrap(),
             "[2026-10-02][16:27:19][owncord_client_lib::crash_log][ERROR] [crash] fatal signal SIGABRT (6) on thread 'owncord-screen'\n"
@@ -473,7 +479,13 @@ mod tests {
             std::str::from_utf8(&buf[..n]).unwrap(),
             "[2026-10-02][16:27:19][owncord_client_lib::crash_log][WARN] [exit] ended by signal SIGTERM (15) on thread 'owncord-client', sent by pid 4242 (kwin_wayland)\n"
         );
-        let n = format_line(&mut buf, 1_790_958_439, libc::SIGHUP, b"main", Some((4242, b"")));
+        let n = format_line(
+            &mut buf,
+            1_790_958_439,
+            libc::SIGHUP,
+            b"main",
+            Some((4242, b"")),
+        );
         assert!(std::str::from_utf8(&buf[..n])
             .unwrap()
             .ends_with("sent by pid 4242 (exited)\n"));

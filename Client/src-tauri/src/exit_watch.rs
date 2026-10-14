@@ -114,6 +114,7 @@ pub fn note_update_handoff() {
 
 fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
     let mut last_beat = now();
+    let mut last_tick = now();
     let mut hang_logged_at: Option<i64> = None;
     while !watch.exited.load(Ordering::SeqCst) {
         if !watch.ping_pending.swap(true, Ordering::SeqCst) {
@@ -129,6 +130,12 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
         }
         std::thread::sleep(PING_EVERY);
         let t = now();
+        // This thread slept far past its tick: the machine was suspended (or
+        // the clock moved), not the main thread frozen. Start counting again.
+        if t - last_tick > i64::try_from(HANG_AFTER.as_secs()).unwrap_or(5) {
+            watch.main_answered.fetch_max(t, Ordering::SeqCst);
+        }
+        last_tick = t;
         let silent_for = t - watch.main_answered.load(Ordering::SeqCst);
         let hang_secs = i64::try_from(HANG_AFTER.as_secs()).unwrap_or(5);
         match hang_logged_at {
@@ -166,7 +173,9 @@ pub fn watch_webview<R: Runtime>(window: &tauri::WebviewWindow<R>) {
         use webkit2gtk::WebViewExt;
         let view = webview.inner();
         view.connect_web_process_terminated(|_, reason| {
-            log::error!("[exit] webview process ended: {reason:?}; the window goes blank until reloaded");
+            log::error!(
+                "[exit] webview process ended: {reason:?}; the window goes blank until reloaded"
+            );
             log::logger().flush();
         });
         view.connect_is_web_process_responsive_notify(|view| {
@@ -183,7 +192,10 @@ pub fn watch_webview<R: Runtime>(window: &tauri::WebviewWindow<R>) {
                 watch
                     .webview_unresponsive_since
                     .store(now(), Ordering::SeqCst);
-                log::warn!("[hang] webview stopped answering (page script busy or stuck); {}", memory_text());
+                log::warn!(
+                    "[hang] webview stopped answering (page script busy or stuck); {}",
+                    memory_text()
+                );
                 log::logger().flush();
             }
             write_run_file(watch, "running");
@@ -264,10 +276,7 @@ fn is_owncord_running(pid: u32) -> bool {
 }
 
 fn previous_run_report(pid: u32, contents: &str) -> String {
-    let fields: Vec<&str> = contents
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
+    let fields: Vec<&str> = contents.lines().filter(|l| !l.trim().is_empty()).collect();
     let detail = if fields.is_empty() {
         "no details recorded".to_string()
     } else {
@@ -380,10 +389,8 @@ mod tests {
 
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "owncord-exit-watch-{tag}-{}",
-                std::process::id()
-            ));
+            let dir = std::env::temp_dir()
+                .join(format!("owncord-exit-watch-{tag}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             Self(dir)
         }
