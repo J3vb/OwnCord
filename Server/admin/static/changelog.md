@@ -144,6 +144,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - A slow check on a channel's age-restricted (NSFW) setting could hold up every message, typing indicator and presence update on the server. Now only messages in that one channel wait, for at most 1 second.
 - A stalled database could leave background cleanup (expired sessions, mention badges, push notifications, voice-leave retries) waiting forever. Each task now gives up after a timeout.
 - The periodic maintenance sweeps could keep running after the server began shutting down or restarting. A sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it.
+- A message that was sent but whose confirmation was lost could show as failed when the app resent it, if you had lost permission to post there, been timed out or been blocked in the meantime. The resend is now recognised as the message you already sent and shows as sent.
 
 ### Known issues
 

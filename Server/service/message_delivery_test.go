@@ -104,7 +104,7 @@ func TestMessageDelivery_PayloadMismatchAndSenderScope(t *testing.T) {
 	}
 }
 
-func TestMessageDelivery_RetryRechecksPermissionAndSkipsSlowMode(t *testing.T) {
+func TestMessageDelivery_RetryAfterRevokeIsDuplicateAndSkipsSlowMode(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	svc.limiter = auth.NewRateLimiter()
@@ -129,8 +129,39 @@ func TestMessageDelivery_RetryRechecksPermissionAndSkipsSlowMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.perms.InvalidateAll()
-	if _, err := svc.SendMessage(ctx, p); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("revoked retry = %v, want forbidden", err)
+	// The original was accepted before the revoke, so its retry is still
+	// acknowledged; a new id is refused.
+	revoked, err := svc.SendMessage(ctx, p)
+	if err != nil || !revoked.Duplicate || revoked.MessageID != retry.MessageID {
+		t.Fatalf("revoked retry = %+v, %v, want duplicate of %d", revoked, err, retry.MessageID)
+	}
+	fresh := p
+	fresh.ClientMessageID = deliveryTestID(time.Now())
+	if _, err := svc.SendMessage(ctx, fresh); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("new send after revoke = %v, want forbidden", err)
+	}
+}
+
+func TestMessageDelivery_RefusedSendRetryStaysRefused(t *testing.T) {
+	svc, database := newTestMessageService(t)
+	svc.RunBackgroundInlineForTest()
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = ? WHERE id = ?`, permissions.ReadMessages, permissions.MemberRoleID); err != nil {
+		t.Fatal(err)
+	}
+	svc.perms.InvalidateAll()
+	p := deliveryTestParams()
+	for attempt := range 2 {
+		if _, err := svc.SendMessage(ctx, p); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("attempt %d = %v, want forbidden", attempt, err)
+		}
+	}
+	var receipts int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts`).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 0 {
+		t.Fatalf("receipts = %d, want 0 for a refused send", receipts)
 	}
 }
 
@@ -230,7 +261,7 @@ func TestMessageDelivery_DuplicateStillUsesGeneralRateLimit(t *testing.T) {
 	}
 }
 
-func TestMessageDelivery_DuplicateRechecksDMBlock(t *testing.T) {
+func TestMessageDelivery_DuplicateAfterDMBlockIsAcknowledged(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
@@ -244,8 +275,13 @@ func TestMessageDelivery_DuplicateRechecksDMBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedBlock(t, database, 2, 1)
-	if _, err := svc.SendMessage(context.Background(), p); !errors.Is(err, ErrBlocked) {
-		t.Fatalf("blocked DM retry = %v, want blocked", err)
+	if retry, err := svc.SendMessage(context.Background(), p); err != nil || !retry.Duplicate {
+		t.Fatalf("blocked DM retry = %+v, %v, want duplicate", retry, err)
+	}
+	fresh := p
+	fresh.ClientMessageID = deliveryTestID(time.Now())
+	if _, err := svc.SendMessage(context.Background(), fresh); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("new DM send after block = %v, want blocked", err)
 	}
 }
 
@@ -253,15 +289,15 @@ func TestMessageDelivery_NewIDsHonorAdvertisedRestoreFloor(t *testing.T) {
 	p := deliveryTestParams()
 	floor := time.Now().Add(6 * time.Minute).UnixMilli()
 	p.ClientMessageID = deliveryTestID(time.UnixMilli(floor))
-	if _, err := messageDeliveryParams(p, p.Content, 0); !errors.Is(err, ErrBadRequest) {
+	if _, err := messageDeliveryParams(p, 0); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("future id without restore floor = %v", err)
 	}
-	parsed, err := messageDeliveryParams(p, p.Content, floor)
+	parsed, err := messageDeliveryParams(p, floor)
 	if err != nil || parsed.CreatedAtMS != floor {
 		t.Fatalf("new id exactly at advertised floor = %+v, %v", parsed, err)
 	}
 	p.ClientMessageID = deliveryTestID(time.UnixMilli(floor + 1))
-	if _, err := messageDeliveryParams(p, p.Content, floor); !errors.Is(err, ErrBadRequest) {
+	if _, err := messageDeliveryParams(p, floor); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("new id beyond floor and clock tolerance = %v", err)
 	}
 }

@@ -24,23 +24,17 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	)
 	defer done()
 
+	delivery, retry, err := s.answerSendRetry(ctx, p)
+	if err != nil || retry != nil {
+		return retry, err
+	}
 	ch, content, err := s.sendMessagePrecheck(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	isDM := ch.Type == "dm"
-	delivery, err := messageDeliveryParams(p, content, s.st.MessageDeliveryFloorMS())
-	if err != nil {
-		return nil, err
-	}
 	if delivery != nil {
-		previous, lookupErr := s.st.FindMessageDelivery(ctx, *delivery)
-		if lookupErr != nil {
-			return nil, messageDeliveryError(lookupErr)
-		}
-		if previous != nil {
-			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
-		}
+		delivery.Content = content
 	}
 	if err := s.checkReplyTarget(ctx, p); err != nil {
 		return nil, err
@@ -139,21 +133,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	return result, nil
 }
 
-// sendMessagePrecheck runs every gate a send must clear before anything is
-// written: rate limit, channel lookup, send permission, content sanitization,
-// and attachment permission. It returns the resolved channel and the
-// sanitized content for the caller to persist.
+// sendMessagePrecheck runs every gate a new send must clear before anything
+// is written: channel lookup, send permission, content sanitization, and
+// attachment permission. It returns the resolved channel and the sanitized
+// content for the caller to persist.
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
-	// Rate limit.
-	ratKey := auth.Key("chat", p.UserID)
-	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
-		return nil, "", ErrRateLimited
-	}
-
-	if p.ChannelID <= 0 {
-		return nil, "", fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
-	}
-
 	ch, err := s.st.GetChannel(ctx, p.ChannelID)
 	if err != nil || ch == nil {
 		return nil, "", fmt.Errorf("%w: channel not found", ErrNotFound)
