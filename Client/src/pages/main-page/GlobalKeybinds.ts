@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 import { dialogOpen } from "@lib/dialogOpen";
@@ -69,7 +70,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       runGlobal(e, "step-channel", () => handlers.onStepChannel(direction, e.shiftKey));
       // The switch rebuilds the composer once the store notifies (a microtask
       // later); keep typing in the new one unless focus has moved on since.
-      if (fromComposer) setTimeout(focusNewComposer, 0);
+      if (fromComposer) setOwnedTimeout(owner.signal, focusNewComposer, 0);
       return;
     }
 
