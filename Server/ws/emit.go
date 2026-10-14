@@ -131,6 +131,10 @@ func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event
 				h.bumpVisibilityWatermark()
 			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
+		case ActivityEvent:
+			// Not a ChannelEvent: it takes no seq and no topic, only a note for
+			// the coalescer, which flushes it off this goroutine.
+			h.activity.note(e.ActivityNote())
 		case ChannelEvent:
 			h.broadcastChannelEvent(ctx, senderID, e)
 		case VoiceVisibilityEvent:

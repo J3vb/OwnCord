@@ -758,3 +758,48 @@ func TestSendMessage_DMMentionsResolve(t *testing.T) {
 		t.Error("DM must not honor @everyone")
 	}
 }
+
+// TestMentionReach_AgreesWithMentionEntries locks the shared per-reader rule:
+// for every reader, MentionReach reports a hit exactly when mentionEntries puts
+// that reader in the batch entry the mention badge is written from.
+func TestMentionReach_AgreesWithMentionEntries(t *testing.T) {
+	svc, _, _ := newMentionFixture(t)
+	ctx := context.Background()
+	// bob online, carol no connection, mod invisible, alice (the author) online.
+	live := map[int64]string{1: db.StatusOnline, 2: db.StatusOnline, 3: "", 4: db.StatusInvisible}
+	svc.SetLiveStatusLookup(func(userID int64) string { return live[userID] })
+
+	cases := []struct {
+		name string
+		set  mentionSet
+	}{
+		{"none", mentionSet{UserIDs: []int64{}}},
+		{"direct", mentionSet{UserIDs: []int64{2, 3}}},
+		{"everyone", mentionSet{UserIDs: []int64{}, Everyone: true}},
+		{"here", mentionSet{UserIDs: []int64{}, Everyone: true, HereOnly: true}},
+		{"direct and everyone", mentionSet{UserIDs: []int64{3}, Everyone: true}},
+		{"direct and here", mentionSet{UserIDs: []int64{3}, Everyone: true, HereOnly: true}},
+		{"unknown id", mentionSet{UserIDs: []int64{99}}},
+	}
+	const authorID = int64(1)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := svc.mentionEntries(ctx, 10, 500, authorID, tc.set, false, nil)
+			batched := map[int64]bool{}
+			for _, e := range entries {
+				for _, uid := range e.UserIDs {
+					batched[uid] = true
+				}
+			}
+			for uid := int64(2); uid <= 4; uid++ {
+				direct, broad := MentionReach(tc.set.UserIDs, tc.set.Everyone, tc.set.HereOnly, uid, live[uid])
+				if got := direct || broad; got != batched[uid] {
+					t.Errorf("user %d: MentionReach = (%v, %v), mentionEntries batched = %v", uid, direct, broad, batched[uid])
+				}
+			}
+			if batched[authorID] {
+				t.Errorf("the author was batched")
+			}
+		})
+	}
+}

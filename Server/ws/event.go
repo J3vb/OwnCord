@@ -177,6 +177,29 @@ func (e channelEvt) EventType() string { return e.evType }
 func (e channelEvt) ChannelID() int64  { return e.channelID }
 func (e channelEvt) Payload() []byte   { return e.payload }
 
+// ActivityEvent feeds the channel_activity coalescer (channel_activity.go). It
+// is deliberately not a ChannelEvent: nothing is sequenced, stored or sent to
+// a topic when it is emitted.
+type ActivityEvent interface {
+	Event
+	ActivityNote() activityNote
+}
+
+// channelActivityEvt is the committed non-DM send the coalescer is told about.
+type channelActivityEvt struct {
+	channelID int64
+	msgID     int64
+	authorID  int64
+	mentions  []int64
+	everyone  bool
+	hereOnly  bool
+}
+
+func (e channelActivityEvt) EventType() string { return MsgTypeChannelActivity }
+func (e channelActivityEvt) ActivityNote() activityNote {
+	return activityNote(e)
+}
+
 // dmEvt is channelEvt's DM counterpart: the same frame addressed to a DM
 // channel's participants instead of its topic subscribers. It satisfies
 // SequencedDMEvent AND ChannelEvent, which is why EmitEvents must check

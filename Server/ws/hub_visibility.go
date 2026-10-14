@@ -50,22 +50,10 @@ func (h *Hub) channelReadAudienceIgnoringArchived(ctx context.Context, channelID
 }
 
 func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, ignoreArchived bool) []int64 {
-	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
-	h.mu.RUnlock()
-
-	// A DM channel carries no channel_overrides rows, so every connected
-	// user whose base role holds READ_MESSAGES would otherwise pass the role
-	// scan below — leaking a private DM call's voice_state/voice_leave
-	// events to the whole server. Resolve the DM's real audience (its
-	// participants, intersected with who is actually connected) instead,
-	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
-	var ref permissions.ChannelRef
+	var ch *db.Channel
 	if h.db != nil {
-		ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+		var err error
+		ch, err = h.readers.Visibility.GetChannel(ctx, channelID)
 		if err != nil {
 			// Fail closed: an unresolvable channel must not fall through to
 			// the role scan, which would treat it as a readable non-DM channel.
@@ -83,6 +71,30 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		if ch == nil {
 			return []int64{}
 		}
+	}
+	return h.channelReadAudienceFor(ctx, channelID, ch, ignoreArchived)
+}
+
+// channelReadAudienceFor is channelReadAudienceImpl over a channel row the
+// caller already read, so a caller that also needs the row (the channel_activity
+// flush reads its type and NSFW label) pays one GetChannel for both. A nil ch is
+// the bare test hub with no database: the role scan runs without a channel ref.
+func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *db.Channel, ignoreArchived bool) []int64 {
+	h.mu.RLock()
+	userIDs := make([]int64, 0, len(h.clients))
+	for uid := range h.clients {
+		userIDs = append(userIDs, uid)
+	}
+	h.mu.RUnlock()
+
+	// A DM channel carries no channel_overrides rows, so every connected
+	// user whose base role holds READ_MESSAGES would otherwise pass the role
+	// scan below — leaking a private DM call's voice_state/voice_leave
+	// events to the whole server. Resolve the DM's real audience (its
+	// participants, intersected with who is actually connected) instead,
+	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
+	var ref permissions.ChannelRef
+	if ch != nil {
 		if ch.Type == "dm" {
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
