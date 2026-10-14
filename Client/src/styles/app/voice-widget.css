@@ -201,6 +201,16 @@ select[hidden] + .vw-stream-stop {
   border-radius: var(--radius-sm);
   transition: background 0.1s;
 }
+.vw-ns {
+  display: flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.vw-ns[aria-pressed="true"] {
+  color: var(--text-positive);
+}
+.vw-ns:hover,
 .vw-signal:hover {
   background: var(--bg-active);
 }

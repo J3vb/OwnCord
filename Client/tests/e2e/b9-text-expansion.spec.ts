@@ -480,7 +480,7 @@ test.describe("B9-20 settings, account and voice text", () => {
       ["Account", "Edit profile"],
       ["Notifications", "Desktop Notifications"],
       ["Text & Images", "Link Preview"],
-      ["Voice & Audio", "Input Device"],
+      ["Voice & Video", "Input Device"],
       ["Keybinds", "Push to Talk"],
       ["Advanced", "Developer Mode"],
       ["Logs", "Export Support Bundle"],

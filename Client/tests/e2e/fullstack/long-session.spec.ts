@@ -169,7 +169,7 @@ async function runCycle(
     "Notifications",
     "Text & Images",
     "Accessibility",
-    "Voice & Audio",
+    "Voice & Video",
     "Keybinds",
     "Advanced",
     "Logs",

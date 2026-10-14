@@ -222,7 +222,7 @@ test("a processing toggle applies to the live microphone and keeps the chosen in
 }) => {
   await joinVoice(alice);
   await openSettings(alice);
-  await switchSettingsTab(alice, "Voice & Audio");
+  await switchSettingsTab(alice, "Voice & Video");
   const input = alice.locator("select[aria-label='Input Device']");
   await expect(input.locator("option", { hasText: "Fake Audio Input 1" })).toHaveCount(1);
   await input.selectOption({ label: "Fake Audio Input 1" });
