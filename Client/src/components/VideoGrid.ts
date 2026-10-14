@@ -819,7 +819,8 @@ export function createVideoGrid(): VideoGridComponent {
    *  toggles and the call view's control bar. */
   function appendChrome(): void {
     if (root === null) return;
-    for (const el of [exitBtn, viewBar, callBar]) {
+    // In the call view the exit control rides in the view bar.
+    for (const el of [viewBar === null ? exitBtn : null, viewBar, callBar]) {
       if (el !== null && el.parentNode !== root) root.appendChild(el);
     }
     syncViewBar();
@@ -1112,6 +1113,7 @@ export function createVideoGrid(): VideoGridComponent {
       else closeCallPopout(true);
     });
     bar.appendChild(popBtn);
+    if (exitBtn !== null) bar.appendChild(exitBtn);
     syncPopButton();
     return bar;
   }
@@ -1249,6 +1251,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (root === null) return;
     if (on && viewBar === null) viewBar = buildViewBar();
     if (!on && viewBar !== null) {
+      if (exitBtn !== null) root.insertBefore(exitBtn, root.firstChild);
       viewBar.remove();
       viewBar = null;
       popBtn = null;
@@ -2188,7 +2191,7 @@ export function createVideoGrid(): VideoGridComponent {
       tabindex: "-1",
     });
 
-    // A header exit control, always reachable in focus mode too: the focused
+    // An exit control, always reachable in focus mode too: the focused
     // tile's own "Back to grid" nav can be scrolled off, and an empty grid
     // could otherwise cover the chat with no way back (OC video-grid exit).
     exitBtn = createElement("button", {
@@ -2198,7 +2201,7 @@ export function createVideoGrid(): VideoGridComponent {
       title: voiceText("grid.showChat"),
       "data-tile-control": "exit-grid",
     });
-    exitBtn.appendChild(createIcon("x", 18));
+    exitBtn.appendChild(createIcon("message-square", 18));
     exitBtn.hidden = true;
     exitBtn.addEventListener("click", () => {
       // Clearing the grid's own focus keeps it consistent if the host only
