@@ -77,7 +77,10 @@ Each run keeps `run-<pid>.state` (time, memory, threads, hang state) in the log
 directory, refreshed every 10 s and deleted on a normal exit. A start that
 finds one from a process that is gone logs it as a run that ended without a
 normal exit, with its last record, which is how an uncatchable `SIGKILL` (the
-out-of-memory killer, or a desktop killing a frozen window) shows up.
+out-of-memory killer, or a desktop killing a frozen window) shows up. A terminate
+or hang-up removes the file as it logs its own line. Memory lines count only
+the app's own process: the webview's separate web process is not included, and
+its end is logged as `[exit] webview process ended`.
 
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The

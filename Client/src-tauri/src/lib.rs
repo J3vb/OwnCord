@@ -339,7 +339,10 @@ pub fn run() {
         Ok(app) => {
             app.run(|_app, event| {
                 if let tauri::RunEvent::ExitRequested { code, .. } = &event {
-                    match code {
+                    match *code {
+                        Some(tauri::RESTART_EXIT_CODE) => {
+                            log::info!("[exit] restart requested by the app")
+                        }
                         Some(code) => log::info!("[exit] exit requested by the app (code {code})"),
                         None => log::info!("[exit] exit requested: the last window closed"),
                     }
@@ -360,6 +363,9 @@ pub fn run() {
         }
         Err(e) => {
             eprintln!("Fatal startup error: {e}");
+            log::error!("[exit] fatal startup error: {e}");
+            #[cfg(target_os = "linux")]
+            exit_watch::note_exit("startup failed");
             #[cfg(not(target_os = "linux"))]
             rfd::MessageDialog::new()
                 .set_title(text::STARTUP_DIALOG_TITLE)

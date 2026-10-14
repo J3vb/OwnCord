@@ -49,6 +49,16 @@ const SIGNALS: [(c_int, &str); 10] = [
 
 /// The native log file, as a C path for `open(2)` in signal context.
 static LOG_FILE: OnceLock<CString> = OnceLock::new();
+/// `exit_watch`'s run file, removed when a terminate or hang-up ends the
+/// process: its line is already logged, so the next start need not report it.
+static RUN_FILE: OnceLock<CString> = OnceLock::new();
+
+/// Name the run file a non-crash signal should remove.
+pub fn set_run_file(path: &Path) {
+    if let Ok(path) = CString::new(path.as_os_str().as_bytes()) {
+        let _ = RUN_FILE.set(path);
+    }
+}
 /// The action each of [`SIGNALS`] had before ours, by index.
 static PREVIOUS: [OnceLock<libc::sigaction>; SIGNALS.len()] =
     [const { OnceLock::new() }; SIGNALS.len()];
@@ -127,6 +137,12 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
         }
     }
     let index = SIGNALS.iter().position(|(s, _)| *s == signal);
+    if index.is_some_and(|i| i >= FATAL) {
+        if let Some(run_file) = RUN_FILE.get() {
+            // SAFETY: unlink(2) is async-signal-safe.
+            unsafe { libc::unlink(run_file.as_ptr()) };
+        }
+    }
     let previous = index.and_then(|i| PREVIOUS[i].get());
     // SAFETY: restoring the action this signal had before `install`.
     unsafe {
