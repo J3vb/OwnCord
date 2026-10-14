@@ -1171,7 +1171,11 @@ export interface MessageResponse {
   readonly mentions_everyone?: boolean;
 }
 
-/** Paginated messages response. */
+/**
+ * Paginated messages response. Newest-first for the default and `before`
+ * pages; **oldest-first** for an `after` page (the window's downward
+ * continuation, already in render order).
+ */
 export interface MessagesResponse {
   readonly messages: readonly MessageResponse[];
   readonly has_more: boolean;

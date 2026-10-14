@@ -1575,3 +1575,39 @@ func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
 		t.Errorf("DM channel %d leaked into a non-participant's unread counts", ch.ID)
 	}
 }
+
+// ─── GetMessagesAfterForAPI ─────────────────────────────────────────────────
+
+func TestGetMessagesAfterForAPI_AscendingAfterCursor(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "afteru1")
+	chID := seedChannel(t, database, "afterc1")
+	otherCh := seedChannel(t, database, "afterc2")
+	ids := seedAroundMessages(t, database, chID, userID, 10)
+	seedAroundMessages(t, database, otherCh, userID, 3) // newer ids in another channel
+	if err := database.DeleteMessage(context.Background(), ids[6], userID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	msgs, err := database.GetMessagesAfterForAPI(context.Background(), chID, ids[4], 3, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAfterForAPI: %v", err)
+	}
+	// Oldest-first, strictly after the cursor, deleted row skipped, capped at 3.
+	want := []int64{ids[5], ids[7], ids[8]}
+	got := make([]int64, 0, len(msgs))
+	for _, m := range msgs {
+		got = append(got, m.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("page = %v, want %v", got, want)
+	}
+
+	none, err := database.GetMessagesAfterForAPI(context.Background(), chID, ids[9], 5, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAfterForAPI(newest): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("page after the newest = %d rows, want 0", len(none))
+	}
+}
