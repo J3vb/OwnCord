@@ -119,6 +119,7 @@ and only when it changes something a contributor or fork holder must do
 **Channels**
 
 - Switching channels quickly (holding Alt+Down) no longer leaves you on a channel that never receives new messages.
+- Alt+Up/Down did nothing while typing in the message box; it now switches channels from there too.
 
 **Voice**
 

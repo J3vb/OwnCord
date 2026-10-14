@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished, type Mock } from "vitest";
 
 const { mockVoiceGetState } = vi.hoisted(() => ({
   mockVoiceGetState: vi.fn(() => ({ currentChannelId: null as number | null })),
@@ -361,24 +361,87 @@ describe("global keybinds", () => {
     expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, true);
   });
 
-  it("does not step while typing in the composer", () => {
-    const h = makeHandlers();
-    detach = attachGlobalKeybinds(h);
-
-    const composer = document.createElement("textarea");
-    document.body.appendChild(composer);
-    composer.focus();
-    composer.dispatchEvent(
+  function altArrowIn(el: HTMLElement, init: KeyboardEventInit = {}): void {
+    document.body.appendChild(el);
+    el.focus();
+    el.dispatchEvent(
       new KeyboardEvent("keydown", {
         key: "ArrowDown",
         altKey: true,
         bubbles: true,
+        cancelable: true,
+        ...init,
       }),
     );
+    el.remove();
+  }
+
+  it("steps channels while typing in the message composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer);
+
+    expect(h.onStepChannel).toHaveBeenCalledWith(1, false);
+  });
+
+  it("moves focus to the new channel's composer after stepping from the composer", () => {
+    const h = makeHandlers();
+    const next = document.createElement("textarea");
+    next.className = "msg-textarea";
+    h.onStepChannel.mockImplementation(() => {
+      document.body.appendChild(next);
+    });
+    detach = attachGlobalKeybinds(h);
+
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer);
+    vi.runAllTimers();
+
+    expect(document.activeElement).toBe(next);
+    next.remove();
+  });
+
+  it("leaves Alt+Arrow to a composer popup that already handled it", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    composer.addEventListener("keydown", (e) => e.preventDefault());
+    altArrowIn(composer);
 
     expect(h.onStepChannel).not.toHaveBeenCalled();
+  });
 
-    composer.remove();
+  it("does not step from the composer during an IME composition", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer, { isComposing: true });
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
+  });
+
+  it("does not step while typing in another text field", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const search = document.createElement("input");
+    search.type = "search";
+    altArrowIn(search);
+    altArrowIn(document.createElement("textarea"));
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
   });
 
   it("keeps a handler error from escaping to the document", () => {
