@@ -5,6 +5,7 @@ const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
 const mockShareQuality = vi.fn<() => string | null>(() => "medium");
 const mockChangeSource = vi.fn().mockResolvedValue(undefined);
 const mockSetQuality = vi.fn().mockResolvedValue(undefined);
+const mockReapplyEnhanced = vi.fn().mockResolvedValue(undefined);
 vi.mock("@lib/livekitSession", () => ({
   getLocalScreenshareStream: () => ({
     getVideoTracks: () => [
@@ -16,6 +17,7 @@ vi.mock("@lib/livekitSession", () => ({
   setScreenshareQuality: (q: string) => mockSetQuality(q),
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
+  reapplyEnhancedNoiseSuppression: () => mockReapplyEnhanced(),
   joinVoice: vi.fn(),
   leaveVoice: vi.fn(),
   toggleMute: vi.fn(),
@@ -52,6 +54,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
+import { loadPref, savePref } from "../../src/lib/preferences";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -1114,5 +1117,58 @@ describe("VoiceWidget", () => {
     expect(grantBtn.title).toBe("Reconnecting…");
 
     widget.destroy?.();
+  });
+
+  describe("noise suppression toggle (WP 1D-6)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      mockReapplyEnhanced.mockClear();
+    });
+
+    function mountWidget(): {
+      widget: ReturnType<typeof createVoiceWidget>;
+      btn: HTMLButtonElement;
+    } {
+      const widget = createVoiceWidget({
+        onDisconnect: vi.fn(),
+        onCameraToggle: vi.fn(),
+        onScreenshareToggle: vi.fn(),
+      });
+      widget.mount(container);
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="vw-ns"]')!;
+      return { widget, btn };
+    }
+
+    it("flips the Enhanced Noise Suppression pref and re-routes the live mic", () => {
+      const { widget, btn } = mountWidget();
+      expect(btn.getAttribute("aria-label")).toBe("Enhanced Noise Suppression");
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+
+      btn.click();
+      expect(loadPref("enhancedNoiseSuppression", false)).toBe(true);
+      expect(mockReapplyEnhanced).toHaveBeenCalledTimes(1);
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+
+      btn.click();
+      expect(loadPref("enhancedNoiseSuppression", true)).toBe(false);
+      expect(mockReapplyEnhanced).toHaveBeenCalledTimes(2);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+
+      widget.destroy?.();
+    });
+
+    it("starts from the saved pref and follows a change made in Settings", () => {
+      savePref("enhancedNoiseSuppression", true);
+      const { widget, btn } = mountWidget();
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+
+      savePref("enhancedNoiseSuppression", false);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      expect(mockReapplyEnhanced).not.toHaveBeenCalled();
+
+      widget.destroy?.();
+      savePref("enhancedNoiseSuppression", true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+    });
   });
 });

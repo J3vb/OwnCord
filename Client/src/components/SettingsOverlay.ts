@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs, About.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Video, Keybinds, Advanced, Logs, About.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -104,7 +104,7 @@ export type TabName =
   | "Notifications"
   | "Text & Images"
   | "Accessibility"
-  | "Voice & Audio"
+  | "Voice & Video"
   | "Keybinds"
   | "Advanced"
   | "Logs"
@@ -117,7 +117,7 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Notifications: "bell",
   "Text & Images": "image",
   Accessibility: "eye",
-  "Voice & Audio": "mic",
+  "Voice & Video": "mic",
   Keybinds: "keyboard",
   Advanced: "settings",
   Logs: "scroll-text",
@@ -139,7 +139,7 @@ const TAB_LABEL_KEYS = {
   Notifications: "tabs.notifications",
   "Text & Images": "tabs.textImages",
   Accessibility: "tabs.accessibility",
-  "Voice & Audio": "tabs.voice",
+  "Voice & Video": "tabs.voice",
   Keybinds: "tabs.keybinds",
   Advanced: "tabs.advanced",
   Logs: "tabs.logs",
@@ -235,7 +235,7 @@ export function createSettingsOverlay(
     Notifications: (signal) => buildNotificationsTab(signal),
     "Text & Images": (signal) => buildTextImagesTab(signal),
     Accessibility: (signal) => buildAccessibilityTab(signal),
-    "Voice & Audio": (signal) => voiceTab.build(signal),
+    "Voice & Video": (signal) => voiceTab.build(signal),
     Keybinds: (signal) => buildKeybindsTab(signal),
     Advanced: (signal) => buildAdvancedTab(signal),
     Logs: (signal) => logsTab.build(signal),
@@ -274,7 +274,7 @@ export function createSettingsOverlay(
 
   /** Release resources held by the tab currently on screen. */
   function cleanupActiveTab(): void {
-    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    if (activeTab === "Voice & Video") voiceTab.cleanup();
     // The Logs tab keeps a live log listener pointed at its (now discarded)
     // list element — drop it so it isn't re-rendering a detached tree.
     if (activeTab === "Logs") logsTab.cleanup();
