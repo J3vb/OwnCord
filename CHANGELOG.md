@@ -47,16 +47,17 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-### Fixed
-
-**Login & connection**
-
-- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
 ### Changed
 
 **Login & connection**
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
+
+### Fixed
+
+**Login & connection**
+
+- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
 
 ## v2.3.0-beta.1
 
