@@ -122,7 +122,22 @@ export function createConnectPage(
     getRegistrationMode: callbacks.getRegistrationMode,
     getRetentionNotice: callbacks.getRetentionNotice,
     onHostSettled: callbacks.onHostSettled,
+    // A typed host that is a saved profile takes that profile's two flags, so
+    // an opted-out profile is not overridden by the defaults. Applied once per
+    // match so later edits to the boxes are the user's own.
+    onHostInput: (host) => applySavedFlags(host),
   });
+  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
+  let appliedProfileHost = "";
+  function applySavedFlags(host: string): void {
+    if (host === appliedProfileHost) return;
+    const saved = knownProfiles.find((p) => p.synthetic !== true && p.host === host) as
+      { autoConnect?: boolean; rememberPassword?: boolean } | undefined;
+    appliedProfileHost = saved ? host : "";
+    if (!saved) return;
+    loginForm.setAutoConnect(saved.autoConnect === true);
+    loginForm.setRememberPassword(saved.rememberPassword === true);
+  }
 
   // Per-host compatibility from the advisory preflight. The notice reads it
   // when the user selects a server; the 15 s probe only writes badges.
@@ -160,13 +175,21 @@ export function createConnectPage(
   const serverPanel = createServerPanel(
     {
       signal,
-      onServerClick(host: string, username?: string, autoConnect?: boolean) {
+      onServerClick(
+        host: string,
+        username?: string,
+        autoConnect?: boolean,
+        rememberPassword?: boolean,
+      ) {
         loginForm.cancelServerWaitUnless(host);
         loginForm.setHost(host);
         if (username) {
           loginForm.setCredentials(username);
         }
-        loginForm.setAutoConnect(autoConnect === true);
+        // A saved profile sets both boxes; a host with no profile gets the
+        // defaults (stay signed in, password not remembered).
+        loginForm.setAutoConnect(autoConnect ?? true);
+        loginForm.setRememberPassword(rememberPassword ?? false);
         // The notice appears only for the host the user selects — never for a
         // background-probe profile (Decision 2).
         selectHost(host);
@@ -441,7 +464,11 @@ export function createConnectPage(
     getPassword: () => loginForm.getPassword(),
     isUsingSavedPassword: () => loginForm.isUsingSavedPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
+      knownProfiles = profiles;
       serverPanel.renderProfiles(profiles);
+      // Profiles load after the form mounts; a host typed before they arrived
+      // still takes its saved profile's flags.
+      applySavedFlags(loginForm.getHost().trim());
     },
     selectServer(
       host: string,
@@ -453,7 +480,8 @@ export function createConnectPage(
       if (username) {
         loginForm.setCredentials(username);
       }
-      loginForm.setAutoConnect(autoConnect === true);
+      loginForm.setAutoConnect(autoConnect ?? true);
+      loginForm.setRememberPassword(rememberPassword ?? false);
       // A profile that opted out must not pick up a stored credential that outlived the opt-out.
       if (rememberPassword === false) return;
       // Load saved credentials asynchronously (same flow as clicking a server card)

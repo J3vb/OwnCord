@@ -186,6 +186,8 @@ test.describe("Saved-password login", () => {
     await password.fill("typed-password-123");
     await page.locator("#username").fill("someone-else");
     await page.locator("#remember-password").uncheck();
+    // Stay signed in keeps the token, so declining to be remembered means both.
+    await page.locator("#auto-connect").uncheck();
     await page.locator(".btn-primary[type='submit']").click();
 
     await expectOverlayUntilReady(page, 10000);
@@ -210,6 +212,8 @@ test.describe("Saved-password login", () => {
     await password.press("a");
     await password.fill("typed-password-123");
     await page.locator("#remember-password").uncheck();
+    // Stay signed in keeps the token, so declining to be remembered means both.
+    await page.locator("#auto-connect").uncheck();
     await page.locator(".btn-primary[type='submit']").click();
 
     await expect

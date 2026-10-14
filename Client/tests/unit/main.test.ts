@@ -173,6 +173,7 @@ const capturedConnectCallbacks: {
   getRetentionNotice?: (host: string) => string | null;
   onHostSettled?: (host: string) => void;
   onDeleteProfile?: (profileId: string) => void;
+  onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -236,7 +237,7 @@ import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { setMarkReadSender } from "@lib/read-state";
 import type { ReadyChannel } from "@lib/types";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
-import { deleteCredential, loadCredential } from "@lib/credentials";
+import { deleteCredential, loadCredential, saveCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
@@ -827,6 +828,230 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     expect(deleteCredential).toHaveBeenCalledWith("case-fold.example:8443");
+  });
+});
+
+describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
+  const host = "split.example:8443";
+  const authOk = {
+    user: { id: 9, username: "alice", avatar: null, role: "member" },
+    server_name: "Split Co",
+    motd: "",
+  };
+  const page = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      getRememberPassword: ReturnType<typeof vi.fn>;
+      getAutoConnect: ReturnType<typeof vi.fn>;
+    };
+
+  beforeEach(() => {
+    vi.mocked(saveCredential).mockClear();
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+  });
+  afterEach(() => {
+    page().getRememberPassword.mockReturnValue(false);
+    page().getAutoConnect.mockReturnValue(false);
+  });
+
+  it("Auto connect alone saves the token but not the password, and clears any older password", async () => {
+    page().getAutoConnect.mockReturnValue(true);
+    page().getRememberPassword.mockReturnValue(false);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledTimes(1);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", undefined, true);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("Auto connect and Remember together save the token and the password", async () => {
+    page().getAutoConnect.mockReturnValue(true);
+    page().getRememberPassword.mockReturnValue(true);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", "hunter2", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("Remember alone saves the token and the password as before", async () => {
+    page().getAutoConnect.mockReturnValue(false);
+    page().getRememberPassword.mockReturnValue(true);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", "hunter2", false);
+  });
+
+  it("neither box ticked deletes the credential and saves nothing", async () => {
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).not.toHaveBeenCalled();
+    expect(deleteCredential).toHaveBeenCalledWith(host);
+  });
+});
+
+describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
+  type P = {
+    id: string;
+    name: string;
+    host: string;
+    autoConnect: boolean;
+    rememberPassword: boolean;
+  };
+  const mk = (id: string, autoConnect: boolean, rememberPassword: boolean): P => ({
+    id,
+    name: id,
+    host: `${id}.example:8443`,
+    autoConnect,
+    rememberPassword,
+  });
+  let profiles: P[] = [];
+
+  beforeEach(() => {
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+    mockProfileManager.getAll.mockImplementation((() => profiles) as never);
+    mockProfileManager.setAutoLogin.mockImplementation(((id: string | null) => {
+      profiles = profiles.map((p) => ({ ...p, autoConnect: p.id === id }));
+    }) as never);
+  });
+  afterEach(() => {
+    profiles = [];
+    mockProfileManager.getAll.mockReset().mockReturnValue([]);
+    mockProfileManager.setAutoLogin.mockReset();
+  });
+
+  it("deletes the token when the panel toggles Auto connect off an auto-connect-only profile", () => {
+    profiles = [mk("a", true, false)];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).toHaveBeenCalledWith("a.example:8443");
+  });
+
+  it("keeps the credential when the profile also remembers its password", () => {
+    profiles = [mk("a", true, true)];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("keeps the credential while another profile on the host still holds a flag", () => {
+    profiles = [mk("a", true, false), { ...mk("a", false, true), id: "a2" }];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("deletes the previous holder's token when a second server claims auto-connect", async () => {
+    profiles = [mk("a", true, false), mk("b", false, false)];
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      getAutoConnect: ReturnType<typeof vi.fn>;
+    };
+    page.getAutoConnect.mockReturnValue(true);
+    try {
+      await loginAndReachAuthOk("b.example:8443", "alice", {
+        user: { id: 9, username: "alice", avatar: null, role: "member" },
+        server_name: "B",
+        motd: "",
+      });
+      await vi.advanceTimersByTimeAsync(50);
+    } finally {
+      page.getAutoConnect.mockReturnValue(false);
+    }
+    expect(deleteCredential).toHaveBeenCalledWith("a.example:8443");
+    expect(deleteCredential).not.toHaveBeenCalledWith("b.example:8443");
+  });
+});
+
+describe("main.ts startup resume of the stored token (WP 2B-4)", () => {
+  const host = "resume.example:8443";
+  const autoProfile = {
+    id: "p-r",
+    name: "Resume Co",
+    host,
+    username: "alex",
+    autoConnect: true,
+    rememberPassword: false,
+  };
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+  });
+  afterEach(() => {
+    sessionStorage.clear();
+    mockProfileManager.getAll.mockReturnValue([]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
+    vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+  });
+
+  /** Re-enter the connect page the way a fresh launch does: no skip flag. */
+  async function relaunch(): Promise<void> {
+    await loginAndReachAuthOk("elsewhere.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Elsewhere",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    vi.mocked(createMainPage).mockClear();
+    // A fresh launch has no logout behind it, so the skip flag a session end
+    // would leave in sessionStorage must not exist when the page mounts.
+    const realSet = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key !== "owncord:skip-auto-login") realSet.call(this, key, value);
+    });
+    clearAuth("server_switch");
+    await vi.advanceTimersByTimeAsync(50);
+    setItem.mockRestore();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  }
+  const lastPage = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showAutoConnecting: ReturnType<typeof vi.fn>;
+    };
+
+  it("resumes the auto-connect profile on a token alone (no remembered password)", async () => {
+    mockProfileManager.getAll.mockReturnValue([autoProfile]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stored-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalledWith("Resume Co");
+  });
+
+  it("lands on the login form, not the main page, when the stored token is rejected", async () => {
+    mockProfileManager.getAll.mockReturnValue([autoProfile]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "expired-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalled();
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "Invalid or expired token" } }),
+    );
+    await vi.advanceTimersByTimeAsync(800);
+    expectConsole("error", /\[ws\] Authentication failed/);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(createMainPage).not.toHaveBeenCalled();
+  });
+
+  it("resumes nothing when the profile was deleted", async () => {
+    mockProfileManager.getAll.mockReturnValue([]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stale-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
   });
 });
 

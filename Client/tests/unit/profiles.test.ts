@@ -590,14 +590,14 @@ describe("ProfileManager", () => {
   // ── Auto-login ──────────────────────────────────────────
 
   describe("setAutoLogin", () => {
-    it("sets auto-login on target profile and forces rememberPassword", () => {
+    it("sets auto-login on target profile and leaves rememberPassword as it was", () => {
       const m = mgr();
       const p1 = m.addProfile(sampleData); // autoConnect: false
       m.setAutoLogin(p1.id);
 
       const updated = m.getById(p1.id)!;
       expect(updated.autoConnect).toBe(true);
-      expect(updated.rememberPassword).toBe(true);
+      expect(updated.rememberPassword).toBe(sampleData.rememberPassword);
     });
 
     it("clears auto-login from all other profiles", () => {
