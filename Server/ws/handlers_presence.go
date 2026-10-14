@@ -13,9 +13,11 @@ import (
 // limit/window even though both run the identical HandleChannelFocus service
 // call. They used to share one auth.Key("focus", ...) budget, which let a
 // "Mark All as Read" burst (one mark_read per badged channel) exhaust the
-// window and silently drop the next legitimate channel_focus — leaving the
+// window and starve the next legitimate channel_focus — leaving the
 // connection subscribed to the previous channel's pub/sub topic with no
-// error surfaced to the client.
+// error surfaced to the client. A channel_focus that does exceed its own
+// budget is deferred, not dropped: the latest one is applied once the window
+// frees (see focus_defer.go).
 const (
 	focusRateLimit  = 5
 	focusRateWindow = time.Second
@@ -116,10 +118,12 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// Every frame drives an unmetered SQLite write (UpdateReadState) plus
 	// perm checks and pubsub churn, so focus is metered on its own key —
 	// mark_read runs the identical service call but must not be able to
-	// spend this budget (see handleMarkReadV2). Silently dropping matches
-	// the handlers' existing error posture.
+	// spend this budget (see handleMarkReadV2). A refused frame is deferred
+	// rather than dropped: dropping it would leave a fast channel switcher on
+	// a channel the server never subscribed them to, so the applier remembers
+	// the latest refused channel and applies it once the window frees.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("focus", info.UserID), focusRateLimit, focusRateWindow) {
-		return Result{}
+		return Result{DeferChannelFocus: &chID}
 	}
 
 	_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, chID)

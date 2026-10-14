@@ -231,9 +231,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		Limiter:    h.limiter,
 		LiveStatus: h.LiveStatus,
 	}
-	presenceDeps := PresenceDeps{
-		Limiter: h.limiter,
-	}
+	presenceDeps := PresenceDeps{Limiter: h.limiter}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -263,6 +261,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	registerChatHandlers(reg, chatDeps)
+	h.focusDeps = presenceDeps
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)
