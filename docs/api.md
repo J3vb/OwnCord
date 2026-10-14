@@ -3220,7 +3220,9 @@ switch), `persist` (the `voice_states` write and moderator-flag restore),
 `token` (minting and sending `voice_token`), `complete` (the voice topic
 subscription, `voice_state` fan-out, existing states and `voice_config`) and
 `total`; a refused or rolled-back join is not counted. A
-`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating; the retention purge holds `seqMu` across a full scan.
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. It is the
+longest hold since start, not a recent one; the replay purges run their
+database deletes outside `seqMu`.
 
 ### GET /metrics (Prometheus)
 

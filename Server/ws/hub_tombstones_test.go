@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -16,17 +17,17 @@ func setReplayPurgeBeforeDelete(t *testing.T, hook func()) {
 }
 
 // The persisted-row delete runs after the purge has released seqMu, so live
-// delivery carries on while it runs; cold-tier reads wait for it, so a
-// resume never reads rows the ring has dropped but the database still holds
-// (2A-7).
-func TestPurgeReplay_DeleteRunsOutsideSeqMuAndHoldsColdReads(t *testing.T) {
+// delivery carries on while it runs; a cold-tier read during it fails fast,
+// so a resume takes the full ready instead of reading rows the ring has
+// dropped but the database still holds (2A-7).
+func TestPurgeReplay_DeleteRunsOutsideSeqMuAndFailsColdReads(t *testing.T) {
 	ctx := context.Background()
 	database := newTeardownTestDB(t)
 	h := newTestHubWith(t, HubOptions{DB: database})
 	h.SetEventStore(database)
+	store := *h.eventStore.Load()
 
 	delivered := make(chan uint64, 1)
-	coldDone := make(chan struct{})
 	setReplayPurgeBeforeDelete(t, func() {
 		//nolint:contextcheck // deliverBroadcast runs on the dispatch goroutine and takes no context by design.
 		go func() {
@@ -40,24 +41,22 @@ func TestPurgeReplay_DeleteRunsOutsideSeqMuAndHoldsColdReads(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Error("a broadcast could not be sequenced while the purge deleted rows: seqMu is still held")
 		}
-		go func() {
-			_, _ = (*h.eventStore.Load()).GetEventsSince(ctx, 0, 10)
-			close(coldDone)
-		}()
-		select {
-		case <-coldDone:
-			t.Error("a cold-tier read ran while the purge had dropped the ring's copies but not the rows")
-		case <-time.After(50 * time.Millisecond):
+		if _, err := store.GetEventsSince(ctx, 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
+			t.Errorf("GetEventsSince during the purge: err = %v, want errReplayPurgeInProgress", err)
+		}
+		if _, err := store.GetEventsSinceForChannels(ctx, 0, []int64{1}, 10); !errors.Is(err, errReplayPurgeInProgress) {
+			t.Errorf("GetEventsSinceForChannels during the purge: err = %v, want errReplayPurgeInProgress", err)
+		}
+		if _, err := store.CountEventsInRange(ctx, 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
+			t.Errorf("CountEventsInRange during the purge: err = %v, want errReplayPurgeInProgress", err)
 		}
 	})
 
 	if err := h.PurgeUserFromReplay(ctx, 42); err != nil {
 		t.Fatalf("PurgeUserFromReplay: %v", err)
 	}
-	select {
-	case <-coldDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the cold-tier read never ran after the purge finished")
+	if _, err := store.GetEventsSince(ctx, 0, 10); err != nil {
+		t.Fatalf("GetEventsSince after the purge: %v", err)
 	}
 }
 
@@ -138,6 +137,52 @@ func TestTombstones_ExpireOnlyPastAgeAndReplayHorizon(t *testing.T) {
 	h.expireReplayTombstones()
 	if h.tombstones.erased(7) || len(h.tombstones.messages) != 0 {
 		t.Fatal("tombstones past both the age and the replay horizon were kept")
+	}
+}
+
+// Expiring an old batch keeps an id a later batch installed again.
+func TestTombstones_ExpireKeepsReinstalledIDs(t *testing.T) {
+	var ts replayPurgeState
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	ts.now = func() time.Time { return now }
+	ts.add(&ts.messages, 1, 5, 6)
+	now = now.Add(2 * tombstoneMinAge)
+	ts.add(&ts.messages, 100, 6)
+	if n := ts.expire(50, 10); n != 1 {
+		t.Fatalf("expired %d ids, want 1", n)
+	}
+	if _, ok := ts.messages[6]; !ok {
+		t.Fatal("an id a later batch reinstalled was expired with the older batch")
+	}
+	if _, ok := ts.messages[5]; ok {
+		t.Fatal("an id only the expired batch held was kept")
+	}
+	if len(ts.batches) != 1 || ts.batches[0].seq != 100 {
+		t.Fatalf("batches = %+v, want only the seq-100 batch", ts.batches)
+	}
+}
+
+// A field of an unexpected JSON type does not hide the ids in other fields.
+func TestParseFrameRefs_TolerantOfOddFieldTypes(t *testing.T) {
+	users := map[int64]uint64{7: 0}
+	for _, tc := range []struct {
+		name  string
+		frame string
+		want  bool
+	}{
+		{"clean", `{"type":"chat_message","payload":{"id":1,"user":{"id":7}}}`, true},
+		{"string mentions", `{"type":"chat_message","payload":{"id":1,"mentions":"x","user":{"id":7}}}`, true},
+		{"string id", `{"type":"chat_message","payload":{"id":"1","user_id":7}}`, true},
+		{"not json", `{"type":`, false},
+		{"other user", `{"type":"chat_message","payload":{"id":1,"user":{"id":8}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			refs, ok := parseFrameRefs([]byte(tc.frame))
+			_, hit := refs.userIn(users)
+			if got := ok && hit; got != tc.want {
+				t.Fatalf("names erased user = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

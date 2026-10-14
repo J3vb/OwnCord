@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -28,28 +29,39 @@ type EventStore interface {
 	GetMaxEventSeq(ctx context.Context) (int64, error)
 }
 
+// errReplayPurgeInProgress is what a cold-tier read returns while a replay
+// purge is between dropping the ring's copies and deleting the rows; the
+// resume treats it like any failed cold read and takes the full ready.
+var errReplayPurgeInProgress = errors.New("replay purge in progress")
+
 // purgeGuardedStore is the EventStore the cold-tier reads go through: each
-// read holds replayPurgeState.mu for reading, so it waits out a purge that
-// has dropped rows from the ring but not yet deleted them from the database.
+// read holds replayPurgeState.mu for reading, and fails with
+// errReplayPurgeInProgress rather than wait when a purge holds it.
 type purgeGuardedStore struct {
 	EventStore
 	mu *syncutil.RWMutex
 }
 
 func (s purgeGuardedStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
-	s.mu.RLock()
+	if !s.mu.TryRLock() {
+		return nil, errReplayPurgeInProgress
+	}
 	defer s.mu.RUnlock()
 	return s.EventStore.GetEventsSince(ctx, afterSeq, limit)
 }
 
 func (s purgeGuardedStore) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error) {
-	s.mu.RLock()
+	if !s.mu.TryRLock() {
+		return nil, errReplayPurgeInProgress
+	}
 	defer s.mu.RUnlock()
 	return s.EventStore.GetEventsSinceForChannels(ctx, afterSeq, channelIDs, limit)
 }
 
 func (s purgeGuardedStore) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
-	s.mu.RLock()
+	if !s.mu.TryRLock() {
+		return 0, errReplayPurgeInProgress
+	}
 	defer s.mu.RUnlock()
 	return s.EventStore.CountEventsInRange(ctx, afterSeq, uptoSeq)
 }
