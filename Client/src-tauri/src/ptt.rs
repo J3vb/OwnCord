@@ -26,27 +26,36 @@ static PTT_VKEY: AtomicI32 = AtomicI32::new(0);
 /// shared flag allowed.
 static PTT_THREAD: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>> = Mutex::new(None);
 
-/// Returns true if a VK code is allowed for global capture in ptt_listen_for_key.
-///
-/// Security hardening (BUG-136): only non-text keys are capturable to reduce
-/// misuse potential if the renderer is compromised.
-fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
-    // Explicitly reject modifier keys.
-    if matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C) {
-        return false;
-    }
+/// Caps Lock.
+const VK_CAPS_LOCK: i32 = 0x14;
+/// The key left of 1 (backtick on a US layout). Stored as VK_OEM_3 on every
+/// platform and read as that physical key, whatever character the active
+/// layout puts on it.
+const VK_BACKTICK: i32 = 0xC0;
 
+/// Returns true if a VK code may be bound as the PTT key.
+///
+/// Security hardening (BUG-136): only non-text keys qualify. Capture
+/// (`ptt_listen_for_key`) and `ptt_set_key` both enforce this one list, so the
+/// poller never watches a key outside it.
+fn is_allowed_ptt_vk(vk: i32) -> bool {
     // Function keys F1-F24.
     if (0x70..=0x87).contains(&vk) {
         return true;
     }
 
-    // Non-text navigation/control keys. Escape is excluded: it's also the
-    // Settings overlay's close key, so a capture in progress races the panel
-    // tearing down and can bind PTT to Escape with no visible confirmation
-    // (OC-0334).
+    // Non-text navigation/control keys, single modifiers, Caps Lock and the
+    // backtick key. The Windows/Meta key stays out. Escape is excluded: it's
+    // also the Settings overlay's close key, so a capture in progress races the
+    // panel tearing down and can bind PTT to Escape with no visible
+    // confirmation (OC-0334).
     matches!(
         vk,
+        0x10 | // Shift
+        0x11 | // Ctrl
+        0x12 | // Alt
+        VK_CAPS_LOCK |
+        VK_BACKTICK |
         0x20 | // Space
         0x21 | // Page Up
         0x22 | // Page Down
@@ -63,6 +72,17 @@ fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
     )
 }
 
+/// One capture tick: the first bindable key in `down` that was not already
+/// held when capture started. `stale` holds those start-time keys and drops
+/// each one once it is released, so a key held while the picker opened is only
+/// captured after a fresh press.
+fn next_captured(down: &[i32], stale: &mut Vec<i32>) -> Option<i32> {
+    stale.retain(|vk| down.contains(vk));
+    down.iter()
+        .copied()
+        .find(|vk| is_allowed_ptt_vk(*vk) && !stale.contains(vk))
+}
+
 // ---------------------------------------------------------------------------
 // Platform-specific key detection
 // ---------------------------------------------------------------------------
@@ -74,17 +94,38 @@ fn is_key_down(vk: i32) -> bool {
         return false;
     }
     // SAFETY: GetAsyncKeyState is safe to call with valid VK codes 1-254
-    let state = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) };
+    let state =
+        unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(layout_vk(vk)) };
     // High-order bit set (negative when interpreted as i16) = key is down
     (state as i16) < 0
 }
 
+/// The VK the active layout gives the key `vk` stands for. Only the backtick
+/// key differs: it is the physical key left of 1 (scan code 0x29), which
+/// layouts map to different OEM VKs (VK_OEM_3 on US English, other OEM codes
+/// on many European layouts).
+/// Anything outside the OEM punctuation range falls back to VK_OEM_3, so the
+/// mapping can never turn into a letter or digit. The layout is the polling
+/// thread's own (the default input language), so a user who switches layouts
+/// per window may find the binding follows a different OEM key.
+#[cfg(windows)]
+fn layout_vk(vk: i32) -> i32 {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VSC_TO_VK};
+    if vk != VK_BACKTICK {
+        return vk;
+    }
+    // SAFETY: MapVirtualKeyW only reads the calling thread's keyboard layout.
+    let mapped = unsafe { MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK) } as i32;
+    if (0xBA..=0xE2).contains(&mapped) {
+        mapped
+    } else {
+        VK_BACKTICK
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn is_key_down(vk: i32) -> bool {
-    let Some(keycode) = linux::vk_to_keycode(vk) else {
-        return false;
-    };
-    held_keys().contains(&keycode)
+    linux::vk_held(vk, &held_keys())
 }
 
 /// One XQueryKeymap snapshot of every held key (empty with no X display).
@@ -267,14 +308,16 @@ mod linux {
         (0x7B, Keycode::F12),
         // Lock keys
         (0x14, Keycode::CapsLock),
+        // Punctuation
+        (0xC0, Keycode::Grave),
     ];
 
     /// Convert a device_query Keycode to its Windows-VK-equivalent integer.
     /// Returns 0 for keys that have no mapping (treated as "unknown").
     pub fn keycode_to_vk(key: &Keycode) -> i32 {
         match key {
-            // Modifier keys (included so ptt_listen_for_key can skip them).
-            // See the VK_KEYCODES doc comment for why these live here instead.
+            // Modifier keys, as the generic VK of either side. See the
+            // VK_KEYCODES doc comment for why these live here instead.
             Keycode::LShift | Keycode::RShift => 0x10,
             Keycode::LControl | Keycode::RControl => 0x11,
             Keycode::LAlt | Keycode::RAlt => 0x12,
@@ -284,6 +327,18 @@ mod linux {
                 .find(|(_, k)| k == key)
                 .map(|(vk, _)| *vk)
                 .unwrap_or(0),
+        }
+    }
+
+    /// Whether `vk` is down in one key snapshot. A modifier VK matches either
+    /// side, the way `GetAsyncKeyState` reads the generic VK on Windows.
+    pub fn vk_held(vk: i32, keys: &[Keycode]) -> bool {
+        let any = |a: Keycode, b: Keycode| keys.contains(&a) || keys.contains(&b);
+        match vk {
+            0x10 => any(Keycode::LShift, Keycode::RShift),
+            0x11 => any(Keycode::LControl, Keycode::RControl),
+            0x12 => any(Keycode::LAlt, Keycode::RAlt),
+            _ => vk_to_keycode(vk).is_some_and(|k| keys.contains(&k)),
         }
     }
 
@@ -442,71 +497,45 @@ pub fn ptt_stop_internal() {
     }
 }
 
+/// Prefix of `ptt_set_key`'s error for a key outside `is_allowed_ptt_vk`, so
+/// the frontend can tell a refused saved key from a missing bridge.
+const UNSUPPORTED_KEY_ERROR: &str = "unsupported_ptt_key";
+
 /// Set the PTT virtual key code. Pass 0 to disable.
-/// Valid range: 0 (disabled) or 1–254 (VK-equivalent key codes).
+/// Valid: 0 (disabled) or a key `is_allowed_ptt_vk` accepts.
 #[tauri::command]
 pub fn ptt_set_key(vk_code: i32) -> Result<(), String> {
-    if vk_code != 0 && !(1..=254).contains(&vk_code) {
-        return Err(format!(
-            "invalid virtual key code: {vk_code} (must be 0 or 1-254)"
-        ));
+    if vk_code != 0 && !is_allowed_ptt_vk(vk_code) {
+        return Err(format!("{UNSUPPORTED_KEY_ERROR}: {vk_code}"));
     }
     PTT_VKEY.store(vk_code, Ordering::SeqCst);
     Ok(())
 }
 
-/// Wait for the user to press any non-modifier key and return its VK-equivalent code.
+/// Wait for the user to press a bindable key and return its VK-equivalent code.
 /// Used by the keybind capture UI. Times out after 10 seconds and returns 0.
 /// Runs on a dedicated thread to avoid blocking the Tauri async thread pool.
 #[tauri::command]
 pub async fn ptt_listen_for_key() -> i32 {
     tokio::task::spawn_blocking(|| {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(windows, target_os = "linux"))]
         {
-            use device_query::{DeviceQuery, DeviceState};
-            let Some(device_state) = DeviceState::checked_new() else {
+            #[cfg(target_os = "linux")]
+            if DEVICE_STATE.with(|ds| ds.is_none()) {
                 log::warn!("PTT key capture unavailable: no X11/XWayland display");
                 return 0;
-            };
+            }
+            let mut stale = bindable_keys_down();
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
 
             while std::time::Instant::now() < deadline {
-                for key in device_state.get_keys() {
-                    let vk = linux::keycode_to_vk(&key);
-                    if !is_allowed_ptt_capture_vk(vk) {
-                        continue;
-                    }
+                if let Some(vk) = next_captured(&bindable_keys_down(), &mut stale) {
                     // Wait for key release (with its own timeout)
                     let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
-                    while device_state.get_keys().contains(&key)
-                        && std::time::Instant::now() < release_deadline
-                    {
+                    while is_key_down(vk) && std::time::Instant::now() < release_deadline {
                         std::thread::sleep(Duration::from_millis(20));
                     }
                     return vk;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            0
-        }
-
-        #[cfg(windows)]
-        {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-
-            while std::time::Instant::now() < deadline {
-                for vk in 1..=254i32 {
-                    // Skip keys that are not explicitly allowed for capture.
-                    if !is_allowed_ptt_capture_vk(vk) {
-                        continue;
-                    }
-                    if is_key_down(vk) {
-                        let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
-                        while is_key_down(vk) && std::time::Instant::now() < release_deadline {
-                            std::thread::sleep(Duration::from_millis(20));
-                        }
-                        return vk;
-                    }
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -520,6 +549,25 @@ pub async fn ptt_listen_for_key() -> i32 {
     })
     .await
     .unwrap_or(0)
+}
+
+/// Every bindable key held right now. Only keys on the allow-list are read.
+#[cfg(windows)]
+fn bindable_keys_down() -> Vec<i32> {
+    (1..=254i32)
+        .filter(|vk| is_allowed_ptt_vk(*vk) && is_key_down(*vk))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn bindable_keys_down() -> Vec<i32> {
+    let mut down: Vec<i32> = held_keys()
+        .iter()
+        .map(linux::keycode_to_vk)
+        .filter(|vk| is_allowed_ptt_vk(*vk))
+        .collect();
+    down.dedup();
+    down
 }
 
 // ---------------------------------------------------------------------------
@@ -569,12 +617,14 @@ mod tests {
     #[test]
     fn ptt_set_key_accepts_valid_codes_and_get_reflects_them() {
         assert!(ptt_set_key(0).is_ok());
-        assert!(ptt_set_key(1).is_ok());
+        assert!(ptt_set_key(0x05).is_ok()); // Mouse X1
         assert!(ptt_set_key(0x20).is_ok()); // Space
-        assert!(ptt_set_key(254).is_ok());
+        assert!(ptt_set_key(0x14).is_ok()); // Caps Lock
+        assert!(ptt_set_key(0xC0).is_ok()); // Backtick
+        assert!(ptt_set_key(0x87).is_ok()); // F24
 
-        ptt_set_key(0x41).unwrap(); // A
-        assert_eq!(PTT_VKEY.load(Ordering::SeqCst), 0x41);
+        ptt_set_key(0x11).unwrap(); // Ctrl
+        assert_eq!(PTT_VKEY.load(Ordering::SeqCst), 0x11);
         ptt_set_key(0).unwrap();
         assert_eq!(PTT_VKEY.load(Ordering::SeqCst), 0);
     }
@@ -584,6 +634,18 @@ mod tests {
         assert!(ptt_set_key(-1).is_err());
         assert!(ptt_set_key(255).is_err());
         assert!(ptt_set_key(300).is_err());
+    }
+
+    // ptt_set_key holds the same line as capture: a key the picker would never
+    // return is refused, with an error the frontend recognises.
+    #[test]
+    fn ptt_set_key_rejects_keys_capture_refuses() {
+        for vk in [
+            0x41, 0x5A, 0x31, 0x0D, 0x08, 0x09, 0x1B, 0x5B, 0x01, 0xDE, 254,
+        ] {
+            let err = ptt_set_key(vk).expect_err(&format!("vk {vk:#04x} must be refused"));
+            assert!(err.starts_with(UNSUPPORTED_KEY_ERROR), "{err}");
+        }
     }
 
     // Stop with no thread registered must be a clean no-op: it must not panic,
@@ -630,28 +692,75 @@ mod tests {
     }
 
     #[test]
-    fn allowed_capture_vk_accepts_safe_non_text_keys() {
-        assert!(is_allowed_ptt_capture_vk(0x70)); // F1
-        assert!(is_allowed_ptt_capture_vk(0x7B)); // F12
-        assert!(is_allowed_ptt_capture_vk(0x25)); // Left arrow
-        assert!(is_allowed_ptt_capture_vk(0x2E)); // Delete
-        assert!(is_allowed_ptt_capture_vk(0x05)); // Mouse X1
-        assert!(is_allowed_ptt_capture_vk(0x06)); // Mouse X2
+    fn allowed_vk_accepts_non_text_keys() {
+        assert!(is_allowed_ptt_vk(0x70)); // F1
+        assert!(is_allowed_ptt_vk(0x7B)); // F12
+        assert!(is_allowed_ptt_vk(0x25)); // Left arrow
+        assert!(is_allowed_ptt_vk(0x2E)); // Delete
+        assert!(is_allowed_ptt_vk(0x05)); // Mouse X1
+        assert!(is_allowed_ptt_vk(0x06)); // Mouse X2
+        assert!(is_allowed_ptt_vk(0x14)); // Caps Lock
+        assert!(is_allowed_ptt_vk(0xC0)); // Backtick
+        assert!(is_allowed_ptt_vk(0x10)); // Shift
+        assert!(is_allowed_ptt_vk(0x11)); // Ctrl
+        assert!(is_allowed_ptt_vk(0x12)); // Alt
     }
 
     #[test]
-    fn allowed_capture_vk_rejects_text_and_modifier_keys() {
-        assert!(!is_allowed_ptt_capture_vk(0x41)); // A
-        assert!(!is_allowed_ptt_capture_vk(0x31)); // 1
-        assert!(!is_allowed_ptt_capture_vk(0x0D)); // Enter
-        assert!(!is_allowed_ptt_capture_vk(0x08)); // Backspace
-        assert!(!is_allowed_ptt_capture_vk(0x10)); // Shift
-        assert!(!is_allowed_ptt_capture_vk(0x11)); // Ctrl
-        assert!(!is_allowed_ptt_capture_vk(0x12)); // Alt
-        assert!(!is_allowed_ptt_capture_vk(0x5B)); // Meta
-                                                   // Escape also closes the Settings overlay the capture UI lives in, so
-                                                   // it must never be capturable as a PTT key (OC-0334).
-        assert!(!is_allowed_ptt_capture_vk(0x1B)); // Escape
+    fn allowed_vk_rejects_text_keys() {
+        for vk in 0x41..=0x5A {
+            assert!(!is_allowed_ptt_vk(vk), "letter {vk:#04x}");
+        }
+        for vk in 0x30..=0x39 {
+            assert!(!is_allowed_ptt_vk(vk), "digit {vk:#04x}");
+        }
+        for vk in 0x60..=0x6F {
+            assert!(!is_allowed_ptt_vk(vk), "numpad {vk:#04x}");
+        }
+        // OEM punctuation other than the backtick key.
+        for vk in (0xBA..=0xE2).filter(|vk| *vk != 0xC0) {
+            assert!(!is_allowed_ptt_vk(vk), "punctuation {vk:#04x}");
+        }
+        assert!(!is_allowed_ptt_vk(0x0D)); // Enter
+        assert!(!is_allowed_ptt_vk(0x08)); // Backspace
+        assert!(!is_allowed_ptt_vk(0x09)); // Tab
+        assert!(!is_allowed_ptt_vk(0x5B)); // Left Meta
+        assert!(!is_allowed_ptt_vk(0x5C)); // Right Meta
+
+        // Side-specific modifiers: only the generic VK is bindable.
+        for vk in 0xA0..=0xA5 {
+            assert!(!is_allowed_ptt_vk(vk), "side modifier {vk:#04x}");
+        }
+        // Escape also closes the Settings overlay the capture UI lives in, so
+        // it must never be capturable as a PTT key (OC-0334).
+        assert!(!is_allowed_ptt_vk(0x1B)); // Escape
+    }
+
+    // A key already held when the picker opens (the Shift of a Shift+click, a
+    // mouse button) is not captured until it is released and pressed again.
+    #[test]
+    fn capture_ignores_keys_held_at_start_until_pressed_again() {
+        let mut stale = vec![0x10];
+        assert_eq!(next_captured(&[0x10], &mut stale), None, "still held");
+        assert_eq!(
+            next_captured(&[0x10, 0x70], &mut stale),
+            Some(0x70),
+            "fresh F1"
+        );
+        assert_eq!(next_captured(&[], &mut stale), None, "released");
+        assert!(stale.is_empty());
+        assert_eq!(
+            next_captured(&[0x10], &mut stale),
+            Some(0x10),
+            "pressed again"
+        );
+    }
+
+    #[test]
+    fn capture_skips_keys_that_cannot_be_bound() {
+        let mut stale = Vec::new();
+        assert_eq!(next_captured(&[0x41, 0x5B], &mut stale), None);
+        assert_eq!(next_captured(&[0x41, 0x14], &mut stale), Some(0x14));
     }
 
     #[cfg(target_os = "linux")]
@@ -669,6 +778,8 @@ mod tests {
             (Keycode::Enter, 0x0D),
             (Keycode::F1, 0x70),
             (Keycode::F12, 0x7B),
+            (Keycode::CapsLock, 0x14),
+            (Keycode::Grave, 0xC0),
         ];
 
         for (keycode, vk) in cases {
@@ -683,6 +794,19 @@ mod tests {
                 "vk_to_keycode failed for vk={vk:#04x}"
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_modifier_vk_matches_either_side() {
+        use super::linux::vk_held;
+        use device_query::Keycode;
+        assert!(vk_held(0x10, &[Keycode::RShift]));
+        assert!(vk_held(0x11, &[Keycode::LControl]));
+        assert!(vk_held(0x12, &[Keycode::RAlt]));
+        assert!(!vk_held(0x11, &[Keycode::LShift]));
+        assert!(vk_held(0xC0, &[Keycode::Grave]));
+        assert!(!vk_held(0xC0, &[]));
     }
 
     #[cfg(target_os = "linux")]

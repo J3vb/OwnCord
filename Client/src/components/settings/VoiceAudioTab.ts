@@ -364,7 +364,13 @@ function buildVoiceAudioTabInner(
     syncMeterGate();
     const vk = loadPref<number>("pttVk", 0);
     if (mode === "vad") void desktop.pushToTalk.stop();
-    else if (vk !== 0) void desktop.pushToTalk.updateKey(vk);
+    else if (vk !== 0)
+      // A saved key the backend refuses is cleared while arming; repaint so
+      // the control does not keep showing it.
+      void desktop.pushToTalk.updateKey(vk).then(() => {
+        if (!signal.aborted && loadPref<number>("pttVk", 0) === 0)
+          pttBox.replaceChildren(...buildPttControls(signal));
+      });
   };
   const modeLabels: Record<InputMode, string> = {
     vad: t("voiceAudio.inputMode.vad"),

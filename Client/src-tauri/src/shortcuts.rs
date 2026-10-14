@@ -84,7 +84,7 @@ pub fn voice_shortcuts_supported() -> bool {
     global_keys_observable(wayland, crate::ptt::ptt_polling_supported())
 }
 
-/// Valid VK range, matching `ptt_set_key` (0 is not a key here: a global
+/// Valid VK range, 1-254 (0 is not a key here: a global
 /// shortcut is never "disabled", the tray and the in-app shortcuts still work).
 pub(crate) fn validate_shortcut_keys(mute_vk: i32, deafen_vk: i32) -> Result<(), String> {
     if !(1..=254).contains(&mute_vk) {
