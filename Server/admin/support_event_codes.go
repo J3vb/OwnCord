@@ -200,6 +200,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"hub: closing stale connection (no activity)":                                                                  "socket_stale_closed",
 	"hub: kicking stale connection for re-registering user":                                                        "hub_kicking_stale_connection",
 	"hub: panic recovered":                                                                                         "hub_panic_recovered",
+	"hub: replay purge unfinished; cold-tier replay is off until it is retried":                                    "hub_replay_purge_unfinished",
 	"hub: role change channel lookup failed, closing socket":                                                       "hub_role_change_channel_lookup_failed",
 	"hub: role change visibility unresolved, closing socket":                                                       "hub_role_change_visibility_unresolved_closing",
 	"hub: stopping and exiting for supervisor restart":                                                             "hub_stopping_for_supervisor_restart",
