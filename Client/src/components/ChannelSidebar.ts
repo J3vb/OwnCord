@@ -235,12 +235,54 @@ export function buildVoiceModOptions(
 }
 
 /**
- * Whether a channel row still shows under a collapsed category. Today only the
- * voice channel the user is in (Discord keeps it, with its users, so the call
- * stays visible); phase 2's "collapsed shows unread" extends this predicate.
+ * Whether a text-style row draws its unread state. The same condition
+ * `renderTextChannelItem` uses for the "unread" class; voice rows never do.
  */
-function rowVisibleWhenCollapsed(channel: Channel): boolean {
-  return channel.type === "voice" && voiceStore.getState().currentChannelId === channel.id;
+function rowIsUnread(channel: Channel): boolean {
+  return channel.type !== "voice" && channel.unreadCount > 0;
+}
+
+/**
+ * Whether a channel row still shows under a collapsed category: the channel
+ * you are viewing, any mention (muted or not, a mention always shows), an
+ * unread row that is not muted, and voice channels you are in or that have
+ * people in them (Discord parity, so a live call stays visible).
+ */
+function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | null): boolean {
+  if (channel.id === activeChannelId) return true;
+  if (channel.mentionCount > 0) return true;
+  if (channel.type === "voice") {
+    const voice = voiceStore.getState();
+    return (
+      voice.currentChannelId === channel.id || (voice.voiceUsers.get(channel.id)?.size ?? 0) > 0
+    );
+  }
+  return rowIsUnread(channel) && !isChannelMuted(channel.id);
+}
+
+/** Whether a collapsed category hides at least one unread row (a muted one). */
+function hidesUnreadRow(channels: readonly Channel[], activeChannelId: number | null): boolean {
+  return channels.some((ch) => rowIsUnread(ch) && !rowVisibleWhenCollapsed(ch, activeChannelId));
+}
+
+/** Show or clear the header's "unread channels hidden" dot. */
+function syncHiddenUnreadDot(header: Element, show: boolean): void {
+  const existing = header.querySelector(".category-unread-dot");
+  if (!show) {
+    existing?.remove();
+    return;
+  }
+  if (existing !== null) return;
+  const dot = createElement("span", {
+    class: "category-unread-dot",
+    role: "img",
+    "aria-label": shellText("channel.unreadHidden"),
+    title: shellText("channel.unreadHidden"),
+    "data-testid": "category-unread-dot",
+  });
+  const label = header.querySelector(".category-name");
+  if (label !== null) label.after(dot);
+  else header.appendChild(dot);
 }
 
 function renderVoiceChannelItem(
@@ -578,6 +620,7 @@ function renderChannelItem(
   onWatchStream?: (userId: number) => void,
   onVoiceModerate?: VoiceModerationCallbacks,
   onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
+  menuChannels: readonly Channel[] | undefined = channels,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
@@ -602,7 +645,7 @@ function renderChannelItem(
     onEditChannel,
     onDeleteChannel,
     onPurgeChannel,
-    channels,
+    menuChannels,
     onReorderChannel,
   );
   if (containerEl !== undefined && channels !== undefined) {
@@ -737,6 +780,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    * single per-render controller did.
    */
   const ownerByEl = new WeakMap<Element, Disposable>();
+  /** Each group's displayed rows, one array per group kept across renders and
+   *  refilled in place, so Move Up/Down on a row built earlier swaps with the
+   *  row shown next to it, not a channel a collapsed category hides. */
+  const shownRowsByGroup = new Map<string, Channel[]>();
 
   /** Abort a group's or row's owner and those of the rows inside it. */
   function disposeOwned(el: Element): void {
@@ -810,10 +857,33 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
 
     /** One group's rows, keyed and reused (B9-21). A collapsed category
-     *  keeps only the rows `rowVisibleWhenCollapsed` allows. */
+     *  keeps only the rows `rowVisibleWhenCollapsed` allows, and its header
+     *  shows a dot while it hides an unread row. */
     function reconcileRows(container: HTMLElement, g: GroupRender): void {
       const collapsed = g.name !== null && isCategoryCollapsed(g.name);
-      const rows = collapsed ? g.channels.filter(rowVisibleWhenCollapsed) : g.channels;
+      const rows = collapsed
+        ? g.channels.filter((ch) => rowVisibleWhenCollapsed(ch, activeChannelId))
+        : g.channels;
+      const header = container.parentElement?.querySelector(".category") ?? null;
+      if (header !== null) {
+        syncHiddenUnreadDot(header, collapsed && hidesUnreadRow(g.channels, activeChannelId));
+      }
+      const groupKey = g.name ?? "\u0000uncategorized";
+      let shown = shownRowsByGroup.get(groupKey);
+      if (shown === undefined) {
+        shown = [];
+        shownRowsByGroup.set(groupKey, shown);
+      }
+      shown.splice(0, shown.length, ...rows);
+      // A focused row a collapsed category stops showing (read, muted, emptied)
+      // hands focus to the category's arrow instead of dropping it to the page.
+      const focused = document.activeElement;
+      const focusedRow =
+        focused instanceof HTMLElement && container.contains(focused)
+          ? focused.closest<HTMLElement>(".channel-item")
+          : null;
+      const losesFocus =
+        focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
       reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
         signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
@@ -839,12 +909,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             onWatchStream,
             onVoiceModerate,
             onPurgeChannel,
+            shown,
           );
           ownerByEl.set(el, owner);
           return el;
         },
         dispose: disposeOwned,
       });
+      if (losesFocus) {
+        header?.querySelector<HTMLElement>(".category-arrow")?.focus();
+      }
     }
 
     reconcileChildren(channelList, groups, {
@@ -950,8 +1024,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const container = createElement("div", { class: "category-channels-container" });
     // Populate through the reconciler so every row gets its key metadata; a
     // later in-place update can then recognise and reuse them.
-    reconcileRows(container, g);
     group.appendChild(container);
+    reconcileRows(container, g);
 
     return group;
   }
