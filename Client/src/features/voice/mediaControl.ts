@@ -21,6 +21,7 @@ import {
   type VideoTrackDeps,
   type CameraTrackState,
   type ScreenTrackState,
+  type StreamQuality,
   enableCamera as doEnableCamera,
   disableCamera as doDisableCamera,
   enableScreenshare as doEnableScreenshare,
@@ -277,6 +278,23 @@ export class MediaControl {
 
   async disableScreenshare(): Promise<void> {
     return doDisableScreenshare(this._screenState, this._videoTrackDeps);
+  }
+
+  /** Share another window or screen without stopping (web path). */
+  async changeScreenshareSource(): Promise<void> {
+    const { changeScreenshareSource } = await import("./screenshareChange");
+    return changeScreenshareSource(this._screenState, this._videoTrackDeps);
+  }
+
+  /** The live share's quality for this share only (web path). */
+  async setScreenshareQuality(quality: StreamQuality): Promise<void> {
+    const { setScreenshareQuality } = await import("./screenshareChange");
+    return setScreenshareQuality(this._screenState, this._videoTrackDeps, quality);
+  }
+
+  /** The live share's quality, or null where it cannot be changed. */
+  getScreenshareQuality(): StreamQuality | null {
+    return this._screenState.quality ?? null;
   }
 
   // --- Delegating methods to DeviceManager ---

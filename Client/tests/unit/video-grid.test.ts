@@ -1631,9 +1631,16 @@ describe("VideoGrid", () => {
     });
 
     it("a stream that ends stops its watch; your own preview is never one", () => {
-      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
-      grid.removeStream(SCREEN);
-      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+      vi.useFakeTimers();
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        // Held while the tile says it ended, for a re-share (WP 1C-1).
+        vi.advanceTimersByTime(3000);
+        expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+      } finally {
+        vi.useRealTimers();
+      }
 
       setStreamWatched.mockClear();
       grid.addStream(1, "Me (You)", fakeStream(), {
@@ -3497,6 +3504,51 @@ describe("VideoGrid", () => {
       vi.advanceTimersByTime(3000);
       expect(cell()).not.toBeNull();
       expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+
+    it("a re-share within the cover stays watched and in focus (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      const setStreamWatched = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch, setStreamWatched });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.setFocusedTile(SCREEN);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2000);
+      const again = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+
+      expect(cell()!.querySelector(".video-ended")).toBeNull();
+      expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+      expect(grid.getFocusedTileId()).toBe(SCREEN);
+      vi.advanceTimersByTime(3000);
+      expect(forgetStreamWatch).not.toHaveBeenCalled();
+      expect(setStreamWatched).not.toHaveBeenCalledWith(SCREEN, false);
+    });
+
+    it("after the cover the watch is forgotten: a later share is offered as Watch (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2999);
+      expect(forgetStreamWatch).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(forgetStreamWatch).toHaveBeenCalledWith(SCREEN);
+
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      expect(cell()!.classList.contains("video-cell--stopped")).toBe(true);
+      expect(cell()!.querySelector("[data-tile-control='watch']")).not.toBeNull();
+    });
+
+    it("leaving the call during the cover forgets the held watch (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      grid.clearStreams();
+      expect(forgetStreamWatch).toHaveBeenCalledWith(SCREEN);
     });
 
     it("leaving the call drops the cover at once", () => {

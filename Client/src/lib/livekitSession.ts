@@ -24,6 +24,7 @@ import { DeviceManager } from "@lib/deviceManager";
 import {
   type CameraTrackState,
   type ScreenTrackState,
+  type StreamQuality,
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
@@ -856,6 +857,18 @@ export class LiveKitSession {
     return this._media.disableScreenshare();
   }
 
+  changeScreenshareSource(): Promise<void> {
+    return this._media.changeScreenshareSource();
+  }
+
+  setScreenshareQuality(quality: StreamQuality): Promise<void> {
+    return this._media.setScreenshareQuality(quality);
+  }
+
+  getScreenshareQuality(): StreamQuality | null {
+    return this._media.getScreenshareQuality();
+  }
+
   async switchInputDevice(deviceId: string): Promise<void> {
     return this._media.switchInputDevice(deviceId);
   }
@@ -1057,6 +1070,9 @@ export const enableCamera = session.enableCamera.bind(session);
 export const disableCamera = session.disableCamera.bind(session);
 export const enableScreenshare = session.enableScreenshare.bind(session);
 export const disableScreenshare = session.disableScreenshare.bind(session);
+export const changeScreenshareSource = session.changeScreenshareSource.bind(session);
+export const setScreenshareQuality = session.setScreenshareQuality.bind(session);
+export const getScreenshareQuality = session.getScreenshareQuality.bind(session);
 export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);

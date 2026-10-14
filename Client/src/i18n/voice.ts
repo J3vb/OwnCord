@@ -220,6 +220,11 @@ export const voiceText = defineCatalog("voice", {
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "share.screenDenied": "Screen sharing permission denied",
   "share.screenFailed": "Failed to start screen sharing",
+  "share.changeFailed": "Couldn't change what you're sharing",
+  "share.qualityFailed": "Couldn't change the stream quality",
+  "card.label": "Your stream",
+  "card.changeSource": "Change source",
+  "card.sourceNamed": "{kind}: {name}",
   "share.screenNotStarted":
     "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
   "device.pipelineError": "Audio pipeline error after device switch",

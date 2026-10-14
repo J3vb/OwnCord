@@ -93,6 +93,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setPttGated: vi.fn(),
   setPttPollingLive: vi.fn(),
   isPttPollingLive: vi.fn(() => false),

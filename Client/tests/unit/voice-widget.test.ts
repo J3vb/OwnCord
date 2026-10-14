@@ -2,7 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Must mock before imports
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
+const mockShareQuality = vi.fn<() => string | null>(() => "medium");
+const mockChangeSource = vi.fn().mockResolvedValue(undefined);
+const mockSetQuality = vi.fn().mockResolvedValue(undefined);
 vi.mock("@lib/livekitSession", () => ({
+  getLocalScreenshareStream: () => ({
+    getVideoTracks: () => [
+      { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
+    ],
+  }),
+  getScreenshareQuality: () => mockShareQuality(),
+  changeScreenshareSource: () => mockChangeSource(),
+  setScreenshareQuality: (q: string) => mockSetQuality(q),
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
   joinVoice: vi.fn(),
@@ -293,6 +304,61 @@ describe("VoiceWidget", () => {
     expect(screenshareBtn.classList.contains("active-ctrl")).toBe(true);
     expect(screenshareBtn.getAttribute("aria-pressed")).toBe("true");
 
+    widget.destroy?.();
+  });
+
+  it("shows a stream card while sharing: source, Change source, Quality, Stop (WP 1C-1)", async () => {
+    setVoiceChannel(1, []);
+    const onScreenshareToggle = vi.fn();
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle,
+    });
+    widget.mount(container);
+    const card = () => container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]');
+    await vi.dynamicImportSettled();
+    expect(card()).toBeNull();
+
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    await vi.dynamicImportSettled();
+    expect(card()).not.toBeNull();
+    expect(card()!.textContent).toContain("You're sharing a window");
+    expect(card()!.textContent).not.toContain("window:42:0");
+
+    const quality = card()!.querySelector<HTMLSelectElement>('[data-testid="vw-stream-quality"]')!;
+    expect(quality.value).toBe("medium");
+    quality.value = "high";
+    quality.dispatchEvent(new Event("change"));
+    expect(mockSetQuality).toHaveBeenCalledWith("high");
+
+    card()!.querySelector<HTMLButtonElement>('[data-testid="vw-stream-change"]')!.click();
+    expect(mockChangeSource).toHaveBeenCalledOnce();
+    card()!.querySelector<HTMLButtonElement>('[data-testid="vw-stream-stop"]')!.click();
+    expect(onScreenshareToggle).toHaveBeenCalledOnce();
+
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: false }));
+    voiceStore.flush();
+    expect(card()).toBeNull();
+    widget.destroy?.();
+  });
+
+  it("the stream card offers only Stop where the share cannot change (WP 1C-1)", async () => {
+    mockShareQuality.mockReturnValueOnce(null);
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    await vi.dynamicImportSettled();
+    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(true);
+    expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
+    expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-stop"]')!.hidden).toBe(false);
     widget.destroy?.();
   });
 
