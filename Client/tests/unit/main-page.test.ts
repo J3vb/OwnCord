@@ -246,6 +246,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setExitVisible: vi.fn(),
       showMiniPlayer: vi.fn(),
       hideMiniPlayer: vi.fn(),
+      raiseCallPopout: vi.fn(() => false),
       mount: vi.fn(),
       destroy: vi.fn(),
     };

@@ -64,6 +64,9 @@ export interface VideoModeController {
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
   getFocusedTileId(): number | null;
+  /** The grid's call pop-out opened (`out`) or closed; `restore` brings the
+   *  call view back into this window. */
+  setCallPoppedOut(out: boolean, restore: boolean): void;
   /** Reset state on teardown. */
   destroy(): void;
 }
@@ -96,6 +99,9 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   let activeHost: VideoPanelHost | null = null;
   /** The user opened the call view: the grid stays up without video. */
   let callOpen = false;
+  /** The call view is in its own window: this one shows the chat while the
+   *  grid stays in video mode there. */
+  let poppedOut = false;
   /** This controller gave the grid its people (the DM call panel gives them
    *  while it hosts the grid), so it takes them back. */
   let peopleGiven = false;
@@ -138,14 +144,22 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     host?.setActive(active);
   }
 
+  /** The chat column shows the grid or the chat. */
+  function showSlots(grid: boolean): void {
+    const chat = grid ? "none" : "";
+    slots.messagesSlot.style.display = chat;
+    slots.typingSlot.style.display = chat;
+    slots.inputSlot.style.display = chat;
+    slots.videoGridSlot.style.display = grid ? "block" : "none";
+  }
+
   function showVideoGrid(): void {
+    // Popped out: the call is shown in its window.
+    if (videoGrid.raiseCallPopout()) return;
     videoGrid.hideMiniPlayer();
     if (videoMode) return;
     videoMode = true;
-    slots.messagesSlot.style.display = "none";
-    slots.typingSlot.style.display = "none";
-    slots.inputSlot.style.display = "none";
-    slots.videoGridSlot.style.display = "block";
+    showSlots(true);
     videoGrid.setExitVisible(true);
     // Opened for a stream (Watch, back from the mini-player): everyone in
     // the call is drawn too, before the next roster change.
@@ -175,15 +189,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     videoGrid.setFocusedTile(null);
     localTileAdded = false;
     localScreenshareTileAdded = false;
-    slots.messagesSlot.style.display = "";
-    slots.typingSlot.style.display = "";
-    slots.inputSlot.style.display = "";
-    slots.videoGridSlot.style.display = "none";
+    showSlots(false);
     videoGrid.setExitVisible(false);
     clearPeople();
   }
 
   function showChat(how?: { keepWatching?: boolean }): void {
+    // The chat is already here; the call stays in its own window.
+    if (poppedOut) return;
     callOpen = false;
     // The stream being watched keeps playing in the mini-player (Discord's),
     // picked while the grid still knows which tile is focused.
@@ -350,6 +363,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     return focusedTileId;
   }
 
+  function setCallPoppedOut(out: boolean, restore: boolean): void {
+    poppedOut = out;
+    if (!videoMode) return;
+    // A popped-out call stays up without video, as an opened call view does.
+    if (out) callOpen = true;
+    if (out || restore) showSlots(!out);
+  }
+
   function openCall(): void {
     callOpen = true;
     showVideoGrid();
@@ -376,6 +397,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     isVideoMode: isVideoModeActive,
     setFocus,
     getFocusedTileId,
+    setCallPoppedOut,
     destroy,
   };
 }

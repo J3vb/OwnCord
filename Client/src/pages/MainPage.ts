@@ -1486,6 +1486,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           : forgetRemoteVideoWatch(tileId, "camera"),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
+      onCallPopout: (out, restore) => videoModeCtrl?.setCallPoppedOut(out, restore),
       // The mini-player's way back to the full stream view.
       focusFallback: () => void focusReachable(),
       onReturnToStream: (tileId) => {

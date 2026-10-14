@@ -36,6 +36,8 @@ export interface TileMenuOptions {
   /** The person's display name. */
   readonly name: string;
   readonly config: TileConfig;
+  /** The document the tile is in (the call's pop-out window's, or the app's). */
+  readonly doc?: Document;
   /** The tile's lifetime: the menu closes when its tile is removed. */
   readonly signal: AbortSignal;
   /** The tiles' own sliders show the same settings; keep them in step. */
@@ -66,6 +68,7 @@ export interface TileMenuPerson {
 export interface SelfTileMenuOptions {
   readonly x: number;
   readonly y: number;
+  readonly doc?: Document;
   readonly signal: AbortSignal;
   /** Hide my camera, where the call view's "Show my camera" toggle applies. */
   readonly onHide?: () => void;
@@ -144,8 +147,10 @@ function openMenu(
   label: string,
   signal: AbortSignal,
   build: (menu: HTMLElement, close: () => void) => void,
+  doc: Document = document,
 ): void {
-  document.querySelectorAll(".video-tile-menu").forEach((el) => {
+  const view = doc.defaultView ?? window;
+  doc.querySelectorAll(".video-tile-menu").forEach((el) => {
     (el as HTMLElement & { dismiss?: Disposable }).dismiss?.destroy();
     el.remove();
   });
@@ -162,16 +167,16 @@ function openMenu(
   };
   build(menu, closeMenu);
 
-  (document.fullscreenElement ?? document.body).appendChild(menu);
+  (doc.fullscreenElement ?? doc.body).appendChild(menu);
   const margin = 8;
   // A long menu in a small window scrolls rather than running off the bottom.
-  const room = window.innerHeight - 2 * margin;
+  const room = view.innerHeight - 2 * margin;
   if (menu.offsetHeight > room) {
     menu.style.maxHeight = `${room}px`;
     menu.style.overflowY = "auto";
   }
-  const left = Math.min(x, window.innerWidth - menu.offsetWidth - margin);
-  const top = Math.min(y, window.innerHeight - menu.offsetHeight - margin);
+  const left = Math.min(x, view.innerWidth - menu.offsetWidth - margin);
+  const top = Math.min(y, view.innerHeight - menu.offsetHeight - margin);
   menu.style.left = `${Math.max(margin, left)}px`;
   menu.style.top = `${Math.max(margin, top)}px`;
   restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
@@ -179,7 +184,7 @@ function openMenu(
   setOwnedTimeout(
     dismiss.signal,
     () => {
-      document.addEventListener(
+      doc.addEventListener(
         "mousedown",
         (e: MouseEvent) => {
           if (!menu.contains(e.target as Node)) closeMenu();
@@ -205,25 +210,37 @@ export function showSelfTileMenu(opts: SelfTileMenuOptions): void {
   const locked = opts.cameraLocked ?? null;
   // A menu whose only row is greyed could not take focus or close by keyboard.
   if (onHide === undefined && (onCameraOff === undefined || locked !== null)) return;
-  openMenu(opts.x, opts.y, t("tile.selfMenu"), opts.signal, (menu, close) => {
-    if (onHide !== undefined) {
-      menu.append(actionItem(t("tile.hideMyCamera"), "hide-self", close, onHide));
-    }
-    if (onCameraOff !== undefined) {
-      const off = actionItem(t("widget.control.cameraOff"), "camera-off", close, onCameraOff);
-      if (locked !== null) {
-        (off as HTMLButtonElement).disabled = true;
-        off.classList.add("disabled");
-        off.title = locked;
+  openMenu(
+    opts.x,
+    opts.y,
+    t("tile.selfMenu"),
+    opts.signal,
+    (menu, close) => {
+      if (onHide !== undefined) {
+        menu.append(actionItem(t("tile.hideMyCamera"), "hide-self", close, onHide));
       }
-      menu.append(off);
-    }
-  });
+      if (onCameraOff !== undefined) {
+        const off = actionItem(t("widget.control.cameraOff"), "camera-off", close, onCameraOff);
+        if (locked !== null) {
+          (off as HTMLButtonElement).disabled = true;
+          off.classList.add("disabled");
+          off.title = locked;
+        }
+        menu.append(off);
+      }
+    },
+    opts.doc,
+  );
 }
 
 export function showTileMenu(opts: TileMenuOptions): void {
-  openMenu(opts.x, opts.y, opts.name, opts.signal, (menu, close) =>
-    buildTileMenu(menu, opts, close),
+  openMenu(
+    opts.x,
+    opts.y,
+    opts.name,
+    opts.signal,
+    (menu, close) => buildTileMenu(menu, opts, close),
+    opts.doc,
   );
 }
 
