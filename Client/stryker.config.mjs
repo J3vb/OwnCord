@@ -29,6 +29,12 @@ const config = {
     "!src/**/*.test.ts",
   ],
   reporters: ["html", "clear-text", "progress"],
+  // The per-test list marks every passing test that killed no mutant with
+  // ✘ or ~, which reads as hundreds of failures in the CI log. Survivors and
+  // the score table still print.
+  clearTextReporter: {
+    reportTests: false,
+  },
   htmlReporter: {
     fileName: "reports/mutation/index.html",
   },

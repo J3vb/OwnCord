@@ -7,6 +7,8 @@ import {
   roleHasPermission,
   canManageChannels,
   canViewAuditLog,
+  canManageInvites,
+  canModerateMembers,
 } from "../../src/lib/permissions";
 import { Permission } from "../../src/lib/types";
 import { setRoles } from "../../src/stores/channels.store";
@@ -173,7 +175,7 @@ describe("isLegacyAdminRole", () => {
 // hid the affordance, because the old check asked whether the role was called
 // "owner" or "admin".
 
-describe("canManageChannels / canViewAuditLog", () => {
+describe("canManageChannels / canViewAuditLog / canManageInvites / canModerateMembers", () => {
   function signInAs(role: string): void {
     authStore.setState(() => ({
       token: "tok",
@@ -249,7 +251,11 @@ describe("canManageChannels / canViewAuditLog", () => {
         id: 20,
         name: "",
         color: null,
-        permissions: Permission.MANAGE_CHANNELS | Permission.VIEW_AUDIT_LOG,
+        permissions:
+          Permission.MANAGE_CHANNELS |
+          Permission.VIEW_AUDIT_LOG |
+          Permission.MANAGE_INVITES |
+          Permission.MODERATE_MEMBERS,
       },
     ]);
     authStore.setState(() => ({
@@ -261,5 +267,29 @@ describe("canManageChannels / canViewAuditLog", () => {
     }));
     expect(canManageChannels()).toBe(true);
     expect(canViewAuditLog()).toBe(true);
+    expect(canManageInvites()).toBe(true);
+    expect(canModerateMembers()).toBe(true);
+  });
+
+  it("gates the Invite button on MANAGE_INVITES", () => {
+    setRoles([
+      { id: 11, name: "Recruiter", color: null, permissions: Permission.MANAGE_INVITES },
+      { id: 4, name: "Member", color: null, permissions: MEMBER_PERMS },
+    ]);
+    signInAs("Recruiter");
+    expect(canManageInvites()).toBe(true);
+    signInAs("Member");
+    expect(canManageInvites()).toBe(false);
+  });
+
+  it("gates the Moderation Center on MODERATE_MEMBERS", () => {
+    setRoles([
+      { id: 12, name: "Warden", color: null, permissions: Permission.MODERATE_MEMBERS },
+      { id: 4, name: "Member", color: null, permissions: MEMBER_PERMS },
+    ]);
+    signInAs("Warden");
+    expect(canModerateMembers()).toBe(true);
+    signInAs("Member");
+    expect(canModerateMembers()).toBe(false);
   });
 });
