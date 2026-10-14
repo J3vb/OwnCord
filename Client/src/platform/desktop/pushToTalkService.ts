@@ -41,6 +41,11 @@ let nativeStop: Promise<void> | null = null;
 let edge = 0;
 let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 
+/** ptt_set_key's rejection for a key outside the backend's bindable list. */
+function isUnsupportedKeyError(err: unknown): boolean {
+  return typeof err === "string" && err.startsWith("unsupported_ptt_key");
+}
+
 function isCurrent(attempt: PttBinding, version = attempt.generation): boolean {
   return binding === attempt && generation === version;
 }
@@ -108,7 +113,17 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     if (nativeStop !== null) await nativeStop;
     if (!isCurrent(attempt)) return;
 
-    await invoke("ptt_set_key", { vkCode: vk });
+    try {
+      await invoke("ptt_set_key", { vkCode: vk });
+    } catch (err) {
+      // A saved key the backend no longer accepts would leave PTT silently
+      // dead with the key still shown in Settings; clear it instead.
+      if (isCurrent(attempt) && isUnsupportedKeyError(err)) {
+        savePref("pttVk", 0);
+        log.warn("Saved Push to Talk key is not supported; cleared", { vk });
+      }
+      throw err;
+    }
     if (!isCurrent(attempt)) return;
 
     // ptt_start spawns its thread unconditionally, so a running thread is NOT

@@ -168,6 +168,17 @@ describe("vkName", () => {
       expect(vkName(0x0d)).toBe("Enter");
     });
 
+    it("names the single modifiers and Caps Lock", () => {
+      expect(vkName(0x10)).toBe("Shift");
+      expect(vkName(0x11)).toBe("Ctrl");
+      expect(vkName(0x12)).toBe("Alt");
+      expect(vkName(0x14)).toBe("Caps Lock");
+    });
+
+    it("returns '`' for the backtick key 0xC0", () => {
+      expect(vkName(0xc0)).toBe("`");
+    });
+
     it("returns 'Escape' for 0x1B", () => {
       expect(vkName(0x1b)).toBe("Escape");
     });
@@ -385,6 +396,23 @@ describe("initPtt", () => {
     mockInvoke.mockRejectedValue(new Error("not in Tauri"));
 
     await expect(initPtt()).resolves.toBeUndefined();
+    // A missing bridge says nothing about the key: the binding stays saved.
+    expect(testPrefs.get("pttVk")).toBe(0x20);
+  });
+
+  it("clears a saved key the backend refuses, so Settings shows it unbound", async () => {
+    testPrefs.set("pttVk", 0x41); // A, never bindable
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ptt_set_key"
+        ? Promise.reject("unsupported_ptt_key: 65")
+        : Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    await expect(initPtt()).resolves.toBeUndefined();
+
+    expect(testPrefs.get("pttVk")).toBe(0);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
+    expect(mockSetPttPollingLive).not.toHaveBeenCalledWith(true);
   });
 });
 
