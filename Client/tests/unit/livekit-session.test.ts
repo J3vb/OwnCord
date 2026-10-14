@@ -1954,7 +1954,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("camera/screen share lost on reconnect notice (WP 1A-4)", () => {
+  describe("camera/screen share restored after a reconnect (WP 1A-4, 1C-6)", () => {
     let wsState: string;
     let secondDrop: ((reason?: number) => void) | undefined;
 
@@ -1986,28 +1986,121 @@ describe("LiveKitSession", () => {
       secondDrop = disconnectedHandler;
     }
 
-    it("shows one toast with a Turn on again action once a camera-on call reconnects", async () => {
+    it("turns the camera back on by itself once a camera-on call reconnects, with no toast", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
       await dropWhile({ camera: true, screenshare: false });
+      mockVoiceState.localCamera = false; // teardownForReconnect turned it off
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledOnce();
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("offers Share again for a web share, which needs the OS picker", async () => {
+      const enableScreenshare = vi.spyOn(session, "enableScreenshare").mockResolvedValue();
+      await dropWhile({ camera: false, screenshare: true });
+      mockVoiceState.localScreenshare = false;
       expect(mockShowActionToast).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(3100);
 
       expect((session as any)._state.type).toBe("connected");
+      expect(enableScreenshare).not.toHaveBeenCalled();
       expect(mockShowActionToast).toHaveBeenCalledOnce();
       const [message, type, action] = mockShowActionToast.mock.calls[0]!;
-      expect(message).toBe("Your camera stopped when the connection dropped");
+      expect(message).toBe("Your screen share stopped when the connection dropped");
       expect(type).toBe("warning");
-      expect(action.label).toBe("Turn on again");
-
-      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
-      const enableScreenshare = vi.spyOn(session, "enableScreenshare").mockResolvedValue();
+      expect(action.label).toBe("Share again");
       action.run();
+      expect(enableScreenshare).toHaveBeenCalledOnce();
+    });
+
+    it("restores the camera and names only the share when both were on", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+
+      await vi.advanceTimersByTimeAsync(3100);
+
       expect(enableCamera).toHaveBeenCalledOnce();
-      expect(enableScreenshare).not.toHaveBeenCalled();
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your screen share stopped when the connection dropped",
+      );
+    });
+
+    it("leaves a camera the user already turned back on alone", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: false });
+      // Still on: the user pressed Camera again before the restore ran.
+      mockVoiceState.localCamera = true;
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect(enableCamera).not.toHaveBeenCalled();
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("shows no share toast when the user leaves while the camera is coming back", async () => {
+      let finishCamera!: () => void;
+      vi.spyOn(session, "enableCamera").mockImplementation(
+        () => new Promise<void>((resolve) => (finishCamera = resolve)),
+      );
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+
+      session.leaveVoice(false);
+      finishCamera();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("a second drop while the camera is coming back still restores both after it", async () => {
+      let finishCamera!: () => void;
+      const enableCamera = vi
+        .spyOn(session, "enableCamera")
+        .mockImplementationOnce(() => new Promise<void>((resolve) => (finishCamera = resolve)))
+        .mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(enableCamera).toHaveBeenCalledOnce();
+
+      // Both are still off in the store when the second drop lands.
+      secondDrop!(/* SERVER_SHUTDOWN */ 1);
+      finishCamera();
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledTimes(2);
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your screen share stopped when the connection dropped",
+      );
+    });
+
+    it("leaving voice removes the Share again toast", async () => {
+      const dismiss = vi.fn();
+      mockShowActionToast.mockReturnValueOnce(dismiss);
+      await dropWhile({ camera: false, screenshare: true });
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+
+      session.leaveVoice(true);
+
+      expect(dismiss).toHaveBeenCalledOnce();
     });
 
     it("keeps what the first drop stopped when a second drop lands before the notice", async () => {
-      await dropWhile({ camera: true, screenshare: false });
+      await dropWhile({ camera: false, screenshare: true });
       // The reconnect lands, then the new room drops again before its tail
       // reaches the notice: the camera is already off by then.
       const reconnecting = (session as any)._state;
@@ -2020,14 +2113,14 @@ describe("LiveKitSession", () => {
         lastDirectUrl: reconnecting.lastDirectUrl,
       };
       reconnecting.ac.abort();
-      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
       secondDrop!(/* SERVER_SHUTDOWN */ 1);
       await vi.advanceTimersByTimeAsync(3100);
 
       expect((session as any)._state.type).toBe("connected");
       expect(mockShowActionToast).toHaveBeenCalledOnce();
       expect(mockShowActionToast.mock.calls[0]![0]).toBe(
-        "Your camera stopped when the connection dropped",
+        "Your screen share stopped when the connection dropped",
       );
     });
 
@@ -2040,6 +2133,7 @@ describe("LiveKitSession", () => {
     });
 
     it("shows no toast when the reconnect gives up", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
       await dropWhile({ camera: true, screenshare: true });
       // The chat socket closed for good: the loop gives up instead of resuming.
       wsState = "disconnected";
@@ -2047,6 +2141,7 @@ describe("LiveKitSession", () => {
 
       expect((session as any)._state.type).toBe("idle");
       expect(mockShowActionToast).not.toHaveBeenCalled();
+      expect(enableCamera).not.toHaveBeenCalled();
     });
   });
 
@@ -4251,6 +4346,29 @@ describe("LiveKitSession", () => {
       // is not reported as a lost call.
       session.failPendingRejoin();
       expect(errorCb).not.toHaveBeenCalled();
+    });
+
+    it("turns the camera back on once a rejoin after a long drop connects", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      mockVoiceState.localCamera = false;
+      (session as any)._lostOnReconnect = { camera: true, screenshare: false };
+      mockRoom.connect.mockResolvedValue(undefined);
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(90_000);
+      wsState = "connected";
+      mockVoiceState.voiceUsers = new Map();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+      expect(enableCamera).not.toHaveBeenCalled();
+
+      mockVoiceState.currentChannelId = 5;
+      await session.handleVoiceToken("rejoin-token", "/livekit", 5, "ws://localhost:7880", true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledOnce();
     });
 
     it("ends the call without retrying when the server refuses the rejoin after a kick", async () => {

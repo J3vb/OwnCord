@@ -44,7 +44,11 @@ import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
-import { showMediaLostNotice, type LostMedia } from "../features/voice/mediaLostNotice";
+import {
+  dismissMediaLostNotice,
+  restoreLostMedia,
+  type LostMedia,
+} from "../features/voice/mediaLostNotice";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
@@ -441,8 +445,8 @@ export class LiveKitSession {
     });
   }
 
-  /** What teardownForReconnect stopped, for the notice once the reconnect
-   *  lands. Cleared by leaveVoice, so a give-up or a rejoin shows nothing. */
+  /** What teardownForReconnect stopped, restored once the reconnect (or its
+   *  rejoin) lands. Cleared by leaveVoice, so a give-up restores nothing. */
   private _lostOnReconnect: LostMedia | null = null;
 
   /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
@@ -501,7 +505,10 @@ export class LiveKitSession {
           : "released";
       },
       rejoinVoice: () => {
+        // The rejoin's join brings back what the drop stopped, as a reconnect does.
+        const lost = this._lostOnReconnect;
         this.leaveVoice(false, true);
+        this._lostOnReconnect = lost;
         this._rejoinPending = true;
         setVoiceStatus("joining");
         noteJoinSent(this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } }));
@@ -516,26 +523,56 @@ export class LiveKitSession {
       clearPendingReconnectFields: () => {
         this._pendingReconnectFields = null;
       },
-      noticeLostMedia: () => {
-        const lost = this._lostOnReconnect;
-        this._lostOnReconnect = null;
-        if (lost === null) return;
-        // Runs inside the reconnect's try: a throw here must not fail a
-        // reconnect that already succeeded.
+      noticeLostMedia: () => this.restoreLostMedia(),
+    });
+  }
+
+  /** Once a reconnect (or its rejoin) lands: bring back what the drop stopped. */
+  private restoreLostMedia(): void {
+    const lost = this._lostOnReconnect;
+    this._lostOnReconnect = null;
+    const room = this._room;
+    if (lost === null || room === null) return;
+    const stillCurrent = (): boolean => this._room === room;
+    const restore = restoreLostMedia(lost, {
+      isOn: (kind) =>
+        kind === "camera"
+          ? voiceStore.getState().localCamera
+          : voiceStore.getState().localScreenshare,
+      enableCamera: () => this.enableCamera(),
+      restartScreenshare: async () => {
+        if (!isLinuxDesktop()) return false;
+        const picker = await import("../features/voice/native/screenPicker");
+        if (!(await picker.armScreenRestart().catch(() => false))) return false;
         try {
-          showMediaLostNotice(lost, {
-            camera: () =>
-              void this.enableCamera().catch((e) => log.error("Camera restart failed", e)),
-            screenshare: () =>
-              void this.enableScreenshare().catch((e) =>
-                log.error("Screenshare restart failed", e),
-              ),
-          });
-        } catch (e) {
-          log.warn("Media-lost notice failed", e);
+          // The user may have shared meanwhile: leave theirs alone.
+          if (stillCurrent() && !voiceStore.getState().localScreenshare)
+            await this.enableScreenshare();
+        } finally {
+          picker.disarmScreenRestart();
         }
+        return true;
+      },
+      stillCurrent,
+      turnOn: {
+        camera: () => void this.enableCamera().catch((e) => log.error("Camera restart failed", e)),
+        screenshare: () =>
+          void this.enableScreenshare().catch((e) => log.error("Screenshare restart failed", e)),
       },
     });
+    restore
+      .then(() => {
+        // Dropped again mid-restore: the next reconnect restores it all,
+        // including what teardownForReconnect saw as still off.
+        if (stillCurrent() || this._state.type !== "reconnecting") return;
+        const prev = this._lostOnReconnect;
+        this._lostOnReconnect = {
+          camera: lost.camera || (prev?.camera ?? false),
+          screenshare: lost.screenshare || (prev?.screenshare ?? false),
+        };
+      })
+      // Runs after the reconnect succeeded: a failure here must not undo it.
+      .catch((e) => log.warn("Restoring media after reconnect failed", e));
   }
 
   // --- URL resolution (delegated to LiveKitUrlResolver) ---
@@ -735,8 +772,13 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<void> {
+    const rejoin = this._rejoinPending;
     this._rejoinPending = false;
-    return this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+    await this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+    if (!rejoin) return;
+    const s = this._state;
+    if (s.type === "connected" && s.channelId === channelId) this.restoreLostMedia();
+    else this._lostOnReconnect = null;
   }
 
   /** A refused voice_join ends a reconnect's rejoin for good: tell the user
@@ -744,6 +786,7 @@ export class LiveKitSession {
   failPendingRejoin(): void {
     if (!this._rejoinPending) return;
     this._rejoinPending = false;
+    this._lostOnReconnect = null;
     this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
   }
 
@@ -807,6 +850,7 @@ export class LiveKitSession {
   leaveVoice(sendWs = true, keepWatched = false): void {
     this._rejoinPending = false;
     this._lostOnReconnect = null;
+    dismissMediaLostNotice();
     if (!keepWatched) this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }

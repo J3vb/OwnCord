@@ -116,6 +116,7 @@ const host = vi.hoisted(() => ({
   handlers: new Set<(e: NativeVoiceEnvelope) => void>(),
   nextSession: 1,
   connectFails: false,
+  screens: { portal: true, sources: [] } as { portal: boolean; sources: Array<{ id: string }> },
 }));
 
 vi.mock("../../src/platform/desktop", () => ({
@@ -177,7 +178,7 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       screenSources: () => {
         host.commands.push(["screenSources", []]);
-        return Promise.resolve({ portal: true, sources: [] });
+        return Promise.resolve(host.screens);
       },
       startScreen: (...args: unknown[]) => {
         host.commands.push(["startScreen", args]);
@@ -282,6 +283,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.handlers.clear();
     host.nextSession = 1;
     host.connectFails = false;
+    host.screens = { portal: true, sources: [] };
     prefs.clear();
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
@@ -531,6 +533,67 @@ describe("LiveKitSession on the Linux native backend", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("a share running when the connection drops (WP 1C-6)", () => {
+    const toasts = { show: vi.fn(() => () => {}) };
+    beforeEach(() => {
+      vi.useFakeTimers();
+      toasts.show.mockClear();
+      initToast(toasts as unknown as ToastContainer);
+      session.setWsClient({
+        send: vi.fn(() => "req-1"),
+        on: vi.fn(),
+        getState: () => "connected",
+      } as never);
+    });
+    afterEach(() => {
+      teardownToast();
+      vi.useRealTimers();
+    });
+
+    const picker = vi.fn();
+    async function shareThenDrop(source: string): Promise<void> {
+      picker.mockReset().mockResolvedValue({ source, quality: "medium", fps: 30 });
+      setScreenSourcePicker(picker);
+      await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+      await session.enableScreenshare();
+      mockVoiceState.localScreenshare = true;
+      host.commands.length = 0;
+      emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
+      mockVoiceState.localScreenshare = false;
+      for (let i = 0; i < 30 && !names().includes("setMicrophone"); i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await flush();
+    }
+
+    it("shares the same window again when the host still lists it", async () => {
+      host.screens = { portal: false, sources: [{ id: "window:81" }] };
+      await shareThenDrop("window:81");
+      await vi.advanceTimersByTimeAsync(0);
+      await flush();
+
+      // The dialog was shown for the first share only.
+      expect(picker).toHaveBeenCalledOnce();
+      expect(host.commands).toContainEqual([
+        "startScreen",
+        [2, "window:81", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+      ]);
+      expect(toasts.show).not.toHaveBeenCalled();
+    });
+
+    it("offers Share again on Wayland, where only the portal can pick", async () => {
+      await shareThenDrop("portal");
+
+      expect(names()).not.toContain("startScreen");
+      expect(toasts.show).toHaveBeenCalledWith(
+        "Your screen share stopped when the connection dropped",
+        "warning",
+        Infinity,
+        expect.objectContaining({ label: "Share again" }),
+      );
+    });
   });
 
   it("a superseding join tears down only its own native session", async () => {
