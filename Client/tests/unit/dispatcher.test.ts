@@ -70,6 +70,7 @@ vi.mock("@lib/livekitSession", () => ({
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
+  reconcileVideoFlags: vi.fn(),
 }));
 // The handlers load the voice module lazily and fire-and-forget
 // (`void livekitSession().then(...)`). A dynamic import resolves through the
@@ -5506,6 +5507,33 @@ describe("WS Dispatcher", () => {
       (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
     );
     expect(voiceLeaveSent).toBe(false);
+  });
+
+  // WP 1C-8: an announce lost while the socket was down leaves the server's
+  // camera/share flag behind what this session sends; `ready` checks it.
+  it("ready hands the server's camera and share flags to the live voice session", async () => {
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "active", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+    const { reconcileVideoFlags } = await import("@lib/livekitSession");
+    vi.mocked(reconcileVideoFlags).mockClear();
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [
+        { user_id: 42, channel_id: 10, muted: false, deafened: false, screenshare: true },
+      ],
+      roles: [],
+      dm_channels: [],
+    });
+
+    await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(false, true));
   });
 
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {

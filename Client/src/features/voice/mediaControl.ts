@@ -28,6 +28,7 @@ import {
   disableCamera as doDisableCamera,
   enableScreenshare as doEnableScreenshare,
   disableScreenshare as doDisableScreenshare,
+  reconcileVideoFlags as doReconcileVideoFlags,
 } from "../../lib/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
@@ -279,6 +280,24 @@ export class MediaControl {
 
   async disableScreenshare(): Promise<void> {
     return doDisableScreenshare(this._screenState, this._videoTrackDeps);
+  }
+
+  reconcileVideoFlags(camera: boolean, screenshare: boolean): void {
+    doReconcileVideoFlags(this._cameraState, this._screenState, this._videoTrackDeps, {
+      camera,
+      screenshare,
+    });
+  }
+
+  /** Stop the camera or share the grant no longer allows (a permission
+   *  removed mid-call): the SFU stops carrying it, so the buttons and the
+   *  server must not keep saying it is on. */
+  dropDeniedVideo(room: Room): void {
+    if (room !== this._room) return;
+    const { localCamera, localScreenshare } = voiceStore.getState();
+    if (localCamera && !publishAllowed(room, Track.Source.Camera)) void this.disableCamera();
+    if (localScreenshare && !publishAllowed(room, Track.Source.ScreenShare))
+      void this.disableScreenshare();
   }
 
   /** Share another window or screen without stopping (web path). */
