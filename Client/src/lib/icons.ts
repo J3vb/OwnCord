@@ -27,6 +27,7 @@ export type IconName =
   | "phone"
   | "phone-off"
   | "volume-2"
+  | "audio-lines"
   | "volume-x"
   | "megaphone"
   | "menu"
@@ -115,6 +116,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Speaker with sound waves
   "volume-2": `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>`,
+  "audio-lines": `<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>`,
   megaphone: `<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>`,
 
   // Hamburger menu (the narrow-width sidebar toggle)

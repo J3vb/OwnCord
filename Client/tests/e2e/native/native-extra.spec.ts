@@ -429,10 +429,10 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
   };
   let held = false;
   try {
-    // A key gates the mic only in the Push to Talk input mode (Voice & Audio).
+    // A key gates the mic only in the Push to Talk input mode (Voice & Video).
     await openSettings(page);
     await page
-      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Voice & Audio" })
+      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Voice & Video" })
       .click();
     const pttMode = page.getByRole("radio", { name: "Push to Talk" });
     await pttMode.click();

@@ -150,7 +150,7 @@ describe("SettingsOverlay", () => {
       "Notifications",
       "Text & Images",
       "Accessibility",
-      "Voice & Audio",
+      "Voice & Video",
       "Keybinds",
       "Advanced",
       "Diagnostics & logs",
@@ -389,9 +389,9 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  // --- Voice & Audio tab tests ---
+  // --- Voice & Video tab tests ---
 
-  it("renders Voice & Audio tab with device selectors", () => {
+  it("renders Voice & Video tab with device selectors", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
     getTab(container, 5).click();

@@ -91,7 +91,7 @@ test.describe("Settings Overlay", () => {
   test("voice/audio tab opens its real controls", async ({ nativePage }) => {
     await openSettings(nativePage);
 
-    // The Voice & Audio tab is part of every build (SettingsOverlay's appTabs
+    // The Voice & Video tab is part of every build (SettingsOverlay's appTabs
     // list), so an absent tab is a regression, not a skippable build variant.
     const voiceTab = nativePage.locator(".settings-sidebar button.settings-nav-item", {
       hasText: /voice|audio/i,
@@ -101,7 +101,7 @@ test.describe("Settings Overlay", () => {
     await voiceTab.click();
     await expect(voiceTab).toHaveClass(/active/);
 
-    // Behaviour, not mere existence: the active pane must be the Voice & Audio
+    // Behaviour, not mere existence: the active pane must be the Voice & Video
     // pane, with its Microphone card, input-device selector and live mic meter
     // mounted.
     const pane = nativePage.locator(".settings-content .settings-pane.active");

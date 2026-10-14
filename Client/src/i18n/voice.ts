@@ -55,6 +55,8 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.shareDenied": "You don't have permission to share your screen here",
   "widget.control.shareVideoLimit": "This channel has reached its video limit",
   "widget.control.disconnect": "Disconnect",
+  "widget.control.noiseSuppression": "Enhanced Noise Suppression",
+  "widget.control.nextJoin": "Enhanced Noise Suppression (applies the next time you join)",
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",
   "widget.requesting": "Requesting...",
@@ -173,7 +175,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.audioUnavailable":
     "Audio sharing is not available on Linux yet; only the picture is shared.",
   "picker.quality": "Stream quality",
-  "picker.qualityHint": "Defaults from Settings → Voice & Audio; applies to this share only.",
+  "picker.qualityHint": "Defaults from Settings → Voice & Video; applies to this share only.",
   "picker.frameRate": "Frame rate",
   "picker.fps": "{fps} fps",
   "picker.fpsDefault": "Default ({fps} fps)",

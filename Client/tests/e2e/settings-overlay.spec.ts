@@ -204,16 +204,16 @@ test.describe("Settings — Notifications Tab", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Settings — Voice & Audio tab
+// Tests: Settings — Voice & Video tab
 // ---------------------------------------------------------------------------
 
-test.describe("Settings — Voice & Audio Tab", () => {
+test.describe("Settings — Voice & Video Tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-    await switchSettingsTab(page, "Voice & Audio");
+    await switchSettingsTab(page, "Voice & Video");
   });
 
   test("shows device selectors for input and output", async ({ page }) => {
