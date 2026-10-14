@@ -41,14 +41,20 @@ func TestPurgeReplay_DeleteRunsOutsideSeqMuAndFailsColdReads(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Error("a broadcast could not be sequenced while the purge deleted rows: seqMu is still held")
 		}
-		if _, err := store.GetEventsSince(ctx, 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
-			t.Errorf("GetEventsSince during the purge: err = %v, want errReplayPurgeInProgress", err)
-		}
-		if _, err := store.GetEventsSinceForChannels(ctx, 0, []int64{1}, 10); !errors.Is(err, errReplayPurgeInProgress) {
-			t.Errorf("GetEventsSinceForChannels during the purge: err = %v, want errReplayPurgeInProgress", err)
-		}
-		if _, err := store.CountEventsInRange(ctx, 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
-			t.Errorf("CountEventsInRange during the purge: err = %v, want errReplayPurgeInProgress", err)
+		// From another goroutine, as a resume would; the purge's own
+		// goroutine holds the lock for writing.
+		errs := make(chan [3]error, 1)
+		go func() {
+			var e [3]error
+			_, e[0] = store.GetEventsSince(ctx, 0, 10)
+			_, e[1] = store.GetEventsSinceForChannels(ctx, 0, []int64{1}, 10)
+			_, e[2] = store.CountEventsInRange(ctx, 0, 10)
+			errs <- e
+		}()
+		for i, err := range <-errs {
+			if !errors.Is(err, errReplayPurgeInProgress) {
+				t.Errorf("cold read %d during the purge: err = %v, want errReplayPurgeInProgress", i, err)
+			}
 		}
 	})
 
