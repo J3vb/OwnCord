@@ -889,6 +889,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "ptt_polling_supported") return false;
         if (cmd === "voice_shortcuts_supported") return false;
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
+        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
+        if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh
