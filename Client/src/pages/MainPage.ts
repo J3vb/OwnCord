@@ -1460,7 +1460,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
         onCameraDevice: (anchor, signal) =>
-          void import("../features/voice/cameraMenu").then((m) => m.showCameraMenu(anchor, signal)),
+          void import("../features/voice/cameraMenu")
+            .then((m) => m.showCameraMenu(anchor, signal))
+            .catch((err: unknown) => log.warn("Camera menu failed to open", err)),
         onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>

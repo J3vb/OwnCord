@@ -335,6 +335,7 @@ export function unpublishManualTrack(
 }
 
 export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
+  state.onCameraEnded = undefined;
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
@@ -829,7 +830,8 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
  *  native track publishes in the backend). */
 export async function getLocalScreenshareFps(room: Room | null): Promise<number | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
-    Partial<Pick<LocalVideoTrack, "getSenderStats">> | undefined;
+    | Partial<Pick<LocalVideoTrack, "getSenderStats">>
+    | undefined;
   if (typeof track?.getSenderStats !== "function") return null;
   const rates = (await track.getSenderStats())
     .map((s) => s.framesPerSecond as number | undefined)

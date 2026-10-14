@@ -55,8 +55,10 @@ export interface MediaControlHost {
 export class MediaControl {
   constructor(private readonly host: MediaControlHost) {}
 
-  /** Camera switches run one at a time, so the last pick wins. */
+  /** Camera switches run one at a time; a queued one that is no longer the
+   *  latest pick is skipped, so the last pick wins. */
   private videoSwitch: Promise<void> = Promise.resolve();
+  private latestVideoDevice: string | null = null;
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
@@ -306,7 +308,10 @@ export class MediaControl {
    *  native capture is started again on the new device. */
   switchVideoDevice(deviceId: string): Promise<void> {
     savePref("videoInputDevice", deviceId);
-    const run = this.videoSwitch.then(() => this.doSwitchVideoDevice(deviceId));
+    this.latestVideoDevice = deviceId;
+    const run = this.videoSwitch.then(() =>
+      this.latestVideoDevice === deviceId ? this.doSwitchVideoDevice(deviceId) : undefined,
+    );
     this.videoSwitch = run.catch(() => {});
     return run;
   }
@@ -314,18 +319,30 @@ export class MediaControl {
   private async doSwitchVideoDevice(deviceId: string): Promise<void> {
     const state = this._cameraState;
     const track = state.manualCameraTrack;
+    // Camera off, or still starting: the saved choice is what it uses next.
+    // An enable that read the choice just before this pick starts on the old
+    // device; picking again moves it.
     if (track === null) return;
     try {
       if ("setDeviceId" in track) {
         const before = track.mediaStreamTrack;
-        await track.setDeviceId(deviceId);
+        if (!(await track.setDeviceId(deviceId))) {
+          log.warn("Camera restarted on another device than the one picked");
+        }
         // The restart swaps the capture: unplug detection moves with it.
         const now = track.mediaStreamTrack;
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
       } else {
+        const generation = state.generation ?? 0;
         await this.enableCamera();
+        // A failed restart already said so, but the server still has the
+        // camera on: tell it the camera is off.
+        if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
+          await this.disableCamera();
+          return;
+        }
       }
       log.info("Camera device switched");
     } catch (err) {

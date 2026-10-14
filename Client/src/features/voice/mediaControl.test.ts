@@ -221,6 +221,18 @@ describe("switchVideoDevice", () => {
     const { media } = setup(fakeRoom(), { manualCameraTrack: { capture: 1 } });
     await media.switchVideoDevice("/dev/video2");
     expect(enableCamera).toHaveBeenCalledTimes(1);
+    expect(disableCamera).not.toHaveBeenCalled();
+  });
+
+  it("native restart that fails tells the server the camera is off", async () => {
+    const camera: { manualCameraTrack: unknown } = { manualCameraTrack: { capture: 1 } };
+    // enableCamera stopped the old capture, then failed to start the new one.
+    vi.mocked(enableCamera).mockImplementationOnce(async () => {
+      camera.manualCameraTrack = null;
+    });
+    const { media } = setup(fakeRoom(), camera);
+    await media.switchVideoDevice("/dev/video9");
+    expect(disableCamera).toHaveBeenCalledTimes(1);
   });
 
   it("a failed switch turns the camera off and says so", async () => {
@@ -252,6 +264,8 @@ describe("switchVideoDevice", () => {
     });
     const { media } = setup(fakeRoom(), { manualCameraTrack: track });
     const first = media.switchVideoDevice("a");
+    await Promise.resolve();
+    await Promise.resolve();
     const second = media.switchVideoDevice("b");
     await Promise.resolve();
     await Promise.resolve();
@@ -259,5 +273,26 @@ describe("switchVideoDevice", () => {
     (release as (() => void) | null)?.();
     await Promise.all([first, second]);
     expect(order).toEqual(["start a", "end a", "start b"]);
+  });
+
+  it("skips a queued pick that a newer pick replaced", async () => {
+    const track = webTrack();
+    let release: (() => void) | null = null;
+    track.setDeviceId.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((r) => {
+          release = () => r(true);
+        }),
+    );
+    const { media } = setup(fakeRoom(), { manualCameraTrack: track });
+    const first = media.switchVideoDevice("a");
+    await Promise.resolve();
+    await Promise.resolve();
+    const skipped = media.switchVideoDevice("b");
+    const last = media.switchVideoDevice("c");
+    (release as (() => void) | null)?.();
+    await Promise.all([first, skipped, last]);
+    expect(track.setDeviceId.mock.calls.map((c) => c[0])).toEqual(["a", "c"]);
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "c");
   });
 });
