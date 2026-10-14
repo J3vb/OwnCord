@@ -49,7 +49,7 @@ vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
   closeUserProfilePopup: vi.fn(),
 }));
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
 import {
   addChannel,
   channelsStore,
@@ -69,6 +69,7 @@ import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
+import { muteChannel, unmuteChannel, invalidateMuteCache } from "@lib/channel-mutes";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -377,7 +378,9 @@ describe("ChannelSidebar", () => {
     // The sidebar re-renders on uiStore change, so channels under
     // collapsed category are not in the DOM
     const itemsAfter = container.querySelectorAll(".channel-item");
-    expect(itemsAfter.length).toBe(2); // only Voice + Info channels remain
+    // Voice + Info stay (their own categories); "general" is unread (2), so it
+    // is the one row a collapsed Text Channels keeps (WP 2B-5).
+    expect(itemsAfter.length).toBe(3);
 
     // Expand again
     const headersAfter = container.querySelectorAll(".category");
@@ -548,13 +551,12 @@ describe("ChannelSidebar", () => {
 
   // ── V9: a collapsed category keeps the voice channel you are in ──
 
-  it("a collapsed category still shows the joined voice channel and its users (V9)", () => {
+  it("a collapsed category still shows the joined voice channel (V9)", () => {
     setChannels([
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ]);
-    addVoiceUser(3, 30, "alice");
-    addVoiceUser(5, 50, "bob");
+    // Nobody is in either channel, so only being joined can keep a row.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     uiStore.setState((prev) => ({
       ...prev,
@@ -563,9 +565,7 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
-    expect(container.querySelector('.voice-user-item[data-voice-uid="30"]')).not.toBeNull();
     expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
-    expect(container.querySelector('.voice-user-item[data-voice-uid="50"]')).toBeNull();
 
     // Leaving hides it; joining the other channel shows that one instead.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
@@ -574,7 +574,6 @@ describe("ChannelSidebar", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5 }));
     voiceStore.flush();
     expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
-    expect(container.querySelector('.voice-user-item[data-voice-uid="50"]')).not.toBeNull();
     expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
 
     // Expanding restores every row.
@@ -584,9 +583,8 @@ describe("ChannelSidebar", () => {
     expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
   });
 
-  it("a collapsed category hides voice channels the user is not in (V9)", () => {
+  it("a collapsed category hides an empty voice channel the user is not in (V9)", () => {
     setChannels(testChannels);
-    addVoiceUser(3, 30, "alice");
     uiStore.setState((prev) => ({
       ...prev,
       collapsedCategories: new Set(["Voice Channels"]),
@@ -595,6 +593,185 @@ describe("ChannelSidebar", () => {
 
     expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
     expect(container.querySelector(".voice-user-item")).toBeNull();
+  });
+
+  // ── WP 2B-5: a collapsed category keeps the rows that matter ──
+
+  describe("collapsed category shows what matters (WP 2B-5)", () => {
+    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+      id,
+      name: `text-${id}`,
+      type: "text",
+      category: "Text Channels",
+      position: id,
+      unread_count: 0,
+      last_message_id: 1,
+      ...extra,
+    });
+    const collapse = (...names: string[]): void => {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(names) }));
+    };
+    const rowIds = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+        (el) => el.dataset.channelId ?? "",
+      );
+    const dot = (): Element | null => container.querySelector(".category-unread-dot");
+
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    it("a collapsed group with one unread channel renders exactly that row", () => {
+      setChannels([text(1), text(2, { unread_count: 3 }), text(3)]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("a mentioned muted channel shows; an unread muted one hides and the header dot shows", () => {
+      setChannels([
+        text(1, { unread_count: 2, mention_count: 1 }),
+        text(2, { unread_count: 4 }),
+        text(3),
+      ]);
+      muteChannel(1);
+      muteChannel(2);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      const d = dot();
+      expect(d).not.toBeNull();
+      expect(d?.getAttribute("aria-label")).toBe("Unread channels hidden");
+    });
+
+    it("shows no dot when no hidden row is unread", () => {
+      setChannels([text(1, { unread_count: 2, mention_count: 1 }), text(2)]);
+      muteChannel(1);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("keeps a voice channel with a person and hides an empty one", () => {
+      setChannels([
+        text(1),
+        { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
+        { id: 5, name: "empty", type: "voice", category: "Voice Channels", position: 1 },
+      ]);
+      addVoiceUser(3, 30, "alice");
+      collapse("Voice Channels");
+      sidebar.mount(container);
+      expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+      expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
+      expect(container.querySelector('.voice-user-item[data-voice-uid="30"]')).not.toBeNull();
+      // Live: the last person leaving hides the row again.
+      voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map() }));
+      voiceStore.flush();
+      expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    });
+
+    it("keeps the active channel", () => {
+      setChannels([text(1), text(2), text(3)]);
+      setActiveChannel(2);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("rows appear and disappear live as unread state changes", () => {
+      setChannels([text(1), text(2), text(3)]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual([]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 1 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+      expect(rowIds()).toEqual(["2"]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 0 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+      expect(rowIds()).toEqual([]);
+    });
+
+    it("muting a collapsed unread row hides it and shows the dot; unmuting reverses", () => {
+      setChannels([text(1, { unread_count: 2 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+      muteChannel(1);
+      expect(rowIds()).toEqual([]);
+      expect(dot()).not.toBeNull();
+      unmuteChannel(1);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("an expanded category shows every row and no header dot", () => {
+      setChannels([text(1, { unread_count: 2 }), text(2), text(3, { unread_count: 1 })]);
+      muteChannel(3);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2", "3"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {
+      const onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+      sidebar.destroy?.();
+      setAdminUser();
+      sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onReorderChannel });
+      setChannels([text(1, { unread_count: 1 }), text(2), text(3, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+
+      container
+        .querySelector('[data-channel-id="3"]')!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
+
+      expect(onReorderChannel).toHaveBeenCalledWith([
+        { channelId: 3, newPosition: 1, previousPosition: 3 },
+        { channelId: 1, newPosition: 3, previousPosition: 1 },
+      ]);
+      expect(channelsStore.getState().channels.get(2)?.position).toBe(2);
+    });
+
+    it("a focused row that stops showing hands focus to the category arrow", () => {
+      setChannels([text(1), text(2, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      const row = container.querySelector<HTMLElement>('[data-channel-id="2"]')!;
+      row.focus();
+      expect(document.activeElement).toBe(row);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        const ch = channels.get(2)!;
+        channels.set(2, { ...ch, unreadCount: 0 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+
+      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".category-arrow"));
+    });
   });
 
   // ── V11: a voice user with nothing to watch opens their profile ──

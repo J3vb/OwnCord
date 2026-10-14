@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Channels**
+
+- A collapsed category now still shows its unread and mentioned channels, the channel you are in and voice channels with people in them. A muted channel with unread messages stays hidden, and the category header shows a small dot.
+
 **Accounts & admin**
 
 - The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.

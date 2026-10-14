@@ -50,6 +50,7 @@ export const shellText = defineCatalog("shell", {
   "channel.ageRestricted": "Age restricted",
   "channel.ageRestrictedTitle": "Age-restricted channel",
   "channel.mentions": { one: "{count} mention", other: "{count} mentions" },
+  "channel.unreadHidden": "Unread channels hidden",
   "channel.reconnecting": "Reconnecting…",
   "channel.notConnected": "Not connected",
   "channel.voiceCapacity": "{connected} of {max} connected",
