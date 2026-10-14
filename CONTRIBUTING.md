@@ -20,7 +20,7 @@ model, coding standards and how to run the checks CI runs.
    [docs/contributing.md](docs/contributing.md). CI takes about 15 minutes and
    checks more than a plain build and test.
 
-3. **Report security problems privately.** Use a GitHub Security Advisory.
+3. **Report security problems privately.** Use GitHub's private report form.
    Never use a public issue or pull request. See [SECURITY.md](SECURITY.md) and
    [docs/security.md](docs/security.md).
 

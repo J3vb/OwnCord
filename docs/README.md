@@ -153,7 +153,7 @@ page. Each kind of status has one owner:
 | ---------------------------------------- | ----------------------------------------------------------------------- |
 | Current release, nightly health, roadmap | [STATUS.md](STATUS.md)                                                  |
 | Defects                                  | `.superpowers/findings-ledger.json` (`FINDINGS.md` is rendered from it) |
-| Security-sensitive defects               | Private GitHub Security Advisories                                      |
+| Security-sensitive defects               | GitHub private vulnerability reports; fixes ship as neutral PRs         |
 | Rules for generated code                 | `CLAUDE.md`, "Generated code — never hand-edit"                         |
 
 A CI job checks the counts in a few current summaries against the live

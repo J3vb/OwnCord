@@ -294,7 +294,7 @@ The difference matters most for security problems.
 | A bug you can reproduce         | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose). The form asks for the details needed to reproduce it |
 | A question about setup or usage | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)                                   |
 | An idea or feature suggestion   | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas), not an issue                 |
-| A security vulnerability        | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new)                                       |
+| A security vulnerability        | [Private report](https://github.com/J3vb/OwnCord/security/advisories/new)                                         |
 
 ### Security reporting
 
@@ -307,7 +307,7 @@ Use [private security reporting](https://github.com/J3vb/OwnCord/security/adviso
 
 This repository is public. A commit message, a PR description and a branch
 name can all reveal a weakness. If you are fixing something you think is a
-security problem, report it in a private advisory first and let the fix be
+security problem, report it privately first and let the fix be
 coordinated. Do not describe the weakness in the public change that fixes it.
 This also applies to weaknesses in the repository's own automation and
 settings, not only to bugs in the server or client.

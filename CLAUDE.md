@@ -137,9 +137,10 @@ and proceeds, so a reviewer can see what was assumed.
   apt.llvm.org only on Debian/Ubuntu. Windows and server-only work need
   nothing. Details: [Client/CLAUDE.md](Client/CLAUDE.md),
   [docs/contributing.md](docs/contributing.md#client-tauri-v2).
-- Security issues go through GitHub Security Advisories, never public issues
-  (`docs/security.md`). This repo is public — unfixed defects do not belong in
-  commits, issues, or PR descriptions.
+- Security issues are reported through GitHub's private report form, never
+  public issues (`docs/security.md`). No advisory is published: the fix is an
+  ordinary PR to `dev` that names the control it adds. This repo is public —
+  unfixed defects do not belong in commits, issues, or PR descriptions.
 - Branch from `dev` and PR to `dev` — `dev` is the integration branch and is
   PR-only; `main` carries releases. Squash merge, conventional commit subjects.
   Full model: [docs/contributing.md](docs/contributing.md#branch-and-pr-model).

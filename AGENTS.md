@@ -74,7 +74,7 @@ Full rules: [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
 
 ## Security rules
 
-- Report vulnerabilities through [GitHub Security Advisories](https://github.com/J3vb/OwnCord/security/advisories/new), **never** a public issue, pull request or discussion. This repository is public: a commit message, PR description, changelog entry or branch name is a disclosure channel, so never describe an unfixed weakness in one. Public artifacts carry only an opaque identifier, the affected property, safe acceptance criteria and a status, never reproduction steps or exploit conditions.
+- Report vulnerabilities through GitHub's [private report form](https://github.com/J3vb/OwnCord/security/advisories/new), **never** a public issue, pull request or discussion. This repository is public: a commit message, PR description, changelog entry or branch name is a disclosure channel, so never describe an unfixed weakness in one. Public artifacts carry only an opaque identifier, the affected property, safe acceptance criteria and a status, never reproduction steps or exploit conditions.
 - Never put a password, token, TOTP secret, private key or message body in a log line, an audit-log detail or a commit. Never widen what reaches the webview: it holds the session token and the voice-E2EE identity key by design, but the remembered password stays Rust-side and never returns over IPC.
 - Validate input at every trust boundary, and verify authorization server-side through the owning permission predicate. Never trust a client-side check or a client-supplied role.
 - Never weaken a test-locked security invariant: the authorization chokepoint inventory, the audit-safety assertions, the E2EE staleness and verification guards, the log redaction helpers.

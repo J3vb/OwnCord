@@ -18,14 +18,18 @@ releases do not get backported fixes.
 
 **Do not open a public issue for a security bug.**
 
-Report it privately with a GitHub Security Advisory:
+Report it privately with GitHub's private vulnerability reporting form:
 
 1. Go to the
-   [OwnCord security advisories page](https://github.com/J3vb/OwnCord/security/advisories/new).
-2. Choose **Report a vulnerability**.
+   [private report form](https://github.com/J3vb/OwnCord/security/advisories/new).
+2. Fill in the report and submit it.
 
-An advisory stays private until it is published. So this channel is safe,
-even though the repository is public.
+Only you and the maintainer can see the report. So this channel is safe, even
+though the repository is public.
+
+OwnCord does not publish GitHub Security Advisories. A fix ships as an ordinary
+pull request to `dev`. Its title, description and commits say what control was
+added, never what the weakness was or how to trigger it.
 
 Please include:
 
@@ -443,8 +447,9 @@ documents. Any disagreement is a bug in this page.
 
 - **Report security problems privately.** Do not open a public issue. Do not
   describe an unfixed weakness in a commit message, PR description or
-  changelog. Use a GitHub Security Advisory, as described at the top of this
-  page.
+  changelog. Use the private report form described at the top of this page.
+  The fix is an ordinary pull request that names the control it adds, not the
+  weakness.
 
 ### Sources
 

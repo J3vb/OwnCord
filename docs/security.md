@@ -6,8 +6,10 @@ data and the desktop client.
 
 ## Reporting Vulnerabilities
 
-Report privately through GitHub Security Advisories:
+Report privately through GitHub's private vulnerability reporting form:
 [github.com/J3vb/OwnCord/security/advisories/new](https://github.com/J3vb/OwnCord/security/advisories/new).
+OwnCord does not publish GitHub Security Advisories; fixes ship as ordinary
+pull requests to `dev` with neutral wording.
 
 **Do NOT open public issues for security bugs.**
 
@@ -26,7 +28,7 @@ as the rule.
 - **Public records carry only four things.** Commits, issues, pull request
   descriptions and changelogs carry an **opaque identifier, the affected
   property, safe acceptance criteria, and a status**. Nothing more.
-- **Details stay in the private advisory.** That means reproduction steps,
+- **Details stay in the private report.** That means reproduction steps,
   source-to-sink traces, the conditions needed to exploit it, and the state a
   fix replaced. A commit that fixes a weakness describes the control it adds,
   not the gap it closes.

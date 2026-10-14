@@ -28,5 +28,5 @@ Rules:
 
 - Protocol changes go through the `protocol-change` skill; schema and queries through `db-change`; never hand-edit generated files.
 - Never weaken a test. When a WP deliberately changes pinned behaviour, keep the old case where it still holds and add the new one.
-- Security-related findings never go into commits, PR text, issues or code comments. Tell Jeroen they belong in a GitHub Security Advisory.
+- Security-related findings never go into commits, PR text, issues or code comments. Keep the detail out of the repo, tell Jeroen privately, and fix it in an ordinary PR to `dev` that names only the control it adds.
 - Base branch is `dev`. Never push to `main`. Never merge.

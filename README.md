@@ -263,7 +263,7 @@ may open the admin panel. Every option is in
 
 ## Reporting a security problem
 
-- Use a private [GitHub Security Advisory](https://github.com/J3vb/OwnCord/security/advisories/new).
+- Use GitHub's [private report form](https://github.com/J3vb/OwnCord/security/advisories/new).
 - Do not open a public issue for a security bug.
 - The full policy is in [SECURITY.md](SECURITY.md) and
   [docs/security.md](docs/security.md).
@@ -273,12 +273,12 @@ may open the admin panel. Every option is in
 There is no support promise (see the note at the top). But each kind of
 message has a right place:
 
-| What you have                 | Where it goes                                                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------- |
-| A bug you can reproduce       | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)                                 |
-| A question about setup or use | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)             |
-| An idea or feature request    | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas)         |
-| A security problem            | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new), never an issue |
+| What you have                 | Where it goes                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| A bug you can reproduce       | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)                               |
+| A question about setup or use | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)           |
+| An idea or feature request    | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas)       |
+| A security problem            | [Private report](https://github.com/J3vb/OwnCord/security/advisories/new), never an issue |
 
 ## Contributing
 
