@@ -1259,6 +1259,7 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
+    // Default: Remember password starts unticked.
     expect(page.getRememberPassword()).toBe(false);
 
     const checkbox = container.querySelector("#remember-password") as HTMLInputElement;
@@ -1274,42 +1275,45 @@ describe("ConnectPage", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    expect(page.getAutoConnect()).toBe(false);
+    // Default: Auto connect (stay signed in) starts ticked.
+    expect(page.getAutoConnect()).toBe(true);
 
     const checkbox = container.querySelector("#auto-connect") as HTMLInputElement;
+    checkbox.checked = false;
+    expect(page.getAutoConnect()).toBe(false);
     checkbox.checked = true;
     expect(page.getAutoConnect()).toBe(true);
 
     page.destroy?.();
   });
 
-  it("ticking auto-connect forces and disables remember password", () => {
+  it("ticking auto-connect no longer forces or disables remember password", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
     const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
     const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
 
+    autoConnectCheckbox.checked = false;
+    autoConnectCheckbox.dispatchEvent(new Event("change"));
     autoConnectCheckbox.checked = true;
     autoConnectCheckbox.dispatchEvent(new Event("change"));
 
-    expect(rememberCheckbox.checked).toBe(true);
-    expect(rememberCheckbox.disabled).toBe(true);
-    expect(page.getRememberPassword()).toBe(true);
+    expect(rememberCheckbox.checked).toBe(false);
+    expect(rememberCheckbox.disabled).toBe(false);
+    expect(page.getRememberPassword()).toBe(false);
 
     page.destroy?.();
   });
 
-  it("unticking auto-connect re-enables remember password", () => {
+  it("unticking auto-connect leaves remember password as the user set it", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
     const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
     const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
 
-    autoConnectCheckbox.checked = true;
-    autoConnectCheckbox.dispatchEvent(new Event("change"));
-
+    rememberCheckbox.checked = true;
     autoConnectCheckbox.checked = false;
     autoConnectCheckbox.dispatchEvent(new Event("change"));
 
@@ -1317,6 +1321,86 @@ describe("ConnectPage", () => {
     expect(rememberCheckbox.checked).toBe(true);
 
     page.destroy?.();
+  });
+
+  describe("saved profile sets both boxes", () => {
+    const savedProfile = (autoConnect: boolean, rememberPassword: boolean) => [
+      {
+        id: "p1",
+        name: "Saved",
+        host: "saved.example:8443",
+        username: "alice",
+        autoConnect,
+        rememberPassword,
+      },
+    ];
+    const boxes = () => ({
+      auto: (container.querySelector("#auto-connect") as HTMLInputElement).checked,
+      remember: (container.querySelector("#remember-password") as HTMLInputElement).checked,
+    });
+
+    it.each([
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ])("server click: autoConnect=%s rememberPassword=%s", (auto, remember) => {
+      const page = createConnectPage(makeCallbacks(), savedProfile(auto, remember));
+      page.mount(container);
+      // Start from the opposite state so a no-op would be caught.
+      page.selectServer("other:1", undefined, !auto, !remember);
+      (container.querySelector(".server-item") as HTMLElement).click();
+      expect(boxes()).toEqual({ auto, remember });
+      page.destroy?.();
+    });
+
+    it.each([
+      [false, false],
+      [true, false],
+      [true, true],
+    ])("selectServer: autoConnect=%s rememberPassword=%s", (auto, remember) => {
+      const page = createConnectPage(makeCallbacks(), savedProfile(auto, remember));
+      page.mount(container);
+      page.selectServer("saved.example:8443", "alice", auto, remember);
+      expect(boxes()).toEqual({ auto, remember });
+      page.destroy?.();
+    });
+
+    it("a typed host matching a saved profile applies that profile's flags", () => {
+      const page = createConnectPage(makeCallbacks(), savedProfile(false, false));
+      page.mount(container);
+      expect(boxes()).toEqual({ auto: true, remember: false });
+      const host = container.querySelector("#host") as HTMLInputElement;
+      host.value = "saved.example:8443";
+      host.dispatchEvent(new Event("input"));
+      expect(boxes()).toEqual({ auto: false, remember: false });
+      // The user's later edit is not overridden by further typing in the host.
+      (container.querySelector("#auto-connect") as HTMLInputElement).checked = true;
+      host.dispatchEvent(new Event("input"));
+      expect(boxes()).toEqual({ auto: true, remember: false });
+      page.destroy?.();
+    });
+
+    it("a host typed before profiles load takes the saved flags when they arrive", () => {
+      const page = createConnectPage(makeCallbacks(), []);
+      page.mount(container);
+      const host = container.querySelector("#host") as HTMLInputElement;
+      host.value = "saved.example:8443";
+      host.dispatchEvent(new Event("input"));
+      expect(boxes()).toEqual({ auto: true, remember: false });
+      page.refreshProfiles(savedProfile(false, false));
+      expect(boxes()).toEqual({ auto: false, remember: false });
+      page.destroy?.();
+    });
+
+    it("a host with no profile gets the defaults", () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+      page.selectServer("other:1", undefined, false, true);
+      page.selectServer("brand-new:1");
+      expect(boxes()).toEqual({ auto: true, remember: false });
+      page.destroy?.();
+    });
   });
 
   it("getPassword returns password input value", () => {

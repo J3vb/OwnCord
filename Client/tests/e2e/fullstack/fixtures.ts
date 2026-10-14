@@ -17,6 +17,10 @@ export async function login(page: Page, server: TestServer, username: string) {
   await page.locator("#host").fill(`127.0.0.1:${server.port}`);
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(TEST_PASSWORD);
+  // Auto connect is ticked by default, and the real-transport mock keeps the
+  // stored token across page.goto, so a second login on the same page would
+  // resume instead of showing the form.
+  await page.locator("#auto-connect").uncheck();
   await page.locator("button[type='submit']").click();
   await expect(page.getByTestId("app-layout")).toBeVisible();
   await expect(

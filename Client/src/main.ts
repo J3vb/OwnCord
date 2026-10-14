@@ -561,6 +561,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // Runs after the pre-auth deadline gives up; a stored-token resume uses it
     // to keep waiting for a server that is still down.
     onPreauthTimeout?: () => void,
+    // Stay-signed-in (Auto connect) keeps the session token even when
+    // Remember password is off; the password itself is saved only with
+    // `rememberPassword`.
+    autoConnect = false,
   ): void {
     log.info("Post-auth wiring", { host, username });
     // Tear down any prior session wiring so listeners and the connected
@@ -651,13 +655,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       }),
     );
 
-    // BUG-135: Only persist credentials when the user opted in. Declining is
-    // an active instruction, not just an absence of one (OCV-022): a password
-    // stored under an earlier opt-in must not outlive the opt-out, so the whole
-    // credential goes. The username survives in the profile, so the form still
-    // prefills it; the token is worthless here because auto-connect forces
-    // remember on.
-    if (!rememberPassword && rememberIsUserChoice) {
+    // BUG-135: Only persist credentials when the user opted in. The token is
+    // kept when Auto connect OR Remember password is ticked; the password only
+    // when Remember is ticked. Declining both is an active instruction, not
+    // just an absence of one (OCV-022): a password stored under an earlier
+    // opt-in must not outlive the opt-out, so the whole credential goes. The
+    // username survives in the profile, so the form still prefills it.
+    const keepToken = rememberPassword || autoConnect;
+    if (!keepToken && rememberIsUserChoice) {
       void (async () => {
         // The store holds one credential per host (`login_account(host) =
         // host`), and `save_credential` already overwrites it with no
@@ -681,8 +686,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         }
       })();
     }
-    if (rememberPassword) {
-      saveCredential(host, username, token, password)
+    if (keepToken) {
+      // Auto connect without Remember: keep the token only. A user's own login
+      // also erases any password saved under an earlier Remember opt-in
+      // (clearPassword); a stored-token resume never clears anything.
+      const clearPassword = !rememberPassword && rememberIsUserChoice;
+      saveCredential(host, username, token, rememberPassword ? password : undefined, clearPassword)
         .then((ok) => {
           if (!ok && owner.isCurrent()) {
             log.warn("Credential save failed — auto-login will not work for this server");
@@ -699,9 +708,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // (BUG-135). No password is passed: save_credential preserves the stored
     // one when none is supplied, which is why the plaintext no longer has to
     // make a round trip through JavaScript.
-    sessionUnsubs.push(
-      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword)),
-    );
+    sessionUnsubs.push(ws.on("user_update", createUserUpdateCredentialSaver(host, keepToken)));
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
@@ -812,6 +819,34 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       });
     }
 
+    // Stay signed in is the only reason an auto-connect-only profile holds a
+    // token. When a change moves auto-connect off such a profile and nothing
+    // else on that host keeps a sign-in (neither flag on any profile there),
+    // the token would sit in the credential store with both flags off, so it
+    // goes. `skipHost` is the host of a login in flight, whose own save/delete
+    // already decides its credential.
+    function mutateAutoLogin(mutate: () => void, skipHost?: string): void {
+      const heldBefore = new Set(
+        profileManager
+          .getAll()
+          .filter((p) => p.autoConnect)
+          .map((p) => p.host),
+      );
+      mutate();
+      const after = profileManager.getAll();
+      for (const host of heldBefore) {
+        if (host === skipHost) continue;
+        if (after.some((p) => p.host === host && (p.autoConnect || p.rememberPassword))) continue;
+        void (async () => {
+          const removed = await deleteCredential(host);
+          if (!removed && pageOwner.isCurrent()) {
+            log.warn("Credential delete failed — the saved sign-in is still stored", { host });
+            setTransientError(connectText("session.passwordRemoveFailed"));
+          }
+        })();
+      }
+    }
+
     // Auto-save a profile for a host after successful login (if not already saved)
     function ensureProfileExists(
       host: string,
@@ -840,11 +875,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       const profile = profileManager.getAll().find((p) => p.host === host);
       if (profile) {
         if (autoConnect) {
-          profileManager.setAutoLogin(profile.id);
+          mutateAutoLogin(() => profileManager.setAutoLogin(profile.id), host);
         } else if (profile.autoConnect) {
           // Only clear when this profile is the current holder — setAutoLogin(null)
           // clears auto-login on every profile, not just this one.
-          profileManager.setAutoLogin(null);
+          mutateAutoLogin(() => profileManager.setAutoLogin(null), host);
         }
       }
       persistProfiles();
@@ -871,7 +906,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       if (!result.token) return;
       const remember = connectPage.getRememberPassword();
       ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-      wirePostAuth(host, result.token, username, remember ? password : undefined, remember, true);
+      wirePostAuth(
+        host,
+        result.token,
+        username,
+        remember ? password : undefined,
+        remember,
+        true,
+        undefined,
+        connectPage.getAutoConnect(),
+      );
     }
 
     const connectPage = createConnectPage(
@@ -944,7 +988,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-          wirePostAuth(host, result.token, username, savedPassword, remember, true);
+          wirePostAuth(
+            host,
+            result.token,
+            username,
+            savedPassword,
+            remember,
+            true,
+            undefined,
+            connectPage.getAutoConnect(),
+          );
         },
         async onRecover(host, username, secret, newPassword) {
           api.endSession();
@@ -992,6 +1045,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
               savedPassword,
               remember,
               true,
+              undefined,
+              connectPage.getAutoConnect(),
             );
           }
         },
@@ -1024,7 +1079,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           connectPage.refreshProfiles(getProfileList());
         },
         onToggleAutoLogin(profileId, enabled) {
-          profileManager.setAutoLogin(enabled ? profileId : null);
+          mutateAutoLogin(() => profileManager.setAutoLogin(enabled ? profileId : null));
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },
@@ -1111,7 +1166,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     ): Promise<void> {
       // The stored token outlives an opt-out whose delete failed, so the
       // profile's own setting decides, not the credential's presence.
-      if (profile.rememberPassword !== true) return;
+      if (profile.rememberPassword !== true && profile.autoConnect !== true) return;
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -1119,14 +1174,18 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         if (cred?.username && cred?.token && !autoLoginCancelled) {
           // Pass autoConnect so the checkbox still reads correctly if the
           // user cancels and lands back on the form.
-          connectPage.selectServer(profile.host, cred.username, profile.autoConnect);
+          connectPage.selectServer(
+            profile.host,
+            cred.username,
+            profile.autoConnect,
+            profile.rememberPassword,
+          );
           connectPage.showAutoConnecting(profile.name);
 
           if (autoLoginCancelled) return;
 
           // Use stored token directly for reconnection, preserving the
-          // profile's existing rememberPassword (autoConnect profiles always
-          // have it true — see setAutoLogin).
+          // profile's existing rememberPassword and autoConnect.
           //
           // The credential re-save no longer has to be suppressed here.
           // save_credential used to treat an absent password as "erase it",
@@ -1148,6 +1207,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             profile.rememberPassword,
             false,
             waitIfDown ? () => waitForServer(profile) : undefined,
+            profile.autoConnect,
           );
         }
       } catch (err) {
@@ -1258,7 +1318,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         connectPage.selectServer(
           quickSwitchTarget,
           targetProfile?.username ?? undefined,
-          targetProfile?.autoConnect === true,
+          targetProfile?.autoConnect,
           targetProfile?.rememberPassword,
         );
         // A quick switch keeps each server's saved sign-in (B7-13), so
