@@ -47,6 +47,64 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.3.0-beta.1
+
+**OwnCord 2.3 beta 1** (the fourth public beta) is the voice release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. Calls get their own view with tiles and a control bar, voice settings work the way Discord's do, streaming gets a stream card with Change source, and the app tells you what changed after an update. It also fixes a long list of voice, scrolling and server problems.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. There is no database change in this release.
+
+### Highlights
+
+- **A real call view**: click the voice channel you are in to see a tile for everyone, with a control bar, view toggles, a full right-click menu on video tiles and a Pop out call button.
+- **Voice settings like Discord**: an Input Mode choice (Voice Activity or Push to Talk), automatic input sensitivity, a Let's Check mic test, Push to Talk on Ctrl, Shift, Alt, Caps Lock or the key left of 1, and mute and deafen in the user panel, remembered across restarts.
+- **Better streaming**: a stream card with Change source and Quality that keeps your viewers watching, stream start and end sounds, cameras that play without a click, and switching camera mid-call.
+- **What's new**: the app and the admin panel show the release notes of the version you run, and the app checks for updates while it runs.
+- **Steadier chat**: fast channel switching always lands on the right channel, scrolling down after a jump loads newer messages, and your own message always scrolls into view.
+
+### Added
+
+**Voice and video**
+
+- Clicking the voice channel you are in, or its name in the voice panel, opens the call: a tile for everyone in it, with their picture, a ring while they speak and a mute or deafen badge. It stays open with no cameras on until you leave or go back to chat.
+- The call view has a control bar at the bottom: mute, deafen, camera, share your screen and disconnect, in the grid and when one stream is focused. Buttons beside **Show chat** hide people without video, hide your own camera tile (others still see it), and, when a stream is focused, hide the row of other participants. These choices are remembered.
+- **Pop out call** in the call view's header moves the whole call (grid, toggles and control bar) into its own window, and the app window goes back to chat. **Bring back**, or closing the window, puts it back; leaving the call closes it.
+- Right-clicking someone's video tile gives the full menu: Profile, Message, their volume, **Mute** (for you only), Focus, Full screen, Pop out, Stop watching and, if you can moderate voice, Server Mute, Server Deafen, Move to and Disconnect. Your own camera tile has **Hide my camera** and **Turn off camera**.
+- Settings → Voice & Video opens with an **Input Mode** choice: Voice Activity or Push to Talk. Push to Talk shows the key and its release delay and hides the sensitivity slider. If you already had a Push to Talk key bound, you start in Push to Talk, so nothing changes for you.
+- **Automatically determine input sensitivity** (on by default) lets Voice Activity set its own threshold just above your room's background noise. If you had moved the slider yourself, it stays manual. On Linux the manual slider stays.
+- A **Let's Check** button under the microphone meter plays your processed microphone back through your chosen speakers, so you hear what others hear. It is not available on Linux yet.
+- Push to Talk can now be bound to Ctrl, Shift, Alt, Caps Lock and the key left of 1. Letters, digits and other typing keys still cannot be bound. A saved key the app cannot use is cleared instead of leaving Push to Talk silently off.
+- While you share your screen, the voice panel shows a stream card with **Change source**, **Quality** and **Stop sharing**. Change source and Quality switch what goes out without ending the stream, so viewers keep watching. Change source works on Windows and Linux.
+- On Windows, **Go Live** first asks for stream quality and frame rate (your Settings by default), then opens the Windows screen picker.
+- A screen share starting or ending in your channel plays a short sound, and a stream you are watching shows "_name_ ended the stream" for 3 seconds before its tile goes.
+- You can switch camera mid-call: pick another camera in Settings → Voice & Video, or from the new arrow beside Camera in the call bar. With the camera off it only saves the choice.
+- After voice reconnects from a dropped connection, your camera turns back on by itself (the video limit still applies). A screen share needs the screen picker again, so a message offers **Share again**; on Linux X11 the same source is shared again without the picker when it still exists.
+- The share buttons are greyed out, with the reason as a tooltip, when you lack the Share Screen permission or the channel's video limit is used up. Stop sharing always works.
+- While you watch a stream, clicking a text channel switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it offers Return to stream (or double-click it), Pop out and Stop watching, and closes when the stream ends.
+- Moderators can drag someone in a voice channel onto another voice channel in the sidebar to move them there, the same as **Move to** in their right-click menu. Press Escape to cancel a drag.
+- The voice panel has a noise suppression button beside the connection quality. It turns Enhanced Noise Suppression on or off during a call, the same setting as in Settings → Voice & Video. On Linux the change applies the next time you join.
+- Voice volume goes to 200 % again: each person's volume (right-click them in the voice channel, or on their video tile) and Settings → Voice & Video → Output Volume. Screen-share audio still tops out at 100 %.
+- Right-clicking someone in a voice channel offers **Mute**, which silences them for you only and keeps their volume for when you unmute. Their row shows a speaker-off icon while muted, and the mute button on their video tile is the same setting.
+- Settings → Voice & Video has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's. Linux always uses VP8 and does not show the choice.
+- People who can mute and move others in a voice channel (the Mute Members permission, or Administrator) can now join it when it is full. Everyone else still gets "voice channel is full".
+- A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
+
+**Messages & files**
+
+- After jumping to an old message (a search hit, a pin or a link), scrolling down now loads the messages that follow and, on reaching the newest, returns you to the live channel. Before, the list stopped at the bottom of what the jump had loaded until you chose Jump to present.
+- While you have pending message requests, the Direct Messages section lists a **Message Requests (N)** row that opens them. Before, there was only a count with nothing to click.
+
+**Desktop UI**
+
+- A mention in a channel you are not looking at now shows a desktop notification ("You were mentioned in #channel"); clicking it opens the channel.
+- Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
+- After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after this one, and a fresh install does not show it.
+- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect. Settings → About has a **Check for updates** button that asks your server right away.
+- The update banner is quieter and says "OwnCord X is ready to install", with **See what's new**, **Update now** and **Later**. While it downloads it shows a progress bar, and **Later** keeps that version quiet.
+
+**Admin panel**
+
+- A **What's new** page shows the release notes of the version the server runs, every earlier version and a link to OwnCord on GitHub. Click the version in the top bar to open it. The notes ship with the server, so nothing is downloaded.
+
 ### Changed
 
 **Login & connection**
@@ -54,124 +112,111 @@ and only when it changes something a contributor or fork holder must do
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 
 **Channels**
+**Voice and video**
+
+- Mute and deafen moved from the voice panel to the user panel, next to Settings. They, the keys and the tray work outside a call too, and are remembered across restarts; your next join applies them.
+- Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Ctrl+M and Ctrl+D still work for now.
+- Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Video.
+- Turning on your camera or screen share while reading a text channel no longer hides the chat and opens the video grid. Open the call to see yourself.
+- In the call grid, cameras fill their tile instead of showing black bars; focus a camera to see the whole picture. The quality chip now shows only on screen shares.
+- Your own camera tile and the settings preview are mirrored, like a mirror; a screen share never is.
+- A self-mute icon is grey and a moderator mute stays red. The speaking ring is steady instead of pulsing.
+- Your own join sound plays once voice connects, not on the click, so a failed join is silent. A moderator moving you plays its own tone.
+- Voice moderation menu items stay visible but greyed out, with the reason, while the app is reconnecting.
+- Clicking someone in a voice channel who has no camera or stream opens their profile. Keyboard users can do the same with Enter or Space.
+- You no longer go Idle while you are in a voice call, and joining a call undoes an automatic Idle.
+- Deafen now also silences stream audio. Undeafen restores each stream's own mute.
+- A call plays another member's audio, camera and screen share only when it arrives end-to-end encrypted. Anything else is not played, and the call's security badge shows Unsecured. On Linux the same rule applies in both directions.
+- The green identity badge on a call participant now says what it checked: the key is the same one this device saw before. It points at comparing safety numbers to confirm who it is, instead of saying "Identity verified".
+- Settings → Voice & Audio is now called Voice & Video.
+
+**Channels and notifications**
 
 - A collapsed category now still shows its unread and mentioned channels, the channel you are in and voice channels with people in them. A muted channel with unread messages stays hidden, and the category header shows a small dot.
+- Setting a server's notification level to Nothing no longer silences direct messages: they still show a notification and count in the taskbar badge. Muting a direct message still silences it.
+- The server header's Mark All as Read button is now Mark Server as Read: it marks only the server's channels read and leaves your direct messages alone.
 
 **Accounts & admin**
 
 - The public server name (`/api/v1/info`, `/api/v1/server-info`) now follows the name edited in the admin page. `server.name` in config.yaml is only the fallback when that name is blank.
 - The settings API now refuses `max_upload_bytes` and `voice_quality` with a 400: they never had an effect. Set `upload.max_size_mb` and `voice.quality` in config.yaml.
 - Two simultaneous config changes in the admin page can no longer combine into a setting the safety checks would have refused.
-- The `admin_allowed_cidrs` warning no longer appears on every start. It now shows only when the server looks like it sits behind a reverse proxy or a container port relay, at startup or when a proxied request reaches /admin.
-
-**Updates**
-
+- The `admin_allowed_cidrs` warning no longer appears on every start. It now shows only when the server looks like it sits behind a reverse proxy or a container port relay.
 - A server update shows one restart countdown instead of two.
 
-**Desktop UI**
-
-- Setting a server's notification level to Nothing no longer silences direct messages: they still show a notification and count in the taskbar badge. Muting a direct message still silences it.
-- The server header's Mark All as Read button is now Mark Server as Read: it marks only the server's channels read and leaves your direct messages alone.
-
-**Voice**
-
-- Moderators can drag someone in a voice channel onto another voice channel in the sidebar to move them there, the same as **Move to** in their right-click menu. Press Escape to cancel a drag.
-- Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Before, the app used Ctrl+M / Ctrl+D while focused, so a rebind changed only the unfocused keys. Ctrl+M and Ctrl+D still work for now. A focused press toggles once, never twice.
-- A call plays another member's audio, camera and screen share only when it arrives end-to-end encrypted. Anything else is not played, and the call's security badge shows Unsecured.
-- On Linux, calls follow the same rule in both directions: your microphone, camera and screen share are only sent end-to-end encrypted, and other members' media plays only when it arrives encrypted.
-- The green identity badge on a call participant now says what it checked: the key is the same one this device saw before. It points at comparing safety numbers to confirm who it is, instead of saying "Identity verified".
-- Other people's cameras play as soon as they turn them on, without clicking Watch stream. Screen shares still wait for a click. Stop watching on a camera keeps it stopped until you leave voice. To get the old behaviour back, turn off **Automatically play cameras** in Settings → Voice & Video.
-- Turning on your camera or screen share while reading a text channel no longer hides the chat and opens the video grid. Open the call to see yourself.
-- In the call grid, cameras fill their tile instead of showing black bars; focus a camera to see the whole picture. The quality chip now shows only on screen shares.
-- Settings → Voice & Audio is now called Voice & Video.
-
-### Added
-
-**Messages & files**
-
-- After jumping to an old message (a search hit, a pin or a link), scrolling down now loads the messages that follow and, on reaching the newest, returns you to the live channel. Before, the list stopped at the bottom of what the jump had loaded until you chose Jump to present.
-
-**Desktop UI**
-
-- A mention in a channel you are not looking at now shows a desktop notification ("You were mentioned in #channel"); clicking it opens the channel.
-- The desktop app now looks for a newer client while it runs, not only at startup: every few hours, and after a reconnect (a server that just updated). The same "Update available" banner appears once per version, and **Later** keeps that version quiet.
-- Settings → About has a **Check for updates** button that asks your server right away and says "You're up to date", offers the new version with an install button, or reports that it could not check.
-- Settings → About shows the app version, what changed in it, the notes of every earlier version and a link to OwnCord on GitHub. The client version line and the update check moved there from Diagnostics & logs.
-- After the desktop app updates, a **What's new** window shows that version's changes once. It starts with the update after the one that adds it, and a fresh install does not show it.
-- The update banner is quieter and says "OwnCord X is ready to install", with **See what's new**, **Update now** and **Later**. While it downloads it shows a progress bar. **See what's new** opens Settings → About, where the new version's notes are shown before you install, and the About tab has a dot while an update is waiting.
-
-**Admin panel**
-
-- A **What's new** page shows the release notes of the version the server runs, every earlier version and a link to OwnCord on GitHub. Click the version in the top bar to open it. The notes ship with the server, so nothing is downloaded.
-
-**Voice**
-
-- Clicking the voice channel you are in, or its name in the voice panel, opens the call: a tile for everyone in it, with their picture, a ring while they speak and a mute or deafen badge. It stays open with no cameras on until you leave or go back to chat.
-- The call view has a control bar at the bottom: mute, deafen, camera, share your screen and disconnect, in the grid and when one stream is focused. Buttons beside **Show chat** hide people without video, hide your own camera tile (others still see it), and, when a stream is focused, hide the row of other participants. These choices are remembered.
-- While you watch a stream, clicking a text channel (including the one already open under the stream) switches to it straight away and keeps you in voice. The stream keeps playing in a small mini-player you can drag anywhere in the window; it remembers its spot until you restart, and offers Return to stream (or double-click it), Pop out and Stop watching. It closes when the stream ends.
-- When voice reconnects after a dropped connection, a message now says your camera or screen share stopped, with a **Turn on again** (or **Share again**) button. Before, they were just off afterwards.
-- A pop-out window that cannot open now shows "Couldn't open the pop-out window" instead of doing nothing.
-- Voice volume goes to 200 % again: each person's volume (right-click them in the voice channel, or on their video tile) and Settings → Voice & Video → Output Volume. Screen-share audio still tops out at 100 %.
-- Right-clicking someone in a voice channel offers **Mute**, which silences them for you only and keeps their volume for when you unmute. Their row shows a speaker-off icon while muted, and the mute button on their video tile is the same setting.
-- Settings → Voice & Video has a **Video Codec** choice for your camera and screen share: VP8 (the default), H.264, which on Windows can encode on the graphics card, or Auto, which picks H.264 only when your graphics card can encode it and is not Intel's (viewers cannot yet play encrypted H.264 from Intel graphics). Linux always uses VP8 and does not show the choice.
-- People who can mute and move others in a voice channel (the Mute Members permission, or Administrator) can now join it when it is full. Everyone else still gets "voice channel is full".
-- The voice panel has a noise suppression button beside the connection quality. It turns Enhanced Noise Suppression on or off during a call, the same setting as in Settings → Voice & Video. On Linux the change applies the next time you join.
-- Right-clicking someone's video tile now gives the full menu: Profile, Message, their volume, **Mute** (for you only), Focus, Full screen, Pop out, Stop watching and, if you can moderate voice, Server Mute, Server Deafen, Move to and Disconnect. Your own camera tile has **Hide my camera** and **Turn off camera**.
-
 ### Fixed
+
+**Voice and video**
+
+- After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute. You can now rejoin it straight away; channel permissions and bans still apply.
+- Joining, leaving, a moderator removing you and the server's own cleanup no longer step on each other. Rarely, a join at the same moment as a cleanup left you shown in voice with no seat, or a moderator's disconnect missed you.
+- When someone loses the Video or Share Screen permission during a call, their camera or screen share now turns off and shows as off for everyone, and stops counting toward the channel's video limit. Before, it stayed shown as on until they left voice.
+- After the chat connection drops and comes back mid-call, the app tells the server again about a camera or share you started meanwhile, so others see it.
+- On Linux, the camera and share buttons now follow what the server allows, as on Windows.
+- Someone's green speaking ring could stay lit after they stopped talking. Rings now clear when you leave or switch channel, when they leave or rejoin, after your connection drops, and as soon as the speaker mutes.
+- Undeafening no longer unmutes you if you were muted before you deafened.
+- After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
+- Mute and deafen keep working while the chat connection is reconnecting; the server is told once the connection is back.
+- An error from the server about something else (a refused edit, a rate limit) no longer cancels a voice join that is still connecting.
+- A voice reconnect you already left or replaced no longer asks for a new voice token, which could delay the live call's own refresh.
+- Leaving voice no longer keeps the old call in memory.
 
 **Channels**
 
 - Switching channels quickly (holding Alt+Down) no longer leaves you on a channel that never receives new messages.
 - Alt+Up/Down did nothing while typing in the message box; it now switches channels from there too.
 
-**Voice**
+**Messages & files**
 
-- Joining, leaving, a moderator removing you and the server's own cleanup no longer step on each other for the same person. Rarely, a join that landed at the same moment as a cleanup left you shown in voice with no seat in the channel, or a moderator's disconnect missed you.
-- When someone loses the Video or Share Screen permission during a call, their camera or screen share now shows as off for everyone within a minute, and a camera stops counting toward the channel's video limit. Before, it stayed shown as on until they left voice.
-- The desktop app now turns your own camera or screen share off at that moment too, so its buttons no longer say it is still on. After the chat connection drops and comes back mid-call, the app also tells the server again about a camera or share you started meanwhile, so others see it.
-- Undeafening no longer unmutes you if you were muted before you deafened.
-- After you leave and rejoin, or switch channel, others see your mute and deafen as they really are instead of "unmuted" while your mic is off.
-- Mute and deafen keep working while the chat connection is reconnecting, in the voice widget, the DM call panel and the keybinds; the server is told once the connection is back.
-- An error from the server about something else (a refused edit, a rate limit) no longer cancels a voice join that is still connecting; only the server refusing the join itself does. Older servers keep the old behaviour for refusals they send without the join's id.
-  **Accounts & admin**
-
-- Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"); the app now uses `/api/v1/moderation/channels`. Access is unchanged for members: it needs a session or token issued by this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it, as for member actions. The admin panel keeps `/admin/api/channels`.
-- Turning on require 2FA while the database was failing showed the admin panel a "bad request" error; it now reports a server error.
-- When sign-in, registration, sign-out, two-factor or account recovery fails on a server-side fault (database, session or password hashing), the cause is now written to the server log. What the client sees is unchanged.
-
-**Voice**
-
-- After a moderator moved you to another voice channel or disconnected you from voice, clicking back into the channel you left was refused for a minute ("You were removed from this voice channel"). You can now rejoin it straight away; channel permissions and bans still apply. Update the server and the desktop app together.
-- Someone's green speaking ring could stay lit after they stopped talking: in a channel you had left or switched away from, after they left or rejoined, or after your connection dropped. Rings now clear in those cases, and go dark as soon as the speaker mutes.
-- A voice reconnect you already left or replaced no longer asks for a new voice token, which could delay the live call's own refresh.
-
-**Server**
-
-- A stalled database could leave the server's after-the-fact cleanup (expired-session removal, API-token last-used, mention badges, push notifications, voice-leave retries) waiting forever, piling up one stuck task per request — each now gives up after a timeout.
-- The periodic maintenance sweeps (signed-out session checks, stale voice cleanup, voice reconcile) could keep running into the database after the server began shutting down or restarting, and a stalled database could hold one forever — a sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it to finish. A delete that already went through is still announced, within its own short timeout.
-- Restoring a backup from the admin panel made the old server process exit with an error (exit code 1) while it restarted, even though the restore worked. The restart now exits cleanly.
-- A backup restored from the admin panel could come back with leftover changes from the database it replaced. The restore now finishes the database's pending writes and clears its write-ahead log before copying the backup in. If the database is too busy to do that, the restore is refused with "the database is busy" and you can retry.
-- Deleting an account, or the server clearing out old messages under a channel's retention setting, could hold up new messages for everyone until the cleanup finished. Messages now keep flowing while the server cleans up.
-- A slow database check on a channel's age-restricted (NSFW) setting could hold up every message, typing indicator and presence update on the server. The check now runs on the side with a 1-second limit, and only messages in that one channel wait for it. If the check fails or runs out of time, that message is not sent live and apps that missed it fetch it when they reconnect.
-- A message that was sent but whose confirmation was lost could show as failed when the app resent it, if you had lost permission to post there, been timed out or been blocked in the meantime. The resend is now recognised as the message you already sent and shows as sent. A new message still needs the permission.
+- Sending a message while scrolled up, or while viewing an old message you jumped to, now takes you to the bottom to see it. Before, your message landed out of sight.
+- Jumping to an old message in another channel could draw the NEW line at a random message. The line is now hidden there and returns at the right place once you are back at the latest messages.
+- Pressing Up in an empty message box to edit your last message put the cursor at the start; it is now at the end.
+- The Pinned Messages panel now shows each author's profile picture, as the chat does.
+- Upload file types saved in the admin page now reach open apps straight away. Before, an app kept refusing files by the old lists until it reconnected.
+- An attachment still uploading when you switched channels was cancelled. It now keeps uploading and is still there when you come back.
+- An attachment left in the message box for over 50 minutes could be sent after the server had already deleted it. It is now uploaded again at Send, or marked expired when it can't be.
+- Removing an attachment from the message box now frees its space in your upload quota right away, and so does re-uploading an old one.
 
 **Login & connection**
 
-- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
+- When the server was too busy to send an update (a deleted or edited message, a reaction, a member change), the app could miss it until a restart. The server now waits briefly before giving up on a new message, and an app that missed an update fetches everything fresh when it reconnects.
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
+- A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
-- When the server was too busy to send an update (a deleted or edited message, a reaction, a member change), the app could miss it until a restart. The server now waits briefly before giving up on a new message, and an app that was offline when an update was skipped fetches everything fresh when it reconnects.
 
-**Messages & files**
+**Accounts & admin**
 
-- Sending a message while scrolled up in a channel, or while viewing an old message you jumped to, now takes you to the bottom to see it. Before, you stayed where you were and your message landed out of sight.
-- The Pinned Messages panel now shows each author's profile picture, as the chat does. Before, it always showed a coloured letter.
-- Upload file types saved in the admin page now reach open apps straight away. Before, an app kept refusing files by the old lists (so emptying both lists did not allow every type) until it reconnected.
-- An attachment still uploading when you switched channels was cancelled and gone when you came back. It now keeps uploading and is still there.
-- An attachment left in the composer for over 50 minutes could be sent after the server had already deleted it. It is now uploaded again at Send, or marked expired when it can't be.
-- Removing an attachment from the composer now frees its space in your upload quota right away, and so does re-uploading an old one. Before, a user close to the limit had to wait for the server to clean up.
-- Jumping to an old message in another channel could draw the NEW line at a random message in the jumped-to stretch. The line is now hidden there and returns at the right place once you are back at the latest messages.
+- Creating, renaming, editing and deleting a channel from the desktop app failed behind a reverse proxy that answers `/admin` with a web page ("Unexpected token '<'"). The app now uses `/api/v1/moderation/channels`; it needs a session or token from this server whose role holds Manage Channels, and `server.admin_allowed_cidrs` does not apply to it. The admin panel keeps `/admin/api/channels`.
+- Turning on require 2FA while the database was failing showed a "bad request" error; it now reports a server error.
+- When sign-in, registration, sign-out, two-factor or account recovery fails on a server-side fault, the cause is now written to the server log. What the client sees is unchanged.
+
+**Server**
+
+- Restoring a backup from the admin panel could come back with leftover changes from the database it replaced. The restore now finishes pending writes and clears the write-ahead log first; if the database is too busy, it is refused with "the database is busy" and you can retry.
+- Restoring a backup from the admin panel made the old server process exit with an error code while it restarted, even though the restore worked. It now exits cleanly.
+- Deleting an account, or clearing old messages under a channel's retention setting, could hold up new messages for everyone. Messages now keep flowing during the cleanup.
+- A slow check on a channel's age-restricted (NSFW) setting could hold up every message, typing indicator and presence update on the server. Now only messages in that one channel wait, for at most 1 second.
+- A stalled database could leave background cleanup (expired sessions, mention badges, push notifications, voice-leave retries) waiting forever. Each task now gives up after a timeout.
+- The periodic maintenance sweeps could keep running after the server began shutting down or restarting. A sweep now stops when the server stops, gives up after a timeout, and shutdown waits for it.
+- A message that was sent but whose confirmation was lost could show as failed when the app resent it, if you had lost permission to post there, been timed out or been blocked in the meantime. The resend is now recognised as the message you already sent and shows as sent.
+
+### Known issues
+
+- **Not yet tested with two people on Windows:** the call view and its pop-out, the stream card and Change source, switching camera mid-call, the camera coming back after a reconnect, drag-to-move, and the new Push to Talk keys.
+- **Push to Talk on Caps Lock also toggles Caps Lock**, AltGr counts as Ctrl and Alt for a Ctrl or Alt binding, and key combinations cannot be bound yet.
+- **A call tile with only a profile picture has no right-click menu** yet; right-click the person in the voice channel instead.
+- **Encrypted H.264 from Intel graphics cannot be played by viewers yet**, so Auto never picks H.264 on Intel.
+- **On Linux**, the mic test and automatic input sensitivity are not available, and voice sounds play on the system default speaker.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Several security hardening fixes.
+- Releases are refused while the nightly upgrade rehearsal is red or older than 72 hours, every rehearsal drill phase now runs, and a release needs its row in `docs/STATUS.md`. The workflow lint and supply-chain scan are now required checks and also run weekly.
+- One failing listener in the app can no longer reorder the updates that follow it.
+- Self-hosting, contributor and architecture docs were rewritten in plain English and checked against the code. Client bundle budgets were raised for the new features.
 
 ## v2.2.0-beta.3
 
