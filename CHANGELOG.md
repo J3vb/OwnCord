@@ -65,7 +65,10 @@ and only when it changes something a contributor or fork holder must do
 
 - An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
 
-**Voice and video**
+**Messaging**
+
+- An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
+  **Voice and video**
 
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 

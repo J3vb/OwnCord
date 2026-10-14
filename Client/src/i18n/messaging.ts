@@ -44,6 +44,7 @@ export const messagingText = defineCatalog("messaging", {
   "error.tooManyAttachments": "You can attach at most {max} files to a message",
   "error.uploadFailed": "Upload failed",
   "error.uploadFailedDetail": "Upload failed: {detail}",
+  "error.dismiss": "Dismiss",
   "error.draftAttachmentExpired": "An attachment in your draft expired — please attach it again",
   "error.attachmentExpired": "An attachment expired — remove it and attach the file again",
   "error.attachmentRefreshing": "Refreshing an older attachment — send again when it's done",
