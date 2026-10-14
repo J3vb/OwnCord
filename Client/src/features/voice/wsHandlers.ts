@@ -180,6 +180,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // snapshot above was taken from — a channel change is out of scope
       // here and comparing rosters across two different channels would
       // misfire.
+      const left: number[] = [];
       if (prevVoiceChannelId === selfVoiceState.channel_id) {
         const currentVoicePeerIds = new Set(
           payload.voice_states
@@ -187,10 +188,16 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
             .map((vs) => vs.user_id),
         );
         for (const uid of prevVoicePeerIds) {
-          if (uid === currentUserId || currentVoicePeerIds.has(uid)) continue;
-          void livekitSession().then(({ handleParticipantLeft }) => handleParticipantLeft(uid));
+          if (uid !== currentUserId && !currentVoicePeerIds.has(uid)) left.push(uid);
         }
       }
+      // The same gap for the camera and share flags: an announce sent while
+      // the socket was down never reached the server (WP 1C-8).
+      void livekitSession().then(({ handleParticipantLeft, reconcileVideoFlags }) => {
+        for (const uid of left) void handleParticipantLeft(uid);
+        if (prevVoiceChannelId === selfVoiceState.channel_id)
+          reconcileVideoFlags(selfVoiceState.camera === true, selfVoiceState.screenshare === true);
+      });
     }
   };
 }

@@ -86,7 +86,7 @@ vi.mock("livekit-client", () => ({
     ParticipantPermissionsChanged: "participantPermissionsChanged",
   },
   Track: {
-    sourceToProto: (source: string) => (source === "microphone" ? 2 : 0),
+    sourceToProto: (source: string) => ({ camera: 1, microphone: 2, screenShare: 3 })[source] ?? 0,
     Source: {
       Microphone: "microphone",
       Camera: "camera",
@@ -678,6 +678,72 @@ describe("LiveKitSession", () => {
       onPermissions(undefined, mockRoom.localParticipant);
       await vi.advanceTimersByTimeAsync(0);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
+  });
+
+  // WP 1C-8: a permission removed mid-call narrows the SFU grant; the camera or
+  // share it no longer allows is turned off here and the server is told.
+  describe("media the grant no longer allows", () => {
+    let permissions: { canPublish: boolean; canPublishSources: number[] };
+    let onPermissions: (previous: unknown, participant: unknown) => void;
+    let ws: { send: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      permissions = { canPublish: true, canPublishSources: [] };
+      (mockRoom.localParticipant as any).permissions = permissions;
+      ws = { send: vi.fn() };
+      session.setWsClient(ws as any);
+      await (session as any).createRoom();
+      onPermissions =
+        mockRoom.on.mock.calls.find(([event]) => event === "participantPermissionsChanged")?.[1] ??
+        (() => {});
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+      mockVoiceState.localCamera = true;
+      mockVoiceState.localScreenshare = true;
+    });
+
+    afterEach(() => {
+      delete (mockRoom.localParticipant as any).permissions;
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+    });
+
+    it("turns the camera off when the grant drops it, and leaves the share", async () => {
+      permissions.canPublishSources = [2, 3, 4];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
+      expect(ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_screenshare" }),
+      );
+    });
+
+    it("stops the share when the grant drops it", async () => {
+      permissions.canPublishSources = [1, 2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).toHaveBeenCalledWith({
+        type: "voice_screenshare",
+        payload: { enabled: false },
+      });
+      expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_camera" }));
+    });
+
+    it("leaves media alone while the grant still allows it, or when it is already off", async () => {
+      onPermissions(undefined, mockRoom.localParticipant);
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      permissions.canPublishSources = [2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).not.toHaveBeenCalled();
     });
   });
 

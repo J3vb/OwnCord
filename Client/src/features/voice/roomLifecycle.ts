@@ -64,6 +64,7 @@ export interface RoomLifecycleHost {
   ): { audioPreset: { maxBitrate: number } } | undefined;
   microphonePublishingAllowed(room: Room): boolean;
   applyMicMuteState(muted: boolean): Promise<void>;
+  dropDeniedVideo(room: Room): void;
 }
 
 export class RoomLifecycle {
@@ -305,6 +306,7 @@ export class RoomLifecycle {
     onRoom(newRoom, RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
       if (participant === newRoom.localParticipant && this._room === newRoom) {
         syncShareGrant(newRoom);
+        this.host.dropDeniedVideo(newRoom);
       }
       if (
         participant !== newRoom.localParticipant ||

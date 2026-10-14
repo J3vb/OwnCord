@@ -77,6 +77,7 @@ vi.mock("@lib/livekitSession", async () => {
     setDeafened: vi.fn(),
     disableCamera: vi.fn(async () => {}),
     disableScreenshare: vi.fn(async () => {}),
+    reconcileVideoFlags: vi.fn(),
   };
 });
 
