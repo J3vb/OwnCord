@@ -11,9 +11,9 @@ import (
 // unchanged — the ordinary topic-subscriber Publish path, at exactly its
 // pre-B5-7 cost. Both carry senderID for the per-sender topic limit. A
 // content-bearing kind stays on that SAME path (still channel-scoped,
-// bm.recipients nil) but is marked with nsfwChannelID, so
-// deliverBroadcast resolves the channel's label and the recipient's
-// acknowledgement at DISPATCH time and narrows the topic's subscribers by
+// bm.recipients nil) but is marked with nsfwChannelID, so the hub
+// resolves the channel's label and the recipient's acknowledgement at
+// DISPATCH time (off the dispatch goroutine, hub_content_gate.go) and narrows the topic's subscribers by
 // CanReadContent's ack check there. Withheld from the plugin sink entirely
 // when the channel turns out to be labelled (decision 13: a plugin has no
 // acknowledgement).
@@ -26,9 +26,10 @@ import (
 // channel was still unlabelled carried no filter at all, so labelling the
 // channel before it dispatched delivered it to everyone, including a plugin
 // sink that decision 13 says must never receive a labelled channel's content
-// (OC-0449). Resolving on the dispatch goroutine also moves a database round
-// trip off every emitting request handler and onto the one goroutine that
-// already serializes broadcasts.
+// (OC-0449). Resolving at dispatch also moves a database round trip off every
+// emitting request handler; since ARCH-019 it runs in a resolver goroutine
+// under a timeout, so it no longer stalls the one goroutine that serializes
+// broadcasts either.
 func (h *Hub) broadcastChannelEvent(ctx context.Context, senderID int64, e ChannelEvent) {
 	_ = ctx
 	if !contentBearingKinds[e.EventType()] {
@@ -44,30 +45,27 @@ func (h *Hub) broadcastChannelEvent(ctx context.Context, senderID int64, e Chann
 }
 
 // resolveChannelContentGate answers B5-7's content gate for one queued
-// broadcast, on the dispatch goroutine, immediately before deliverBroadcast
-// takes seqMu. A zero channelID — every metadata kind and every ordinary
+// broadcast. A zero channelID — every metadata kind and every ordinary
 // broadcast — resolves nothing and costs nothing.
 //
-// Deliberately outside seqMu: this is a database round trip, and seqMu
-// serializes EVERY broadcast, so holding it across one would tax every other
-// publisher (including the voice_state fan-out OC-0445 is about) for a read
-// only this frame needs. The ordering contract that buys is stated on
-// nsfwDispatchResolveRaceHook: a revocation or relabelling that has completed
-// by this point is honoured by this event; one landing after it cannot recall
-// frames already authorized, and nothing here claims it can.
-func (h *Hub) resolveChannelContentGate(channelID int64) (allow func(userID int64) bool, labelled, unconfirmed bool) {
+// Never on the dispatch goroutine (ARCH-019): Run parks the frame in its
+// channel's lane and a resolver goroutine calls this under
+// contentGateTimeout (hub_content_gate.go). Deliberately outside seqMu too:
+// this is a database round trip, and seqMu serializes EVERY broadcast. The
+// ordering contract is stated on nsfwDispatchResolveRaceHook: a revocation or
+// relabelling that has completed by the time the frame is dequeued is
+// honoured by this event; one landing after it cannot recall frames already
+// authorized, and nothing here claims it can.
+func (h *Hub) resolveChannelContentGate(ctx context.Context, channelID int64) (allow func(userID int64) bool, labelled, unconfirmed bool) {
 	if channelID == 0 {
 		return nil, false, false
 	}
-	if nsfwDispatchResolveRaceHook != nil {
-		nsfwDispatchResolveRaceHook(channelID)
-	}
-	return h.channelNSFWFilter(context.Background(), channelID)
+	return h.channelNSFWFilter(ctx, channelID)
 }
 
 // nsfwDispatchResolveRaceHook, when non-nil, runs once per content-bearing
-// channel event on the dispatch goroutine, immediately BEFORE
-// deliverBroadcast resolves that event's B5-7 gate and before seqMu is taken.
+// channel event on the dispatch goroutine, when the event is dequeued and
+// immediately BEFORE its B5-7 gate read is issued (and before seqMu is taken).
 // Test-only (always nil in production): it is the deterministic barrier the
 // ordering contract needs to be pinned rather than raced for.
 //

@@ -18,6 +18,7 @@ func (h *Hub) closeStop() {
 // method, not a closure in Run, so Run's dispatch loop stays Run.func1 — the
 // name the api suite's goleak filter ignores.
 func (h *Hub) finishRun() {
+	h.closeParkedBarriers()
 	h.sweeps.Wait()
 	close(h.runDone)
 }

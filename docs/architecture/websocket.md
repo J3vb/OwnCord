@@ -111,6 +111,14 @@ flowchart LR
 - Typing, moderation and mention-badge notices may be lost by design.
 - The global `broadcast` channel (1024) drops frames and counts them in
   `broadcastDrops` when it is full.
+- A content frame in a channel that may be NSFW-labelled needs a database read
+  (the label and who acknowledged it) before it can be numbered. That read runs
+  off the dispatch loop, with a 1 s limit, while the frame waits in a lane for
+  its channel; later frames for the same channel wait behind it, and every
+  other frame keeps flowing. A read that fails or times out withholds the
+  frame and moves the visibility watermark, so a resuming client re-syncs
+  (`Server/ws/hub_content_gate.go`). Order within a channel is kept; a global
+  frame can overtake a channel's frame that is still waiting.
 
 ## D4c — Typed command dispatch
 
@@ -166,7 +174,7 @@ The event-persistence pair is still attached after the hub is running
 `Server/internal/app/persistence.go`). That hot-swap after `Run` is the timing
 dependency the audit note names.
 
-**Source of truth:** `Server/ws/hub.go`, `Server/ws/serve.go`,
+**Source of truth:** `Server/ws/hub.go`, `Server/ws/hub_content_gate.go`, `Server/ws/serve.go`,
 `Server/ws/client.go`, `Server/ws/handlers.go`, `Server/ws/command.go`,
 `Server/ws/pubsub.go`, `Server/ws/ringbuffer.go`, `Server/ws/event_persister.go`,
 `Server/ws/message_types.go`, `Server/migrations/014_events_table.sql`.

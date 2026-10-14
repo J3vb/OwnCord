@@ -383,3 +383,18 @@ func (h *Hub) DisconnectRevokedUser(userID int64) {
 	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
 	h.kickClientTerminal(c)
 }
+
+// onClientEvent applies a queued Register or Unregister on the dispatch
+// goroutine.
+func (h *Hub) onClientEvent(ev clientEvent) {
+	if !ev.add {
+		h.unregisterNow(ev.c)
+		return
+	}
+	// No handshake permission set on this path (and no DB call on the hub
+	// goroutine, ARCH-019) — nil denies the inherited voice-channel
+	// subscription. A wake refusal cannot occur here: the handshake paths
+	// refuse before queueing a Register event, and the event path never
+	// carries wakeReconnect.
+	h.registerNow(ev.c, nil)
+}
