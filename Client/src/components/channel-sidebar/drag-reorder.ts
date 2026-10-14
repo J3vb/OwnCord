@@ -269,6 +269,10 @@ export function attachDragHandlers(
       if (e.button !== 0) {
         return;
       }
+      // A press on a voice participant is voice-drag-move's gesture.
+      if (e.target instanceof Element && e.target.closest(".voice-user-item") !== null) {
+        return;
+      }
       // Start tracking — only activate drag after movement threshold
       pendingDrag = { startX: e.clientX, startY: e.clientY };
     },

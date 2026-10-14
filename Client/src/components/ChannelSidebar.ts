@@ -28,6 +28,7 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachVoiceUserDrag, markVoiceDropTarget } from "./channel-sidebar/voice-drag-move";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
@@ -313,6 +314,7 @@ function renderVoiceChannelItem(
   if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
+  if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
 
   const classes = ["channel-item", "voice", isJoined ? "active" : "", frozen ? "disabled" : ""]
     .filter(Boolean)
@@ -557,6 +559,18 @@ function renderVoiceChannelItem(
         // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused
         // participant row opens the same menu.
         openMenuOnKeyboard(row, openVolumeMenu, signal);
+        // Drag onto another voice channel to move them; the menu's "Move to"
+        // is the keyboard path to the same command.
+        if (onVoiceModerate !== undefined) {
+          attachVoiceUserDrag(
+            row,
+            channel.id,
+            user.userId,
+            onVoiceModerate.onMove,
+            signal,
+            lifetimeSignal,
+          );
+        }
       }
 
       // A click watches their camera or stream; with nothing to watch it opens
