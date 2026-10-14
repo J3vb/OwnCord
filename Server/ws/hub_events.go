@@ -221,8 +221,8 @@ func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Contex
 }
 
 // awaitDispatch returns once every broadcast enqueued on h.broadcast before
-// the call has been through deliverBroadcast — sequenced, buffered and
-// handed to the persister. BroadcastToAll is asynchronous, so the caller
+// the call has been sequenced, buffered and handed to the persister,
+// including content that parked on its gate (hub_content_gate.go). BroadcastToAll is asynchronous, so the caller
 // that just broadcast a member_ban and now wants to purge replay behind it
 // needs this barrier first. A hub whose dispatch loop is not running (a
 // test hub, a hub after GracefulStop) has nothing queued to wait for.

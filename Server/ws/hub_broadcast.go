@@ -31,10 +31,12 @@ type broadcastMsg struct {
 	// alone (allowTopicFrame). Zero for server-originated frames.
 	senderID int64
 	// barrier, when non-nil, makes this entry a dispatch barrier rather than
-	// a broadcast: deliverBroadcast closes it and sequences nothing. Because
-	// h.broadcast is FIFO on one dispatch goroutine, whoever waits on it
-	// knows every broadcast enqueued earlier has been sequenced, buffered
-	// and handed to the persister (awaitDispatch).
+	// a broadcast: dispatch closes it and sequences nothing. Because
+	// h.broadcast is FIFO on one dispatch goroutine, and a barrier waits for
+	// any frame enqueued before it that is still parked on its content gate
+	// (hub_content_gate.go), whoever waits on it knows every broadcast
+	// enqueued earlier has been sequenced, buffered and handed to the
+	// persister (awaitDispatch).
 	barrier chan struct{}
 	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
 	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
@@ -42,10 +44,10 @@ type broadcastMsg struct {
 	// nsfwChannelID, when non-zero, marks this entry as a content-bearing
 	// channel event (chat_message, chat_edited, reaction_update,
 	// plugin_broadcast — see contentBearingKinds) whose B5-7 gate is resolved
-	// by deliverBroadcast at DISPATCH time rather than by the caller at
-	// enqueue time. It carries the channel identity and nothing else: the
-	// label and the recipient's acknowledgement are read when the event
-	// reaches the head of this queue, so a revocation or a relabelling that
+	// at DISPATCH time rather than by the caller at enqueue time. It carries
+	// the channel identity and nothing else: the label and the recipient's
+	// acknowledgement are read once the event is dequeued, off the dispatch
+	// goroutine (hub_content_gate.go), so a revocation or a relabelling that
 	// completed while it waited is honoured by the event itself (OC-0449).
 	//
 	// The alternative — resolving at enqueue and handing over a precomputed
@@ -58,6 +60,10 @@ type broadcastMsg struct {
 	// not, because the enqueue happens on a request handler that can be
 	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
 	nsfwChannelID int64
+	// laneChannelID, on a global frame (channelID == 0), names the channel
+	// whose parked content it must not overtake (BroadcastChannelDelete).
+	// Ordering only: delivery is unchanged.
+	laneChannelID int64
 	// presence, droppable and presenceSnapshot carry presence_batch and the
 	// presence drop policy; see hub_presence.go.
 	presence         map[int64]pendingPresence
@@ -163,8 +169,11 @@ func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 // already gone, so a permission check here would answer from base role perms
 // and could drop the delete for exactly the users who saw the channel via a
 // positive override, stranding it in their sidebar.
+//
+// laneChannelID keeps it behind any of the channel's content still waiting on
+// its gate, so a client never sees a message for a channel it already removed.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
-	h.BroadcastToAll(buildChannelDelete(channelID))
+	h.enqueue(broadcastMsg{msg: buildChannelDelete(channelID), laneChannelID: channelID}, "global message")
 }
 
 // refreshChannelVisibilityRaceHook, when non-nil, runs once per connected
@@ -343,26 +352,13 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	}
 }
 
-// deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
-// in the replay buffer, and sends it to the appropriate clients via pub/sub.
-func (h *Hub) deliverBroadcast(bm broadcastMsg) {
-	if bm.barrier != nil {
-		close(bm.barrier)
-		return
-	}
-	if bm.presenceSnapshot {
-		h.deliverPresenceSnapshots()
-		return
-	}
-
-	// Dispatch lag: enqueue→dispatch start, how long this frame waited for the
-	// single dispatch goroutine (SRV-04).
-	h.observeDispatchLag(bm.enqueuedAt)
-
-	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
-	// head of the queue, before seqMu — rather than by whoever enqueued the
-	// frame. See resolveChannelContentGate and nsfwChannelID.
-	contentFilter, labelled, gateUnconfirmed := h.resolveChannelContentGate(bm.nsfwChannelID)
+// deliverGated stamps bm.msg with a monotonic sequence number, stores it in
+// the replay buffer, and sends it to the appropriate clients via pub/sub. g is
+// B5-7's content gate for the frame, already resolved off the dispatch
+// goroutine (hub_content_gate.go); the zero gateResult is "unfiltered", which
+// is what every non-content frame carries.
+func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
+	contentFilter, labelled, gateUnconfirmed := g.allow, g.labelled, g.unconfirmed
 
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
@@ -450,8 +446,8 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 			// topic. The rate limiter already passed above, before the seq
 			// was allocated. contentFilter (B5-7) narrows delivery to the
 			// subset of THIS LIVE subscriber list it approves, resolved
-			// against the label and acknowledgements read immediately before
-			// seqMu was taken rather than by the caller — so a concurrent
+			// against the label and acknowledgements read after the frame
+			// was dequeued rather than by the caller — so a concurrent
 			// reconnect's registration (also under seqMu) can never land in a
 			// gap between "who was asked" and "who actually got it".
 			if contentFilter != nil {
