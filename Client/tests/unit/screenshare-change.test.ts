@@ -219,6 +219,21 @@ describe("changeScreenshareSource", () => {
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
+  it("captures the new source at the frame rate picked for this share", async () => {
+    const rig = setup(false);
+    rig.state.quality = "high";
+    rig.state.fps = 60;
+    picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(createLocalScreenTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1920, height: 1080, frameRate: 60 }),
+      }),
+    );
+  });
+
   it("swaps the audio too when both sources carry it", async () => {
     const rig = setup(true);
     const [, freshAudio] = picked(true);
@@ -314,6 +329,20 @@ describe("setScreenshareQuality", () => {
     expect(rig.state.quality).toBe("high");
     expect(savePref).not.toHaveBeenCalled();
     expect(rig.wsSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps the frame rate picked for this share", async () => {
+    const rig = setup(false);
+    rig.state.fps = 60;
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).toHaveBeenCalledWith(
+      expect.objectContaining({ frameRate: 60 }),
+    );
+    expect(rig.video.publishOptions).toMatchObject({
+      screenShareEncoding: { maxBitrate: 9_000_000, maxFramerate: 60 },
+    });
   });
 
   it("a refused size keeps the old quality and says so", async () => {

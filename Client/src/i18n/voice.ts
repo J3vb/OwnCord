@@ -157,6 +157,10 @@ export const voiceText = defineCatalog("voice", {
   "picker.tabEmpty": "Nothing to share in this tab.",
   "picker.portalNote":
     "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the quality below.",
+  "picker.windowsNote":
+    "Windows will now ask which screen or window to share, and whether to share its audio. OwnCord only sets the quality below.",
+  "picker.browserNote":
+    "Your browser will now ask which screen or window to share. OwnCord only sets the quality below.",
   "picker.audio": "Audio",
   "picker.audioUnavailable":
     "Audio sharing is not available on Linux yet; only the picture is shared.",
