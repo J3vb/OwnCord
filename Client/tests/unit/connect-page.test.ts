@@ -1381,6 +1381,18 @@ describe("ConnectPage", () => {
       page.destroy?.();
     });
 
+    it("a host typed before profiles load takes the saved flags when they arrive", () => {
+      const page = createConnectPage(makeCallbacks(), []);
+      page.mount(container);
+      const host = container.querySelector("#host") as HTMLInputElement;
+      host.value = "saved.example:8443";
+      host.dispatchEvent(new Event("input"));
+      expect(boxes()).toEqual({ auto: true, remember: false });
+      page.refreshProfiles(savedProfile(false, false));
+      expect(boxes()).toEqual({ auto: false, remember: false });
+      page.destroy?.();
+    });
+
     it("a host with no profile gets the defaults", () => {
       const page = createConnectPage(makeCallbacks(), testProfiles);
       page.mount(container);

@@ -204,7 +204,8 @@ export interface ProfileManager {
   /**
    * Set the auto-login profile. Only one profile can be auto-login at a time.
    * Passing null clears auto-login on all profiles.
-   * Setting auto-login also forces rememberPassword to true on the target.
+   * rememberPassword is left as is: auto-login keeps the session token on its
+   * own, and the password is saved only when rememberPassword is set.
    */
   setAutoLogin(id: string | null): void;
 

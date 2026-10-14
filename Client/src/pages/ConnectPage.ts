@@ -125,18 +125,19 @@ export function createConnectPage(
     // A typed host that is a saved profile takes that profile's two flags, so
     // an opted-out profile is not overridden by the defaults. Applied once per
     // match so later edits to the boxes are the user's own.
-    onHostInput(host) {
-      if (host === appliedProfileHost) return;
-      const saved = knownProfiles.find((p) => p.synthetic !== true && p.host === host) as
-        { autoConnect?: boolean; rememberPassword?: boolean } | undefined;
-      appliedProfileHost = saved ? host : "";
-      if (!saved) return;
-      loginForm.setAutoConnect(saved.autoConnect === true);
-      loginForm.setRememberPassword(saved.rememberPassword === true);
-    },
+    onHostInput: (host) => applySavedFlags(host),
   });
   let knownProfiles: readonly SimpleProfile[] = initialProfiles;
   let appliedProfileHost = "";
+  function applySavedFlags(host: string): void {
+    if (host === appliedProfileHost) return;
+    const saved = knownProfiles.find((p) => p.synthetic !== true && p.host === host) as
+      { autoConnect?: boolean; rememberPassword?: boolean } | undefined;
+    appliedProfileHost = saved ? host : "";
+    if (!saved) return;
+    loginForm.setAutoConnect(saved.autoConnect === true);
+    loginForm.setRememberPassword(saved.rememberPassword === true);
+  }
 
   // Per-host compatibility from the advisory preflight. The notice reads it
   // when the user selects a server; the 15 s probe only writes badges.
@@ -465,6 +466,9 @@ export function createConnectPage(
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       knownProfiles = profiles;
       serverPanel.renderProfiles(profiles);
+      // Profiles load after the form mounts; a host typed before they arrived
+      // still takes its saved profile's flags.
+      applySavedFlags(loginForm.getHost().trim());
     },
     selectServer(
       host: string,
