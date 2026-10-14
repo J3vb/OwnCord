@@ -584,8 +584,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function showUploadError(message: string): void {
     if (attachmentPreviewBar === null) return;
     // One persistent refusal line: the user needs to read it after the fact,
-    // so it is not removed on a timer (A11Y-05). It is cleared by the next
-    // edit or successful send (clearUploadError).
+    // so it is not removed on a timer (A11Y-05). It is cleared by its own
+    // dismiss button, the next edit or a successful send (clearUploadError).
     clearUploadError();
     uploadErrorEl = createElement(
       "div",
@@ -595,6 +595,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       },
       message,
     );
+    const dismissBtn = createElement("button", {
+      class: "attachment-upload-error-dismiss",
+      type: "button",
+      "aria-label": messagingText("error.dismiss"),
+    });
+    dismissBtn.appendChild(createIcon("x", 14));
+    dismissBtn.addEventListener(
+      "click",
+      () => {
+        clearUploadError();
+        textarea?.focus();
+      },
+      { signal },
+    );
+    uploadErrorEl.appendChild(dismissBtn);
     textarea?.setAttribute("aria-describedby", uploadErrorId);
     // app.css only shows the preview bar via .visible -- without this an
     // error with no attachments already queued renders into a display:none

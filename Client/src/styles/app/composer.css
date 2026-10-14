@@ -145,6 +145,23 @@
   color: var(--text-danger);
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.attachment-upload-error-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.attachment-upload-error-dismiss:hover {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
 }
 .attachment-preview-bar.visible + .message-input-box {
   border-radius: 0 0 var(--radius-md) var(--radius-md);
