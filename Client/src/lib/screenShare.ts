@@ -558,6 +558,19 @@ export interface ScreenTrackState extends GenerationGuarded {
   announced?: LocalTrack;
 }
 
+/** A share whose video track changes its own source under the publication
+ *  (the Linux native capture, which picks in its own dialog). */
+export interface InPlaceSourceChange {
+  changeSource(): Promise<void>;
+}
+
+/** The live share's video track when it changes source by itself, else null. */
+export function inPlaceSourceChange(state: ScreenTrackState): InPlaceSourceChange | null {
+  const video = state.manualScreenTracks.find((t) => t.kind === Track.Kind.Video) as
+    Partial<InPlaceSourceChange> | undefined;
+  return typeof video?.changeSource === "function" ? (video as InPlaceSourceChange) : null;
+}
+
 /** Stop sharing when the OS ends the capture (its own Stop sharing bar), as
  *  long as this video track still carries `mst` for this share. A Change
  *  source moves the watch to the new capture. */

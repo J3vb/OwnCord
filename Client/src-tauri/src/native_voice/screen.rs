@@ -260,7 +260,9 @@ pub type Started = oneshot::Receiver<Result<(u32, u32), String>>;
 struct Shared {
     /// The published screen share's source; `None` while not published.
     source: Mutex<Option<NativeVideoSource>>,
-    preview: Arc<Preview>,
+    /// Swapped by `take_over`, so the frame socket's `screen` route keeps
+    /// playing across a source change.
+    preview: Mutex<Arc<Preview>>,
 }
 
 pub struct ScreenCapture {
@@ -296,7 +298,7 @@ impl ScreenCapture {
         let (ready, started) = oneshot::channel();
         let shared = Arc::new(Shared {
             source: Mutex::new(None),
-            preview: Arc::new(watch::channel(None).0),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
         });
         let counted = Counted::new();
         let thread_shared = shared.clone();
@@ -318,11 +320,33 @@ impl ScreenCapture {
     }
 
     pub fn preview(&self) -> Arc<Preview> {
-        self.shared.preview.clone()
+        self.shared
+            .preview
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
         *self.shared.source.lock().unwrap_or_else(|p| p.into_inner()) = source;
+    }
+
+    /// Carry `from`'s published source and preview over to this capture, so
+    /// the publication and the preview socket keep going on this capture's
+    /// frames once `from` is dropped (a Change source).
+    pub fn take_over(&self, from: &ScreenCapture) {
+        *self
+            .shared
+            .preview
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = from.preview();
+        let source = from
+            .shared
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        self.set_source(source);
     }
 }
 
@@ -564,8 +588,13 @@ fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
     if let Some(source) = source {
         source.capture_frame(&frame);
     }
-    if shared.preview.receiver_count() > 0 {
-        shared.preview.send_replace(Some(Arc::new(frame.buffer)));
+    let preview = shared
+        .preview
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    if preview.receiver_count() > 0 {
+        preview.send_replace(Some(Arc::new(frame.buffer)));
     }
 }
 
@@ -587,7 +616,7 @@ mod tests {
     ) -> Option<Result<(u32, u32), String>> {
         let shared = Shared {
             source: Mutex::new(None),
-            preview: Arc::new(watch::channel(None).0),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
         };
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let stopper = std::thread::spawn(move || {
@@ -766,6 +795,51 @@ mod tests {
         drop(capture);
         assert_eq!(active_captures(), base);
         // The preview ends with the capture.
+        assert!(rt.block_on(preview.changed()).is_err());
+    }
+
+    #[test]
+    fn a_taken_over_preview_keeps_playing_the_new_capture() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let synthetic = |width, height| {
+            ScreenCapture::start(
+                Target::Synthetic { width, height },
+                CaptureOptions {
+                    fps: 30.0,
+                    max_width: 0,
+                    max_height: 0,
+                },
+                || {},
+            )
+            .unwrap()
+        };
+        let (old, started) = synthetic(320, 180);
+        assert_eq!(rt.block_on(started).unwrap(), Ok((320, 180)));
+        // What the frame socket holds for the live share.
+        let socket = old.preview();
+        let mut preview = socket.subscribe();
+        let (new, started) = synthetic(160, 90);
+        assert_eq!(rt.block_on(started).unwrap(), Ok((160, 90)));
+        new.take_over(&old);
+        assert!(Arc::ptr_eq(&new.preview(), &socket));
+        drop(old);
+        // The socket's preview outlives the old capture and now carries the
+        // new one's frames.
+        let size = |frame: &I420Buffer| (frame.width(), frame.height());
+        let mut last = None;
+        for _ in 0..10 {
+            rt.block_on(preview.changed()).unwrap();
+            last = preview.borrow_and_update().as_deref().map(size);
+            if last == Some((160, 90)) {
+                break;
+            }
+        }
+        assert_eq!(last, Some((160, 90)));
+        drop(new);
+        drop(socket);
         assert!(rt.block_on(preview.changed()).is_err());
     }
 

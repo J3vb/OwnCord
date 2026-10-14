@@ -71,6 +71,22 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.not.toHaveProperty("audio");
   });
 
+  it("asks only for the source when changing a live share's source", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      sourceOnly: true,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    expect(root.querySelector(".ssp-options")).toBeNull();
+    expect(root.querySelectorAll(".ssp-select")).toHaveLength(0);
+    root.querySelector<HTMLButtonElement>(".ssp-source")!.click();
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ source: "screen:1" });
+  });
+
   it("keeps the selection on a visible card across tab switches", async () => {
     const picking = showScreenSharePicker({
       sources,

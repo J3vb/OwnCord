@@ -1,13 +1,14 @@
 /**
  * The voice widget's stream card while you share your screen (WP 1C-1): what
  * is going out, Change source, Quality and Stop. Loaded on the first share.
- * Change source and Quality are offered only where the share can change
- * without stopping (the web path); the Linux native capture picks both in its
- * own dialog, so there the card keeps Stop.
+ * Change source is offered wherever the share can change without stopping;
+ * Quality only on the web path (the Linux native capture picks its quality in
+ * its own dialog).
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import {
+  canChangeScreenshareSource,
   changeScreenshareSource,
   getLocalScreenshareStream,
   getScreenshareQuality,
@@ -75,7 +76,7 @@ export function createStreamCard(onStop: () => void, signal: AbortSignal): Strea
   function update(): void {
     setText(name, shareSourceName(getLocalScreenshareStream()?.getVideoTracks()[0]));
     const current = getScreenshareQuality();
-    change.hidden = current === null;
+    change.hidden = !canChangeScreenshareSource();
     quality.hidden = current === null;
     if (current !== null) quality.value = current;
   }

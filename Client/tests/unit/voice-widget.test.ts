@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
 const mockShareQuality = vi.fn<() => string | null>(() => "medium");
 const mockChangeSource = vi.fn().mockResolvedValue(undefined);
+const mockCanChange = vi.fn<() => boolean>(() => true);
 const mockSetQuality = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhanced = vi.fn().mockResolvedValue(undefined);
 const mockIsLinuxDesktop = vi.fn(() => false);
@@ -18,6 +19,7 @@ vi.mock("@lib/livekitSession", () => ({
   }),
   getScreenshareQuality: () => mockShareQuality(),
   changeScreenshareSource: () => mockChangeSource(),
+  canChangeScreenshareSource: () => mockCanChange(),
   setScreenshareQuality: (q: string) => mockSetQuality(q),
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
@@ -353,6 +355,7 @@ describe("VoiceWidget", () => {
 
   it("the stream card offers only Stop where the share cannot change (WP 1C-1)", async () => {
     mockShareQuality.mockReturnValueOnce(null);
+    mockCanChange.mockReturnValueOnce(false);
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     const widget = createVoiceWidget({
@@ -366,6 +369,24 @@ describe("VoiceWidget", () => {
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-stop"]')!.hidden).toBe(false);
+    widget.destroy?.();
+  });
+
+  it("the stream card offers Change source without Quality on a Linux share", async () => {
+    mockShareQuality.mockReturnValueOnce(null);
+    mockCanChange.mockReturnValueOnce(true);
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    await vi.dynamicImportSettled();
+    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(false);
+    expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     widget.destroy?.();
   });
 

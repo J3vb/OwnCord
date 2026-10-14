@@ -61,6 +61,18 @@ export const nativeVoice: NativeVoice = {
   publishScreen: (session, capture, options) =>
     invoke<string>("native_voice_publish_screen", { session, capture, options }),
   stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
+  async changeScreen(session, source, capture) {
+    try {
+      return await invoke<NativeVoiceScreenStarted>("native_voice_change_screen", {
+        session,
+        source,
+        capture,
+      });
+    } catch (err) {
+      // The host rejects with its reason as a string; callers classify it.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
   listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>
