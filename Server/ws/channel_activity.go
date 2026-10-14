@@ -31,9 +31,11 @@ import (
 // it is never taken under seqMu, h.mu, ps.mu or any c.mu. note runs on the
 // readPump goroutine with no hub lock held. flush swaps the map out under mu,
 // releases it, and only then resolves, taking h.mu/ps.mu read locks and c.mu
-// one at a time. flushMu only serializes flushes: it is taken by flush alone,
-// above every other lock, and never by note or forget. Nothing here takes
-// seqMu or runs on the dispatch goroutine.
+// one at a time. flushMu serializes flushes and sits above every other lock:
+// flush and forget take it, forget before mu, so a purge returns only after a
+// flush already resolving has finished and cannot send an erased id afterwards.
+// note never takes it, and neither purge entry point holds a hub lock when it
+// calls forget. Nothing here takes seqMu or runs on the dispatch goroutine.
 const (
 	activityWindow       = time.Second
 	activityFlushTimeout = 2 * time.Second
@@ -130,6 +132,8 @@ func (a *activityState) note(n activityNote) {
 // frame already sent cannot be recalled (the contract nsfw_content.go states
 // for shed content).
 func (a *activityState) forget(userIDs, msgIDs []int64) {
+	a.flushMu.Lock()
+	defer a.flushMu.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for chID, pc := range a.pending {

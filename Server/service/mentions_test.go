@@ -759,42 +759,52 @@ func TestSendMessage_DMMentionsResolve(t *testing.T) {
 	}
 }
 
-// TestMentionReach_AgreesWithMentionEntries locks the shared per-reader rule:
-// for every reader, MentionReach reports a hit exactly when mentionEntries puts
-// that reader in the batch entry the mention badge is written from.
+// TestMentionReach_AgreesWithMentionEntries pins MentionReach's expected
+// (direct, broad) verdict per reader, including the @here statuses, and checks
+// that mentionEntries batches exactly the readers it reports a hit for. The
+// author and the author's blockers are removed by the caller, outside
+// MentionReach, so they are not part of this table.
 func TestMentionReach_AgreesWithMentionEntries(t *testing.T) {
 	svc, _, _ := newMentionFixture(t)
 	ctx := context.Background()
-	// bob online, carol no connection, mod invisible, alice (the author) online.
+	// bob(2) online, carol(3) no connection, mod(4) invisible; alice(1) authors.
 	live := map[int64]string{1: db.StatusOnline, 2: db.StatusOnline, 3: "", 4: db.StatusInvisible}
 	svc.SetLiveStatusLookup(func(userID int64) string { return live[userID] })
 
+	type verdict struct{ direct, broad bool }
 	cases := []struct {
 		name string
 		set  mentionSet
+		want map[int64]verdict // readers 2, 3, 4
 	}{
-		{"none", mentionSet{UserIDs: []int64{}}},
-		{"direct", mentionSet{UserIDs: []int64{2, 3}}},
-		{"everyone", mentionSet{UserIDs: []int64{}, Everyone: true}},
-		{"here", mentionSet{UserIDs: []int64{}, Everyone: true, HereOnly: true}},
-		{"direct and everyone", mentionSet{UserIDs: []int64{3}, Everyone: true}},
-		{"direct and here", mentionSet{UserIDs: []int64{3}, Everyone: true, HereOnly: true}},
-		{"unknown id", mentionSet{UserIDs: []int64{99}}},
+		{"none", mentionSet{UserIDs: []int64{}}, map[int64]verdict{}},
+		{"direct", mentionSet{UserIDs: []int64{2, 3}}, map[int64]verdict{2: {true, false}, 3: {true, false}}},
+		{"everyone", mentionSet{UserIDs: []int64{}, Everyone: true},
+			map[int64]verdict{2: {false, true}, 3: {false, true}, 4: {false, true}}},
+		{"here reaches only present readers", mentionSet{UserIDs: []int64{}, Everyone: true, HereOnly: true},
+			map[int64]verdict{2: {false, true}}},
+		{"direct and everyone", mentionSet{UserIDs: []int64{3}, Everyone: true},
+			map[int64]verdict{2: {false, true}, 3: {true, true}, 4: {false, true}}},
+		{"direct and here", mentionSet{UserIDs: []int64{3}, Everyone: true, HereOnly: true},
+			map[int64]verdict{2: {false, true}, 3: {true, false}}},
+		{"unknown id", mentionSet{UserIDs: []int64{99}}, map[int64]verdict{}},
 	}
 	const authorID = int64(1)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			entries := svc.mentionEntries(ctx, 10, 500, authorID, tc.set, false, nil)
 			batched := map[int64]bool{}
-			for _, e := range entries {
+			for _, e := range svc.mentionEntries(ctx, 10, 500, authorID, tc.set, false, nil) {
 				for _, uid := range e.UserIDs {
 					batched[uid] = true
 				}
 			}
 			for uid := int64(2); uid <= 4; uid++ {
 				direct, broad := MentionReach(tc.set.UserIDs, tc.set.Everyone, tc.set.HereOnly, uid, live[uid])
-				if got := direct || broad; got != batched[uid] {
-					t.Errorf("user %d: MentionReach = (%v, %v), mentionEntries batched = %v", uid, direct, broad, batched[uid])
+				if got := (verdict{direct, broad}); got != tc.want[uid] {
+					t.Errorf("user %d: MentionReach = %+v, want %+v", uid, got, tc.want[uid])
+				}
+				if hit := direct || broad; hit != batched[uid] {
+					t.Errorf("user %d: MentionReach hit = %v, mentionEntries batched = %v", uid, hit, batched[uid])
 				}
 			}
 			if batched[authorID] {

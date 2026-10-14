@@ -426,7 +426,7 @@ func TestChannelActivity_ReconnectInWindow(t *testing.T) {
 	// Close the leading edge so the note waits in the window, as a second
 	// message in a burst would.
 	f.hub.activity.mu.Lock()
-	f.hub.activity.lastFlush = time.Now()
+	f.hub.activity.lastFlush = time.Now().Add(time.Hour)
 	f.hub.activity.mu.Unlock()
 	res, _ := f.send(t, f.author, f.textID, "before the resume")
 	f.hub.EmitEvents(context.Background(), res.Events[:1])
@@ -598,5 +598,102 @@ func TestChannelActivity_FlushOffDispatch(t *testing.T) {
 	}
 	if !gotLast {
 		t.Fatalf("the latest message %d never reached the reader", last.Load())
+	}
+}
+
+func TestChannelActivity_WindowThrottle(t *testing.T) {
+	var a activityState
+	t0 := time.Unix(1000, 0)
+	if _, pending := a.due(t0); pending {
+		t.Fatal("an empty state reports pending work")
+	}
+
+	a.note(activityNote{channelID: 1, msgID: 1, authorID: 9})
+	if wait, pending := a.due(t0); !pending || wait != 0 {
+		t.Fatalf("first note after a quiet period: wait=%v pending=%v, want 0 (leading edge)", wait, pending)
+	}
+	if got := a.take(t0); len(got) != 1 {
+		t.Fatalf("take = %d channels, want 1", len(got))
+	}
+
+	a.note(activityNote{channelID: 1, msgID: 2, authorID: 9})
+	if wait, _ := a.due(t0.Add(100 * time.Millisecond)); wait != 900*time.Millisecond {
+		t.Errorf("100ms into the window: wait = %v, want 900ms", wait)
+	}
+	if wait, _ := a.due(t0.Add(activityWindow)); wait != 0 {
+		t.Errorf("at the window's close: wait = %v, want 0", wait)
+	}
+	if got := a.take(t0.Add(activityWindow)); len(got) != 1 {
+		t.Fatalf("second take = %d channels, want 1", len(got))
+	}
+	if got := a.take(t0.Add(2 * activityWindow)); got != nil {
+		t.Errorf("take of an empty map = %v, want nil", got)
+	}
+
+	a.note(activityNote{channelID: 1, msgID: 3, authorID: 9})
+	if wait, pending := a.due(t0.Add(5 * time.Second)); !pending || wait != 0 {
+		t.Errorf("note after a quiet second: wait=%v pending=%v, want 0", wait, pending)
+	}
+}
+
+func TestChannelActivity_MentionCapEvictsOldestByID(t *testing.T) {
+	var a activityState
+	a.note(activityNote{channelID: 1, msgID: 50, authorID: 9, mentions: []int64{2}})
+	for id := int64(1); id < 20; id++ {
+		a.note(activityNote{channelID: 1, msgID: id, authorID: 9, mentions: []int64{2}})
+	}
+	pc := a.pending[1]
+	if len(pc.mentions) != activityMaxMentions {
+		t.Fatalf("kept %d mentions, want %d", len(pc.mentions), activityMaxMentions)
+	}
+	lowest, kept50 := int64(1<<62), false
+	for _, m := range pc.mentions {
+		lowest = min(lowest, m.msgID)
+		kept50 = kept50 || m.msgID == 50
+	}
+	if lowest != 5 || !kept50 || pc.latestID != 50 {
+		t.Errorf("lowest kept id = %d, kept 50 = %v, latest = %d; want 5, true, 50", lowest, kept50, pc.latestID)
+	}
+}
+
+func TestChannelActivity_ForgetDropsErasedUserAndSweptMessages(t *testing.T) {
+	f := newActivityFixture(t)
+	ctx := context.Background()
+	a := f.user(t, "erased", permissions.MemberRoleID)
+	b := f.user(t, "other", permissions.MemberRoleID)
+	c := f.user(t, "reader", permissions.MemberRoleID)
+	cSend := f.connect(c, 0)
+	act := &f.hub.activity
+
+	// A's mention is dropped; B's later message survives as the latest entry.
+	act.note(activityNote{channelID: f.textID, msgID: 10, authorID: a.ID, mentions: []int64{c.ID}})
+	act.note(activityNote{channelID: f.textID, msgID: 11, authorID: b.ID})
+	act.forget([]int64{a.ID}, nil)
+	f.flush()
+	e := wantOneEntry(t, "after erasing A", activityFrames(cSend))
+	if e.MessageID != 11 || e.AuthorID == nil || *e.AuthorID != b.ID || e.MentionsYou {
+		t.Errorf("entry = %+v, want only B's message 11 with no mention", e)
+	}
+
+	// A swept latest message drops the whole channel.
+	act.note(activityNote{channelID: f.textID, msgID: 30, authorID: b.ID})
+	act.forget(nil, []int64{30})
+	f.flush()
+	if got := activityFrames(cSend); len(got) != 0 {
+		t.Errorf("swept message still produced %+v", got)
+	}
+
+	// The real purge entry point reaches the pending map.
+	startActivityHub(t, f.hub)
+	act.mu.Lock()
+	act.lastFlush = time.Now().Add(time.Hour)
+	act.mu.Unlock()
+	act.note(activityNote{channelID: f.textID, msgID: 40, authorID: a.ID, mentions: []int64{c.ID}})
+	if err := f.hub.PurgeUserFromReplay(ctx, a.ID); err != nil {
+		t.Fatalf("PurgeUserFromReplay: %v", err)
+	}
+	f.flush()
+	if got := activityFrames(cSend); len(got) != 0 {
+		t.Errorf("erased user's message still produced %+v", got)
 	}
 }
