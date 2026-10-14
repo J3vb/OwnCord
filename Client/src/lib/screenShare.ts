@@ -346,6 +346,9 @@ export function stopManualCameraTrack(state: CameraTrackState, room: Room | null
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
+  // A stopped track is no longer what the server was told is on, and holding
+  // it would keep the left room reachable through its signal client.
+  state.announced = undefined;
   unpublishManualTrack(room, track);
   track.stop();
 }
@@ -500,6 +503,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       state.manualCameraTrack.stop();
       state.manualCameraTrack = null;
     }
+    state.announced = undefined;
     setLocalCamera(false);
     log.error("Failed to enable camera", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -598,6 +602,7 @@ export function stopManualScreenTracks(state: ScreenTrackState, room: Room | nul
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
+  state.announced = undefined;
   for (const track of tracks) {
     unpublishManualTrack(room, track);
     track.stop();
