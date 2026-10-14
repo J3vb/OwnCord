@@ -1709,6 +1709,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         () => {
           updateJumpToPresentPill();
           updateUnreadBar();
+          // A tail reload that changed no rows reattaches without a messages
+          // update, so the reader's pending own send follows here instead.
+          if (followOwnSend()) {
+            followOwnSendUntil = 0;
+            scrollToBottom();
+            updateScrollToBottomBtn();
+          }
         },
       ),
     );

@@ -290,4 +290,16 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
       now.mockRestore();
     }
   });
+
+  it("a reattach that changes no rows still lands a pending own send at the bottom", () => {
+    const { root, around } = sendWhileDetached();
+    expect(atBottom(root)).toBe(false);
+
+    // The tail matched the cached rows, so only the detached flag changes.
+    setDetached(false);
+    messagesStore.flush();
+
+    expect(atBottom(root)).toBe(true);
+    expect(around.length).toBeGreaterThan(0);
+  });
 });
