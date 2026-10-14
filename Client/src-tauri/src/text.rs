@@ -37,6 +37,12 @@ pub fn tray_tooltip(count: u32) -> String {
     }
 }
 
+// --- Close to tray notice --------------------------------------------------
+
+/// Shown once, the first time the X button hides the window to the tray.
+pub const TRAY_NOTICE_TITLE: &str = "OwnCord";
+pub const TRAY_NOTICE_BODY: &str = "OwnCord is still running in the tray";
+
 // --- Startup failure dialog (not Linux) ------------------------------------
 
 // The startup failure dialog is `#[cfg(not(target_os = "linux"))]` in lib.rs

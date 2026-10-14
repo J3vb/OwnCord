@@ -39,6 +39,8 @@ mod tofu;
 mod tray;
 mod unread_badge;
 mod update_commands;
+#[cfg(desktop)]
+mod window_prefs;
 #[cfg(windows)]
 mod windows_media;
 mod ws_proxy;
@@ -150,11 +152,20 @@ pub fn run() {
                 // A pop-out opens where window.open places it, never restored
                 // full screen.
                 .with_filter(|label| label == "main")
+                // Not the visible flag: the app can quit while the window is
+                // hidden in the tray, and restoring "hidden" at the next launch
+                // would start it with no window.
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
                 .build(),
         )
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None::<Vec<&'static str>>,
+            // A login launch carries the flag; `startMinimized` decides what it
+            // does (window_prefs.rs).
+            Some(vec![window_prefs::MINIMIZED_ARG]),
         ))
         .plugin(tauri_plugin_deep_link::init());
 
@@ -169,6 +180,12 @@ pub fn run() {
         .manage(native_voice_state())
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
+            #[cfg(desktop)]
+            window_prefs::get_window_prefs,
+            #[cfg(desktop)]
+            window_prefs::set_window_pref,
+            #[cfg(desktop)]
+            window_prefs::show_next_launch,
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
@@ -270,6 +287,8 @@ pub fn run() {
             commands::open_devtools,
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            use tauri::Manager as _;
             // Rust logging is initialized by tauri_plugin_log (registered above).
             // Record the version and PID first: paired with the "[update]
             // installer launching" line, they bound the install gap a report
@@ -292,24 +311,48 @@ pub fn run() {
             // The main window is built here, not from tauri.conf.json alone
             // ("create": false): only a code-built webview takes a new-window
             // handler, which stream pop-outs need (popout.rs).
+            // Close to tray and Start minimised (window_prefs.rs): read before
+            // the window exists, so a minimised login launch never flashes it.
+            #[cfg(desktop)]
+            let start_hidden = {
+                app.manage(window_prefs::WindowPrefs::load(app.handle()));
+                let prefs = app.state::<window_prefs::WindowPrefs>();
+                // Always consumed, so the marker never outlives one launch.
+                let show_next = window_prefs::take_show_next_launch(app.handle());
+                window_prefs::should_start_hidden(
+                    show_next,
+                    window_prefs::launched_minimized(),
+                    prefs.start_minimized(),
+                    window_prefs::tray_available,
+                )
+            };
             if let Some(config) = app.config().app.windows.first().cloned() {
                 let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
                 #[cfg(desktop)]
                 let builder = {
                     let handle = app.handle().clone();
-                    builder.on_new_window(move |url, features| {
-                        popout::on_new_window(&handle, url, features)
-                    })
+                    builder
+                        .visible(!start_hidden)
+                        .on_new_window(move |url, features| {
+                            popout::on_new_window(&handle, url, features)
+                        })
                 };
                 let window = builder.build()?;
                 // WebView2 hides device names until mic/camera are allowed.
                 #[cfg(windows)]
                 windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
                 let handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if matches!(event, tauri::WindowEvent::Destroyed) {
-                        popout::close_all(&handle);
+                #[cfg(desktop)]
+                let main = window.clone();
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Destroyed => popout::close_all(&handle),
+                    #[cfg(desktop)]
+                    // Registered after the window-state plugin's own listener,
+                    // so the geometry it saves is the visible one.
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        window_prefs::on_close_requested(&handle, &main, api);
                     }
+                    _ => {}
                 });
             }
             diagnostics::spawn_frontend_watchdog(app.handle());

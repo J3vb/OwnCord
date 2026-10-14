@@ -29,6 +29,7 @@ import { trayStatus } from "./trayStatus";
 import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
 import { windowControl } from "./window";
+import { windowPrefs } from "./windowPrefs";
 import type { Platform } from "../contracts";
 
 export const desktop: Platform = {
@@ -56,4 +57,5 @@ export const desktop: Platform = {
   updater,
   urlOpener,
   window: windowControl,
+  windowPrefs,
 };
