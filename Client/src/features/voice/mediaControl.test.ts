@@ -10,13 +10,17 @@ const store = vi.hoisted(() => ({
 const gate = vi.hoisted(() => ({ gated: false }));
 
 vi.mock("livekit-client", () => ({
-  Track: { Source: { Microphone: "microphone" }, sourceToProto: () => 2 },
+  Track: {
+    Source: { Microphone: "microphone", ScreenShare: "screen_share" },
+    sourceToProto: (source: string) => (source === "screen_share" ? 3 : 2),
+  },
 }));
 vi.mock("../../stores/voice.store", () => ({
   voiceStore: { getState: () => store },
   setLocalMuted: vi.fn(),
   setLocalDeafened: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
 }));
 vi.mock("../../lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
@@ -31,10 +35,10 @@ vi.mock("../../lib/screenShare", () => ({
   disableCamera: vi.fn(async () => undefined),
 }));
 
-import { setLocalMuted, setListenOnly } from "../../stores/voice.store";
+import { setLocalMuted, setListenOnly, setShareDenied } from "../../stores/voice.store";
 import { savePref } from "../../lib/preferences";
 import { enableCamera, disableCamera } from "../../lib/screenShare";
-import { MediaControl, type MediaControlHost } from "./mediaControl";
+import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
 
 type Permissions = { canPublish: boolean; canPublishSources: number[] } | undefined;
 
@@ -131,6 +135,19 @@ describe("microphonePublishingAllowed", () => {
     expect(
       media.microphonePublishingAllowed(fakeRoom({ canPublish: true, canPublishSources: [3] })),
     ).toBe(false);
+  });
+});
+
+describe("syncShareGrant (WP 1C-3)", () => {
+  it("marks share denied only when the grant leaves screen share out", () => {
+    syncShareGrant(fakeRoom());
+    expect(setShareDenied).toHaveBeenLastCalledWith(false);
+    syncShareGrant(fakeRoom({ canPublish: true, canPublishSources: [2, 1] }));
+    expect(setShareDenied).toHaveBeenLastCalledWith(true);
+    syncShareGrant(fakeRoom({ canPublish: true, canPublishSources: [2, 3, 4] }));
+    expect(setShareDenied).toHaveBeenLastCalledWith(false);
+    syncShareGrant(fakeRoom({ canPublish: false, canPublishSources: [] }));
+    expect(setShareDenied).toHaveBeenLastCalledWith(true);
   });
 });
 

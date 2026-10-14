@@ -11,6 +11,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setListenOnly,
+  setShareDenied,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
@@ -194,13 +195,7 @@ export class MediaControl {
   }
 
   microphonePublishingAllowed(room: Room): boolean {
-    const permissions = room.localParticipant.permissions;
-    return (
-      permissions === undefined ||
-      (permissions.canPublish &&
-        (permissions.canPublishSources.length === 0 ||
-          permissions.canPublishSources.includes(Track.sourceToProto(Track.Source.Microphone))))
-    );
+    return publishAllowed(room, Track.Source.Microphone);
   }
 
   /** Mute the SDK microphone track and tear down processing; capture/publish
@@ -435,4 +430,21 @@ export class MediaControl {
   async reapplyEnhancedNoiseSuppression(): Promise<void> {
     return this._audioPipeline.reapplyEnhancedNoiseSuppression(this.onErrorCallback ?? undefined);
   }
+}
+
+/** Whether the SFU grant lets this room publish `source`; an empty source
+ *  list means every source. */
+export function publishAllowed(room: Room, source: Track.Source): boolean {
+  const permissions = room.localParticipant.permissions;
+  return (
+    permissions === undefined ||
+    (permissions.canPublish &&
+      (permissions.canPublishSources.length === 0 ||
+        permissions.canPublishSources.includes(Track.sourceToProto(source))))
+  );
+}
+
+/** Mirror the grant's screen-share permission into the store for the share buttons. */
+export function syncShareGrant(room: Room): void {
+  setShareDenied(!publishAllowed(room, Track.Source.ScreenShare));
 }

@@ -152,6 +152,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
   setLocalGateSpeaking: vi.fn(),
   restateSelfVoiceState: vi.fn(),
   setVoiceStatus: vi.fn(),

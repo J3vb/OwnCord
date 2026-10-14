@@ -24,6 +24,7 @@ import {
 } from "@lib/connectionStats";
 import { getRoomForStats, retryMicPermission } from "@lib/livekitSession";
 import { voiceText as t } from "../i18n/voice";
+import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
 
 export interface VoiceWidgetOptions {
@@ -328,6 +329,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       if (btn === null || frozen || !joining) continue;
       btn.disabled = true;
       btn.title = t("status.joining");
+    }
+    const block = shareBlockReason(voiceStore.getState());
+    if (shareBtn !== null && !shareBtn.disabled && block !== null) {
+      shareBtn.disabled = true;
+      shareBtn.title = block;
     }
   }
 
@@ -671,6 +677,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           listenOnly: s.listenOnly,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
+          shareBlock: shareBlockReason(s),
         }),
         () => render(),
         (a, b) =>
@@ -682,7 +689,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.shareRev === b.shareRev &&
           a.listenOnly === b.listenOnly &&
           a.voiceStatus === b.voiceStatus &&
-          a.encryptionDegraded === b.encryptionDegraded,
+          a.encryptionDegraded === b.encryptionDegraded &&
+          a.shareBlock === b.shareBlock,
       ),
     );
     // Freeze controls reactively when the WS socket drops (§3 connection status).

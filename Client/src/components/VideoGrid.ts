@@ -140,6 +140,8 @@ export interface CallState {
   readonly serverDeafened?: boolean;
   /** The chat socket is down: camera and share are inert until it is back. */
   readonly offline?: "reconnecting" | "disconnected";
+  /** Why share is inert (no permission, video limit), when it is. */
+  readonly shareBlock?: string;
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -1011,7 +1013,8 @@ export function createVideoGrid(): VideoGridComponent {
       drawMediaButton(share, on, on ? "monitor-off" : "monitor");
       const label = voiceText(on ? "widget.control.shareStop" : "widget.control.shareStart");
       share.setAttribute("aria-label", label);
-      share.title = mediaLockReason() ?? label;
+      share.title = mediaLockReason() ?? callState.shareBlock ?? label;
+      if (callState.shareBlock !== undefined) share.disabled = true;
     }
   }
 

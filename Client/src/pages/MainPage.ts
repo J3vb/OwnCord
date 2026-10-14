@@ -25,6 +25,7 @@ import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
+import { shareBlockReason } from "../features/voice/shareGate";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
@@ -1502,6 +1503,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
      *  the chat socket (camera and share freeze while it is down). */
     const syncCallState = (state: VoiceState): void => {
       const socket = uiStore.getState().connectionStatus;
+      const shareBlock = shareBlockReason(state);
       const callState: CallState = {
         muted: isSelfMuted(state),
         deafened: state.localDeafened,
@@ -1512,6 +1514,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         serverMuted: state.localServerMuted === true,
         serverDeafened: state.localServerDeafened === true,
         ...(socket === "connected" ? {} : { offline: socket }),
+        ...(shareBlock === null ? {} : { shareBlock }),
       };
       const callKey = JSON.stringify(callState);
       if (callKey === prevCallState) return;

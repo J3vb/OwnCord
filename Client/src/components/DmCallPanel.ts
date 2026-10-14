@@ -40,6 +40,7 @@ import { verifyPresentation, openIdentityMismatchModal } from "../features/voice
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
+import { shareBlockReason } from "../features/voice/shareGate";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -983,8 +984,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (share !== null) {
       share.setAttribute("aria-pressed", String(voice.localScreenshare));
       swapIcon(share, voice.localScreenshare ? "monitor-off" : "monitor", 20);
-      share.disabled = frozen || connecting;
-      share.title = reason || (connecting ? t("status.joining") : d("share"));
+      const block = shareBlockReason(voice);
+      share.disabled = frozen || connecting || block !== null;
+      share.title = reason || (connecting ? t("status.joining") : (block ?? d("share")));
     }
     tick();
   }
