@@ -198,6 +198,54 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("dismisses the refusal line with its close button", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "a".repeat(4001);
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+
+    const dismiss = container.querySelector(
+      ".attachment-upload-error-dismiss",
+    ) as HTMLButtonElement | null;
+    expect(dismiss?.getAttribute("aria-label")).toBe("Dismiss");
+    dismiss!.click();
+
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
+    expect(container.querySelector(".attachment-preview-bar")?.classList.contains("visible")).toBe(
+      false,
+    );
+    expect(textarea.hasAttribute("aria-describedby")).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+
+    comp.destroy?.();
+  });
+
+  it("keeps the dismiss button, and its focus, when the shown reason changes", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode: wait 5s");
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    const dismiss = container.querySelector(
+      ".attachment-upload-error-dismiss",
+    ) as HTMLButtonElement;
+    dismiss.focus();
+
+    comp.setSendGate("Slow mode: wait 4s");
+
+    expect(container.querySelector(".attachment-upload-error")?.textContent).toBe(
+      "Slow mode: wait 4s",
+    );
+    expect(container.querySelector(".attachment-upload-error-dismiss")).toBe(dismiss);
+    expect(document.activeElement).toBe(dismiss);
+
+    comp.destroy?.();
+  });
+
   it("refuses an over-long edit through the same guard", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
