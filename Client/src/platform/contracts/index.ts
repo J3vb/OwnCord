@@ -27,6 +27,7 @@ export type { TrayStatus } from "./trayStatus";
 export type { ExternalContentBroker } from "./externalContent";
 export type { NativeVoice } from "./nativeVoice";
 export type { SystemIdle } from "./systemIdle";
+export type { WindowPrefs } from "./windowPrefs";
 
 import type { HttpClient } from "./http";
 import type { SocketTransport } from "./socket";
@@ -51,6 +52,7 @@ import type { TrayStatus } from "./trayStatus";
 import type { ExternalContentBroker } from "./externalContent";
 import type { NativeVoice } from "./nativeVoice";
 import type { SystemIdle } from "./systemIdle";
+import type { WindowPrefs } from "./windowPrefs";
 
 /** Every platform capability, one readonly member per contract interface. */
 export interface Platform {
@@ -78,4 +80,5 @@ export interface Platform {
   readonly externalContent: ExternalContentBroker;
   readonly nativeVoice: NativeVoice;
   readonly systemIdle: SystemIdle;
+  readonly windowPrefs: WindowPrefs;
 }

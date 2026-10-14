@@ -7,6 +7,7 @@ import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
+import type { WindowPrefName, WindowPrefsState } from "../../platform/contracts/windowPrefs";
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
@@ -42,6 +43,10 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   section.appendChild(buildAutostartRow(signal));
+
+  // Close to tray / Start minimized — owned by the native host, which reads
+  // both before the webview exists.
+  for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
 
   // ---- Debug section (dev builds only: its one row is DevTools) --------------
 
@@ -300,6 +305,105 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   })();
 
   return row;
+}
+
+/**
+ * "Close to tray" and "Start minimized". The native host owns both values (it
+ * needs them before the webview loads), so the rows read and write through
+ * `desktop.windowPrefs`. With no host (dev browser / tests) they remove
+ * themselves, like the autostart row.
+ */
+function buildWindowPrefRows(signal: AbortSignal): HTMLDivElement[] {
+  const defs: ReadonlyArray<{
+    pref: WindowPrefName;
+    label: string;
+    desc: string;
+    fallback: boolean;
+  }> = [
+    {
+      pref: "minimizeToTray",
+      label: t("advanced.minimizeToTray.label"),
+      desc: t("advanced.minimizeToTray.desc"),
+      fallback: true,
+    },
+    {
+      pref: "startMinimized",
+      label: t("advanced.startMinimized.label"),
+      desc: t("advanced.startMinimized.desc"),
+      fallback: false,
+    },
+  ];
+
+  const rows: HTMLDivElement[] = [];
+  const applyLoaded: Array<(state: WindowPrefsState) => void> = [];
+
+  for (const def of defs) {
+    const row = createElement("div", { class: "setting-row" });
+    const info = createElement("div", {});
+    appendChildren(
+      info,
+      createElement("div", { class: "setting-label" }, def.label),
+      createElement("div", { class: "setting-desc" }, def.desc),
+    );
+
+    // The last value the host confirmed; a failed save puts the toggle back.
+    let saved = def.fallback;
+    // Set on a click that saved, so a slow initial read cannot undo it (OC-0141).
+    let touched = false;
+    const show = (on: boolean): void => {
+      toggle.classList.toggle("on", on);
+      toggle.setAttribute("aria-checked", String(on));
+    };
+    const toggle = createToggle(def.fallback, {
+      signal,
+      label: def.label,
+      onChange: (nowOn) => {
+        touched = true;
+        void (async () => {
+          const ok = await desktop.windowPrefs.set(def.pref, nowOn);
+          if (!ok) {
+            show(saved);
+            // Nothing changed, so a read still on its way may apply.
+            touched = false;
+            return;
+          }
+          saved = nowOn;
+          if (def.pref === "startMinimized" && nowOn) await refreshAutostartEntry();
+        })();
+      },
+    });
+    appendChildren(row, info, toggle);
+    rows.push(row);
+    applyLoaded.push((state) => {
+      if (touched) return;
+      saved = state[def.pref];
+      show(saved);
+    });
+  }
+
+  void (async () => {
+    const state = await desktop.windowPrefs.load();
+    if (state === null) {
+      for (const row of rows) row.remove();
+      return;
+    }
+    for (const apply of applyLoaded) apply(state);
+  })();
+
+  return rows;
+}
+
+/**
+ * Rewrite the OS login entry. Only entries written by this version carry the
+ * `--minimized` flag Start minimized needs, so turning the preference on
+ * refreshes an entry an older version created.
+ */
+async function refreshAutostartEntry(): Promise<void> {
+  try {
+    if (await desktop.autostart.isEnabled()) await desktop.autostart.enable();
+  } catch (err) {
+    log.warn("Failed to refresh the login entry", { error: String(err) });
+  }
 }
 
 function buildCacheRow(

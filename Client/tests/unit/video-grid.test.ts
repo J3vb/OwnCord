@@ -3063,6 +3063,18 @@ describe("VideoGrid", () => {
       container.remove();
     });
 
+    it("seats show chat in the view bar in the call view, and back in the grid without it", () => {
+      grid.setExitVisible(true);
+      const exit = () =>
+        root().querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']")!;
+      expect(exit().parentElement!.classList.contains("video-grid__views")).toBe(true);
+      expect(exit().hidden).toBe(false);
+
+      grid.setExitVisible(false);
+      expect(exit().parentElement).toBe(root());
+      expect(exit().hidden).toBe(true);
+    });
+
     it("reads the saved toggles when the grid mounts", () => {
       localStorage.setItem("owncord:settings:callShowNonVideo", "false");
       localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
