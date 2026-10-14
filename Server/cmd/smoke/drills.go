@@ -1064,7 +1064,7 @@ const (
 )
 
 // classifyFullSend sorts a chat_send reply. The distinction that matters is
-// between a refusal and a throttle: service.sendMessagePrecheck charges the
+// between a refusal and a throttle: service.sendMessageRateGate charges the
 // per-user chat rate limit BEFORE it reads the channel, so a RATE_LIMITED reply
 // never reached SQLite and proves nothing about the disk. Counting one as a
 // refusal is how a run that only ever touched the rate limiter comes to report
@@ -3320,7 +3320,7 @@ const (
 
 	// drillFullSendPause spaces the full stage's sends. MessageService's
 	// precheck allows ten chat sends per user per second
-	// (service.sendMessagePrecheck) and answers RATE_LIMITED BEFORE it reads
+	// (service.sendMessageRateGate) and answers RATE_LIMITED BEFORE it reads
 	// the channel, let alone writes to a full disk, so a loop that asked fifty
 	// times in a few milliseconds would measure the drill's own pacing and
 	// report it as the filesystem refusing. 120ms is eight a second: under the

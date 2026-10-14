@@ -24,12 +24,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	)
 	defer done()
 
-	ch, content, err := s.sendMessagePrecheck(ctx, p)
-	if err != nil {
+	if err := s.sendMessageRateGate(p); err != nil {
 		return nil, err
 	}
-	isDM := ch.Type == "dm"
-	delivery, err := messageDeliveryParams(p, content, s.st.MessageDeliveryFloorMS())
+	// A retry of an accepted send is answered from its receipt before the
+	// channel, permission and content gates: the message already exists, so a
+	// permission change since then must not turn its acknowledgment into a
+	// refusal (ARCH-039).
+	delivery, err := messageDeliveryParams(p, s.st.MessageDeliveryFloorMS())
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +43,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		if previous != nil {
 			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
 		}
+	}
+	ch, content, err := s.sendMessagePrecheck(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	isDM := ch.Type == "dm"
+	if delivery != nil {
+		delivery.Content = content
 	}
 	if err := s.checkReplyTarget(ctx, p); err != nil {
 		return nil, err
@@ -139,21 +149,23 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	return result, nil
 }
 
-// sendMessagePrecheck runs every gate a send must clear before anything is
-// written: rate limit, channel lookup, send permission, content sanitization,
-// and attachment permission. It returns the resolved channel and the
-// sanitized content for the caller to persist.
-func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
-	// Rate limit.
-	ratKey := auth.Key("chat", p.UserID)
-	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
-		return nil, "", ErrRateLimited
+// sendMessageRateGate runs before anything reads the database, retries
+// included: the per-user chat rate limit, then the channel id's shape.
+func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat", p.UserID), 10, time.Second) {
+		return ErrRateLimited
 	}
-
 	if p.ChannelID <= 0 {
-		return nil, "", fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
+		return fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
 	}
+	return nil
+}
 
+// sendMessagePrecheck runs every gate a new send must clear before anything
+// is written: channel lookup, send permission, content sanitization, and
+// attachment permission. It returns the resolved channel and the sanitized
+// content for the caller to persist.
+func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	ch, err := s.st.GetChannel(ctx, p.ChannelID)
 	if err != nil || ch == nil {
 		return nil, "", fmt.Errorf("%w: channel not found", ErrNotFound)

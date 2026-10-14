@@ -21,7 +21,9 @@ const MessageRetryWindow = 24 * time.Hour
 
 // messageDeliveryParams validates the immutable logical id. Embedding time in
 // the id lets the server safely reject old retries after receipt pruning.
-func messageDeliveryParams(p SendMessageParams, content string, floorMS int64) (*db.MessageDeliveryParams, error) {
+// Content is left empty: the caller fills in the sanitized text once the send
+// gates have run, since a receipt lookup does not need it.
+func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliveryParams, error) {
 	if p.ClientMessageID == "" {
 		return nil, nil
 	}
@@ -54,7 +56,7 @@ func messageDeliveryParams(p SendMessageParams, content string, floorMS int64) (
 	hash := sha256.Sum256(encoded)
 	return &db.MessageDeliveryParams{
 		UserID: p.UserID, ChannelID: p.ChannelID, ClientMessageID: key,
-		PayloadHash: hash[:], ExpiresAtMS: expiresMS, CreatedAtMS: createdMS, Content: content,
+		PayloadHash: hash[:], ExpiresAtMS: expiresMS, CreatedAtMS: createdMS,
 		ReplyTo: p.ReplyTo, AttachmentIDs: p.AttachmentIDs,
 	}, nil
 }
@@ -108,7 +110,8 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 }
 
 // checkMessageSlowMode is charged only for a new send. A matching receipt
-// bypasses it, while current permissions and the general rate limit still run.
+// returns before it, as it does before the permission gates; only the general
+// rate limit runs for a retry.
 func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) error {
 	if ch.Type != "dm" && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
 		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)

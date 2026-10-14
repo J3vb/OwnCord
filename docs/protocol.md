@@ -560,9 +560,12 @@ The `chat_message` broadcast also echoes `client_message_id` when supplied;
 history does not carry it, so clients also reconcile by acknowledged server
 message id when history was restored before acknowledgment.
 
-Retries still pass current send permissions, DM membership/block/timeout and
-the general chat rate limit. A matching receipt does not spend slow-mode
-cooldown, reopen DMs, increment mentions, dispatch push notifications or
+Retries still pass the general chat rate limit. A matching receipt is
+answered before the channel, send-permission, DM membership/block/timeout and
+content checks: the message was accepted when it was sent, so a later
+permission change cannot turn its acknowledgment into a refusal. A key with no
+receipt is a new send and passes every check. A matching receipt does not
+spend slow-mode cooldown, reopen DMs, increment mentions, dispatch push notifications or
 broadcast another message. Changed payloads or channels with the same key
 return `CONFLICT`. Keys belong to their sender, so another authorized sender
 may independently use the same key without seeing the first sender's result.
