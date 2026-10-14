@@ -708,9 +708,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // (BUG-135). No password is passed: save_credential preserves the stored
     // one when none is supplied, which is why the plaintext no longer has to
     // make a round trip through JavaScript.
-    sessionUnsubs.push(
-      ws.on("user_update", createUserUpdateCredentialSaver(host, keepToken)),
-    );
+    sessionUnsubs.push(ws.on("user_update", createUserUpdateCredentialSaver(host, keepToken)));
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });

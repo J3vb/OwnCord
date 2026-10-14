@@ -128,8 +128,7 @@ export function createConnectPage(
     onHostInput(host) {
       if (host === appliedProfileHost) return;
       const saved = knownProfiles.find((p) => p.synthetic !== true && p.host === host) as
-        | { autoConnect?: boolean; rememberPassword?: boolean }
-        | undefined;
+        { autoConnect?: boolean; rememberPassword?: boolean } | undefined;
       appliedProfileHost = saved ? host : "";
       if (!saved) return;
       loginForm.setAutoConnect(saved.autoConnect === true);
