@@ -1,6 +1,6 @@
 /**
  * The push-to-talk key capture and release delay, shared by the Keybinds tab
- * and Voice & Audio's Push to Talk input mode. PTT uses Rust-side
+ * and Voice & Video's Push to Talk input mode. PTT uses Rust-side
  * GetAsyncKeyState polling so the key is NOT hijacked.
  */
 

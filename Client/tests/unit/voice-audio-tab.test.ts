@@ -1726,7 +1726,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("does not register a new permanent abort listener on every rebuild (OC-0125)", () => {
     // Simulates the settings overlay staying open for a session while the
-    // user re-opens the Voice & Audio tab (e.g. hide()/show() cycles):
+    // user re-opens the Voice & Video tab (e.g. hide()/show() cycles):
     // SettingsOverlay's single AbortController lives for the whole session,
     // and build() is called again each time the tab is (re)rendered.
     stubNavigator();

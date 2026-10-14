@@ -22,7 +22,13 @@ import {
   type ConnectionStatsPoller,
   type QualityLevel,
 } from "@lib/connectionStats";
-import { getRoomForStats, retryMicPermission } from "@lib/livekitSession";
+import {
+  getRoomForStats,
+  reapplyEnhancedNoiseSuppression,
+  retryMicPermission,
+} from "@lib/livekitSession";
+import { loadPref, savePref } from "@lib/preferences";
+import { isLinuxDesktop } from "../features/voice/native/platform";
 import { voiceText as t } from "../i18n/voice";
 import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
@@ -126,6 +132,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
+  /** Quick toggle for the Enhanced Noise Suppression pref Settings also sets. */
+  let nsBtn: HTMLButtonElement | null = null;
   /** The stream card while you share; loaded on the first share. */
   let streamCard: StreamCard | null = null;
   /** Owns the current card's listeners; aborted when the card goes. */
@@ -337,6 +345,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
   }
 
+  function renderNs(): void {
+    nsBtn?.setAttribute("aria-pressed", String(loadPref("enhancedNoiseSuppression", false)));
+  }
+
   function render(): void {
     if (root === null || channelNameEl === null) return;
 
@@ -538,8 +550,39 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
+    // The native engine reads it at connect, not live.
+    const nsLabel = t(
+      isLinuxDesktop() ? "widget.control.nextJoin" : "widget.control.noiseSuppression",
+    );
+    nsBtn = createElement("button", {
+      type: "button",
+      class: "vw-ns",
+      "aria-label": nsLabel,
+      title: nsLabel,
+      "data-testid": "vw-ns",
+    });
+    nsBtn.appendChild(createIcon("audio-lines", 14));
+    nsBtn.addEventListener(
+      "click",
+      () => {
+        savePref("enhancedNoiseSuppression", !loadPref("enhancedNoiseSuppression", false));
+        void reapplyEnhancedNoiseSuppression();
+      },
+      { signal: disposable.signal },
+    );
+    // savePref announces every change, so a toggle in Settings shows here too.
+    window.addEventListener(
+      "owncord:pref-change",
+      (e) => {
+        if ((e as CustomEvent<{ key: string }>).detail.key === "enhancedNoiseSuppression")
+          renderNs();
+      },
+      { signal: disposable.signal },
+    );
+    renderNs();
+
     const headerSub = createElement("div", { class: "vw-header-sub" });
-    appendChildren(headerSub, channelNameEl, securedBadge, signalWrap);
+    appendChildren(headerSub, channelNameEl, securedBadge, signalWrap, nsBtn);
     appendChildren(header, headerMain, headerSub);
 
     // Expanded stats pane (hidden by default): Upload and Download tiles,
@@ -735,6 +778,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     securedText = null;
     controlsRow = null;
     cameraBtn = null;
+    nsBtn = null;
     shareBtn = null;
     disconnectBtn = null;
     streamCardScope?.destroy();
