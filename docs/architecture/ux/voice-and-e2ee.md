@@ -163,7 +163,9 @@ across its owner turning it off and on and across a channel switch, until you
 leave voice, and a stream that ends is forgotten rather than stopped. A
 screen share you were watching that ends says "Otto ended the stream" in its
 tile for 3 s before the tile goes; the tile's controls are dead meanwhile, and
-leaving voice or the same person sharing again replaces it at once. A watch
+leaving voice or the same person sharing again replaces it at once. The watch
+lasts as long as that cover: the same person sharing again within it is still
+watched, and keeps the focus. A watch
 survives a channel switch and the app's own reconnect or rejoin, but not
 livekit-client's full reconnect, and ends when you leave voice. The setting is
 read as each camera is published (and on a reconnect's sweep), so turning it
@@ -175,7 +177,15 @@ the native backend still auto-subscribes, so it unsubscribes an unwatched
 stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
 Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. In a DM call, focus view stays inside the call panel and the
+**Hide preview**. While you share, the voice widget shows a stream card
+(`components/voice-widget/streamCard.ts`, loaded on the first share): what is
+going out, **Change source**, **Quality** and **Stop sharing**. Change source
+opens the picker and swaps the new capture under the published track
+(`features/voice/screenshareChange.ts`), so viewers keep watching and the
+server hears no `voice_screenshare`; cancelling the picker changes nothing.
+Quality re-sizes the running capture for this share only (the Settings default
+stays). On Linux the native capture picks in its own dialog, so the card has
+Stop sharing only. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
