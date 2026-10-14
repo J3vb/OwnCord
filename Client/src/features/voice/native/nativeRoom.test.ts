@@ -66,6 +66,7 @@ const host = vi.hoisted(() => ({
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
   changeScreen: (): Promise<unknown> => Promise.resolve({ capture: 6, width: 800, height: 600 }),
   pickChange: (): Promise<string | null> => Promise.resolve("window:9"),
+  noted: [] as string[],
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
 }));
@@ -95,6 +96,7 @@ vi.mock("./videoRenderer", () => ({
 vi.mock("./screenPicker", () => ({
   pickScreenSource: () => host.pick(),
   pickChangeSource: () => host.pickChange(),
+  noteChangedSource: (source: string) => host.noted.push(source),
 }));
 vi.mock("../../../platform/desktop", () => ({
   desktop: {
@@ -227,6 +229,7 @@ beforeEach(() => {
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   host.changeScreen = () => Promise.resolve({ capture: 6, width: 800, height: 600 });
   host.pickChange = () => Promise.resolve("window:9");
+  host.noted = [];
   nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
   nativeCounters.openRooms = 0;
@@ -1336,6 +1339,7 @@ describe("NativeRoom screen share", () => {
       [1, "window:9", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
     ]);
     expect(screen).toMatchObject({ capture: 6, width: 800, height: 600 });
+    expect(host.noted).toEqual(["window:9"]);
     expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(screen);
     expect(host.renderers).toHaveLength(1);
     expect(host.renderers[0]!.disposed).toBe(false);
@@ -1359,6 +1363,7 @@ describe("NativeRoom screen share", () => {
     host.changeScreen = () => Promise.reject(new Error("screen capture portal did not start"));
     await expect(screen.changeSource()).rejects.toMatchObject({ name: "NotAllowedError" });
     expect(screen.capture).toBe(4);
+    expect(host.noted).toEqual([]);
   });
 
   it("a Stop that reached the host after the swap still stops the new capture", async () => {
