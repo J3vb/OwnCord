@@ -155,11 +155,17 @@ pub enum Event {
     ActiveSpeakers {
         identities: Vec<String>,
     },
-    /// The server's grant for the local participant changed: whether it still
-    /// lets this client publish the microphone. The webview defers an unmute
-    /// that arrives while it is false and republishes when it turns true.
-    MicrophonePermission {
-        allowed: bool,
+    /// The server's grant for the local participant, once right after
+    /// connect and again on every change: livekit-client's
+    /// `ParticipantPermission` publish fields, with `can_publish_sources` as
+    /// the protocol's `TrackSource` numbers (empty means every source). The
+    /// webview gates the microphone, camera and screen share on it, as the
+    /// web path does with `localParticipant.permissions`.
+    Permission {
+        #[serde(rename = "canPublish")]
+        can_publish: bool,
+        #[serde(rename = "canPublishSources")]
+        can_publish_sources: Vec<i32>,
     },
     /// The input-sensitivity gate opened (speech) or closed (silence). It
     /// lights the local speaking ring, as the web path's detector does.
@@ -306,9 +312,7 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
         RoomEvent::ParticipantPermissionChanged {
             participant: Participant::Local(_),
             permission: Some(permission),
-        } => Event::MicrophonePermission {
-            allowed: mic_allowed(&permission),
-        },
+        } => permission_event(&permission),
         RoomEvent::ActiveSpeakersChanged { speakers } => Event::ActiveSpeakers {
             identities: speakers.iter().map(|s| s.identity().to_string()).collect(),
         },
@@ -638,6 +642,11 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
+        // The join's grant raises no change event, so the webview hears it
+        // here, before any event the forwarder sends.
+        if let Some(permission) = room.local_participant().permission() {
+            on_event(permission_event(&permission));
+        }
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
         let playout = Playout::default();
@@ -1273,6 +1282,13 @@ fn release_slot(slot: &mut Option<VideoPublication>, sid: &TrackSid) -> Option<u
     None
 }
 
+fn permission_event(permission: &livekit_protocol::ParticipantPermission) -> Event {
+    Event::Permission {
+        can_publish: permission.can_publish,
+        can_publish_sources: permission.can_publish_sources.clone(),
+    }
+}
+
 /// Whether the server's grant lets this participant publish the microphone:
 /// an empty source list means every source (LiveKit's rule).
 fn mic_allowed(permission: &livekit_protocol::ParticipantPermission) -> bool {
@@ -1425,9 +1441,25 @@ mod tests {
     }
 
     #[test]
-    fn microphone_permission_event_serializes_for_the_webview() {
-        let json = serde_json::to_string(&Event::MicrophonePermission { allowed: false }).unwrap();
-        assert_eq!(json, r#"{"type":"microphonePermission","allowed":false}"#);
+    fn permission_event_serializes_for_the_webview() {
+        let json = serde_json::to_string(&permission_event(&permission(
+            true,
+            &[proto::TrackSource::Microphone, proto::TrackSource::Camera],
+        )))
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"permission","canPublish":true,"canPublishSources":[2,1]}"#
+        );
+    }
+
+    #[test]
+    fn permission_event_carries_a_full_denial() {
+        let json = serde_json::to_string(&permission_event(&permission(false, &[]))).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"permission","canPublish":false,"canPublishSources":[]}"#
+        );
     }
 
     #[test]

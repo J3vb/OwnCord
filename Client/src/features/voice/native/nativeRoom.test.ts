@@ -262,6 +262,21 @@ describe("NativeRoom connect/disconnect", () => {
     expect(room.remoteParticipants.get("user-2")?.audioTrackPublications.size).toBe(1);
   });
 
+  it("keeps the join grant sent before the snapshot while connect is pending", async () => {
+    const room = createNativeRoom(audio);
+    const changed = vi.fn();
+    room.on("participantPermissionsChanged", changed);
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({ session: 3, event: { type: "permission", canPublish: true, canPublishSources: [2] } });
+    emit({ session: 3, event: { type: "connected", participants: [] } });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [2] });
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
   it("raises no TrackPublished for the snapshot replayed during connect, only for a later one", async () => {
     const room = createNativeRoom(audio);
     const published: string[] = [];
@@ -613,26 +628,31 @@ describe("NativeRoom room surface", () => {
     expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
   });
 
-  it("tracks the microphone grant and announces a restored one after the unmute", async () => {
+  it("tracks the server's grant for every source and announces each change", async () => {
     const room = createNativeRoom(audio);
     const changed = vi.fn();
     room.on("participantPermissionsChanged", changed);
     await room.connect("u", "t");
     expect(room.localParticipant.permissions).toBeUndefined();
-    // A moderator mute withdraws the grant; the unmute reaches the webview
-    // over the OwnCord socket before the SFU's restored grant arrives.
-    emit({ session: 1, event: { type: "microphonePermission", allowed: false } });
+    // The connect-time grant: microphone (2) and camera (1), no screen share.
+    emit({
+      session: 1,
+      event: { type: "permission", canPublish: true, canPublishSources: [2, 1] },
+    });
     expect(room.localParticipant.permissions).toEqual({
       canPublish: true,
-      canPublishSources: [1, 3, 4],
+      canPublishSources: [2, 1],
     });
-    // The microphone (2) is left out; camera and screen share stay allowed.
     expect(changed).toHaveBeenLastCalledWith(undefined, room.localParticipant);
     changed.mockClear();
-    emit({ session: 1, event: { type: "microphonePermission", allowed: true } });
-    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
+    // A moderator mute withdraws publishing altogether.
+    emit({ session: 1, event: { type: "permission", canPublish: false, canPublishSources: [] } });
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(changed).toHaveBeenCalledWith(undefined, room.localParticipant);
+    expect(room.localParticipant.permissions).toEqual({ canPublish: false, canPublishSources: [] });
+    // An open grant: an empty source list means every source.
+    emit({ session: 1, event: { type: "permission", canPublish: true, canPublishSources: [] } });
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
   });
 
   it("maps native events onto livekit RoomEvents", async () => {

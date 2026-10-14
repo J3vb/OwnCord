@@ -69,10 +69,11 @@ export type NativeVoiceEvent =
   | { type: "trackUnsubscribed"; identity: string; sid: string }
   | { type: "trackMuted"; identity: string; sid: string; muted: boolean }
   | { type: "activeSpeakers"; identities: string[] }
-  /** The server's grant for the local participant changed: whether it still
-   *  lets this client publish the microphone (a moderator server-mute
-   *  withdraws it, lifting the mute restores it). */
-  | { type: "microphonePermission"; allowed: boolean }
+  /** The server's grant for the local participant: once on connect, then on
+   *  every change (a moderator server-mute, a role or channel permission
+   *  change). Sources are LiveKit protocol `TrackSource` numbers; an empty
+   *  list means every source. */
+  | { type: "permission"; canPublish: boolean; canPublishSources: number[] }
   /** The input-sensitivity gate opened (speech) or closed (silence). */
   | { type: "voiceGate"; open: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
