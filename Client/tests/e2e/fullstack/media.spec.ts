@@ -49,6 +49,13 @@ function captureFrames(transport: {
   return frames;
 }
 
+/** Share from the voice widget: the quality step, then Go Live opens the
+ *  browser's picker (auto-accepted by the fake-UI launch flag). */
+async function startShare(page: Page): Promise<void> {
+  await page.locator(".voice-widget button[aria-label='Screenshare']").click();
+  await page.getByTestId("screen-share-go-live").click();
+}
+
 /** Open the call view: a second click on the joined voice channel. Your own
  *  camera or share never opens it on its own (WP 1B-4). */
 async function openCall(page: Page, name = "voice-one"): Promise<void> {
@@ -284,7 +291,7 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   const outbound = captureFrames(aliceTransport);
 
   const shareBtn = alice.locator(".voice-widget button[aria-label='Screenshare']");
-  await shareBtn.click();
+  await startShare(alice);
 
   // Local UI: the control reports sharing and a self screen tile (offset id)
   // is published under the grid. The grid stays closed, so the chat stays in
@@ -379,7 +386,7 @@ for (const [ending, end] of shareEndings) {
     await joinVoice(alice);
     await joinVoice(bob);
     const shareBtn = alice.locator(".voice-widget button[aria-label='Screenshare']");
-    await shareBtn.click();
+    await startShare(alice);
     await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
 
     const aliceRow = bob.locator(".voice-user-item[data-voice-uid='1']");

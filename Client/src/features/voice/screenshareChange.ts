@@ -44,6 +44,7 @@ interface LiveShare {
   readonly video: LocalVideoTrack;
   readonly tracks: LocalTrack[];
   readonly quality: StreamQuality;
+  readonly fps: number;
   readonly generation: number;
 }
 
@@ -61,6 +62,7 @@ function liveShare(state: ScreenTrackState, deps: VideoTrackDeps): LiveShare | n
     video: video as LocalVideoTrack,
     tracks: state.manualScreenTracks,
     quality: state.quality,
+    fps: state.fps ?? getScreenShareFps(),
     generation: state.generation ?? 0,
   };
 }
@@ -102,9 +104,7 @@ export async function changeScreenshareSource(
   let fresh: LocalTrack[] = [];
   let swapped = false;
   try {
-    fresh = await createLocalScreenTracks(
-      getScreenShareCaptureOptions(live.quality, getScreenShareFps()),
-    );
+    fresh = await createLocalScreenTracks(getScreenShareCaptureOptions(live.quality, live.fps));
     const freshVideo = fresh.find((t) => t.kind === Track.Kind.Video);
     if (
       superseded(state, deps, live) ||
@@ -211,7 +211,7 @@ export async function setScreenshareQuality(
   if (live === null || live.quality === quality) return;
   state.changing = true;
   try {
-    const fps = getScreenShareFps();
+    const fps = live.fps;
     const frameRate = getEffectiveScreenShareFps(quality, fps);
     const maxBitrate = getScreenShareMaxBitrate(quality, fps);
     const size = SCREENSHARE_PRESETS[quality].resolution;

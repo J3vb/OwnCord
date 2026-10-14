@@ -35,6 +35,10 @@ import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTra
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 import { resolveVideoCodec } from "../features/voice/videoCodec";
+import {
+  getScreenSourcePicker,
+  type ScreenSourcePicker,
+} from "../features/voice/native/screenPickerSlot";
 
 const log = createLogger("screenShare");
 
@@ -529,6 +533,8 @@ export interface ScreenTrackState extends GenerationGuarded {
   /** The live share's quality, set once it is published (web path only):
    *  Change source and Quality act on a share only while it is set. */
   quality?: StreamQuality;
+  /** The live share's frame-rate choice (30 = the quality's own rate). */
+  fps?: number;
   /** A Change source or Quality change is running. */
   changing?: boolean;
 }
@@ -573,12 +579,36 @@ export function watchScreenEnded(
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
   state.quality = undefined;
+  state.fps = undefined;
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
   for (const track of tracks) {
     unpublishManualTrack(room, track);
     track.stop();
+  }
+}
+
+/** The web path's quality step before the OS picker (WP 1C-2): the saved
+ *  defaults, overridden for this share by the dialog. Null when it was closed. */
+async function pickWebShareQuality(
+  showPicker: ScreenSourcePicker,
+  quality: StreamQuality,
+  fps: number,
+): Promise<{ quality: StreamQuality; fps: number } | null> {
+  try {
+    const pick = await showPicker({
+      sources: [],
+      portal: false,
+      osPicker: true,
+      defaultQuality: quality,
+      defaultFps: fps,
+    });
+    return pick === null ? null : { quality: pick.quality, fps: pick.fps };
+  } catch (err) {
+    // The dialog's chunk failed to load: share at the defaults rather than not at all.
+    log.warn("Screen share quality step unavailable", err);
+    return { quality, fps };
   }
 }
 
@@ -594,11 +624,24 @@ export async function enableScreenshare(
     return;
   }
   setLocalScreenshare(true);
-  const quality = getScreenShareQuality();
-  const fps = getScreenShareFps();
+  const generation = state.generation ?? 0;
+  let quality = getScreenShareQuality();
+  let fps = getScreenShareFps();
+  // Linux picks inside its own capture; a headless run (no dialog registered)
+  // keeps the saved defaults.
+  const showPicker = isLinuxDesktop() ? null : getScreenSourcePicker();
+  if (showPicker !== null) {
+    const pick = await pickWebShareQuality(showPicker, quality, fps);
+    if ((state.generation ?? 0) !== generation) return;
+    if (pick === null) {
+      // Closed before Go Live: nothing was captured or announced.
+      setLocalScreenshare(false);
+      return;
+    }
+    ({ quality, fps } = pick);
+  }
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
-  const generation = state.generation ?? 0;
   let removeEndedListener: (() => void) | undefined;
   try {
     stopManualScreenTracks(state, room);
@@ -681,7 +724,10 @@ export async function enableScreenshare(
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
     // The Linux native capture changes source through its own picker only.
-    if (!isLinuxDesktop()) state.quality = quality;
+    if (!isLinuxDesktop()) {
+      state.quality = quality;
+      state.fps = fps;
+    }
     bumpLocalShareRev();
     deps.reapplyAudioPipeline();
     // The Linux native track carries the dialog's per-share encoding, which
