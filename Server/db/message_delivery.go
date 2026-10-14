@@ -49,9 +49,11 @@ type MessageDelivery struct {
 	Duplicate bool
 }
 
-// FindMessageDelivery permits retries to skip slow-mode accounting only after
-// the service has rechecked current permissions. CreateMessageDelivery repeats
-// the lookup under its writer transaction to serialize simultaneous sends.
+// FindMessageDelivery answers a retry from the sender's own receipt. The
+// service calls it right after the general rate limit, before the permission
+// gates, and a hit returns only the original id and timestamp.
+// CreateMessageDelivery repeats the lookup under its writer transaction to
+// serialize simultaneous sends.
 func (d *DB) FindMessageDelivery(ctx context.Context, p MessageDeliveryParams) (*MessageDelivery, error) {
 	previous, err := findMessageDelivery(ctx, d.q, p)
 	if err == nil && previous == nil && p.CreatedAtMS < d.MessageDeliveryFloorMS() {

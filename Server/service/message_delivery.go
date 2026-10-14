@@ -21,7 +21,9 @@ const MessageRetryWindow = 24 * time.Hour
 
 // messageDeliveryParams validates the immutable logical id. Embedding time in
 // the id lets the server safely reject old retries after receipt pruning.
-func messageDeliveryParams(p SendMessageParams, content string, floorMS int64) (*db.MessageDeliveryParams, error) {
+// Content is left empty: the caller fills in the sanitized text once the send
+// gates have run, since a receipt lookup does not need it.
+func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliveryParams, error) {
 	if p.ClientMessageID == "" {
 		return nil, nil
 	}
@@ -54,9 +56,44 @@ func messageDeliveryParams(p SendMessageParams, content string, floorMS int64) (
 	hash := sha256.Sum256(encoded)
 	return &db.MessageDeliveryParams{
 		UserID: p.UserID, ChannelID: p.ChannelID, ClientMessageID: key,
-		PayloadHash: hash[:], ExpiresAtMS: expiresMS, CreatedAtMS: createdMS, Content: content,
+		PayloadHash: hash[:], ExpiresAtMS: expiresMS, CreatedAtMS: createdMS,
 		ReplyTo: p.ReplyTo, AttachmentIDs: p.AttachmentIDs,
 	}, nil
+}
+
+// answerSendRetry runs ahead of the channel, permission and content gates. A
+// retry of an accepted send is answered from its receipt: the message already
+// exists, so a permission change since then must not turn its acknowledgment
+// into a refusal (ARCH-039). Otherwise it returns the parsed key, or nil for a
+// send without one.
+func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParams) (*db.MessageDeliveryParams, *SendMessageResult, error) {
+	if err := s.sendMessageRateGate(p); err != nil {
+		return nil, nil, err
+	}
+	delivery, err := messageDeliveryParams(p, s.st.MessageDeliveryFloorMS())
+	if err != nil || delivery == nil {
+		return nil, nil, err
+	}
+	previous, err := s.st.FindMessageDelivery(ctx, *delivery)
+	if err != nil {
+		return nil, nil, messageDeliveryError(err)
+	}
+	if previous != nil {
+		return nil, &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
+	}
+	return delivery, nil, nil
+}
+
+// sendMessageRateGate runs before anything reads the database, retries
+// included: the per-user chat rate limit, then the channel id's shape.
+func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat", p.UserID), 10, time.Second) {
+		return ErrRateLimited
+	}
+	if p.ChannelID <= 0 {
+		return fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
+	}
+	return nil
 }
 
 func messageDeliveryError(err error) error {
@@ -108,7 +145,8 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 }
 
 // checkMessageSlowMode is charged only for a new send. A matching receipt
-// bypasses it, while current permissions and the general rate limit still run.
+// returns before it, as it does before the permission gates; only the general
+// rate limit runs for a retry.
 func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) error {
 	if ch.Type != "dm" && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
 		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
