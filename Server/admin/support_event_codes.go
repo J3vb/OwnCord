@@ -48,7 +48,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"MessageService.EditMessage DMAudience":                                                                   "messageservice_editmessage_dmaudience",
 	"MessageService.EditMessage ReplaceMessageMentions":                                                       "messageservice_editmessage_replacemessagementions",
 	"MessageService.GetMessages":                                                                              "messageservice_getmessages",
-	"MessageService.GetMessagesAfter":                                                                         "messageservice_getmessagesafter",
 	"MessageService.GetMessagesAround":                                                                        "messageservice_getmessagesaround",
 	"MessageService.GetReactionUsers":                                                                         "messageservice_getreactionusers",
 	"MessageService.PurgeMessages":                                                                            "messageservice_purgemessages",
