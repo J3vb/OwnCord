@@ -105,7 +105,9 @@ fn is_key_down(vk: i32) -> bool {
 /// layouts map to different OEM VKs (VK_OEM_3 on US English, other OEM codes
 /// on many European layouts).
 /// Anything outside the OEM punctuation range falls back to VK_OEM_3, so the
-/// mapping can never turn into a letter or digit.
+/// mapping can never turn into a letter or digit. The layout is the polling
+/// thread's own (the default input language), so a user who switches layouts
+/// per window may find the binding follows a different OEM key.
 #[cfg(windows)]
 fn layout_vk(vk: i32) -> i32 {
     use windows::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VSC_TO_VK};

@@ -2170,6 +2170,22 @@ describe("VoiceAudioTab input mode (WP 1D-2)", () => {
     ac.abort();
   });
 
+  it("repaints the key as Not set when arming Push to Talk clears a refused key", async () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    mockPttUpdateKey.mockImplementationOnce(async () => {
+      localStorage.setItem("owncord:settings:pttVk", "0");
+    });
+    const { el, ac } = mount();
+    const keyButton = (): HTMLElement =>
+      pttBox(el).querySelector<HTMLElement>('button[aria-label^="Push to Talk keybind"]')!;
+    expect(keyButton().textContent).toBe("A");
+
+    option(el, "ptt").click();
+    await vi.waitFor(() => expect(keyButton().textContent).toBe("Not set"));
+    ac.abort();
+  });
+
   it("switching back to Voice Activity stops push to talk and restores the sensitivity row", () => {
     localStorage.setItem("owncord:settings:inputMode", '"ptt"');
     const { el, ac } = mount();

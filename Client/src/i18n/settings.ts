@@ -120,7 +120,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.clear": "Clear",
   "keybinds.pressKey": "Press a supported key...",
   "keybinds.pttHint":
-    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, Ctrl, Shift, Alt, Caps Lock, the ` key and Mouse 4/5.",
+    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, Ctrl, Shift, Alt, Caps Lock, the key left of 1, and Mouse 4/5.",
   "keybinds.pttModeOff":
     "Push to Talk is off, so this key does nothing. Turn it on in Voice & Video under Input Mode.",
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
