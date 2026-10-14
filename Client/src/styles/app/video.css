@@ -251,6 +251,13 @@
   justify-content: center;
   pointer-events: none;
 }
+/* The stream ended: who ended it, for a moment before the tile goes. */
+.video-ended {
+  z-index: 6;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-weight: 600;
+}
 .video-watch-btn {
   pointer-events: auto;
   padding: 8px 16px;
@@ -482,6 +489,10 @@
 }
 .video-fs-btn--leave:hover {
   background: var(--danger-fill-hover);
+}
+.video-fs-btn--device {
+  width: 24px;
+  margin-left: -6px;
 }
 /* The quality chip shows on the stream you are watching. */
 .video-quality {

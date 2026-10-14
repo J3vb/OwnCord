@@ -179,7 +179,7 @@ describe("createVideoModeController", () => {
   });
 
   it("adds local self-view tile when local camera is on", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalCameraStream.mockReturnValue(fakeStream);
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -389,7 +389,7 @@ describe("createVideoModeController", () => {
   });
 
   it("adds local screenshare self-view tile when local screenshare is on", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -418,6 +418,44 @@ describe("createVideoModeController", () => {
     });
   });
 
+  it("redraws your screen-share tile when the share changes source, not on other updates", () => {
+    const streamOf = (id: string) => ({ getVideoTracks: () => [{ id }] }) as unknown as MediaStream;
+    const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: true,
+        voiceUsers: new Map([[10, users]]),
+      }),
+    );
+    const first = streamOf("window-a");
+    mockGetLocalScreenshareStream.mockReturnValue(first);
+    const vg = makeVideoGrid();
+    const ctrl = createVideoModeController({
+      slots: makeSlots(),
+      videoGrid: vg,
+      getCurrentUserId: () => 1,
+    });
+    ctrl.checkVideoMode();
+    // Same capture (a quality change, a roster update): the tile stays.
+    mockGetLocalScreenshareStream.mockReturnValue(streamOf("window-a"));
+    ctrl.checkVideoMode();
+    expect(vg.removeStream).not.toHaveBeenCalledWith(1_000_001);
+    expect(vg.addStream).toHaveBeenCalledTimes(1);
+
+    // Change source: a new capture under the same publication.
+    const second = streamOf("window-b");
+    mockGetLocalScreenshareStream.mockReturnValue(second);
+    ctrl.checkVideoMode();
+    expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
+    expect(vg.addStream).toHaveBeenLastCalledWith(
+      1_000_001,
+      "me (Screen)",
+      second,
+      expect.objectContaining({ isSelf: true, isScreenshare: true }),
+    );
+  });
+
   it("removes local screenshare tile when screenshare is turned off", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
 
@@ -429,7 +467,7 @@ describe("createVideoModeController", () => {
         voiceUsers: new Map([[10, users]]),
       }),
     );
-    const fakeStream = { getTracks: () => [] } as unknown as MediaStream;
+    const fakeStream = { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
 
     const vg = makeVideoGrid();
@@ -483,7 +521,7 @@ describe("createVideoModeController", () => {
   // -----------------------------------------------------------------------
 
   it("checkVideoMode passes isSelf:true for local camera tile", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalCameraStream.mockReturnValue(fakeStream);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -511,7 +549,7 @@ describe("createVideoModeController", () => {
   });
 
   it("checkVideoMode passes isSelf:true and isScreenshare:true for local screenshare tile", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
     mockHasLocalScreenshareAudio.mockReturnValueOnce(true);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
@@ -598,7 +636,7 @@ describe("createVideoModeController", () => {
       new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
 
     it("camera on while reading chat stays in chat, and the tile waits in the grid", () => {
-      const fakeStream = {} as MediaStream;
+      const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
       mockGetLocalCameraStream.mockReturnValue(fakeStream);
       const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
       mockVoiceStoreGetState.mockReturnValue(state);
@@ -624,7 +662,7 @@ describe("createVideoModeController", () => {
     });
 
     it("camera on in the open call view shows there, and the call stays open", () => {
-      const fakeStream = {} as MediaStream;
+      const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
       mockGetLocalCameraStream.mockReturnValue(fakeStream);
       const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
       mockVoiceStoreGetState.mockReturnValue(state);

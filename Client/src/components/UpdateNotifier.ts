@@ -2,11 +2,14 @@
 // Mounts at the top of the main page and allows the user to update or dismiss.
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
+import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
 import { createUpdateChecker } from "../features/updates/updateChecker";
 import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
-import { uiStore } from "@stores/ui.store";
+import { setAvailableUpdate } from "../features/updates/availableUpdate";
+import { openSettings, uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
 import { connectText } from "../i18n/connect";
@@ -39,6 +42,44 @@ export function formatDownloadProgress(p: DownloadProgress): string {
   }
   const mb = (p.received / (1024 * 1024)).toFixed(1);
   return connectText("update.downloadingMb", { mb });
+}
+
+function toMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+/** "38.4 of 61.9 MB" under the progress bar, or null while the size is unknown. */
+export function formatDownloadSize(p: DownloadProgress): string | null {
+  if (p.total === null || p.total <= 0) return null;
+  return connectText("update.progressMb", {
+    received: toMb(Math.min(p.received, p.total)),
+    total: toMb(p.total),
+  });
+}
+
+/** The banner's fixed frame: an icon tile, then a body for the headline and
+ *  its second line. Callers add the actions after the body. */
+function buildFrame(banner: HTMLDivElement, icon: IconName, headline: string): HTMLDivElement {
+  const tile = createElement("div", { class: "update-banner-icon" });
+  tile.appendChild(createIcon(icon, 18));
+  const body = createElement("div", { class: "update-banner-body" });
+  body.appendChild(createElement("span", { class: "update-banner-text" }, headline));
+  banner.replaceChildren(tile, body);
+  return body;
+}
+
+function buildProgressBar(p: DownloadProgress): HTMLDivElement | null {
+  const size = formatDownloadSize(p);
+  if (size === null || p.total === null) return null;
+  const pct = Math.min(100, Math.max(0, (p.received / p.total) * 100));
+  const row = createElement("div", { class: "update-banner-sub" });
+  // The headline already carries the percentage; the bar repeats it visually.
+  const track = createElement("div", { class: "update-banner-progress", "aria-hidden": "true" });
+  const fill = createElement("div", { class: "update-banner-progress-fill" });
+  fill.style.width = `${pct}%`;
+  track.appendChild(fill);
+  appendChildren(row, track, createElement("span", { class: "update-banner-size" }, size));
+  return row;
 }
 
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
@@ -75,6 +116,12 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   function handleOutcome(outcome: UpdateOutcome, reason: UpdateCheckReason): void {
+    // The About tab reads the offer even when the banner was dismissed.
+    if (outcome.kind === "available") {
+      setAvailableUpdate({ version: outcome.version, body: outcome.body, serverUrl });
+    } else if (outcome.kind !== "failed") {
+      setAvailableUpdate(null);
+    }
     if (installBusy()) return;
     const key =
       outcome.kind === "available"
@@ -88,7 +135,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     else if (key === dismissedKey) return;
     if (shownKey === key) return;
     removeBanner();
-    if (outcome.kind === "available") showBanner(outcome.version, outcome.body);
+    if (outcome.kind === "available") showBanner(outcome.version);
     else showManualUpgradeBanner();
   }
 
@@ -103,12 +150,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     banner = createElement("div", { class: "update-banner" });
     shownKey = MANUAL_KEY;
-
-    const text = createElement(
-      "span",
-      { class: "update-banner-text" },
-      connectText("update.unavailable"),
-    );
+    buildFrame(banner, "triangle-alert", connectText("update.unavailable"));
 
     const dismissBtn = createElement(
       "button",
@@ -120,22 +162,26 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       removeBanner();
     });
 
-    appendChildren(banner, text, dismissBtn);
+    banner.appendChild(dismissBtn);
     container.prepend(banner);
     announce(connectText("update.unavailable"));
   }
 
-  function showBanner(version: string, _notes: string): void {
+  function showBanner(version: string): void {
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });
     shownKey = version;
+    const body = buildFrame(banner, "download", connectText("update.ready", { version }));
 
-    const text = createElement(
-      "span",
-      { class: "update-banner-text" },
-      connectText("update.available", { version }),
+    // The notes live on the About tab's update card, which reads the same offer.
+    const notesBtn = createElement(
+      "button",
+      { class: "update-banner-link", type: "button" },
+      connectText("update.seeWhatsNew"),
     );
+    // i18n-exempt: settings tab key, not shown text
+    notesBtn.addEventListener("click", () => openSettings("About"));
 
     const updateBtn = createElement(
       "button",
@@ -156,21 +202,21 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       removeBanner();
     });
 
-    appendChildren(banner, text, updateBtn, laterBtn);
+    appendChildren(banner, notesBtn, updateBtn, laterBtn);
     if (isWindows()) {
       // The Windows installer is unsigned, so SmartScreen warns when the
       // updater launches it. Say so before the click, not as a surprise.
-      banner.appendChild(
-        createElement(
-          "span",
-          { class: "update-banner-warning", id: "update-banner-warning" },
-          connectText("update.smartScreen"),
-        ),
-      );
+      const warning = createElement("span", {
+        class: "update-banner-warning update-banner-sub",
+        id: "update-banner-warning",
+      });
+      warning.appendChild(createIcon("triangle-alert", 13));
+      warning.append(connectText("update.smartScreen"));
+      body.appendChild(warning);
       updateBtn.setAttribute("aria-describedby", "update-banner-warning");
     }
     container.prepend(banner);
-    announce(connectText("update.available", { version }));
+    announce(connectText("update.ready", { version }));
   }
 
   function installUpdate(): void {
@@ -196,7 +242,12 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
           : state.restartRequired
             ? connectText("update.installedRestart")
             : connectText("update.failed");
-    banner.replaceChildren(createElement("span", { class: "update-banner-text" }, text));
+    const failed = state.status === "failed" && !state.restartRequired;
+    const body = buildFrame(banner, failed ? "triangle-alert" : "download", text);
+    if (state.status === "downloading" && state.progress !== null) {
+      const bar = buildProgressBar(state.progress);
+      if (bar !== null) body.appendChild(bar);
+    }
 
     // Announce only the coarse transition. A percentage tick is not a new
     // event; reading "Downloading update… 47%" every frame is noise, so the
@@ -293,6 +344,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       checkTimer = null;
     }
     removeBanner();
+    // Another server may offer a different version, or none.
+    setAvailableUpdate(null);
     liveRegion?.remove();
     liveRegion = null;
     container = null;

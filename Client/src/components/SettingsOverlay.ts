@@ -31,6 +31,7 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
+import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
 
 const log = createLogger("SettingsOverlay");
 
@@ -127,6 +128,8 @@ const TAB_ICONS: Record<TabName, IconName> = {
 const SAFETY = "Safety" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.account")
 const ACCOUNT = "Account" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.about")
+const ABOUT = "About" satisfies TabName;
 
 /** What each tab is called on screen (B9-20 moved every label onto the seam). */
 const TAB_LABEL_KEYS = {
@@ -174,6 +177,7 @@ export function createSettingsOverlay(
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
+  let unsubUpdate: (() => void) | null = null;
   /**
    * Scopes the *current* tab build's element listeners. `renderActiveTab()`
    * aborts the previous one before building the next, so a discarded pane's
@@ -486,6 +490,17 @@ export function createSettingsOverlay(
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
       btn.appendChild(document.createTextNode(tabLabel(name)));
+      if (name === ABOUT) {
+        // A dot while the update check has a newer version on offer.
+        const dot = createElement("span", { class: "settings-nav-dot" });
+        dot.appendChild(
+          createElement("span", { class: "sr-only" }, settingsText("tabs.aboutUpdate")),
+        );
+        unsubUpdate = subscribeAvailableUpdate((update) => {
+          if (update === null) dot.remove();
+          else btn.appendChild(dot);
+        });
+      }
       btn.addEventListener("click", () => setActiveTab(name), { signal: disposable.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
@@ -595,6 +610,8 @@ export function createSettingsOverlay(
       unsubUi();
       unsubUi = null;
     }
+    unsubUpdate?.();
+    unsubUpdate = null;
     if (unsubAuth !== null) {
       unsubAuth();
       unsubAuth = null;

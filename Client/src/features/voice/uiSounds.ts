@@ -39,25 +39,30 @@ interface SoundState {
   /** Other members (not self) in `channelId`, so a join/leave of the room can
    *  be told from a mute toggle. */
   readonly peers: ReadonlySet<number>;
+  /** Who in `channelId` is sharing their screen, by the server's roster:
+   *  your own share counts once the server has it, not on the click. */
+  readonly sharing: ReadonlySet<number>;
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
 }
 
-function remotePeers(channelId: number | null): ReadonlySet<number> {
-  if (channelId === null) return new Set();
-  const self = authStore.getState().user?.id ?? 0;
-  const users = voiceStore.getState().voiceUsers.get(channelId);
-  if (users === undefined) return new Set();
-  return new Set([...users.keys()].filter((id) => id !== self));
-}
-
 function snapshot(channelId: number | null): SoundState {
   const s = voiceStore.getState();
+  const self = authStore.getState().user?.id ?? 0;
+  const peers = new Set<number>();
+  const sharing = new Set<number>();
+  if (channelId !== null) {
+    for (const [id, user] of s.voiceUsers.get(channelId) ?? []) {
+      if (user.screenshare) sharing.add(id);
+      if (id !== self) peers.add(id);
+    }
+  }
   return {
     channelId,
     voiceStatus: s.voiceStatus,
     rosterRevision: getVoiceRosterRevision(),
-    peers: remotePeers(channelId),
+    peers,
+    sharing,
     localMuted: s.localMuted,
     localDeafened: s.localDeafened,
   };
@@ -170,12 +175,19 @@ export function startVoiceUiSounds(): () => void {
     // incremental roster revision reaches here — a setVoiceStates replacement
     // leaves it unchanged, so a reconnect replay is silent. The revision is
     // global, so diff the peer sets: a voice_state for a user in another
-    // channel (or a mute toggle) must not read as a join.
+    // channel (or a mute toggle) must not read as a join. Someone who stays
+    // (you included) and starts or stops sharing is a stream edge; one who
+    // joins or leaves while sharing plays only the join or leave.
     if (next.rosterRevision !== prev.rosterRevision && next.channelId !== null) {
       const joined = [...next.peers].some((id) => !prev.peers.has(id));
       const left = [...prev.peers].some((id) => !next.peers.has(id));
       if (joined) playVoiceSound("join");
       else if (left) playVoiceSound("leave");
+      else if ([...next.sharing].some((id) => !prev.sharing.has(id))) {
+        playVoiceSound("streamStart");
+      } else if ([...prev.sharing].some((id) => !next.sharing.has(id))) {
+        playVoiceSound("streamEnd");
+      }
       finish();
       return;
     }

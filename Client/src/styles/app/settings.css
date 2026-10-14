@@ -1048,6 +1048,53 @@ details.disclose[open] > summary .icon {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
+.about-update {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.about-update-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.about-update-icon {
+  display: flex;
+  flex: none;
+  color: var(--accent);
+}
+.about-update-text {
+  flex: 1;
+  min-width: 200px;
+}
+.about-update-title {
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.about-update-notes {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+}
+.about-update-eyebrow {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--header-secondary);
+}
+.settings-nav-dot {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .about-history details.disclose {
   border-top: 1px solid var(--border);
 }

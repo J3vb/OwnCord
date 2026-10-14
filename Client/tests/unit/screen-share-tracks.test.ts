@@ -61,6 +61,7 @@ const {
 type VideoTrackDeps = Parameters<typeof enableCamera>[1];
 
 const { voiceStore } = await import("@stores/voice.store");
+const { setScreenSourcePicker } = await import("../../src/features/voice/native/screenPickerSlot");
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 
@@ -1672,5 +1673,121 @@ describe("video codec", () => {
     expect(video.stop).toHaveBeenCalled();
     expect(audio.stop).toHaveBeenCalled();
     expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+});
+
+describe("enableScreenshare quality step (WP 1C-2)", () => {
+  afterEach(() => setScreenSourcePicker(null));
+
+  it("captures and publishes at the quality and fps picked before the OS picker", async () => {
+    const picker = vi.fn().mockResolvedValue({ source: "os", quality: "high", fps: 60 });
+    setScreenSourcePicker(picker);
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const state = { manualScreenTracks: [] as LocalTrack[] } as Parameters<
+      typeof enableScreenshare
+    >[0];
+
+    await enableScreenshare(state, fakeDeps(rig.room));
+
+    expect(picker).toHaveBeenCalledWith(
+      expect.objectContaining({ osPicker: true, defaultQuality: "medium", defaultFps: 30 }),
+    );
+    expect(createLocalScreenTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1920, height: 1080, frameRate: 60 }),
+      }),
+    );
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      screenShareEncoding: { maxBitrate: 9_000_000, maxFramerate: 60 },
+    });
+    expect(state.quality).toBe("high");
+    expect(state.fps).toBe(60);
+  });
+
+  it("opens the OS picker only after the quality step", async () => {
+    let goLive!: (pick: unknown) => void;
+    setScreenSourcePicker(() => new Promise((resolve) => (goLive = resolve as typeof goLive)));
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    const enabling = enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+    await vi.waitFor(() => expect(goLive).toBeDefined());
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    goLive({ source: "os", quality: "medium", fps: 30 });
+    await enabling;
+
+    expect(createLocalScreenTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures nothing and announces nothing when the quality step is closed", async () => {
+    setScreenSourcePicker(() => Promise.resolve(null));
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalled();
+    expect(deps.onError).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+
+  it("does not capture when the share is stopped while the quality step is open", async () => {
+    let goLive!: (pick: unknown) => void;
+    setScreenSourcePicker(() => new Promise((resolve) => (goLive = resolve as typeof goLive)));
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    const enabling = enableScreenshare(state, deps);
+    await vi.waitFor(() => expect(goLive).toBeDefined());
+    await disableScreenshare(state, deps);
+    goLive({ source: "os", quality: "high", fps: 60 });
+    await enabling;
+
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: true },
+    });
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+
+  it("leaves Linux to its own picker: no quality step before the native capture", async () => {
+    const picker = vi.fn();
+    setScreenSourcePicker(picker);
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+    const rig = fakeRoom();
+    const createScreenTracks = vi.fn().mockResolvedValue([fakeVideoTrack()]);
+    (rig.room.localParticipant as unknown as { createScreenTracks: unknown }).createScreenTracks =
+      createScreenTracks;
+
+    try {
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+
+    expect(picker).not.toHaveBeenCalled();
+    expect(createScreenTracks).toHaveBeenCalledTimes(1);
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+  });
+
+  it("shares at the saved defaults when the dialog cannot load", async () => {
+    setScreenSourcePicker(() => Promise.reject(new Error("chunk failed")));
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expectConsole("warn", /Screen share quality step unavailable/);
+    expect(createLocalScreenTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1280, height: 720, frameRate: 30 }),
+      }),
+    );
   });
 });

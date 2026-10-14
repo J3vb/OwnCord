@@ -25,6 +25,7 @@ import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
+import { shareBlockReason } from "../features/voice/shareGate";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
@@ -95,6 +96,7 @@ import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
+import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -1440,6 +1442,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
+    const tileMenu = createTileMenuActions(ws, sidebar.messageUser, () =>
+      videoModeCtrl?.showChat(),
+    );
+    unsubscribers.push(tileMenu.destroy);
     // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
       onStopSharing: () => {
@@ -1454,6 +1460,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onCameraDevice: (anchor, signal) =>
+          void import("../features/voice/cameraMenu")
+            .then((m) => m.showCameraMenu(anchor, signal))
+            .catch((err: unknown) => log.warn("Camera menu failed to open", err)),
         onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>
@@ -1461,6 +1471,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
       getLocalShareFps: () => getLocalScreenshareFps(),
+      onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
@@ -1481,6 +1492,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl?.showVideoGrid();
         videoModeCtrl?.setFocus(tileId);
       },
+      tileMenu,
     });
 
     let prevVideoSignature = "";
@@ -1491,6 +1503,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
      *  the chat socket (camera and share freeze while it is down). */
     const syncCallState = (state: VoiceState): void => {
       const socket = uiStore.getState().connectionStatus;
+      const shareBlock = shareBlockReason(state);
       const callState: CallState = {
         muted: isSelfMuted(state),
         deafened: state.localDeafened,
@@ -1501,6 +1514,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         serverMuted: state.localServerMuted === true,
         serverDeafened: state.localServerDeafened === true,
         ...(socket === "connected" ? {} : { offline: socket }),
+        ...(shareBlock === null ? {} : { shareBlock }),
       };
       const callKey = JSON.stringify(callState);
       if (callKey === prevCallState) return;
@@ -1561,7 +1575,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? "c" : "") +
-            (state.localScreenshare ? "s" : "");
+            (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);
             if (users) {

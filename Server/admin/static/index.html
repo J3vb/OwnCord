@@ -93,7 +93,7 @@
   <div class="main">
     <header class="topbar">
       <button class="topbar-menu" id="navToggle" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false" data-action="openNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-      <div class="topbar-server"><span class="topbar-server-name" id="topbarServer"></span><span class="topbar-version" id="topbarVersion"></span></div>
+      <div class="topbar-server"><span class="topbar-server-name" id="topbarServer"></span><button type="button" class="topbar-version" id="topbarVersion" title="What's new in this version" data-action="navigateTo" data-args="[&quot;whatsnew&quot;]"></button></div>
       <div class="user-menu-wrap">
         <button class="user-menu-btn" id="userMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="userMenu" data-action="toggleUserMenu"></button>
         <div class="user-menu hidden" id="userMenu"></div>
@@ -123,6 +123,7 @@
 <script src="/admin/js/server.js"></script>
 <script src="/admin/js/config.js"></script>
 <script src="/admin/js/operations.js"></script>
+<script src="/admin/js/whats-new.js"></script>
 <script src="/admin/js/boot.js"></script>
 </body>
 </html>

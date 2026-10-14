@@ -273,8 +273,17 @@ export function playNotificationSound(): void {
 }
 
 /** The short voice UI sounds (DP-40): join/leave, a moderator's move,
- *  mute/unmute, deafen/undeafen. */
-export type VoiceSound = "join" | "leave" | "moved" | "mute" | "unmute" | "deafen" | "undeafen";
+ *  mute/unmute, deafen/undeafen, a stream starting and ending. */
+export type VoiceSound =
+  | "join"
+  | "leave"
+  | "moved"
+  | "mute"
+  | "unmute"
+  | "deafen"
+  | "undeafen"
+  | "streamStart"
+  | "streamEnd";
 
 // A note (or pair) per edge, all under a fifth of a second. Distinct enough to
 // tell apart by ear without being a message or a call.
@@ -296,6 +305,17 @@ const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number,
   unmute: [[587, 0]],
   deafen: [[330, 0]],
   undeafen: [[494, 0]],
+  // Three notes, so a stream is told apart from a join or a leave.
+  streamStart: [
+    [440, 0],
+    [587, 0.08],
+    [880, 0.16],
+  ],
+  streamEnd: [
+    [880, 0],
+    [587, 0.08],
+    [440, 0.16],
+  ],
 };
 
 /** Play one voice UI sound. */

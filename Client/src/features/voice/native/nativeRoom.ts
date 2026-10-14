@@ -26,7 +26,7 @@
 // down only its own room. Every renderer, the camera track and the screen
 // track are disposed when their track goes away and, at the latest, in
 // disconnect().
-import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
+import { DisconnectReason, RoomEvent, Track, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { loadPref } from "../../../lib/preferences";
 import { voiceStore } from "../../../stores/voice.store";
@@ -833,11 +833,16 @@ export class NativeRoom {
         break;
       }
       case "microphonePermission":
-        // The shape `MediaControl.microphonePublishingAllowed` reads; an empty
-        // source list means every source.
+        // The shape `publishAllowed` reads; an empty source list means every
+        // source. The session reports only the microphone, so a denial lists
+        // the other sources (camera, screen share and its audio) as allowed.
         this.localParticipant.permissions = {
-          canPublish: event.allowed,
-          canPublishSources: [],
+          canPublish: true,
+          canPublishSources: event.allowed
+            ? []
+            : [Track.Source.Camera, Track.Source.ScreenShare, Track.Source.ScreenShareAudio].map(
+                Track.sourceToProto,
+              ),
         };
         this.emit(RoomEvent.ParticipantPermissionsChanged, undefined, this.localParticipant);
         break;

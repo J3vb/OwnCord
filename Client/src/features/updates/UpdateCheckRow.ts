@@ -43,7 +43,7 @@ function currentInstallState(): UpdateInstallState {
 /** Text for an install that is under way or done: offering Install again would
  *  only rejoin the same operation, so say where it stands instead. A failed
  *  download that can be retried is not one of these. */
-function installInProgressText(state: UpdateInstallState): string | null {
+export function installInProgressText(state: UpdateInstallState): string | null {
   if (state.status === "downloading") return connectText("update.downloading");
   if (state.status === "restarting") return connectText("update.installedRestarting");
   if (state.status === "failed" && state.restartRequired) {

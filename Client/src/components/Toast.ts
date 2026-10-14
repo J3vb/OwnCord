@@ -47,7 +47,8 @@ interface ToastEntry {
 }
 
 export interface ToastContainer extends MountableComponent {
-  show(message: string, type?: ToastType, durationMs?: number, action?: ToastAction): void;
+  /** Returns a function that removes the toast. */
+  show(message: string, type?: ToastType, durationMs?: number, action?: ToastAction): () => void;
   clear(): void;
 }
 
@@ -92,8 +93,8 @@ export function createToastContainer(): ToastContainer {
     type: ToastType = "info",
     durationMs: number = DEFAULT_DURATION_MS,
     action?: ToastAction,
-  ): void {
-    if (root === null) return;
+  ): () => void {
+    if (root === null) return () => {};
     const sticky = type === "error" || durationMs === Infinity;
 
     // Coalesce an identical repeat (same type and text) into the toast
@@ -107,7 +108,7 @@ export function createToastContainer(): ToastContainer {
       pauseEntry(existing);
       existing.remainingMs = durationMs;
       resume(existing);
-      return;
+      return () => removeToast(existing);
     }
 
     // Evict the oldest toast when at capacity, sparing sticky ones (they
@@ -116,7 +117,7 @@ export function createToastContainer(): ToastContainer {
     // the oldest sticky one.
     while (toasts.length >= MAX_TOASTS) {
       const victim = toasts.find((t) => !t.sticky) ?? (sticky ? toasts[0] : undefined);
-      if (victim === undefined) return;
+      if (victim === undefined) return () => {};
       removeToast(victim);
     }
 
@@ -198,6 +199,7 @@ export function createToastContainer(): ToastContainer {
         el.classList.add("show");
       });
     });
+    return () => removeToast(entry);
   }
 
   function clear(): void {

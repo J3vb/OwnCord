@@ -25,6 +25,7 @@ vi.mock("livekit-client", () => {
 vi.mock("../../stores/voice.store", () => ({
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setVoiceStatus: vi.fn(),
 }));
 vi.mock("../../lib/preferences", () => ({

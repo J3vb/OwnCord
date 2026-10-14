@@ -3,7 +3,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const showActionToast = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/toast", () => ({ showActionToast }));
 
-import { showMediaLostNotice } from "./mediaLostNotice";
+import {
+  dismissMediaLostNotice,
+  restoreLostMedia,
+  showMediaLostNotice,
+  type RestoreMedia,
+} from "./mediaLostNotice";
 
 type Action = { label: string; run: () => void };
 
@@ -57,5 +62,74 @@ describe("showMediaLostNotice", () => {
     call.action.run();
     expect(camera).toHaveBeenCalledOnce();
     expect(screenshare).toHaveBeenCalledOnce();
+  });
+});
+
+describe("restoreLostMedia (WP 1C-6)", () => {
+  let on: { camera: boolean; screenshare: boolean };
+  let current: boolean;
+  let r: RestoreMedia & {
+    enableCamera: ReturnType<typeof vi.fn>;
+    restartScreenshare: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    showActionToast.mockReset();
+    on = { camera: false, screenshare: false };
+    current = true;
+    r = {
+      isOn: (kind) => on[kind],
+      enableCamera: vi.fn(async () => {
+        on.camera = true;
+      }),
+      restartScreenshare: vi.fn(async () => false),
+      stillCurrent: () => current,
+      turnOn: { camera: vi.fn(), screenshare: vi.fn() },
+    };
+  });
+
+  it("turns the camera back on with no toast", async () => {
+    await restoreLostMedia({ camera: true, screenshare: false }, r);
+    expect(r.enableCamera).toHaveBeenCalledOnce();
+    expect(showActionToast).not.toHaveBeenCalled();
+  });
+
+  it("offers Share again when the share cannot restart by itself", async () => {
+    await restoreLostMedia({ camera: false, screenshare: true }, r);
+    expect(r.restartScreenshare).toHaveBeenCalledOnce();
+    expect(lastCall().message).toBe("Your screen share stopped when the connection dropped");
+    expect(lastCall().action.label).toBe("Share again");
+  });
+
+  it("shows nothing when the share restarted (Linux, source still there)", async () => {
+    r.restartScreenshare.mockResolvedValue(true);
+    await restoreLostMedia({ camera: false, screenshare: true }, r);
+    expect(showActionToast).not.toHaveBeenCalled();
+  });
+
+  it("leaves media the user already turned back on alone", async () => {
+    on = { camera: true, screenshare: true };
+    await restoreLostMedia({ camera: true, screenshare: true }, r);
+    expect(r.enableCamera).not.toHaveBeenCalled();
+    expect(r.restartScreenshare).not.toHaveBeenCalled();
+    expect(showActionToast).not.toHaveBeenCalled();
+  });
+
+  it("stops once the call ended during the camera restart", async () => {
+    r.enableCamera.mockImplementation(async () => {
+      current = false;
+    });
+    await restoreLostMedia({ camera: true, screenshare: true }, r);
+    expect(r.restartScreenshare).not.toHaveBeenCalled();
+    expect(showActionToast).not.toHaveBeenCalled();
+  });
+
+  it("dismissMediaLostNotice removes the toast once", async () => {
+    const remove = vi.fn();
+    showActionToast.mockReturnValueOnce(remove);
+    await restoreLostMedia({ camera: false, screenshare: true }, r);
+    dismissMediaLostNotice();
+    dismissMediaLostNotice();
+    expect(remove).toHaveBeenCalledOnce();
   });
 });

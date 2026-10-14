@@ -95,7 +95,6 @@ export function showUserVolumeMenu(
   menu.appendChild(sep);
 
   const currentVol = getUserVolume(userId);
-  const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
   const volLabel = createElement(
     "div",
     {
@@ -133,7 +132,7 @@ export function showUserVolumeMenu(
     setUserVolume(userId, val);
     // Raising the level unmutes, as the tile slider does.
     if (val > 0 && getUserLocalMute(userId)) setUserLocalMute(userId, false);
-    renderMute(isSilenced());
+    mute.sync();
   });
 
   appendChildren(sliderRow, slider, valLabel);
@@ -148,60 +147,14 @@ export function showUserVolumeMenu(
   resetBtn.addEventListener("click", () => {
     setUserVolume(userId, 100);
     showFullVolume();
-    renderMute(isSilenced());
+    mute.sync();
   });
   menu.appendChild(resetBtn);
 
-  // Local Mute: silences this user for you only and keeps the slider's level,
-  // so unchecking it brings that level back. A level of 0 reads as muted too,
-  // and unchecking it restores 100%, as the tile mute does. The menu stays open.
-  const muteItem = createMenuItem(t("volume.mute"), "context-menu-item");
-  muteItem.setAttribute("role", "menuitemcheckbox");
-  muteItem.setAttribute("data-action", "local-mute");
-  muteItem.style.display = "flex";
-  muteItem.style.alignItems = "center";
-  const muteCheck = createElement("span", {
-    "aria-hidden": "true",
-    style: "margin-left:auto;display:inline-flex",
-  });
-  muteCheck.appendChild(createIcon("check", 14));
-  muteItem.appendChild(muteCheck);
-  const renderMute = (muted: boolean): void => {
-    muteItem.setAttribute("aria-checked", String(muted));
-    muteCheck.style.visibility = muted ? "visible" : "hidden";
-  };
-  renderMute(isSilenced());
-  muteItem.addEventListener("click", () => {
-    if (!isSilenced()) {
-      setUserLocalMute(userId, true);
-    } else {
-      setUserLocalMute(userId, false);
-      if (getUserVolume(userId) === 0) {
-        setUserVolume(userId, 100);
-        showFullVolume();
-      }
-    }
-    renderMute(isSilenced());
-  });
-  menu.appendChild(muteItem);
+  const mute = createLocalMuteItem(userId, showFullVolume);
+  menu.appendChild(mute.item);
 
-  if (typeof mod === "string") {
-    menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-    menu.appendChild(
-      createElement(
-        "div",
-        {
-          class: "context-menu-item",
-          "aria-disabled": "true",
-          "data-action": "voice-mod-unavailable",
-          style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
-        },
-        mod,
-      ),
-    );
-  } else if (mod !== undefined) {
-    appendModerationSection(menu, mod, closeMenu);
-  }
+  if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu);
 
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -240,6 +193,76 @@ export function showUserVolumeMenu(
       dismiss.destroy();
     },
     { signal: dismiss.signal },
+  );
+}
+
+/**
+ * Local Mute, as a checkbox row: silences this user for you only and keeps
+ * their level, so unchecking it brings that level back. A level of 0 reads as
+ * muted too, and unchecking it restores 100% (then `onRestoreFull` runs, so
+ * the caller can redraw its slider). The menu stays open. `sync` redraws the
+ * check after the caller changes the level.
+ */
+export function createLocalMuteItem(
+  userId: number,
+  onRestoreFull: () => void,
+): { readonly item: HTMLElement; readonly sync: () => void } {
+  const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
+  const item = createMenuItem(t("volume.mute"), "context-menu-item");
+  item.setAttribute("role", "menuitemcheckbox");
+  item.setAttribute("data-action", "local-mute");
+  item.style.display = "flex";
+  item.style.alignItems = "center";
+  const check = createElement("span", {
+    "aria-hidden": "true",
+    style: "margin-left:auto;display:inline-flex",
+  });
+  check.appendChild(createIcon("check", 14));
+  item.appendChild(check);
+  const sync = (): void => {
+    const muted = isSilenced();
+    item.setAttribute("aria-checked", String(muted));
+    check.style.visibility = muted ? "visible" : "hidden";
+  };
+  sync();
+  item.addEventListener("click", () => {
+    if (!isSilenced()) {
+      setUserLocalMute(userId, true);
+    } else {
+      setUserLocalMute(userId, false);
+      if (getUserVolume(userId) === 0) {
+        setUserVolume(userId, 100);
+        onRestoreFull();
+      }
+    }
+    sync();
+  });
+  return { item, sync };
+}
+
+/** The moderation section, or why it is unavailable (a string, shown as
+ *  disabled text). Shared with the video tile menu. */
+export function appendVoiceModeration(
+  menu: HTMLElement,
+  mod: VoiceModMenuOptions | string,
+  close: () => void,
+): void {
+  if (typeof mod !== "string") {
+    appendModerationSection(menu, mod, close);
+    return;
+  }
+  menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  menu.appendChild(
+    createElement(
+      "div",
+      {
+        class: "context-menu-item",
+        "aria-disabled": "true",
+        "data-action": "voice-mod-unavailable",
+        style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+      },
+      mod,
+    ),
   );
 }
 

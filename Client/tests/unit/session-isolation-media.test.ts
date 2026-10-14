@@ -146,6 +146,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setPttGated: vi.fn(),
   // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
   // startup without importing the LiveKit SDK), so the mock has to carry real
@@ -159,6 +160,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
   setLocalGateSpeaking: vi.fn(),
   restateSelfVoiceState: vi.fn(),
   setVoiceStatus: vi.fn(),

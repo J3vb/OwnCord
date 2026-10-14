@@ -39,9 +39,35 @@ export interface ScreenSharePick {
   simulcast: boolean;
 }
 
+/** The last confirmed pick, for a share restarted after a reconnect. */
+let lastPick: ScreenSharePick | null = null;
+/** Set while a restart runs: the next pick is this, with no dialog. */
+let restartPick: ScreenSharePick | null = null;
+
+/** Make the next share reuse the last pick when the host still lists its
+ *  source. False on Wayland (only the portal dialog can pick) or when the
+ *  source is gone. Undo with disarmScreenRestart once the share settles. */
+export async function armScreenRestart(): Promise<boolean> {
+  const pick = lastPick;
+  if (pick === null || pick.source === "portal") return false;
+  const listed = await desktop.nativeVoice.screenSources();
+  if (!listed.sources.some((s) => s.id === pick.source)) return false;
+  restartPick = pick;
+  return true;
+}
+
+export function disarmScreenRestart(): void {
+  restartPick = null;
+}
+
 /** Resolve the source to share and its settings, or null when the user closed
  *  the picker. */
 export async function pickScreenSource(): Promise<ScreenSharePick | null> {
+  if (restartPick !== null) {
+    const pick = restartPick;
+    restartPick = null;
+    return pick;
+  }
   const showPicker = getScreenSourcePicker();
   if (showPicker === null) return null;
   const listed = await desktop.nativeVoice.screenSources();
@@ -52,11 +78,12 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
     defaultFps: getScreenShareFps(),
   });
   if (pick === null) return null;
-  return {
+  lastPick = {
     source: pick.source,
     capture: captureOptions(getScreenShareCaptureOptions(pick.quality, pick.fps)),
     maxBitrate: getScreenShareMaxBitrate(pick.quality, pick.fps),
     maxFramerate: getEffectiveScreenShareFps(pick.quality, pick.fps),
     simulcast: isScreenShareSimulcast(pick.quality, pick.fps),
   };
+  return lastPick;
 }

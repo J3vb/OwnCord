@@ -123,7 +123,9 @@ test.describe("Updater journey", () => {
     await page.goto("/");
     await navigateToMainPageReady(page);
 
-    await expect(bannerText(page)).toHaveText("Update v9.9.9 available", { timeout: 10_000 });
+    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
+      timeout: 10_000,
+    });
 
     await page.locator(".update-banner-later").click();
     await expect(banner(page)).toHaveCount(0);
@@ -135,7 +137,9 @@ test.describe("Updater journey", () => {
     await mockUpdaterSession(page, { available: true, version: "9.9.9" });
     await page.goto("/");
     await navigateToMainPageReady(page);
-    await expect(bannerText(page)).toHaveText("Update v9.9.9 available", { timeout: 10_000 });
+    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
+      timeout: 10_000,
+    });
 
     await page.locator(".update-banner-install").click();
     await expect(bannerText(page)).toHaveText("Downloading update…");
@@ -164,7 +168,9 @@ test.describe("Updater journey", () => {
     await mockUpdaterSession(page, { available: true, version: "9.9.9" });
     await page.goto("/");
     await navigateToMainPageReady(page);
-    await expect(bannerText(page)).toHaveText("Update v9.9.9 available", { timeout: 10_000 });
+    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
+      timeout: 10_000,
+    });
 
     await page.locator(".update-banner-install").click();
     await expect(bannerText(page)).toHaveText("Downloading update…");

@@ -37,11 +37,13 @@
 //     Client/src/lib/types.ts                  permissions/schema_doc_test.go
 //     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
 //     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
+//     CHANGELOG.md                             admin/changelog_bundle_test.go
 //
 //   Client reads outside Client/:
 //     docs/api.md                              tests/contract/api-profile-route.test.ts
 //     docs/architecture/platform-contracts.md  tests/unit/platform-contracts-counts.test.ts
 //     Server/admin/static/ (all of it)         tests/contract/server-admin-*.test.ts
+//     CHANGELOG.md                             bundled by vite.config.ts (About tab)
 //     protocol/schema.json                     src/lib/protocolTypes.ts is generated from it
 //
 //   Rust reads outside Client/src-tauri/:
@@ -85,6 +87,10 @@ const SERVER_READS_OUTSIDE = new Set([
   "Client/src/lib/types.ts",
   "Client/src-tauri/tauri.conf.json",
   ".superpowers/findings-ledger.json",
+  // The admin panel embeds a copy of the released sections and
+  // TestBundledChangelog fails when a release moves notes under a version
+  // heading without refreshing it.
+  "CHANGELOG.md",
   // GENERATED from protocol/schema.json, but asserted from the Server side:
   // `make protocol-verify` regenerates BOTH Server/ws/message_types.go and this
   // file and fails on drift, so editing, deleting or renaming this path has to
@@ -99,6 +105,9 @@ const CLIENT_READS_OUTSIDE = new Set([
   "docs/api.md",
   "docs/architecture/platform-contracts.md",
   "Server/admin/static/index.html",
+  // Built into the About tab and the What's new dialog, and parsed by
+  // tests/unit/whats-new-changelog.test.ts.
+  "CHANGELOG.md",
 ]);
 
 /** Paths outside Client/src-tauri/ that a Rust test reads or runs. */

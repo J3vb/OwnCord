@@ -10,7 +10,7 @@
 // Create Role prefills, and whether "/" is swallowed inside the field it
 // focuses. Server/admin/panel_wiring_test.go greps the same file for the
 // wiring; these tests run it.
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminIndexHtml, adminPanelHtml } from "../helpers/admin-panel";
 import path from "node:path";
@@ -48,6 +48,7 @@ window.__test = {
   wiz: wiz,
   wizStepCount: WIZ_STEP_COUNT,
   renderWizard: renderWizard,
+  renderWhatsNew: renderWhatsNew,
   actions: ACTIONS
 };
 </script>`;
@@ -92,13 +93,14 @@ interface Bridge {
   wiz: { step: number };
   wizStepCount: number;
   renderWizard: () => void;
+  renderWhatsNew: () => Promise<string>;
   actions: Record<string, unknown>;
 }
 
 type Responder = (
   path: string,
   method: string,
-) => { status?: number; json?: unknown; headers?: Record<string, string> };
+) => { status?: number; json?: unknown; text?: string; headers?: Record<string, string> };
 
 const proposedPreview = {
   token: "signed-preview",
@@ -155,7 +157,7 @@ function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
           status,
           headers: new Headers(r.headers),
           json: async () => r.json ?? {},
-          text: async () => JSON.stringify(r.json ?? {}),
+          text: async () => r.text ?? JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -1637,5 +1639,78 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
     await tick();
     expect(calls).toEqual([]);
+  });
+
+  it("shows the running version's release notes, the history and the repository (What's new)", async () => {
+    const changelog = [
+      "# Changelog",
+      "",
+      "## Unreleased",
+      "",
+      "- Not released yet",
+      "",
+      "## v1.2.0 — Spring",
+      "",
+      "### Added",
+      "",
+      "- **Bold** and `code` and [docs](https://example.com/d) and [local](docs/x.md)",
+      "- <img src=x onerror=alert(1)>",
+      "",
+      "## v1.1.0",
+      "",
+      "- Older change",
+    ].join("\n");
+    const calls: FetchCall[] = [];
+    const { dom, bridge } = await boot(calls, (p) =>
+      p === "/admin/changelog.md" ? { text: changelog } : defaultRespond(p, "GET"),
+    );
+    bridge.state.me = { version: "v1.2.0" };
+    const host = dom.window.document.createElement("div");
+    host.innerHTML = await bridge.renderWhatsNew();
+
+    expect(calls.map((c) => c.url)).toEqual(["/admin/changelog.md"]);
+    expect(host.textContent).toContain("This server runs OwnCord v1.2.0");
+    expect(host.textContent).toContain("What's new in v1.2.0");
+    expect(host.textContent).not.toContain("Not released yet");
+    const notes = host.querySelector(".section-card .changelog-body")!;
+    expect(notes.querySelector("h4")!.textContent).toBe("Added");
+    expect(notes.querySelector("strong")!.textContent).toBe("Bold");
+    expect(notes.querySelector("code")!.textContent).toBe("code");
+    // Only https links become links, and the notes' own markup stays text.
+    expect([...notes.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([
+      "https://example.com/d",
+    ]);
+    expect(notes.querySelector("img")).toBeNull();
+    expect(notes.textContent).toContain("<img src=x onerror=alert(1)>");
+    // Earlier versions sit in the history; the repository is linked.
+    expect(host.querySelector(".whats-new-history")!.textContent).toContain("v1.1.0");
+    expect(host.querySelector(".whats-new-history")!.textContent).toContain("Older change");
+    expect(host.querySelector<HTMLAnchorElement>(".whats-new-repo")!.href).toBe(
+      "https://github.com/J3vb/OwnCord",
+    );
+  });
+
+  it("links to GitHub when the notes cannot be loaded or the version has none (What's new)", async () => {
+    const calls: FetchCall[] = [];
+    let status = 404;
+    const { dom, bridge } = await boot(calls, (p) =>
+      p === "/admin/changelog.md"
+        ? { status, text: "## v1.1.0\n\n- Older" }
+        : defaultRespond(p, "GET"),
+    );
+    bridge.state.me = { version: "1.2.0-dev" };
+    const host = dom.window.document.createElement("div");
+    const warn = vi.spyOn(dom.window.console, "warn").mockImplementation(() => {});
+    host.innerHTML = await bridge.renderWhatsNew();
+    expect(warn).toHaveBeenCalled();
+    expect(host.textContent).toContain("could not be loaded");
+    expect(host.querySelector<HTMLAnchorElement>(".card-note a")!.href).toBe(
+      "https://github.com/J3vb/OwnCord/releases",
+    );
+
+    status = 200;
+    host.innerHTML = await bridge.renderWhatsNew();
+    expect(host.textContent).toContain("This build has no release notes");
+    expect(host.querySelector(".whats-new-history")!.textContent).toContain("v1.1.0");
   });
 });
