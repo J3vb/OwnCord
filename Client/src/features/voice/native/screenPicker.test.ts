@@ -4,6 +4,7 @@ import type { NativeVoiceScreenSources } from "../../../platform/contracts/nativ
 interface FakePickOptions {
   readonly sources: readonly unknown[];
   readonly portal: boolean;
+  readonly sourceOnly?: boolean;
 }
 type FakePick = {
   source: string;
@@ -24,7 +25,12 @@ vi.mock("../../../platform/desktop", () => ({
   desktop: { nativeVoice: { screenSources: () => Promise.resolve(host.sources) } },
 }));
 
-import { armScreenRestart, disarmScreenRestart, pickScreenSource } from "./screenPicker";
+import {
+  armScreenRestart,
+  disarmScreenRestart,
+  pickChangeSource,
+  pickScreenSource,
+} from "./screenPicker";
 import { setScreenSourcePicker } from "./screenPickerSlot";
 
 const x11: NativeVoiceScreenSources = {
@@ -190,5 +196,43 @@ describe("armScreenRestart (WP 1C-6)", () => {
 
     await expect(pickScreenSource()).resolves.toBeNull();
     expect(shown).toHaveBeenCalledOnce();
+  });
+});
+
+describe("pickChangeSource", () => {
+  beforeEach(() => {
+    host.sources = x11;
+    setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));
+  });
+  afterEach(() => {
+    disarmScreenRestart();
+    setScreenSourcePicker(null);
+  });
+
+  it("asks for the source only, and a later restart shares the new one", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    const first = await pickScreenSource();
+    host.pick = (opts) => {
+      expect(opts.sourceOnly).toBe(true);
+      return { source: "screen:277", quality: "low", fps: 5 };
+    };
+    await expect(pickChangeSource()).resolves.toBe("screen:277");
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    // Same capture and encoding as the share's own pick, the new source.
+    await expect(pickScreenSource()).resolves.toEqual({ ...first, source: "screen:277" });
+  });
+
+  it("leaves the pick to the portal on Wayland, with no dialog", async () => {
+    host.sources = { portal: true, sources: [] };
+    const shown = vi.fn(() => null);
+    host.pick = shown;
+    await expect(pickChangeSource()).resolves.toBe("portal");
+    expect(shown).not.toHaveBeenCalled();
+  });
+
+  it("resolves null when the dialog is dismissed", async () => {
+    host.pick = () => null;
+    await expect(pickChangeSource()).resolves.toBeNull();
   });
 });

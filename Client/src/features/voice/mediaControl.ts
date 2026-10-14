@@ -29,6 +29,7 @@ import {
   enableScreenshare as doEnableScreenshare,
   disableScreenshare as doDisableScreenshare,
   reconcileVideoFlags as doReconcileVideoFlags,
+  inPlaceSourceChange,
 } from "../../lib/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
@@ -315,6 +316,13 @@ export class MediaControl {
   /** The live share's quality, or null where it cannot be changed. */
   getScreenshareQuality(): StreamQuality | null {
     return this._screenState.quality ?? null;
+  }
+
+  /** Whether the live share can change source without stopping. */
+  canChangeScreenshareSource(): boolean {
+    return (
+      this._screenState.quality !== undefined || inPlaceSourceChange(this._screenState) !== null
+    );
   }
 
   /** Use camera `deviceId` ("" = default) from now on and move a live camera

@@ -87,3 +87,27 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
   };
   return lastPick;
 }
+
+/** The source for a Change source on a live share, or null when the user
+ *  closed the picker. Only the source is picked: the share keeps its
+ *  quality. On Wayland the portal's own dialog is the picker. */
+export async function pickChangeSource(): Promise<string | null> {
+  const listed = await desktop.nativeVoice.screenSources();
+  let source = "portal";
+  if (!listed.portal) {
+    const showPicker = getScreenSourcePicker();
+    if (showPicker === null) return null;
+    const pick = await showPicker({
+      sources: listed.sources,
+      portal: false,
+      sourceOnly: true,
+      defaultQuality: getScreenShareQuality(),
+      defaultFps: getScreenShareFps(),
+    });
+    if (pick === null) return null;
+    source = pick.source;
+  }
+  // A restart after a reconnect shares what is going out now.
+  if (lastPick !== null) lastPick = { ...lastPick, source };
+  return source;
+}

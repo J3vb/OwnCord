@@ -290,6 +290,57 @@ describe("changeScreenshareSource", () => {
     expect(backupMst.stop).toHaveBeenCalled();
   });
 
+  it("a share that changes its own source does it in place, without a browser picker", async () => {
+    const rig = setup(false);
+    rig.state.quality = undefined;
+    const changeSource = vi.fn().mockResolvedValue(undefined);
+    Object.assign(rig.video, { changeSource });
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(changeSource).toHaveBeenCalledTimes(1);
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    expect(rig.state.manualScreenTracks[0]).toBe(rig.video);
+    expect(rig.wsSend).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localShareRev).toBe(1);
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("an in-place change that is cancelled stays silent; one that fails says so", async () => {
+    const rig = setup(false);
+    const changeSource = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("closed", "NotAllowedError"))
+      .mockRejectedValueOnce(new Error("no frame"));
+    Object.assign(rig.video, { changeSource });
+
+    await changeScreenshareSource(rig.state, rig.deps);
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+
+    await changeScreenshareSource(rig.state, rig.deps);
+    expectConsole("error", /\[screenShare\] Failed to change screenshare source/);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.state.changing).toBe(false);
+    expect(voiceStore.getState().localScreenshare).toBe(true);
+  });
+
+  it("an in-place change that a Stop overtook leaves the stopped share alone", async () => {
+    const rig = setup(false);
+    let finish!: () => void;
+    const changeSource = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    Object.assign(rig.video, { changeSource });
+
+    const changing = changeScreenshareSource(rig.state, rig.deps);
+    rig.state.generation = 1;
+    rig.state.manualScreenTracks = [];
+    finish();
+    await changing;
+
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
+
   it("does nothing on a share that cannot change (Linux native, or still starting)", async () => {
     const rig = setup(false);
     rig.state.quality = undefined;

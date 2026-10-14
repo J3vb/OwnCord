@@ -64,6 +64,8 @@ const host = vi.hoisted(() => ({
       maxFramerate: 5,
     }),
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
+  changeScreen: (): Promise<unknown> => Promise.resolve({ capture: 6, width: 800, height: 600 }),
+  pickChange: (): Promise<string | null> => Promise.resolve("window:9"),
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
 }));
@@ -90,7 +92,10 @@ vi.mock("./videoRenderer", () => ({
     }
   },
 }));
-vi.mock("./screenPicker", () => ({ pickScreenSource: () => host.pick() }));
+vi.mock("./screenPicker", () => ({
+  pickScreenSource: () => host.pick(),
+  pickChangeSource: () => host.pickChange(),
+}));
 vi.mock("../../../platform/desktop", () => ({
   desktop: {
     nativeVoice: {
@@ -162,6 +167,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["stopScreen", args]);
         return Promise.resolve();
       },
+      changeScreen: (...args: unknown[]) => {
+        host.calls.push(["changeScreen", args]);
+        return host.changeScreen();
+      },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
         return () => {
@@ -216,6 +225,8 @@ beforeEach(() => {
       simulcast: false,
     });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
+  host.changeScreen = () => Promise.resolve({ capture: 6, width: 800, height: 600 });
+  host.pickChange = () => Promise.resolve("window:9");
   nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
   nativeCounters.openRooms = 0;
@@ -1313,6 +1324,59 @@ const share = async (room: ReturnType<typeof createNativeRoom>) => {
 };
 
 describe("NativeRoom screen share", () => {
+  it("changes the live share's source in the host, keeping the track and its preview", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await screen.changeSource();
+    // The share keeps the capture settings it was started with.
+    expect(host.calls.at(-1)).toEqual([
+      "changeScreen",
+      [1, "window:9", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+    ]);
+    expect(screen).toMatchObject({ capture: 6, width: 800, height: 600 });
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(screen);
+    expect(host.renderers).toHaveLength(1);
+    expect(host.renderers[0]!.disposed).toBe(false);
+    // The new capture ending on its own ends the share; Stop stops it by id.
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 6 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toContain("ended");
+    screen.stop();
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 6]]);
+  });
+
+  it("a cancelled or refused change leaves the live capture as it was", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    host.pickChange = () => Promise.resolve(null);
+    await expect(screen.changeSource()).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(host.calls.map(([n]) => n)).not.toContain("changeScreen");
+    host.pickChange = () => Promise.resolve("portal");
+    host.changeScreen = () => Promise.reject(new Error("screen capture portal did not start"));
+    await expect(screen.changeSource()).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(screen.capture).toBe(4);
+  });
+
+  it("a Stop that reached the host after the swap still stops the new capture", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    let resolve!: (v: unknown) => void;
+    host.changeScreen = () => new Promise((r) => (resolve = r));
+    const changing = screen.changeSource();
+    await vi.waitFor(() => expect(host.calls.map(([n]) => n)).toContain("changeScreen"));
+    screen.stop();
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 4]]);
+    resolve({ capture: 6, width: 800, height: 600 });
+    await changing;
+    expect(screen.capture).toBe(4);
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 6]]);
+  });
+
   it("captures the picked source natively and previews it on the frame socket", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");

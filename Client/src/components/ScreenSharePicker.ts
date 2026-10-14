@@ -49,6 +49,9 @@ export interface ScreenSharePickerOptions {
   /** True on the web path: the OS picker that opens next owns the source
    *  and the audio choice. */
   readonly osPicker?: boolean;
+  /** True for Change source on a live share: its quality and audio stay as
+   *  they are, so only the source is picked. */
+  readonly sourceOnly?: boolean;
   readonly defaultQuality: StreamQuality;
   readonly defaultFps: number;
 }
@@ -282,10 +285,12 @@ export function showScreenSharePicker(
     }
 
     // ---- Options: audio note + quality -------------------------------------
-    const options = createElement("div", { class: "ssp-options" });
-    if (opts.osPicker !== true) options.appendChild(buildAudioOption());
-    options.appendChild(buildQualityOption());
-    body.appendChild(options);
+    if (opts.sourceOnly !== true) {
+      const options = createElement("div", { class: "ssp-options" });
+      if (opts.osPicker !== true) options.appendChild(buildAudioOption());
+      options.appendChild(buildQualityOption());
+      body.appendChild(options);
+    }
     content.appendChild(body);
 
     function buildQualityOption(): HTMLElement {
