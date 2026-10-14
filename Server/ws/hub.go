@@ -152,18 +152,12 @@ type Hub struct {
 	// purge (PurgeUserFromReplay): a client resuming from a seq at or
 	// before it may have missed the purged member_ban and takes the full
 	// ready, since the purge left holes replay cannot fill. Ratcheted like
-	// visibilityChangeSeq. purgedUsers is the tombstone set behind it: a
-	// frame naming one of these ids that a producer sequences after the
-	// purge is dropped instead of buffered and persisted. Both guarded by
-	// seqMu on the write side; purgedUsers is read under seqMu too.
+	// visibilityChangeSeq; written under seqMu.
 	replayPurgeSeq atomic.Uint64
-	purgedUsers    map[int64]struct{}
-	// purgedMessages is the retention sweep's tombstone set
-	// (PurgeMessagesFromReplay): the ids of the last sweep's messages, so a
-	// frame about one of them that a producer sequences after the purge is
-	// dropped; replaced by the next sweep's ids, since a late frame reaches
-	// the hub within moments of the purge. Guarded by seqMu like purgedUsers.
-	purgedMessages map[int64]struct{}
+	// tombstones are the erased users and retention-swept messages whose
+	// late frames are dropped, plus the purge/cold-read lock
+	// (hub_tombstones.go).
+	tombstones replayPurgeState
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	// settings is the read seam the cache below refreshes through —
