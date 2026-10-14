@@ -107,7 +107,12 @@ export async function pickChangeSource(): Promise<string | null> {
     if (pick === null) return null;
     source = pick.source;
   }
-  // A restart after a reconnect shares what is going out now.
-  if (lastPick !== null) lastPick = { ...lastPick, source };
   return source;
+}
+
+/** Record `source` as what the live share now captures, once the host has
+ *  swapped it in: a restart after a reconnect shares what is going out now,
+ *  and a failed change leaves the old source in place. */
+export function noteChangedSource(source: string): void {
+  if (lastPick !== null) lastPick = { ...lastPick, source };
 }
