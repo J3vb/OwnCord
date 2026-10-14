@@ -49,7 +49,7 @@ const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
-import { pickScreenSource } from "./screenPicker";
+import { pickChangeSource, pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
 
@@ -570,11 +570,43 @@ export class NativeRoom {
       `${this.frames}/screen`,
       (t) => this.stopScreen(session, t),
       { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
+      pick.capture,
+      (t) => this.changeScreenSource(session, t),
     );
     this.screen?.stop();
     this.screen = track;
     if (this.endedCapture === track.capture) track.end();
     return [track];
+  }
+
+  /** Change source for the live share `track`: pick a source, then let the
+   *  host move the publication onto a new capture of it, at the share's own
+   *  capture settings and encoding. */
+  private async changeScreenSource(session: number, track: NativeScreenTrack): Promise<void> {
+    const live = (): boolean => this.sessionId === session && this.screen === track;
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new Error("screen share is no longer live");
+    const source = await pickChangeSource();
+    if (source === null) throw pickerDismissed();
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new Error("screen share ended during the pick");
+    const started = await desktop.nativeVoice
+      .changeScreen(session, source, track.captureRequest)
+      .catch((err: unknown) => {
+        throw startError(err);
+      });
+    if (!live()) {
+      // The share was stopped or ended while the host swapped it in: a stop
+      // that reached the host after the swap named the old capture, so stop
+      // the new one too (a no-op when the stop came first).
+      if (this.sessionId === session)
+        desktop.nativeVoice
+          .stopScreen(session, started.capture)
+          .catch((err) => log.warn("native stopScreen failed", { capture: started.capture, err }));
+      return;
+    }
+    track.retarget(started);
+    if (this.endedCapture === track.capture) track.end();
   }
 
   /** A stopped screen track: stop its host capture (a no-op for a capture a

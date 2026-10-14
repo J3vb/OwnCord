@@ -883,6 +883,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
         return undefined;
       },
+      onScrollBottom: () => {
+        if (channelAbort !== null) {
+          return msgCtrl.loadNewerMessages(channelId, channelAbort.signal);
+        }
+        return undefined;
+      },
       onRetryLoad: () => {
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);

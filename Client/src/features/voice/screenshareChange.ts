@@ -6,8 +6,10 @@
  * (`LocalTrack.replaceTrack`), so the publication and its sid stay: viewers
  * keep watching, and the server hears no `voice_screenshare` at all. Quality
  * re-sizes the running capture and re-sets its encoding, with no new picker.
- * Both are web-path only: the Linux native capture picks through its own
- * dialog, so its share has no `quality` and neither runs.
+ * Quality is web-path only: the Linux native capture picks its quality in
+ * its own dialog, so its share has no `quality`. Change source there is the
+ * track's own (`inPlaceSourceChange`): the host swaps the capture under the
+ * same publication.
  */
 
 import {
@@ -24,11 +26,13 @@ import {
   SCREENSHARE_PRESETS,
   disableScreenshare,
   getEffectiveScreenShareFps,
+  inPlaceSourceChange,
   getScreenShareCaptureOptions,
   getScreenShareFps,
   getScreenShareMaxBitrate,
   unpublishManualTrack,
   watchScreenEnded,
+  type InPlaceSourceChange,
   type ScreenTrackState,
   type StreamQuality,
   type VideoTrackDeps,
@@ -98,6 +102,11 @@ export async function changeScreenshareSource(
   state: ScreenTrackState,
   deps: VideoTrackDeps,
 ): Promise<void> {
+  const inPlace = inPlaceSourceChange(state);
+  if (inPlace !== null) {
+    await changeInPlace(state, deps, inPlace);
+    return;
+  }
   const live = liveShare(state, deps);
   if (live === null) return;
   state.changing = true;
@@ -173,6 +182,39 @@ export async function changeScreenshareSource(
     log.error("Failed to change screenshare source", err);
     deps.onError(voiceText("share.changeFailed"));
     await disableScreenshare(state, deps);
+  } finally {
+    state.changing = false;
+  }
+}
+
+/** Change source on a track that swaps its own capture: the publication, the
+ *  tracks and the ended watch all stay, and a failed or cancelled pick leaves
+ *  the old source going. */
+async function changeInPlace(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  share: InPlaceSourceChange,
+): Promise<void> {
+  const room = deps.getRoom();
+  if (state.changing === true || room === null) return;
+  const generation = state.generation ?? 0;
+  const tracks = state.manualScreenTracks;
+  const stale = (): boolean =>
+    (state.generation ?? 0) !== generation ||
+    state.manualScreenTracks !== tracks ||
+    deps.getRoom() !== room;
+  state.changing = true;
+  try {
+    await share.changeSource();
+    if (stale()) return;
+    bumpLocalShareRev();
+    log.info("Screenshare source changed", { inPlace: true });
+  } catch (err) {
+    if (stale()) return;
+    if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
+      log.error("Failed to change screenshare source", err);
+      deps.onError(voiceText("share.changeFailed"));
+    }
   } finally {
     state.changing = false;
   }

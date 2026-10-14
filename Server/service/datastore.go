@@ -38,6 +38,7 @@ type Store interface {
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error

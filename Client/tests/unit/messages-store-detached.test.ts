@@ -15,6 +15,7 @@ import {
   addMessage,
   setMessages,
   prependMessages,
+  appendNewerMessages,
   setAroundMessages,
   reattachToPresent,
   getChannelMessages,
@@ -392,5 +393,95 @@ describe("hasMessageLoaded", () => {
     expect(hasMessageLoaded(1, 11)).toBe(true);
     expect(hasMessageLoaded(1, 900)).toBe(false);
     expect(hasMessageLoaded(2, 11)).toBe(false);
+  });
+});
+
+describe("appendNewerMessages", () => {
+  it("appends an oldest-first page below a detached window and stays detached while more remain", () => {
+    setAroundMessages(1, ascendingWindow(10, 20), true, true);
+
+    appendNewerMessages(1, ascendingWindow(21, 25), true);
+
+    expect(ids(1)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(isWindowDetached(1)).toBe(true);
+  });
+
+  it("reattaches when the page reaches the newest message, so live messages append again", () => {
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+    // Detached: a live broadcast is refused.
+    addMessage(broadcast(99));
+    expect(ids(1)).toEqual([10, 11, 12]);
+
+    appendNewerMessages(1, ascendingWindow(13, 14), false);
+
+    expect(ids(1)).toEqual([10, 11, 12, 13, 14]);
+    expect(isWindowDetached(1)).toBe(false);
+    addMessage(broadcast(15));
+    expect(ids(1)).toEqual([10, 11, 12, 13, 14, 15]);
+  });
+
+  it("reattaches on an empty final page", () => {
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    appendNewerMessages(1, [], false);
+
+    expect(ids(1)).toEqual([10, 11, 12]);
+    expect(isWindowDetached(1)).toBe(false);
+  });
+
+  it("ignores a page for a window that is not detached", () => {
+    const initial: MessageResponse[] = [];
+    for (let id = 12; id >= 10; id--) initial.push(response(id));
+    setMessages(1, initial, false);
+    const before = getChannelMessages(1);
+
+    appendNewerMessages(1, ascendingWindow(13, 14), true);
+
+    expect(getChannelMessages(1)).toBe(before);
+    expect(isWindowDetached(1)).toBe(false);
+  });
+
+  it("skips rows already loaded (a duplicate or overlapping page)", () => {
+    setAroundMessages(1, ascendingWindow(10, 14), true, true);
+
+    appendNewerMessages(1, ascendingWindow(12, 16), true);
+
+    expect(ids(1)).toEqual([10, 11, 12, 13, 14, 15, 16]);
+  });
+
+  it("keeps pending and failed rows at the tail, below the new page", () => {
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+    addOptimisticMessage({
+      correlationId: "c1",
+      channelId: 1,
+      user: USER,
+      content: "still sending",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    appendNewerMessages(1, ascendingWindow(13, 14), true);
+
+    const loaded = getChannelMessages(1);
+    expect(loaded.map((m) => m.id)).toEqual([10, 11, 12, 13, 14, 0]);
+    expect(loaded.at(-1)!.status).toBe("pending");
+  });
+
+  it("drops the oldest rows at the cap and reports more history above", () => {
+    setAroundMessages(1, ascendingWindow(1, 100), false, true);
+    for (let from = 101; from <= 500; from += 100) {
+      appendNewerMessages(1, ascendingWindow(from, from + 99), true);
+    }
+    expect(getChannelMessages(1)).toHaveLength(500);
+    expect(hasMoreMessages(1)).toBe(false);
+
+    appendNewerMessages(1, ascendingWindow(501, 520), true);
+
+    const loaded = ids(1);
+    expect(loaded).toHaveLength(500);
+    expect(loaded[0]).toBe(21);
+    expect(loaded.at(-1)).toBe(520);
+    expect(hasMoreMessages(1)).toBe(true);
+    expect(isWindowDetached(1)).toBe(true);
   });
 });

@@ -1055,10 +1055,11 @@ Paginated message history for a channel.
 
 #### Query Parameters
 
-| Param    | Type  | Default    | Range | Description                                          |
-| -------- | ----- | ---------- | ----- | ---------------------------------------------------- |
-| `before` | int64 | 0 (latest) | >= 0  | Cursor: return messages with ID less than this value |
-| `limit`  | int   | 50         | 1-100 | Number of messages to return                         |
+| Param    | Type  | Default    | Range | Description                                                                                                 |
+| -------- | ----- | ---------- | ----- | ----------------------------------------------------------------------------------------------------------- |
+| `before` | int64 | 0 (latest) | >= 0  | Cursor: return messages with ID less than this value, newest first                                          |
+| `after`  | int64 | none       | >= 1  | Cursor: return messages with ID greater than this value, **oldest first**. Cannot be combined with `before` |
+| `limit`  | int   | 50         | 1-100 | Number of messages to return                                                                                |
 
 #### Response 200 OK
 
@@ -1123,6 +1124,16 @@ GET /api/v1/channels/5/messages?before=1042&limit=50
 ```
 
 When `has_more` is `false`, you have reached the beginning of the channel history.
+
+Pass `after` instead to page toward the present from a window fetched with
+`messages/around` (below): the response keeps the same shape but its `messages`
+are **oldest-first**, and `has_more` is `false` once the page reaches the newest
+message. `after` with `before` is a `400`; `after` is read-gated exactly like
+`before`.
+
+```
+GET /api/v1/channels/5/messages?after=1042&limit=50
+```
 
 ---
 

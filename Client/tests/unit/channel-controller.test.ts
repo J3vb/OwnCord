@@ -350,6 +350,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
     msgCtrl: {
       loadMessages: vi.fn(),
       loadOlderMessages: vi.fn(),
+      loadNewerMessages: vi.fn(),
     } as unknown as ChannelControllerOptions["msgCtrl"],
     reactionCtrl: {
       handleReaction: vi.fn(),
@@ -1568,6 +1569,16 @@ describe("createChannelController", () => {
       capturedMessageListOpts!.onScrollTop();
 
       expect(opts.msgCtrl.loadOlderMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+    });
+
+    it("onScrollBottom delegates to msgCtrl.loadNewerMessages", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onScrollBottom!();
+
+      expect(opts.msgCtrl.loadNewerMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
     });
 
     it("onReplyClick sets reply with username", () => {

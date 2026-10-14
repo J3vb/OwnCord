@@ -295,6 +295,83 @@ export function reduceReattachToPresent(prev: MessagesState, channelId: number):
   return { ...prev, loadedChannels: updatedLoaded };
 }
 
+/**
+ * appendNewerMessages' reducer: add the oldest-first page that follows a
+ * detached window's newest delivered row below it. Only a detached window
+ * takes one — an attached window is already at the tail, and live broadcasts
+ * own its appends. A page that reaches the newest message (`hasMore` false)
+ * reattaches the window, so live messages append normally again. When the
+ * cap is exceeded the OLDEST rows are dropped (the reader is scrolling down),
+ * which leaves older history above the window, so `hasMore` turns true.
+ */
+export function reduceAppendNewerMessages(
+  prev: MessagesState,
+  channelId: number,
+  messages: readonly MessageResponse[],
+  hasMore: boolean,
+): MessagesState {
+  if (!prev.detachedChannels.has(channelId)) return prev;
+  const existing = prev.messagesByChannel.get(channelId) ?? [];
+  const sent = existing.filter((m) => m.status === "sent");
+  // Pending/failed rows are the only copy of the user's composed text; they
+  // stay at the tail, below whatever lands.
+  const carried = existing.filter((m) => m.status !== "sent");
+  const newestId = sent.reduce((max, m) => Math.max(max, m.id), 0);
+  // An `after` page is oldest-first (render order) already.
+  const fresh = messages.filter((m) => m.id > newestId).map(messageResponseToMessage);
+  let kept = [...sent, ...fresh];
+  const overflow = kept.length - MAX_MESSAGES_PER_CHANNEL;
+  const wasTrimmed = overflow > 0;
+  if (wasTrimmed) kept = kept.slice(overflow);
+
+  const updatedMessages = new Map(prev.messagesByChannel);
+  updatedMessages.set(channelId, [...kept, ...carried]);
+
+  const updatedHasMore = new Map(prev.hasMore);
+  if (wasTrimmed) updatedHasMore.set(channelId, true);
+
+  const updatedDetached = new Set(prev.detachedChannels);
+  if (!hasMore) updatedDetached.delete(channelId);
+
+  return {
+    ...prev,
+    messagesByChannel: updatedMessages,
+    hasMore: updatedHasMore,
+    detachedChannels: updatedDetached,
+  };
+}
+
+/**
+ * mergeTailMessages' reducer: union an oldest-first page into an ATTACHED
+ * window. It repairs the hole a re-attach can leave: a live message refused
+ * while the final `after` page was in flight is in neither that page nor the
+ * list. Rows already present are skipped, new sent rows land in id order (not
+ * filtered by the newest id: a live row appended since has a higher id than the
+ * refused one), and pending/failed rows stay at the tail. A detached window is
+ * left alone.
+ */
+export function reduceMergeTailMessages(
+  prev: MessagesState,
+  channelId: number,
+  messages: readonly MessageResponse[],
+): MessagesState {
+  if (prev.detachedChannels.has(channelId)) return prev;
+  const existing = prev.messagesByChannel.get(channelId) ?? [];
+  const known = new Set(existing.filter((m) => m.status === "sent").map((m) => m.id));
+  const fresh = messages.filter((m) => !known.has(m.id)).map(messageResponseToMessage);
+  if (fresh.length === 0) return prev;
+  const sent = [...existing.filter((m) => m.status === "sent"), ...fresh].toSorted(
+    (a, b) => a.id - b.id,
+  );
+  const merged = [
+    ...sent.slice(-MAX_MESSAGES_PER_CHANNEL),
+    ...existing.filter((m) => m.status !== "sent"),
+  ];
+  const updatedMessages = new Map(prev.messagesByChannel);
+  updatedMessages.set(channelId, merged);
+  return { ...prev, messagesByChannel: updatedMessages };
+}
+
 /** prependMessages' reducer: add an older newest-first page above the window. */
 export function reducePrependMessages(
   prev: MessagesState,

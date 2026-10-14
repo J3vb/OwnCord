@@ -346,6 +346,9 @@ export function stopManualCameraTrack(state: CameraTrackState, room: Room | null
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
+  // A stopped track is no longer what the server was told is on, and holding
+  // it would keep the left room reachable through its signal client.
+  state.announced = undefined;
   unpublishManualTrack(room, track);
   track.stop();
 }
@@ -500,6 +503,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       state.manualCameraTrack.stop();
       state.manualCameraTrack = null;
     }
+    state.announced = undefined;
     setLocalCamera(false);
     log.error("Failed to enable camera", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -554,6 +558,19 @@ export interface ScreenTrackState extends GenerationGuarded {
   announced?: LocalTrack;
 }
 
+/** A share whose video track changes its own source under the publication
+ *  (the Linux native capture, which picks in its own dialog). */
+export interface InPlaceSourceChange {
+  changeSource(): Promise<void>;
+}
+
+/** The live share's video track when it changes source by itself, else null. */
+export function inPlaceSourceChange(state: ScreenTrackState): InPlaceSourceChange | null {
+  const video = state.manualScreenTracks.find((t) => t.kind === Track.Kind.Video) as
+    Partial<InPlaceSourceChange> | undefined;
+  return typeof video?.changeSource === "function" ? (video as InPlaceSourceChange) : null;
+}
+
 /** Stop sharing when the OS ends the capture (its own Stop sharing bar), as
  *  long as this video track still carries `mst` for this share. A Change
  *  source moves the watch to the new capture. */
@@ -598,6 +615,7 @@ export function stopManualScreenTracks(state: ScreenTrackState, room: Room | nul
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
+  state.announced = undefined;
   for (const track of tracks) {
     unpublishManualTrack(room, track);
     track.stop();
