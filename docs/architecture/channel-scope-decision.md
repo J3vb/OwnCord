@@ -13,9 +13,13 @@ different scopes:
 
 - **Live.** A channel-scoped frame (`chat_message`, `chat_edited`,
   `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`)
-  in a server channel goes only to the channel's topic subscribers. In
-  practice that is the one channel each connection has focused (`deliverGated`
-  in `Server/ws/hub_broadcast.go`). DM content goes to every participant.
+  in a server channel goes only to the channel's topic subscribers
+  (`deliverGated` in `Server/ws/hub_broadcast.go`). In practice that is the
+  channel each connection has focused, plus one exception: a resume while the
+  user is still in a voice call also subscribes that voice channel's topic
+  when it is readable (`registerNow` in `Server/ws/hub_registry.go`), and a
+  later focus change leaves that subscription in place. So a connection has at
+  most two live server-channel topics. DM content goes to every participant.
 - **Replay.** A resume replays the frames since `last_seq` for **every
   channel the user can read**, subject to the content gate, not only the
   focused one
@@ -34,7 +38,9 @@ on any `chat_message` in a non-active channel
 **Keep both scopes as they are, and add a small activity frame for live
 unread instead of widening either one.**
 
-1. **Live content stays focused-channel only.** Sending every content frame to
+1. **Live content stays focused-channel only**, plus the voice-channel
+   subscription a resume restores, which this record keeps: it is bounded at
+   one extra topic per connection. Sending every content frame to
    every reader of every channel would multiply fan-out by the number of
    channels a user can read. It would also run the content gate per frame for
    readers who are not looking. Full content is only worth sending where it is

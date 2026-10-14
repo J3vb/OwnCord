@@ -120,7 +120,8 @@ flowchart LR
   (`Server/ws/hub_content_gate.go`). Order within a channel is kept; a global
   frame can overtake a channel's frame that is still waiting.
 - A server channel's frames go live only to that channel's topic, which is
-  the focused channel (DM frames go to every participant), while a resume replays every readable channel. That
+  the focused channel (plus, after a resume mid-call, the voice channel; DM
+  frames go to every participant), while a resume replays every readable channel. That
   difference is deliberate: see
   [channel-scope-decision.md](channel-scope-decision.md).
 
