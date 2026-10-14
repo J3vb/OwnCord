@@ -133,26 +133,33 @@ func TestChannelFocusV2_NoPermission_ReturnsForbidden(t *testing.T) {
 	}
 }
 
-func TestChannelFocusV2_RateLimited_SilentDrop(t *testing.T) {
+func TestChannelFocusV2_RateLimited_Defers(t *testing.T) {
 	deps, userID, chID := newFocusTestDeps(t)
 	deps.Limiter = auth.NewRateLimiter()
 	cmd := ChannelFocusCmd{userID: userID, ChannelID: chID}
 	info := ClientInfo{UserID: userID, Username: "focuser"}
 
 	// Every frame drives an unmetered SQLite write; 5/s must be enough for
-	// any legitimate focus churn, and the 6th within the window is dropped.
+	// any legitimate focus churn. The 6th within the window is not applied
+	// now, but is deferred so the applier can land it once the window frees.
 	for i := range 5 {
 		res := handleChannelFocusV2(context.Background(), cmd, info, deps)
 		if res.SetChannelID == nil {
 			t.Fatalf("in-budget focus %d must set the channel id", i)
 		}
+		if res.DeferChannelFocus != nil {
+			t.Fatalf("in-budget focus %d must not be deferred", i)
+		}
 	}
 	res := handleChannelFocusV2(context.Background(), cmd, info, deps)
 	if res.SetChannelID != nil {
-		t.Error("rate-limited channel_focus must be dropped (no SetChannelID)")
+		t.Error("rate-limited channel_focus must not set the channel id immediately")
 	}
 	if res.Error != nil {
-		t.Errorf("silent drop expected, got error %v", res.Error)
+		t.Errorf("deferral must not surface an error, got %v", res.Error)
+	}
+	if res.DeferChannelFocus == nil || *res.DeferChannelFocus != chID {
+		t.Errorf("DeferChannelFocus = %v, want &%d", res.DeferChannelFocus, chID)
 	}
 }
 

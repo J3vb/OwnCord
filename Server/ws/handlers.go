@@ -102,6 +102,9 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 		return
 	}
+	if env.Type == MsgTypeChannelFocus && result.SetChannelID == nil && result.DeferChannelFocus == nil {
+		supersedeDeferredFocus(c)
+	}
 	if result.Error != nil {
 		if ce, ok := errors.AsType[ClientError](result.Error); ok {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
@@ -218,7 +221,10 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
-		h.applySetChannelID(c, *result.SetChannelID)
+		h.applyFocusResult(c, env.Type, *result.SetChannelID)
+	}
+	if result.DeferChannelFocus != nil {
+		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID)
 	}
 	if result.SetPresence != nil {
 		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus)

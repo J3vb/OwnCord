@@ -19,6 +19,7 @@ import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { noteJoinSent } from "../voice/joinRequest";
+import { resetChannelFocus } from "../../lib/last-channel";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
@@ -51,6 +52,7 @@ export function handleAuthOk(
   // first reconnect attempt. Re-asserting focus here (idempotent on the
   // server) covers that gap on every connect, resume included.
   const activeChannelId = channelsStore.select((s) => s.activeChannelId);
+  resetChannelFocus();
   if (activeChannelId !== null) {
     ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
   }

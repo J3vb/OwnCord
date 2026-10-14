@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, onTestFinished } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -307,7 +307,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
-import { loadLastChannel } from "@lib/last-channel";
+import { loadLastChannel, resetChannelFocus } from "@lib/last-channel";
 import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
@@ -372,6 +372,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
 
 describe("createChannelController", () => {
   beforeEach(() => {
+    resetChannelFocus();
     deactivatePendingMessages();
     vi.clearAllMocks();
     capturedMessageListOpts = null;
@@ -1429,7 +1430,12 @@ describe("createChannelController", () => {
     it("onRetry still re-sends a failed draft after the channel was remounted", () => {
       // A failed row survives a channel switch (it is carried across history
       // refetches), so its draft must too — a per-mount draft map left Retry
-      // silently inert once the reader switched away and back.
+      // silently inert once the reader switched away and back. Fake timers pin
+      // the remount inside the focus throttle's quiet window.
+      vi.useFakeTimers();
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
       const opts = makeOpts();
       let n = 0;
       (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
@@ -1449,8 +1455,10 @@ describe("createChannelController", () => {
       capturedMessageListOpts.onRetry("cid-2");
 
       expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
+      // The remount's channel_focus is throttled (same channel, inside the
+      // quiet window) and skipped, so the retry's send gets cid-3, not cid-4.
       expect(mockAddOptimistic).toHaveBeenLastCalledWith(
-        expect.objectContaining({ correlationId: "cid-4", content: "hello" }),
+        expect.objectContaining({ correlationId: "cid-3", content: "hello" }),
       );
     });
 

@@ -48,6 +48,11 @@ type Hub struct {
 	// site invalidates synchronously (InvalidateUser on role change,
 	// InvalidateAll on channel-override change) — the cache TTL is a backstop.
 	perms *service.PermissionService
+	// focusDeps is the presence handlers' dependency set; the deferred-focus
+	// drain goroutine (focus_defer.go) reuses its limiter and channel service so
+	// it meters and authorises exactly like handleChannelFocusV2. ChannelSvc is
+	// nil in bare test hubs, which have nothing to defer to.
+	focusDeps PresenceDeps
 	// messageSvc gates plugin broadcasts through the same posting policy as a
 	// real message send (permissions, DM membership, DM blocks). Nil only in
 	// bare test hubs; the broadcast gate fails closed then.
