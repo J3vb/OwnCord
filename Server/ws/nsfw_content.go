@@ -162,32 +162,33 @@ var reconnectFrameReadableRaceHook func(userID, channelID int64)
 // revoke or unlabel landing between two frames of one replay is honoured by
 // the very next frame it affects, not just the next reconnect. A lookup
 // failure fails closed (not readable) — the whole point of re-checking live
-// is to distrust a stale "yes", so an error must not fall back to one.
-func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) bool {
+// is to distrust a stale "yes", so an error must not fall back to one — and
+// reports confirmed=false, so the caller can mark the frame as lost.
+func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (readable, confirmed bool) {
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 	if err != nil {
 		slog.Warn("ws: frameReadableNow GetChannel failed, dropping frame",
 			"channel_id", channelID, "err", err)
-		return false
+		return false, false
 	}
 	if ch == nil {
 		// A missing channel is UNKNOWN, not "not labelled" — same posture as
 		// a lookup error (round 2 P1's channelNSFWFilter fix): fail closed
 		// rather than trust a frame whose channel this read cannot even
-		// confirm exists any more.
+		// confirm exists any more. A deleted channel's frame is not owed.
 		slog.Warn("ws: frameReadableNow found no such channel, dropping frame", "channel_id", channelID)
-		return false
+		return false, true
 	}
 	if !ch.NSFW {
-		return true
+		return true, true
 	}
 	ok, ackErr := h.readers.Visibility.HasNSFWAcknowledgement(ctx, userID, channelID)
 	if ackErr != nil {
 		slog.Warn("ws: frameReadableNow HasNSFWAcknowledgement failed, dropping frame",
 			"channel_id", channelID, "err", ackErr)
-		return false
+		return false, false
 	}
-	return ok
+	return ok, true
 }
 
 // payloadChannelID extracts payload.channel_id from a wrapped wire frame, or

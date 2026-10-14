@@ -158,6 +158,7 @@ and only when it changes something a contributor or fork holder must do
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
 - When the server was too busy to send an update (a deleted or edited message, a reaction, a member change), the app could miss it until a restart. The server now waits briefly before giving up on a new message, and an app that was offline when an update was skipped fetches everything fresh when it reconnects.
+- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
 
 **Messages & files**
 

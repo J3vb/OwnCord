@@ -41,6 +41,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 1,
           "payload": {
             "updates": [
               {
@@ -57,6 +58,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 2,
           "payload": {
             "attachments": [],
             "channel_id": 1,
@@ -84,6 +86,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "updates": [
               {
@@ -115,6 +118,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "updates": [
               {
@@ -153,6 +157,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 4,
           "payload": {
             "attachments": [],
             "channel_id": 1,

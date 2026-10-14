@@ -98,7 +98,7 @@ func (d *writeDeadline) stop() {
 // connection: it may have left a message half-sent, and readPump's teardown
 // must run rather than leave a peer that never hears another event.
 func writePumpWrite(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []byte) bool {
-	if err := wd.write(conn, msg); err != nil {
+	if err := wd.write(conn, c.stampCseq(msg)); err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
 		_ = conn.CloseNow()
 		return false

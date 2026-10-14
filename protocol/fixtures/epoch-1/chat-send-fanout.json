@@ -27,6 +27,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 5,
           "payload": {
             "attachments": [],
             "channel_id": 1,
@@ -70,6 +71,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "attachments": [],
             "channel_id": 1,

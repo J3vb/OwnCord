@@ -485,7 +485,7 @@ func (h *Hub) reconnectRegister(
 	// the fan-out can't reach an unregistered client, and the entry check has
 	// already passed, so nothing else catches it before this resume commits
 	// to permissions computed before the change (OC-0206).
-	if h.mustFullResyncAtRegister(lastSeq) {
+	if h.mustFullResyncAtRegister(lastSeq, c.userID) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
 		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
@@ -535,11 +535,11 @@ func (h *Hub) reconnectWriteReplay(
 			if reconnectFrameReadableRaceHook != nil {
 				reconnectFrameReadableRaceHook(c.userID, chID)
 			}
-			if !h.frameReadableNow(ctx, c.user.ID, chID) {
+			if !h.replayFrameAllowed(ctx, c, chID) {
 				continue
 			}
 		}
-		if err := handshakeWrite(ctx, conn, evt); err != nil {
+		if err := handshakeWrite(ctx, conn, c.stampCseq(evt)); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")

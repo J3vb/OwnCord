@@ -27,6 +27,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 5,
           "payload": {
             "camera": false,
             "channel_id": 2,
@@ -61,6 +62,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 6,
           "payload": {
             "camera": false,
             "channel_id": 2,
@@ -118,6 +120,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 7,
           "payload": {
             "channel_id": 2,
             "user_id": "<id:number>"
@@ -144,6 +147,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "camera": false,
             "channel_id": 2,
@@ -185,6 +189,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 4,
           "payload": {
             "camera": false,
             "channel_id": 2,
@@ -268,6 +273,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 5,
           "payload": {
             "channel_id": 2,
             "user_id": "<id:number>"

@@ -16,6 +16,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 5,
           "payload": {
             "channel_id": 1,
             "content": "edited text",
@@ -42,6 +43,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 6,
           "payload": {
             "channel_id": 1,
             "message_id": "<id:number>"
@@ -68,6 +70,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "channel_id": 1,
             "content": "edited text",
@@ -84,6 +87,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 4,
           "payload": {
             "channel_id": 1,
             "message_id": "<id:number>"
