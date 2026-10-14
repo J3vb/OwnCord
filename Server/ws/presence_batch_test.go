@@ -420,7 +420,7 @@ func TestPresenceDrop_ForcesFullReadyOnResume(t *testing.T) {
 }
 
 func TestPresenceBatch_ErasedUserLosesOnlyItsOwnEntry(t *testing.T) {
-	h := &Hub{purgedUsers: map[int64]struct{}{7: {}}}
+	h := &Hub{tombstones: replayPurgeState{users: map[int64]tombstone{7: {}}}}
 	msg, _ := h.buildPresenceBatch(map[int64]pendingPresence{7: {status: db.StatusOffline}, 8: {status: db.StatusOnline}})
 	if msg == nil || eventNamesUser(msg, 7) || !eventNamesUser(msg, 8) {
 		t.Fatalf("batch = %s, want user 8's entry kept and the erased user 7's dropped", msg)

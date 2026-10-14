@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // EventStore persists broadcast events for cold-tier replay during reconnection
@@ -25,4 +26,30 @@ type EventStore interface {
 	CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error)
 	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 	GetMaxEventSeq(ctx context.Context) (int64, error)
+}
+
+// purgeGuardedStore is the EventStore the cold-tier reads go through: each
+// read holds replayPurgeState.mu for reading, so it waits out a purge that
+// has dropped rows from the ring but not yet deleted them from the database.
+type purgeGuardedStore struct {
+	EventStore
+	mu *syncutil.RWMutex
+}
+
+func (s purgeGuardedStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.EventStore.GetEventsSince(ctx, afterSeq, limit)
+}
+
+func (s purgeGuardedStore) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.EventStore.GetEventsSinceForChannels(ctx, afterSeq, channelIDs, limit)
+}
+
+func (s purgeGuardedStore) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.EventStore.CountEventsInRange(ctx, afterSeq, uptoSeq)
 }
