@@ -237,6 +237,19 @@ func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int
 	return delivered
 }
 
+// subscribers snapshots topic's subscribers, minus excludeUserID.
+func (ps *PubSub) subscribers(topic Topic, excludeUserID int64) []*Client {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	clients := make([]*Client, 0, len(ps.topics[topic]))
+	for uid, c := range ps.topics[topic] {
+		if uid != excludeUserID {
+			clients = append(clients, c)
+		}
+	}
+	return clients
+}
+
 // SubscriberCount returns the number of subscribers for a topic.
 func (ps *PubSub) SubscriberCount(topic Topic) int {
 	ps.mu.RLock()

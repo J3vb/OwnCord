@@ -401,8 +401,9 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		if gateUnconfirmed {
 			// The deny-all gate withheld this frame from subscribers it may
 			// not have been meant to skip: a resume at or behind it must
-			// take the full-ready path.
+			// take the full-ready path, and a connected one must resync.
 			h.bumpVisibilityWatermark()
+			h.markLoss(lossRoute{channelID: bm.channelID, recipients: bm.recipients})
 		}
 
 		// Store in replay buffer for reconnection recovery.

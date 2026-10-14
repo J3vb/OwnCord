@@ -37,6 +37,14 @@ only together with the test that reads them.
 | [community-services.md](community-services.md) | B5-0: the community, content and moderation services, each with abuse cases, data ownership and lifecycle                                            |
 | [b9-ui-contract.md](b9-ui-contract.md)         | B9-2: the shared UI rules every feature follows: colour tokens, focus, keyboard, announcements, motion, teardown, and the reusable Playwright checks |
 
+### Decisions
+
+Short decision records, kept here until the ADR series exists (roadmap Phase 7).
+
+| Doc                                                    | Covers                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| [channel-scope-decision.md](channel-scope-decision.md) | Why live channel frames reach only the focused channel while replay covers every readable one |
+
 ### Target behaviour (not shipped behaviour)
 
 | Doc                 | Covers                                                                                                        |

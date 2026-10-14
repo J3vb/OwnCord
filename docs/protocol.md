@@ -74,12 +74,13 @@ Every WebSocket message is a JSON object with these fields:
 }
 ```
 
-| Field     | Type   | Required                | Description                                                                                    |
-| --------- | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
-| `type`    | string | Yes                     | Determines how `payload` is interpreted                                                        |
-| `id`      | string | Client messages only    | Client-generated UUID for request/response correlation                                         |
-| `payload` | object | Yes                     | Contents vary by `type`. Must be present (can be `{}`).                                        |
-| `seq`     | uint64 | Broadcast messages only | Monotonically increasing sequence number. Only present on server-to-client broadcast messages. |
+| Field     | Type   | Required                     | Description                                                                                                                                      |
+| --------- | ------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`    | string | Yes                          | Determines how `payload` is interpreted                                                                                                          |
+| `id`      | string | Client messages only         | Client-generated UUID for request/response correlation                                                                                           |
+| `payload` | object | Yes                          | Contents vary by `type`. Must be present (can be `{}`).                                                                                          |
+| `seq`     | uint64 | Broadcast messages only      | Monotonically increasing sequence number. Only present on server-to-client broadcast messages.                                                   |
+| `cseq`    | uint64 | Sequenced server frames only | Per-connection count of sequenced frames written to this socket, starting at 1. See Delivery guarantee. Absent from servers without the feature. |
 
 ---
 
@@ -114,6 +115,20 @@ window, and its next resume takes the full `ready`, because replay cannot bring
 back a seq below ones it has since seen. Clients must treat presence as
 eventually consistent and must not assume they have seen every transition. See
 Presence for the invisible-member split.
+
+**Delivery guarantee.** Every frame that carries `seq` also carries `cseq`: 1
+on the first sequenced frame written to a socket, one more on each later one.
+A frame not meant for this connection never uses a `cseq`. While `cseq` stays
+contiguous, the client has every sequenced frame the server addressed to this
+connection, except presence frames, which may be dropped and are repaired by a
+full `presence_batch` snapshot. When the server loses a frame it cannot replay
+(one dropped before it was sequenced, or one withheld because its content gate
+could not be read), it marks each connected recipient for a full resync and
+makes that connection's next `cseq` one higher than expected. A client that
+sees a `cseq` other than last + 1 reconnects with its `last_seq` after a short
+random delay, and the server answers with the full `ready`. `cseq` restarts on
+every socket and is never sent back. A server without this feature sends no
+`cseq`, and the client then skips the check.
 
 ---
 
@@ -407,12 +422,12 @@ while the window is minimised. The JSON ping above is unchanged.
 
 When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message. The server resolves the reconnect through a **3-tier replay pipeline** (cheapest first):
 
-| Tier | Condition                                                                                                | Server Behavior                                                                                                                      | `replay_source` |
-| ---- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| —    | `last_seq == 0`                                                                                          | Full flow: `auth_ok` + `ready`, then the user's presence in the next `presence_batch`                                                | `none`          |
-| 1    | seq within the in-memory ring buffer (1000 events)                                                       | Replay flow: `auth_ok` + missed events + `presence_batch` (no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
-| 2    | seq within the persistent `events` table (max 5000 events, subject to retention)                         | Same replay flow, served from the cold tier                                                                                          | `db`            |
-| 3    | seq too far behind, channel visibility changed while away, or a presence frame was dropped for this user | Full flow (fallback): same as `last_seq == 0`                                                                                        | `none`          |
+| Tier | Condition                                                                                                   | Server Behavior                                                                                                                      | `replay_source` |
+| ---- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| —    | `last_seq == 0`                                                                                             | Full flow: `auth_ok` + `ready`, then the user's presence in the next `presence_batch`                                                | `none`          |
+| 1    | seq within the in-memory ring buffer (1000 events)                                                          | Replay flow: `auth_ok` + missed events + `presence_batch` (no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
+| 2    | seq within the persistent `events` table (max 5000 events, subject to retention)                            | Same replay flow, served from the cold tier                                                                                          | `db`            |
+| 3    | seq too far behind, channel visibility changed while away, or a frame for this user was dropped or withheld | Full flow (fallback): same as `last_seq == 0`                                                                                        | `none`          |
 
 A visibility watermark forces the tier-3 full re-sync whenever channel
 visibility changed while the client was disconnected, so permission changes

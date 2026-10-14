@@ -68,6 +68,10 @@ type ServerMetrics struct {
 	BackpressureLowDrops         uint64 `json:"backpressure_low_drops"`
 	BackpressurePresenceDrops    uint64 `json:"backpressure_presence_drops"`
 
+	// DeliveryLossMarks counts connected clients told to resync because a
+	// sequenced frame meant for them was dropped or withheld (2A-5).
+	DeliveryLossMarks uint64 `json:"delivery_loss_marks"`
+
 	// WSConnRejects counts upgrades refused by the max_ws_connections cap.
 	WSConnRejects uint64 `json:"ws_conn_rejects"`
 
@@ -131,6 +135,7 @@ type MetricsSources struct {
 	ReconnectTiers      func() (buffer, db, full uint64)
 	Backpressure        func() (queueDisconnects, highFallbacks, lowDrops uint64)
 	PresenceDrops       func() uint64
+	LossMarks           func() uint64
 	ConnRejects         func() uint64
 	PersisterStats      func() (persisted, dropped, flushes, errs uint64, ok bool)
 	DBStats             func() sql.DBStats // writer pool
@@ -174,15 +179,7 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 			healthy, _ := src.LiveKitHealth(r.Context())
 			metrics.LiveKitHealthy = &healthy
 		}
-		if src.ReconnectTiers != nil {
-			metrics.ReconnectTierBuffer, metrics.ReconnectTierDB, metrics.ReconnectTierFull = src.ReconnectTiers()
-		}
-		if src.Backpressure != nil {
-			metrics.BackpressureQueueDisconnects, metrics.BackpressureHighFallbacks, metrics.BackpressureLowDrops = src.Backpressure()
-		}
-		if src.PresenceDrops != nil {
-			metrics.BackpressurePresenceDrops = src.PresenceDrops()
-		}
+		fillDelivery(&metrics, src)
 		if src.PersisterStats != nil {
 			if persisted, dropped, flushes, errs, ok := src.PersisterStats(); ok {
 				metrics.EventPersister = &EventPersisterMetrics{
@@ -236,6 +233,22 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 
 // fillHubLatency copies the hub's latency distributions, queue depth, seqMu
 // hold and topic sheds into metrics.
+// fillDelivery copies the reconnect-tier, send-queue and delivery-loss totals.
+func fillDelivery(metrics *ServerMetrics, src MetricsSources) {
+	if src.ReconnectTiers != nil {
+		metrics.ReconnectTierBuffer, metrics.ReconnectTierDB, metrics.ReconnectTierFull = src.ReconnectTiers()
+	}
+	if src.Backpressure != nil {
+		metrics.BackpressureQueueDisconnects, metrics.BackpressureHighFallbacks, metrics.BackpressureLowDrops = src.Backpressure()
+	}
+	if src.PresenceDrops != nil {
+		metrics.BackpressurePresenceDrops = src.PresenceDrops()
+	}
+	if src.LossMarks != nil {
+		metrics.DeliveryLossMarks = src.LossMarks()
+	}
+}
+
 func fillHubLatency(metrics *ServerMetrics, src MetricsSources) {
 	if src.TopicSheds != nil {
 		metrics.TopicSheds = src.TopicSheds()
