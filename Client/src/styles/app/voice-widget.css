@@ -145,6 +145,34 @@
   opacity: 0.6;
   cursor: wait;
 }
+/* The stream card while you share (WP 1C-1): what goes out, then its actions. */
+.vw-stream-card {
+  margin: 4px 4px 0;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  font-size: var(--font-size-xs);
+}
+.vw-stream-card > div:last-child {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.vw-stream-card button,
+.vw-stream-card select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-normal);
+  font: inherit;
+  cursor: pointer;
+}
+.vw-stream-card .vw-stream-stop {
+  color: var(--text-danger);
+}
 /* The listen-only explanation sits below the Grant Microphone button: the
    state needs a reason and a next step, not just an action (BPR-092). */
 .vw-mic-notice {

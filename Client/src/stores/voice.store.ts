@@ -107,6 +107,9 @@ export interface VoiceState {
   readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Bumped when the live share changes source or quality without stopping:
+   *  its preview and the stream card redraw. */
+  readonly localShareRev?: number;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
   readonly joinedAt: number | null;
   /** True when joined in listen-only mode (mic permission denied or no mic found). */
@@ -584,6 +587,14 @@ export function setLocalScreenshare(enabled: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localScreenshare: enabled,
+  }));
+}
+
+/** The live share changed source or quality. */
+export function bumpLocalShareRev(): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localShareRev: (prev.localShareRev ?? 0) + 1,
   }));
 }
 

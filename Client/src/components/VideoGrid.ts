@@ -1445,8 +1445,7 @@ export function createVideoGrid(): VideoGridComponent {
     signal: AbortSignal,
   ): HTMLDivElement {
     const track = stream.getVideoTracks()[0];
-    const settings = track?.getSettings?.() ?? {};
-    const surface = (settings as { displaySurface?: string }).displaySurface;
+    const surface = track?.getSettings?.()?.displaySurface;
     const title =
       surface === "window"
         ? voiceText("tile.sharingWindow")
@@ -1458,9 +1457,11 @@ export function createVideoGrid(): VideoGridComponent {
     // short of it (a 60 Hz monitor, a busy encoder).
     const renderDetail = (fps: number | null): void => {
       const parts: string[] = [];
-      if (settings.height !== undefined) {
+      // Read each time: the share's quality can change while it runs.
+      const shown = track?.getSettings?.().height;
+      if (shown !== undefined) {
         // Plain strings: the catalog would group 1080 as "1,080".
-        const height = String(settings.height);
+        const height = String(shown);
         parts.push(
           fps === null
             ? voiceText("tile.qualityHeight", { height })
@@ -1522,8 +1523,11 @@ export function createVideoGrid(): VideoGridComponent {
   ): void {
     if (root === null) return;
 
-    // A tile still saying its stream ended makes way for the new stream.
-    if (cells.get(userId)?.ending !== undefined) dropTile(userId);
+    // The same person shared again while their tile said it ended (a new
+    // source, a quick re-share): a new tile, still watched and in focus.
+    const reshared = cells.get(userId)?.ending !== undefined;
+    const refocus = reshared && focusedTileId === userId;
+    if (reshared) dropTile(userId, true);
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
     if (existing !== undefined && stream === null) {
@@ -1721,6 +1725,7 @@ export function createVideoGrid(): VideoGridComponent {
     syncTileNav();
     relayout();
     syncViews();
+    if (refocus) setFocusedTile(userId);
   }
 
   /** A remote tile's menu, with the tile's view state as it is now. */
@@ -1847,8 +1852,9 @@ export function createVideoGrid(): VideoGridComponent {
       dropTile(userId);
       return;
     }
-    // The stream and its watch are gone now; only the tile lingers.
-    forgetWatch(userId);
+    // The stream is gone; only the tile and its watch linger, so the same
+    // person sharing again within the cover keeps being watched (dropTile
+    // forgets the watch once it goes).
     entry.listeners.destroy();
     entry.trackCleanup?.();
     entry.trackCleanup = undefined;
@@ -1868,7 +1874,8 @@ export function createVideoGrid(): VideoGridComponent {
     syncStatsPolling();
   }
 
-  function dropTile(userId: number): void {
+  /** `keepWatch`: the same stream is coming back on a new tile. */
+  function dropTile(userId: number, keepWatch = false): void {
     const entry = cells.get(userId);
     if (entry === undefined) return;
     clearTimeout(entry.ending);
@@ -1880,8 +1887,7 @@ export function createVideoGrid(): VideoGridComponent {
     entry.popout?.close();
     entry.mini?.close();
     // The stream is gone: so is the watch (a new one starts from the default).
-    // An ended tile forgot it already, and a new stream may be watched now.
-    if (entry.ending === undefined && entry.config !== undefined && !entry.config.isSelf) {
+    if (!keepWatch && entry.config !== undefined && !entry.config.isSelf) {
       forgetWatch(userId);
     }
     if (entry.trackCleanup) {
@@ -2068,7 +2074,9 @@ export function createVideoGrid(): VideoGridComponent {
       resizeObserver = null;
     }
 
-    for (const [, entry] of cells) {
+    for (const [tileId, entry] of cells) {
+      // An ended tile still holds its stream's watch for a re-share.
+      if (entry.ending !== undefined) forgetWatch(tileId);
       clearTimeout(entry.ending);
       entry.popout?.close();
       entry.mini?.close();

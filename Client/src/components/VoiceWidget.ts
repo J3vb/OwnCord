@@ -24,6 +24,7 @@ import {
 } from "@lib/connectionStats";
 import { getRoomForStats, retryMicPermission } from "@lib/livekitSession";
 import { voiceText as t } from "../i18n/voice";
+import type { StreamCard } from "./voice-widget/streamCard";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -124,6 +125,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
+  /** The stream card while you share; loaded on the first share. */
+  let streamCard: StreamCard | null = null;
+  /** Owns the current card's listeners; aborted when the card goes. */
+  let streamCardScope: Disposable | null = null;
+  let streamCardLoad = 0;
   /** Persistent polite status for a moderator-imposed mute/deafen. The
    *  disabled controls carry only a `title`, which a screen reader never
    *  reaches (a disabled button cannot take focus), so the reason is announced
@@ -330,6 +336,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
+    syncStreamCard(channelId !== null && voice.localScreenshare);
 
     if (channelId === null) {
       root.classList.remove("visible");
@@ -422,6 +429,28 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       // which would break the "announced once" goal.
       if (micNoticeEl.textContent !== text) setText(micNoticeEl, text);
     }
+  }
+
+  function syncStreamCard(sharing: boolean): void {
+    if (!sharing) {
+      streamCardLoad++;
+      streamCardScope?.destroy();
+      streamCardScope = null;
+      streamCard?.el.remove();
+      streamCard = null;
+      return;
+    }
+    if (streamCard !== null) {
+      streamCard.update();
+      return;
+    }
+    const load = ++streamCardLoad;
+    void import("./voice-widget/streamCard").then(({ createStreamCard }) => {
+      if (load !== streamCardLoad || root === null || controlsRow === null) return;
+      streamCardScope = new Disposable();
+      streamCard = createStreamCard(options.onScreenshareToggle, streamCardScope.signal);
+      root.insertBefore(streamCard.el, controlsRow);
+    });
   }
 
   function createControlButton(
@@ -638,6 +667,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           serverDeafened: s.localServerDeafened,
           camera: s.localCamera,
           screenshare: s.localScreenshare,
+          shareRev: s.localShareRev,
           listenOnly: s.listenOnly,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
@@ -649,6 +679,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.serverDeafened === b.serverDeafened &&
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
+          a.shareRev === b.shareRev &&
           a.listenOnly === b.listenOnly &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
@@ -698,6 +729,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     cameraBtn = null;
     shareBtn = null;
     disconnectBtn = null;
+    streamCardScope?.destroy();
+    streamCardScope = null;
+    streamCard = null;
+    streamCardLoad++;
     modStatusEl = null;
     grantMicBtn = null;
     signalWrap = null;

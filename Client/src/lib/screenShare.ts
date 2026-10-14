@@ -22,7 +22,7 @@ import {
   type TrackPublishOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
+import { bumpLocalShareRev, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
@@ -91,7 +91,7 @@ const SCREENSHARE_AUDIO: AudioCaptureOptions = {
 /** Publish options for the screen-share audio track. Without them it inherits
  *  the voice defaults: DTX (pumps quiet passages), mono, and the operator's
  *  voice bitrate. */
-const SCREENSHARE_AUDIO_PUBLISH: TrackPublishOptions = {
+export const SCREENSHARE_AUDIO_PUBLISH: TrackPublishOptions = {
   dtx: false,
   forceStereo: true,
   audioPreset: AudioPresets.musicHighQualityStereo,
@@ -314,7 +314,7 @@ function hasCameraTracks(
  *  must proceed immediately and contain that asynchronous failure too. Takes
  *  any track with a `mediaStreamTrack` (browser `LocalTrack` or a native
  *  camera/screen track). */
-function unpublishManualTrack(
+export function unpublishManualTrack(
   room: Room,
   track: LocalTrack | { mediaStreamTrack: MediaStreamTrack },
 ): void {
@@ -526,10 +526,53 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
   screenTrackEndedCleanup?: () => void;
+  /** The live share's quality, set once it is published (web path only):
+   *  Change source and Quality act on a share only while it is set. */
+  quality?: StreamQuality;
+  /** A Change source or Quality change is running. */
+  changing?: boolean;
+}
+
+/** Stop sharing when the OS ends the capture (its own Stop sharing bar), as
+ *  long as this video track still carries `mst` for this share. A Change
+ *  source moves the watch to the new capture. */
+export function watchScreenEnded(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  videoTrack: LocalTrack,
+  screenTracks: LocalTrack[],
+  generation: number,
+): () => void {
+  const room = deps.getRoom();
+  const ws = deps.getWs();
+  const mst = videoTrack.mediaStreamTrack;
+  const onEnded = (): void => {
+    if (
+      (state.generation ?? 0) !== generation ||
+      state.manualScreenTracks !== screenTracks ||
+      videoTrack.mediaStreamTrack !== mst ||
+      deps.getRoom() !== room ||
+      deps.getWs() !== ws
+    ) {
+      return;
+    }
+    log.info("Screen track ended externally (OS stop-sharing)");
+    void disableScreenshare(state, deps);
+  };
+  const cleanup = (): void => {
+    mst.removeEventListener("ended", onEnded);
+    if (state.screenTrackEndedCleanup === cleanup) {
+      state.screenTrackEndedCleanup = undefined;
+    }
+  };
+  state.screenTrackEndedCleanup = cleanup;
+  mst.addEventListener("ended", onEnded, { once: true });
+  return cleanup;
 }
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
+  state.quality = undefined;
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
@@ -578,27 +621,7 @@ export async function enableScreenshare(
     // screen audio) cannot start after the user has already stopped sharing.
     const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
     if (videoTrack !== undefined) {
-      const onEnded = (): void => {
-        if (
-          (state.generation ?? 0) !== generation ||
-          state.manualScreenTracks !== screenTracks ||
-          deps.getRoom() !== room ||
-          deps.getWs() !== ws
-        ) {
-          return;
-        }
-        log.info("Screen track ended externally (OS stop-sharing)");
-        void disableScreenshare(state, deps);
-      };
-      const cleanup = (): void => {
-        videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
-        if (state.screenTrackEndedCleanup === cleanup) {
-          state.screenTrackEndedCleanup = undefined;
-        }
-      };
-      removeEndedListener = cleanup;
-      state.screenTrackEndedCleanup = cleanup;
-      videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
+      removeEndedListener = watchScreenEnded(state, deps, videoTrack, screenTracks, generation);
       if (videoTrack.mediaStreamTrack.readyState === "ended") {
         await disableScreenshare(state, deps);
         return;
@@ -657,6 +680,9 @@ export async function enableScreenshare(
     }
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
+    // The Linux native capture changes source through its own picker only.
+    if (!isLinuxDesktop()) state.quality = quality;
+    bumpLocalShareRev();
     deps.reapplyAudioPipeline();
     // The Linux native track carries the dialog's per-share encoding, which
     // replaces the saved prefs.

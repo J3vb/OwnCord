@@ -1568,7 +1568,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? "c" : "") +
-            (state.localScreenshare ? "s" : "");
+            (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);
             if (users) {
