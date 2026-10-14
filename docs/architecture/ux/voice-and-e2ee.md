@@ -140,6 +140,14 @@ saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
 and none applies while the DM call panel hosts the grid. A control bar at the
 bottom of the call view, in grid and focus view, has mute, deafen, camera,
 share and disconnect; camera and share are inert until the join has connected.
+**Pop out call**, last in the header, moves the whole call view (tiles,
+toggles and control bar) into a pop-out window of its own and returns the app
+window to the chat; opening the call again from the app raises that window.
+**Bring the call back**, or closing the window, puts the call view back in the
+app window; leaving the call closes it. Show chat and the camera picker arrow
+are hidden there and the tile menu has no Profile row (each opens in the app
+window), and starting a share brings the call back first so its picker is in
+view.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
