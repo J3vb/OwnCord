@@ -269,7 +269,7 @@ export function attachDragHandlers(
       if (e.button !== 0) {
         return;
       }
-      // A press on a voice participant is voice-drag-move's gesture.
+      // A press on a voice participant is features/voice/dragMove's gesture.
       if (e.target instanceof Element && e.target.closest(".voice-user-item") !== null) {
         return;
       }

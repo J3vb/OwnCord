@@ -28,7 +28,7 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
-import { attachVoiceUserDrag, markVoiceDropTarget } from "./channel-sidebar/voice-drag-move";
+import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
@@ -403,6 +403,7 @@ function renderVoiceChannelItem(
       // (watch or profile, below), and on a remote participant's row
       // Shift+F10 opens the per-user volume/moderation menu.
       row.tabIndex = 0;
+      row.setAttribute("role", "button");
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -412,12 +413,13 @@ function renderVoiceChannelItem(
       const member = membersStore.getState().members.get(user.userId);
       const resolved = member !== undefined ? memberDisplayName(member) : user.username;
 
-      row.appendChild(
-        createAvatarElement(
-          { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
-          { className: "vu-avatar", background: pickAvatarColor(resolved) },
-        ),
+      const avatar = createAvatarElement(
+        { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
+        { className: "vu-avatar", background: pickAvatarColor(resolved) },
       );
+      // The name follows, so the avatar's initial would only repeat it.
+      avatar.setAttribute("aria-hidden", "true");
+      row.appendChild(avatar);
 
       const label = resolved || shellText("common.unknown");
       const nameEl = createElement("span", { class: "vu-name" }, label);

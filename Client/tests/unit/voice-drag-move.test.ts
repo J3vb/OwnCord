@@ -248,6 +248,21 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
     expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
   });
 
+  it("stays cancelled after Escape until the button is released later", async () => {
+    mount(true);
+    mouse(row(TARGET_ID), "mousedown", 10, 310);
+    mouse(document, "mousemove", 50, 420);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    mouse(document, "mousemove", 50, 420);
+    expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
+    expect(document.querySelector(".voice-drop-target")).toBeNull();
+    mouse(document, "mouseup", 10, 310, 0);
+    mouse(row(TARGET_ID), "click", 10, 310, 0);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(mockOpenUserProfilePopup).not.toHaveBeenCalled();
+  });
+
   it("keeps a plain click opening the profile", () => {
     mount(true);
     const r = row(TARGET_ID);

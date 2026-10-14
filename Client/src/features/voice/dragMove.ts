@@ -10,11 +10,11 @@
  * re-render often) cannot strand one.
  */
 
-import { Disposable } from "@lib/disposable";
-import { setOwnedTimeout } from "@lib/dom";
-import { channelsStore } from "@stores/channels.store";
-import { uiStore } from "@stores/ui.store";
-import { voiceStore } from "@stores/voice.store";
+import { Disposable } from "../../lib/disposable";
+import { setOwnedTimeout } from "../../lib/dom";
+import { channelsStore } from "../../stores/channels.store";
+import { uiStore } from "../../stores/ui.store";
+import { voiceStore } from "../../stores/voice.store";
 
 /** Pixels the pointer must travel before a press becomes a drag. */
 const DRAG_THRESHOLD = 5;
@@ -104,14 +104,22 @@ export function attachVoiceUserDrag(
       const gesture = new Disposable();
       let ghost: HTMLElement | null = null;
 
-      const end = (): void => {
-        gesture.destroy();
+      // Escape clears the visuals but keeps the gesture until the button is
+      // released, so that release cannot become a click.
+      let cancelled = false;
+
+      const clearVisuals = (): void => {
         ghost?.remove();
+        ghost = null;
         clearDropHighlight();
         document.body.classList.remove("voice-user-moving");
         document
           .querySelectorAll(`[data-voice-uid="${userId}"].dragging`)
           .forEach((el) => el.classList.remove("dragging"));
+      };
+      const end = (): void => {
+        gesture.destroy();
+        clearVisuals();
       };
       lifetimeSignal.addEventListener("abort", end, { signal: gesture.signal });
 
@@ -122,6 +130,7 @@ export function attachVoiceUserDrag(
             end();
             return;
           }
+          if (cancelled) return;
           if (ghost === null) {
             if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < DRAG_THRESHOLD) {
               return;
@@ -150,9 +159,10 @@ export function attachVoiceUserDrag(
         "mouseup",
         (ev) => {
           const dragged = ghost !== null;
+          const wasCancelled = cancelled;
           end();
-          if (!dragged) return;
-          suppressNextClick();
+          if (dragged || wasCancelled) suppressNextClick();
+          if (!dragged || wasCancelled) return;
           const target = dropChannelAt(ev.clientX, ev.clientY, channelId);
           if (target === null) return;
           const toChannelId = Number(target.dataset[VOICE_DROP_ATTR]);
@@ -167,10 +177,14 @@ export function attachVoiceUserDrag(
       document.addEventListener(
         "keydown",
         (ev) => {
-          if (ev.key !== "Escape") return;
+          if (ev.key !== "Escape" || cancelled) return;
           ev.preventDefault();
-          if (ghost !== null) suppressNextClick();
-          end();
+          if (ghost === null) {
+            end();
+            return;
+          }
+          clearVisuals();
+          cancelled = true;
         },
         { signal: gesture.signal },
       );
