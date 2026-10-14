@@ -28,6 +28,7 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
@@ -313,6 +314,7 @@ function renderVoiceChannelItem(
   if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
+  if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
 
   const classes = ["channel-item", "voice", isJoined ? "active" : "", frozen ? "disabled" : ""]
     .filter(Boolean)
@@ -401,6 +403,7 @@ function renderVoiceChannelItem(
       // (watch or profile, below), and on a remote participant's row
       // Shift+F10 opens the per-user volume/moderation menu.
       row.tabIndex = 0;
+      row.setAttribute("role", "button");
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -410,12 +413,13 @@ function renderVoiceChannelItem(
       const member = membersStore.getState().members.get(user.userId);
       const resolved = member !== undefined ? memberDisplayName(member) : user.username;
 
-      row.appendChild(
-        createAvatarElement(
-          { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
-          { className: "vu-avatar", background: pickAvatarColor(resolved) },
-        ),
+      const avatar = createAvatarElement(
+        { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
+        { className: "vu-avatar", background: pickAvatarColor(resolved) },
       );
+      // The name follows, so the avatar's initial would only repeat it.
+      avatar.setAttribute("aria-hidden", "true");
+      row.appendChild(avatar);
 
       const label = resolved || shellText("common.unknown");
       const nameEl = createElement("span", { class: "vu-name" }, label);
@@ -557,6 +561,18 @@ function renderVoiceChannelItem(
         // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused
         // participant row opens the same menu.
         openMenuOnKeyboard(row, openVolumeMenu, signal);
+        // Drag onto another voice channel to move them; the menu's "Move to"
+        // is the keyboard path to the same command.
+        if (onVoiceModerate !== undefined) {
+          attachVoiceUserDrag(
+            row,
+            channel.id,
+            user.userId,
+            onVoiceModerate.onMove,
+            signal,
+            lifetimeSignal,
+          );
+        }
       }
 
       // A click watches their camera or stream; with nothing to watch it opens

@@ -305,6 +305,30 @@
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-sm);
 }
+.voice-user-moving {
+  user-select: none;
+  cursor: grabbing !important;
+}
+.voice-user-moving * {
+  cursor: grabbing !important;
+}
+.voice-user-item.dragging {
+  opacity: 0.3;
+}
+.voice-drop-target {
+  box-shadow: 0 0 0 2px var(--accent) inset;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: var(--radius-sm);
+}
+.voice-user-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.85;
+  background: var(--bg-active);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
 .channel-item .ch-icon {
   opacity: 0.6;
   flex-shrink: 0;
