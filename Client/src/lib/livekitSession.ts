@@ -42,7 +42,7 @@ import type {
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
 import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
-import { MediaControl } from "../features/voice/mediaControl";
+import { MediaControl, syncShareGrant } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
 import {
   dismissMediaLostNotice,
@@ -634,6 +634,7 @@ export class LiveKitSession {
   private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
     const room = this._room;
     if (room === null) return;
+    syncShareGrant(room);
 
     const state = voiceStore.getState();
     // In Push to Talk mode a bound key means transmission is gated by

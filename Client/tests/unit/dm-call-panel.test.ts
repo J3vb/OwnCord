@@ -766,6 +766,20 @@ describe("DmCallPanel — controls while the call connects (D-08)", () => {
     q(root, "dcp-camera")!.click();
     expect(opts.onCameraToggle).toHaveBeenCalledTimes(1);
   });
+
+  it("disables share with the reason when the grant leaves screen share out (WP 1C-3)", () => {
+    setVoice(DM, [vu(SELF)]);
+    patchVoice({ voiceStatus: "connected", shareDenied: true });
+    const { root } = mount();
+    expect(q(root, "dcp-share")!.disabled).toBe(true);
+    expect(q(root, "dcp-share")!.title).toBe(
+      "You don't have permission to share your screen here",
+    );
+    expect(q(root, "dcp-camera")!.disabled).toBe(false);
+
+    patchVoice({ shareDenied: false });
+    expect(q(root, "dcp-share")!.disabled).toBe(false);
+  });
 });
 
 describe("DmCallPanel — video in the call", () => {

@@ -110,6 +110,9 @@ export interface VoiceState {
   /** Bumped when the live share changes source or quality without stopping:
    *  its preview and the stream card redraw. */
   readonly localShareRev?: number;
+  /** The SFU grant leaves out screen share (no Share Screen permission here).
+   *  Absent reads as allowed. Written from the voice session. */
+  readonly shareDenied?: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
   readonly joinedAt: number | null;
   /** True when joined in listen-only mode (mic permission denied or no mic found). */
@@ -398,6 +401,7 @@ export function joinVoiceChannel(channelId: number): void {
       // Optimistic: the widget shows "Connecting…" the moment the user clicks,
       // before the voice_token round-trip. livekitSession advances it from here.
       voiceStatus: "joining",
+      shareDenied: false,
       // A fresh join starts clean — any degraded flag belongs to the
       // previous session's worker, not this one.
       encryptionDegraded: false,
@@ -417,6 +421,7 @@ export function leaveVoiceChannel(): void {
       localServerMuted: false,
       localServerDeafened: false,
       encryptionDegraded: false,
+      shareDenied: false,
     };
     const channelId = prev.currentChannelId;
     const voiceUsers = withoutRings(prev.voiceUsers, channelId);
@@ -596,6 +601,12 @@ export function bumpLocalShareRev(): void {
     ...prev,
     localShareRev: (prev.localShareRev ?? 0) + 1,
   }));
+}
+
+export function setShareDenied(denied: boolean): void {
+  voiceStore.setState((prev) =>
+    (prev.shareDenied === true) === denied ? prev : { ...prev, shareDenied: denied },
+  );
 }
 
 /** Set listen-only mode (mic permission denied or no mic found). */

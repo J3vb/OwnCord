@@ -52,6 +52,8 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.cameraOff": "Turn off camera",
   "widget.control.shareStart": "Share your screen",
   "widget.control.shareStop": "Stop sharing",
+  "widget.control.shareDenied": "You don't have permission to share your screen here",
+  "widget.control.shareVideoLimit": "This channel has reached its video limit",
   "widget.control.disconnect": "Disconnect",
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",

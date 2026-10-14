@@ -546,6 +546,66 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("disables share with a reason when the grant leaves it out or the video limit is used up (WP 1C-3)", () => {
+    channelsStore.setState((prev) => {
+      const channels = new Map(prev.channels);
+      channels.set(1, {
+        id: 1,
+        name: "Voice Lobby",
+        type: "voice",
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 2,
+      });
+      return { ...prev, channels };
+    });
+    const user = (userId: number, camera: boolean, screenshare: boolean): VoiceUser => ({
+      userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera,
+      screenshare,
+    });
+    setVoiceChannel(1, [user(1, false, false), user(2, true, false)]);
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    expect(shareBtn.disabled).toBe(false);
+
+    voiceStore.setState((prev) => ({ ...prev, shareDenied: true }));
+    voiceStore.flush();
+    expect(shareBtn.disabled).toBe(true);
+    expect(shareBtn.title).toBe("You don't have permission to share your screen here");
+
+    voiceStore.setState((prev) => ({ ...prev, shareDenied: false }));
+    setVoiceChannel(1, [user(1, false, false), user(2, true, false), user(3, false, true)]);
+    voiceStore.flush();
+    expect(shareBtn.disabled).toBe(true);
+    expect(shareBtn.title).toBe("This channel has reached its video limit");
+
+    // Your own share holds a slot: Stop sharing stays live at the limit.
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    expect(shareBtn.disabled).toBe(false);
+    expect(shareBtn.title).toBe("Stop sharing");
+
+    widget.destroy?.();
+  });
+
   it("falls back to 'Voice Channel' when channel is not in store", () => {
     // Don't add channel to channelsStore
     setVoiceChannel(999, []);

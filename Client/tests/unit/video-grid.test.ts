@@ -2936,6 +2936,17 @@ describe("VideoGrid", () => {
       expect(barButton("deafen").disabled).toBe(true);
       expect(barButton("deafen").title).toBe("You were deafened by a moderator");
       expect(camera.disabled).toBe(false);
+
+      // No share permission or the video limit: share is inert with the reason.
+      grid.setCallState({
+        muted: false,
+        deafened: false,
+        listenOnly: false,
+        shareBlock: "This channel has reached its video limit",
+      });
+      expect(share.disabled).toBe(true);
+      expect(share.title).toBe("This channel has reached its video limit");
+      expect(camera.disabled).toBe(false);
     });
 
     it("offers camera and share on a full-screen tile too", async () => {
