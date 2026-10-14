@@ -78,6 +78,9 @@ export interface VideoGridCallbacks {
     readonly onDeafenToggle: () => void;
     readonly onLeave: () => void;
     readonly onCameraToggle?: () => void;
+    /** Pick the camera from a menu at `anchor`, closed with the grid
+     *  (`signal`): the arrow beside Camera. */
+    readonly onCameraDevice?: (anchor: HTMLElement, signal: AbortSignal) => void;
     readonly onScreenshareToggle?: () => void;
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
@@ -934,6 +937,18 @@ export function createVideoGrid(): VideoGridComponent {
       bar.appendChild(
         callButton(voiceText("widget.control.cameraOn"), "camera", "camera", onCamera),
       );
+      const onDevice = cc.onCameraDevice;
+      if (onDevice !== undefined) {
+        const pick: HTMLButtonElement = callButton(
+          voiceText("call.chooseCamera"),
+          "chevron-up",
+          "camera-device",
+          () => onDevice(pick, gridListeners.signal),
+          " video-fs-btn--device",
+        );
+        pick.setAttribute("aria-haspopup", "menu");
+        bar.appendChild(pick);
+      }
     }
     if (cc.onScreenshareToggle !== undefined) {
       const onShare = cc.onScreenshareToggle;
@@ -988,6 +1003,8 @@ export function createVideoGrid(): VideoGridComponent {
       camera.setAttribute("aria-label", label);
       camera.title = mediaLockReason() ?? label;
     }
+    const pick = bar.querySelector<HTMLButtonElement>("[data-call-control='camera-device']");
+    if (pick !== null) pick.disabled = mediaLockReason() !== null;
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
     if (share !== null) {
       const on = callState.screenshare === true;

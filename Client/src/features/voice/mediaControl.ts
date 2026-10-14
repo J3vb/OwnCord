@@ -17,6 +17,7 @@ import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
+import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
   type CameraTrackState,
@@ -53,6 +54,9 @@ export interface MediaControlHost {
 
 export class MediaControl {
   constructor(private readonly host: MediaControlHost) {}
+
+  /** Camera switches run one at a time, so the last pick wins. */
+  private videoSwitch: Promise<void> = Promise.resolve();
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
@@ -295,6 +299,41 @@ export class MediaControl {
   /** The live share's quality, or null where it cannot be changed. */
   getScreenshareQuality(): StreamQuality | null {
     return this._screenState.quality ?? null;
+  }
+
+  /** Use camera `deviceId` ("" = default) from now on and move a live camera
+   *  onto it. The web track restarts in place (same publication); the Linux
+   *  native capture is started again on the new device. */
+  switchVideoDevice(deviceId: string): Promise<void> {
+    savePref("videoInputDevice", deviceId);
+    const run = this.videoSwitch.then(() => this.doSwitchVideoDevice(deviceId));
+    this.videoSwitch = run.catch(() => {});
+    return run;
+  }
+
+  private async doSwitchVideoDevice(deviceId: string): Promise<void> {
+    const state = this._cameraState;
+    const track = state.manualCameraTrack;
+    if (track === null) return;
+    try {
+      if ("setDeviceId" in track) {
+        const before = track.mediaStreamTrack;
+        await track.setDeviceId(deviceId);
+        // The restart swaps the capture: unplug detection moves with it.
+        const now = track.mediaStreamTrack;
+        if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
+          now.addEventListener("ended", state.onCameraEnded, { once: true });
+        }
+      } else {
+        await this.enableCamera();
+      }
+      log.info("Camera device switched");
+    } catch (err) {
+      if (state.manualCameraTrack !== track) return;
+      log.warn("Camera device switch failed", err);
+      await this.disableCamera();
+      this.onErrorCallback?.(voiceText("share.cameraFailed"));
+    }
   }
 
   // --- Delegating methods to DeviceManager ---

@@ -2852,6 +2852,28 @@ describe("VideoGrid", () => {
       expect(cc.onLeave).toHaveBeenCalledTimes(1);
     });
 
+    it("puts the camera picker arrow beside Camera, inert while the camera is locked", () => {
+      const onCameraDevice = vi.fn();
+      grid.setCallbacks({ callControls: { ...controls(), onCameraDevice } });
+      grid.setExitVisible(true);
+      expect(
+        [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
+          (b) => b.dataset["callControl"],
+        ),
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "leave"]);
+
+      const pick = barButton("camera-device");
+      expect(pick.getAttribute("aria-label")).toBe("Choose camera");
+      expect(pick.getAttribute("aria-haspopup")).toBe("menu");
+      pick.click();
+      expect(onCameraDevice).toHaveBeenCalledTimes(1);
+      expect(onCameraDevice.mock.calls[0]![0]).toBe(pick);
+      expect(onCameraDevice.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);
+
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
+      expect(barButton("camera-device").disabled).toBe(true);
+    });
+
     it("builds the bar from callbacks set after the call view opened", () => {
       grid.setExitVisible(true);
       expect(bar()).toBeNull();

@@ -82,6 +82,9 @@ export const voiceText = defineCatalog("voice", {
   "call.isCalling": "{name} is calling",
   "call.goToCall": "Go to the call",
   "call.inProgress": "Call in progress",
+  "call.chooseCamera": "Choose camera",
+  "call.defaultCamera": "Default",
+  "call.cameraNumber": "Camera {n}",
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",

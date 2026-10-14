@@ -1459,6 +1459,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onCameraDevice: (anchor, signal) =>
+          void import("../features/voice/cameraMenu").then((m) => m.showCameraMenu(anchor, signal)),
         onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>

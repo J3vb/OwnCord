@@ -293,6 +293,9 @@ export function rollbackPendingVideo(id: string): "camera" | "screen" | undefine
 /** Mutable state for the manually published camera track. */
 export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | NativeCameraTrack | null;
+  /** The live camera's unplug handler, re-armed when a device switch
+   *  restarts its capture. */
+  onCameraEnded?: () => void;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -420,6 +423,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
     };
     cameraEndedCleanup = removeEndedListener;
+    state.onCameraEnded = onEnded;
     videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
     if (videoTrack.mediaStreamTrack.readyState === "ended") {
       await disableCamera(state, deps);
