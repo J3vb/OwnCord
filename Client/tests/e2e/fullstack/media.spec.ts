@@ -468,7 +468,7 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   // removes the SFU participant, which ends the client's LiveKit room. P2-T5:
   // the voice reconnect loop then sees the released membership once the chat
   // socket is back and rejoins on its own — a fresh authorized join and key
-  // exchange, with the camera off as after any join.
+  // exchange. WP 1C-6: the camera that was on comes back by itself.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   await alice.waitForTimeout(16_000); // outlast the 15 s server grace window
@@ -478,7 +478,10 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
     timeout: 45_000,
   });
   await expectDecodedMedia(alice);
-  await alice.locator(".voice-widget button[aria-label='Camera']").click();
+  await expect(alice.locator(".voice-widget button[aria-label='Camera']")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await watchCamera(bob, 1);
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
