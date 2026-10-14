@@ -284,10 +284,11 @@ Per-user volume is adjustable (0–200%; saved values above 200% are read as 200
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. One exception on success: a reconnect
-drops your camera and screen share (`teardownForReconnect`), so once it lands a toast names what stopped,
-with a "Turn on again" button ("Share again" for a screen share alone) that runs the normal enable path;
-nothing is restored automatically. The 60 s token-refresh response guard and the
+"Voice connection lost — failed to reconnect" + auto-leave. A reconnect drops your camera and screen
+share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
+the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
+with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host
+still lists it. Leaving voice removes the toast. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 **A planned restart returns the call (RT-12).** The hub wipes `voice_states` on
