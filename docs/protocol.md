@@ -534,7 +534,7 @@ to reconstruct them:
 | Field               | Type           | Required | Constraints                                                                   |
 | ------------------- | -------------- | -------- | ----------------------------------------------------------------------------- |
 | `channel_id`        | number         | Yes      | Positive integer                                                              |
-| `content`           | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty.  |
+| `content`           | string         | Yes\*    | Max 4000 runes. HTML-sanitized. \*Can be empty if `attachments` is non-empty. |
 | `reply_to`          | number or null | No       | ID of a message in the same channel that is not deleted, else `BAD_REQUEST`.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
@@ -565,12 +565,15 @@ answered before the channel, send-permission, DM membership/block/timeout and
 content checks: the message was accepted when it was sent, so a later
 permission change cannot turn its acknowledgment into a refusal. A key with no
 receipt is a new send and passes every check. A matching receipt does not
-spend slow-mode cooldown, reopen DMs, increment mentions, dispatch push notifications or
-broadcast another message. Changed payloads or channels with the same key
+spend slow-mode cooldown, reopen DMs, increment mentions, dispatch push
+notifications or broadcast another message. Changed payloads or channels with the same key
 return `CONFLICT`. Keys belong to their sender, so another authorized sender
 may independently use the same key without seeing the first sender's result.
-Receipts survive message deletion: a deleted original returns `FORBIDDEN`
-and is never recreated; a missing channel returns `NOT_FOUND`.
+Receipts survive message deletion: a deleted original, including one removed
+with its channel, returns `ALREADY_DELETED` and is never recreated. A key with
+no receipt for a missing channel returns `NOT_FOUND`. A malformed, expired or
+pre-restore key with no receipt returns `BAD_REQUEST` before any permission
+check.
 
 Message content, mentions, attachment ownership links and the receipt commit
 together. Receipts contain only ids, a request fingerprint, the original
