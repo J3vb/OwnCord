@@ -830,8 +830,7 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
  *  native track publishes in the backend). */
 export async function getLocalScreenshareFps(room: Room | null): Promise<number | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
-    | Partial<Pick<LocalVideoTrack, "getSenderStats">>
-    | undefined;
+    Partial<Pick<LocalVideoTrack, "getSenderStats">> | undefined;
   if (typeof track?.getSenderStats !== "function") return null;
   const rates = (await track.getSenderStats())
     .map((s) => s.framesPerSecond as number | undefined)
