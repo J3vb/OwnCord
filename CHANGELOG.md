@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+**Login & connection**
+
+- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
+
 ## v2.3.0-beta.1
 
 **OwnCord 2.3 beta 1** (the fourth public beta) is the voice release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. Calls get their own view with tiles and a control bar, voice settings work the way Discord's do, streaming gets a stream card with Change source, and the app tells you what changed after an update. It also fixes a long list of voice, scrolling and server problems.
@@ -178,8 +184,6 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - Logging in again right after a sign-out can no longer leave the new connection refusing to send messages.
 - A failed local connection tunnel now shows the normal "could not reach the server" error instead of a raw native message.
 - A failed link open or native event registration is logged instead of raising an unhandled error.
-- When the server was too busy to send an update (a deleted or edited message, a reaction, a member change), the app could miss it until a restart. The server now waits briefly before giving up on a new message, and an app that was offline when an update was skipped fetches everything fresh when it reconnects.
-- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
 
 **Accounts & admin**
 
