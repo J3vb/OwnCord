@@ -148,6 +148,7 @@ and only when it changes something a contributor or fork holder must do
 - Restoring a backup from the admin panel made the old server process exit with an error (exit code 1) while it restarted, even though the restore worked. The restart now exits cleanly.
 - A backup restored from the admin panel could come back with leftover changes from the database it replaced. The restore now finishes the database's pending writes and clears its write-ahead log before copying the backup in. If the database is too busy to do that, the restore is refused with "the database is busy" and you can retry.
 - Deleting an account, or the server clearing out old messages under a channel's retention setting, could hold up new messages for everyone until the cleanup finished. Messages now keep flowing while the server cleans up.
+- A slow database check on a channel's age-restricted (NSFW) setting could hold up every message, typing indicator and presence update on the server. The check now runs on the side with a 1-second limit, and only messages in that one channel wait for it. If the check fails or runs out of time, that message is not sent live and apps that missed it fetch it when they reconnect.
 
 **Login & connection**
 

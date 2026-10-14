@@ -181,7 +181,7 @@ func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 // while such a drop is unsettled every call ratchets the watermark to the
 // current seq, and the drop only counts as settled once the queue is seen
 // empty — every frame queued before it has been sequenced by then. That proof
-// holds only on the dispatch goroutine, so deliverBroadcast is the sole caller,
+// holds only on the dispatch goroutine, so deliverGated is the sole caller,
 // under seqMu after each frame; mustFullResyncAtRegister bumps for an
 // unsettled drop but never settles it.
 func (h *Hub) applyQueueContentDrops() {
@@ -190,7 +190,8 @@ func (h *Hub) applyQueueContentDrops() {
 		return
 	}
 	h.bumpVisibilityWatermark()
-	if len(h.broadcast) == 0 {
+	// A parked frame (hub_content_gate.go) was dequeued but not sequenced.
+	if len(h.broadcast) == 0 && h.gates.parked == 0 {
 		h.queueDrops.applied = n
 	}
 }

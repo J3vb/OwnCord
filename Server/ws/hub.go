@@ -108,6 +108,7 @@ type Hub struct {
 	life     context.Context
 	stopLife context.CancelFunc
 	sweeps   sync.WaitGroup
+	gates    contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -300,19 +301,11 @@ func (h *Hub) Run() {
 				case <-h.stop:
 					return
 				case ev := <-h.clientEvents:
-					if ev.add {
-						// No handshake permission set on this path (and no DB
-						// call allowed on the hub goroutine) — nil denies the
-						// inherited voice-channel subscription. A wake
-						// refusal cannot occur here: the handshake paths
-						// refuse before queueing a Register event, and the
-						// event path never carries wakeReconnect.
-						h.registerNow(ev.c, nil)
-					} else {
-						h.unregisterNow(ev.c)
-					}
-				case bm := <-h.broadcast:
-					h.deliverBroadcast(bm)
+					h.onClientEvent(ev)
+				case bm := <-h.broadcastIn():
+					h.dispatch(bm)
+				case res := <-h.gates.results:
+					h.onGateResolved(res)
 				case <-staleTicker.C:
 					h.onStaleTick()
 				case <-sessionSweepTicker.C:
