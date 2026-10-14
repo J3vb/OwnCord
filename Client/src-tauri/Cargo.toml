@@ -192,7 +192,7 @@ dbus = "0.9"
 # whole family on prost 0.14 uniformly, which is why it compiles.
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
-livekit = "=0.9.3"
+livekit = "=0.9.4"
 # Names the SDK's permission/track-source protobuf types (its `proto` module
 # does not re-export them). Same version livekit 0.9.3 already resolves, so no
 # new crate enters the tree.
