@@ -129,7 +129,7 @@ pub fn note_exit(how: &str) {
 /// finds it reads it as the update handoff rather than an unexplained end.
 pub fn note_update_handoff() {
     if let Some(watch) = WATCH.get() {
-        write_run_file(watch, "handing over to an update installer");
+        write_run_file(watch);
     }
 }
 
@@ -161,7 +161,7 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
                 );
                 log::logger().flush();
                 hang_logged_at = Some(t - silent_for);
-                write_run_file(watch, "running");
+                write_run_file(watch);
             }
             Some(since) if silent_for < hang_secs => {
                 log::warn!(
@@ -175,7 +175,7 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
         if t - last_beat >= i64::try_from(HEARTBEAT.as_secs()).unwrap_or(10) {
             last_beat = t;
             log_memory_step(watch);
-            write_run_file(watch, "running");
+            write_run_file(watch);
         }
     }
 }
@@ -224,7 +224,14 @@ fn run_file_path(dir: &Path, pid: u32) -> PathBuf {
     dir.join(format!("{RUN_FILE_PREFIX}{pid}{RUN_FILE_SUFFIX}"))
 }
 
-fn write_run_file(watch: &Watch, state: &str) {
+fn write_run_file(watch: &Watch) {
+    // Kept on every heartbeat while the installer runs, so a process the
+    // installer ends reads as the update handoff, not an unexplained end.
+    let state = if crate::update_commands::installer_launching() {
+        "handing over to an update installer"
+    } else {
+        "running"
+    };
     let _writing = watch
         .run_file_lock
         .lock()
@@ -512,11 +519,11 @@ mod tests {
             run_file_lock: Mutex::new(()),
             memory_logged_mb: AtomicU64::new(0),
         };
-        write_run_file(&watch, "running");
+        write_run_file(&watch);
         assert!(watch.run_file.exists());
         watch.exited.store(true, Ordering::SeqCst);
         std::fs::remove_file(&watch.run_file).unwrap();
-        write_run_file(&watch, "running");
+        write_run_file(&watch);
         assert!(
             !watch.run_file.exists(),
             "a late heartbeat must not recreate it"

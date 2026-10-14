@@ -122,6 +122,7 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
     };
     let mut line = [0u8; 320];
     let len = format_line(&mut line, now.tv_sec, signal, &thread[..name_len], sender);
+    let mut logged = false;
     if let Some(path) = LOG_FILE.get() {
         // SAFETY: open/write/close are async-signal-safe.
         unsafe {
@@ -131,13 +132,15 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
                 0o644,
             );
             if fd >= 0 {
-                libc::write(fd, line.as_ptr().cast(), len);
+                let written = libc::write(fd, line.as_ptr().cast(), len);
+                logged = usize::try_from(written) == Ok(len);
                 libc::close(fd);
             }
         }
     }
     let index = SIGNALS.iter().position(|(s, _)| *s == signal);
-    if index.is_some_and(|i| i >= FATAL) {
+    // Only once the line is on disk: otherwise the run file is the trace.
+    if logged && index.is_some_and(|i| i >= FATAL) {
         if let Some(run_file) = RUN_FILE.get() {
             // SAFETY: unlink(2) is async-signal-safe.
             unsafe { libc::unlink(run_file.as_ptr()) };
