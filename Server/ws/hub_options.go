@@ -198,7 +198,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		defaultVoiceQuality: defaultVoiceQuality,
 		settingsUpload:      opts.UploadPolicy,
 		uploadFileTypes:     opts.UploadFileTypes,
-		voiceMod:            newVoiceModLocks(),
+		voiceMod:            newUserLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
 		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
@@ -222,6 +222,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if opts.ReplayColdLimit > 0 {
 		h.coldReplayLimit = opts.ReplayColdLimit
 	}
+	h.life, h.stopLife = context.WithCancel(context.Background()) // the hub's own lifecycle, ended by closeStop
 
 	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
@@ -230,9 +231,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		Limiter:    h.limiter,
 		LiveStatus: h.LiveStatus,
 	}
-	presenceDeps := PresenceDeps{
-		Limiter: h.limiter,
-	}
+	presenceDeps := PresenceDeps{Limiter: h.limiter}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -262,6 +261,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	registerChatHandlers(reg, chatDeps)
+	h.focusDeps = presenceDeps
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)

@@ -614,6 +614,28 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
 }
 
+// GetMessagesAfterForAPI returns up to limit messages with id > after in the
+// API response shape, ordered OLDEST-first (the mirror of GetMessagesForAPI's
+// newest-first before-pages): the page continues a window downward toward the
+// live tail. Callers that need has_more ask for limit+1 and trim.
+func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
+	rows, err := d.reader.QueryContext(ctx,
+		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+		        m.mentions_everyone
+		 FROM messages m JOIN users u ON m.user_id = u.id
+		 WHERE m.channel_id = ? AND m.id > ? AND m.deleted = 0
+		 ORDER BY m.id ASC LIMIT ?`,
+		channelID, after, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetMessagesAfterForAPI: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+}
+
 // GetMessagesAroundForAPI returns a window of messages centred on centerID in
 // the API response shape, ordered oldest-first: up to beforeCount messages
 // older than the centre, the centre itself, and up to afterCount newer ones.

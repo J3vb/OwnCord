@@ -551,10 +551,17 @@ describe("DmCallPanel — connected", () => {
 
     setConnectionStatus("reconnecting");
     uiStore.flush();
-    for (const id of ["dcp-deafen", "dcp-camera", "dcp-share"]) {
+    for (const id of ["dcp-camera", "dcp-share"]) {
       expect(q(root, id)!.disabled).toBe(true);
     }
+    // Mute and deafen apply locally and are restated on reconnect, so only a
+    // moderator's restriction keeps them out of reach.
+    expect(q(root, "dcp-deafen")!.disabled).toBe(false);
+    expect(q(root, "dcp-mute")!.disabled).toBe(true);
     expect(q(root, "dcp-leave")!.disabled).toBe(false);
+
+    patchVoice({ localServerMuted: false });
+    expect(q(root, "dcp-mute")!.disabled).toBe(false);
   });
 
   it("updates the speaking ring in place, without redrawing the avatar", () => {
@@ -652,7 +659,9 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
     voiceStore.flush();
     const badge = shield(root, OTTO)!;
     expect(badge.querySelector("svg")!.getAttribute("data-icon")).toBe("shield-check");
-    expect(badge.title).toBe("Identity verified · Safety number: 1234 5678");
+    expect(badge.title).toBe(
+      "Same key as before · Safety number: 1234 5678 · Compare it with them to confirm it is them",
+    );
     expect(badge.tagName).toBe("SPAN");
     expect(shield(root, SELF)).toBeNull();
   });
@@ -756,6 +765,18 @@ describe("DmCallPanel — controls while the call connects (D-08)", () => {
     expect(q(root, "dcp-share")!.disabled).toBe(false);
     q(root, "dcp-camera")!.click();
     expect(opts.onCameraToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables share with the reason when the grant leaves screen share out (WP 1C-3)", () => {
+    setVoice(DM, [vu(SELF)]);
+    patchVoice({ voiceStatus: "connected", shareDenied: true });
+    const { root } = mount();
+    expect(q(root, "dcp-share")!.disabled).toBe(true);
+    expect(q(root, "dcp-share")!.title).toBe("You don't have permission to share your screen here");
+    expect(q(root, "dcp-camera")!.disabled).toBe(false);
+
+    patchVoice({ shareDenied: false });
+    expect(q(root, "dcp-share")!.disabled).toBe(false);
   });
 });
 

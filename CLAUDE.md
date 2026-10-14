@@ -43,8 +43,10 @@ Optional command-line tools that make a task cheaper. Install the ones you need
 runs on every PR (Repository Hygiene); zizmor runs when `.github/**`,
 `scripts/**` or another shared CI input changes; osv-scanner and cargo-deny run
 when a manifest, a lockfile, `osv-scanner.toml` or `Client/src-tauri/deny.toml`
-changes (`scripts/ci-select.mjs`). Run the matching one locally before pushing
-that kind of change.
+changes (`scripts/ci-select.mjs`), and weekly on `main`
+(`weekly-supply-chain.yml`). Workflow Security Lint and Supply-chain Scan are
+required checks on `dev`. Run the matching one locally before pushing that kind
+of change.
 
 | Tool                                                       | Reach for it when                                                                       | Install / run                                                                                                                              |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |

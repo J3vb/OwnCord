@@ -15,6 +15,7 @@ import {
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload } from "../connection/dispatchContext";
 import { expectConsole } from "../../../tests/helpers/console";
 
@@ -26,6 +27,7 @@ vi.mock("../../lib/livekitSession", () => ({
   isVoiceSessionActive: vi.fn(() => false),
   isAutoReconnecting: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
+  reconcileVideoFlags: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import { setMuted, setDeafened, handleParticipantLeft } from "../../lib/livekitSession";
@@ -89,6 +91,42 @@ describe("snapshotReadyVoice", () => {
 
     await vi.waitFor(() => expect(handleParticipantLeft).toHaveBeenCalledWith(7));
     expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it("restates a mute toggled while the socket was down", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ muted: false })]));
+
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+  });
+
+  it("does not restate a mute the server already holds", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ muted: true })]));
+
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("does not fight the release of a moderator mute lifted while disconnected", () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true, localMuted: true }));
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ server_muted: false })]));
+
+    expect(socket.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
   });
 
   it("releases a moderator mute lifted while disconnected, using the pre-ready flags", async () => {
@@ -178,12 +216,18 @@ describe("handleVoiceState moderator enforcement", () => {
   });
 });
 
+const refusal = (code: Payload<"error">["code"]): Payload<"error"> => ({ code, message: "" });
+
 describe("handleVoiceJoinRollback", () => {
+  beforeEach(() => {
+    resetJoinRequest();
+  });
+
   it("rolls back an outstanding join", () => {
     joinVoiceChannel(4);
     expect(voiceStore.getState().voiceStatus).toBe("joining");
 
-    handleVoiceJoinRollback();
+    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), undefined);
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
@@ -193,15 +237,64 @@ describe("handleVoiceJoinRollback", () => {
     // token issued; without arming the backoff every click re-sent voice_join.
     noteJoinSucceeded();
     joinVoiceChannel(4);
-    handleVoiceJoinRollback();
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
     expect(joinRetryInMs()).toBeGreaterThan(0);
     noteJoinSucceeded();
   });
 
   it("does not back off an error that lands with no join outstanding", () => {
     noteJoinSucceeded();
-    handleVoiceJoinRollback();
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
     expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("ignores an error carrying another command's id", () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-1");
+
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), "chat-edit-7");
+
+    expect(voiceStore.getState().currentChannelId).toBe(4);
+    expect(voiceStore.getState().voiceStatus).toBe("joining");
+  });
+
+  it("rolls back the refusal answering the pending join", () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-1");
+
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), "join-1");
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("does not roll back a newer join for an older join's refusal", () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-old");
+    joinVoiceChannel(5);
+    noteJoinSent("join-new");
+
+    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), "join-old");
+
+    expect(voiceStore.getState().currentChannelId).toBe(5);
+    expect(voiceStore.getState().voiceStatus).toBe("joining");
+  });
+
+  it("rolls back an id-less join refusal from an older server", () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-1");
+
+    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), undefined);
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("ignores an id-less non-join error while joining", () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-1");
+
+    handleVoiceJoinRollback(refusal("INVALID_JSON"), undefined);
+
+    expect(voiceStore.getState().currentChannelId).toBe(4);
   });
 });
 

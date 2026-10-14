@@ -368,23 +368,6 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     appendChildren(voice.details, voiceTools, diagPanel);
     section.appendChild(voice.details);
 
-    // Version, last and quiet: support asks for it, nobody else needs it.
-    const versionEl = createElement("p", { class: "setting-desc" }, t("logs.version.loading"));
-    section.appendChild(versionEl);
-    void desktop.appMetadata
-      .getVersion()
-      .then((v) => {
-        // A host that answers without a version (a browser mock) reads as
-        // unknown, never "vnull".
-        versionEl.textContent =
-          typeof v === "string" && v !== ""
-            ? t("logs.version.known", { version: v })
-            : t("logs.version.unknown");
-      })
-      .catch(() => {
-        versionEl.textContent = t("logs.version.unknown");
-      });
-
     // Live update: subscribe to new log entries
     unsubLogListener?.();
     unsubLogListener = addLogListener(() => {

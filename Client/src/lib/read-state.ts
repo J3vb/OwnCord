@@ -1,6 +1,6 @@
 /**
  * Explicit mark-as-read, for affordances that clear a badge without opening
- * the channel (the channel context menu, "Mark All as Read").
+ * the channel (the channel context menu, "Mark Server as Read").
  *
  * Opening a channel already marks it read via `channel_focus`. That message
  * also rebinds the connection's focused channel, so it is the wrong tool here:
@@ -101,14 +101,25 @@ export function hasUnread(channelId: number): boolean {
   return dm !== undefined && (dm.unreadCount > 0 || dm.mentionCount > 0);
 }
 
-/** Ids of every channel and DM that currently shows a badge. */
-export function unreadChannelIds(): readonly number[] {
+export interface UnreadScope {
+  /** Whether direct messages are included. Default true. The server header's
+   *  "Mark Server as Read" passes false: DMs are not part of the server. */
+  readonly includeDms?: boolean;
+}
+
+/** Ids of every channel and DM that currently shows a badge (DMs left out when
+ *  `includeDms` is false — their channels-store mirror rows too). */
+export function unreadChannelIds(opts: UnreadScope = {}): readonly number[] {
+  const includeDms = opts.includeDms ?? true;
   const ids = new Set<number>();
   for (const ch of channelsStore.getState().channels.values()) {
+    if (!includeDms && ch.type === "dm") continue;
     if (ch.unreadCount > 0 || ch.mentionCount > 0) ids.add(ch.id);
   }
-  for (const dm of dmStore.getState().channels) {
-    if (dm.unreadCount > 0 || dm.mentionCount > 0) ids.add(dm.channelId);
+  if (includeDms) {
+    for (const dm of dmStore.getState().channels) {
+      if (dm.unreadCount > 0 || dm.mentionCount > 0) ids.add(dm.channelId);
+    }
   }
   return [...ids];
 }
@@ -146,8 +157,9 @@ function unreadTotal(channelId: number): number {
 }
 
 /**
- * Mark every unread channel and DM read. Returns how many were marked, so the
- * caller can stay silent when there was nothing to do.
+ * Mark every unread channel and DM read (DMs skipped with `{ includeDms: false }`,
+ * for the server-scoped action). Returns how many were marked, so the caller can
+ * stay silent when there was nothing to do.
  *
  * Sent in bursts of `MARK_ALL_READ_BURST_SIZE` spaced `MARK_ALL_READ_BURST_INTERVAL_MS`
  * apart — see the budget note above. Each channel's local badge is cleared at
@@ -163,12 +175,12 @@ function unreadTotal(channelId: number): number {
  * scheduling and firing in the same tick — so it stays unconditional, as does
  * every other caller of `markChannelRead`.
  */
-export function markAllRead(): number {
+export function markAllRead(opts: UnreadScope = {}): number {
   // A second click supersedes the first: its own `unreadChannelIds()` already
   // covers everything the earlier burst had not sent yet, so keeping the old
   // timers would only duplicate sends and spend budget twice.
   cancelPendingMarkAll();
-  const ids = unreadChannelIds();
+  const ids = unreadChannelIds(opts);
   for (const [i, id] of ids.entries()) {
     const delay = Math.floor(i / MARK_ALL_READ_BURST_SIZE) * MARK_ALL_READ_BURST_INTERVAL_MS;
     if (delay === 0) {

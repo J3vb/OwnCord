@@ -1,20 +1,29 @@
 # Client Architecture (Tauri)
 
-**Verified against:** `origin/dev` at `4a70f7b8`, 2026-09-25.
+**Verified against:** `origin/dev` at `ac6ffc4e`, 2026-10-13.
 
-Desktop client built on Tauri v2: a TypeScript webview (~70k LOC of non-test
-sources, vanilla TS — no UI framework) plus ~13k LOC of Rust across 26 modules.
-State lives in a
-hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
-microtask-batched notifications, selector subscriptions). Components are
-factory functions returning `{ element, mount, destroy }` built with the
-`@lib/dom` helpers; a 2-page state machine inline in `src/main.ts`
-(`activePage` + `navigate()`) switches between the Connect and Main pages.
+This page maps the desktop client as it is built today: its modules, stores,
+Rust commands and test tooling. Read it before you add a module or move code
+between layers. For how each view should _behave_, see [ux/](ux/README.md).
 
-> `docs/client-architecture.md` is a 15-line redirect stub kept for old links;
-> this document is the client architecture reference. The abandoned SolidJS
-> beachhead that used to live under `src/components/solid/` was fully removed
-> (audit A-2026-07-12, closed 2026-07-19).
+The client is built on Tauri v2. It has two halves:
+
+- a TypeScript webview: about 90,000 lines of non-test source, plain
+  TypeScript with no UI framework;
+- a Rust backend: about 23,000 lines across 39 source files in
+  `src-tauri/src/` (including the Linux `native_voice/` module).
+
+State lives in a hand-written reactive store (`src/lib/store.ts`). It uses
+immutable updates, batches notifications in a microtask, and lets callers
+subscribe to a selected slice. Components are factory functions that return
+`{ element, mount, destroy }`, built with the `@lib/dom` helpers. A small
+two-page state machine in `src/main.ts` (`activePage` and `navigate()`)
+switches between the Connect page and the Main page.
+
+> `docs/client-architecture.md` is a redirect page kept for old links. This
+> document is the client architecture reference. The abandoned SolidJS code
+> that used to live under `src/components/solid/` was removed (audit
+> A-2026-07-12, closed 2026-07-19).
 
 ## D7 — Module map
 
@@ -29,6 +38,8 @@ flowchart TB
         WSP["ws_proxy.rs<br/>WSS proxy"]
         HTP["http_proxy.rs<br/>loopback TCP→TLS REST tunnel"]
         LKP["livekit_proxy.rs<br/>loopback TLS tunnel (pin required)"]
+        EXT["external_content.rs<br/>broker for previews, external<br/>images, GIFs, oEmbed"]
+        NV["native_voice/<br/>LiveKit Rust SDK (Linux only)"]
         CRED["credentials.rs + secret_store.rs<br/>OS keychain + verified fallback"]
         PTT["ptt.rs<br/>push-to-talk polling"]
         UPDC["update_commands.rs<br/>self-hosted updater"]
@@ -38,12 +49,12 @@ flowchart TB
     subgraph comm ["Communication layer (src/lib)"]
         API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
         WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
-        DISP["dispatcher.ts<br/>36 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
-        LKS["livekitSession.ts (0.9k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
+        DISP["dispatcher.ts<br/>about 40 msg types → store mutators<br/>(handlers in features/*/wsHandlers.ts)"]
+        LKS["livekitSession.ts (1.1k LOC facade)<br/>+ features/voice/<br/>voice state machine"]
         LKE["livekitE2EE.ts (1.0k LOC facade)<br/>+ features/voice/e2ee*<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
 
-    subgraph state ["Stores (9 singletons)"]
+    subgraph state ["Stores (src/stores, 10 singletons)"]
         AUTH2["auth"]
         CHAN["channels<br/>(incl. roles)"]
         MSG["messages<br/>(reducers in features/messaging/)"]
@@ -52,13 +63,14 @@ flowchart TB
         DM["dm"]
         BLK["blocks"]
         EMO["emoji"]
+        GIF["gifFavorites"]
         UIS["ui"]
     end
 
     subgraph ui ["UI (imperative DOM)"]
         CP["ConnectPage<br/>profiles + health polling"]
-        MP["MainPage<br/>SidebarArea / ChatArea /<br/>15 controllers"]
-        COMP["~60 component files<br/>message-list, settings tabs,<br/>voice widgets, overlays"]
+        MP["MainPage<br/>SidebarArea / ChatArea /<br/>controllers in pages/main-page/"]
+        COMP["~70 component files<br/>message-list, settings tabs,<br/>voice widgets, overlays"]
     end
 
     MAIN --> CP
@@ -71,10 +83,11 @@ flowchart TB
     HTP --> TOFU
     LKP --> TOFU
     WSC --> DISP
-    DISP --> AUTH2 & CHAN & MSG & MEM & VOICE & DM & BLK & EMO & UIS
+    DISP --> AUTH2 & CHAN & MSG & MEM & VOICE & DM & BLK & EMO & GIF & UIS
     state --> ui
     LKS --> LKP
     LKS --> LKE
+    LKS -.->|"Linux"| NV
     VOICE --> LKS
     MP --> COMP
     WSP --> SRV["Go server"]
@@ -87,17 +100,35 @@ flowchart TB
     VOICE -.-> MEM
 ```
 
-**What this shows.** Data flows one way in the happy path: WS frame → Rust
-`ws_proxy` → `ws.ts` → `dispatcher.ts` → store mutators → subscribed components
-re-render. All three network paths — WebSocket, REST, and LiveKit — terminate
-TLS inside Rust proxies that share one TOFU core (`tofu.rs`): the WS and HTTP
-proxies use a capture-then-decide verifier, and the LiveKit proxy refuses to
-start without an existing pin. Deciding never writes a pin — a first
-connection is _rejected_ and surfaced to the user as a blocking trust prompt
-before any pin is stored (the former auto-pin-on-first-use behavior was
-removed in the 2026-07-22 security remediation). The remaining dashed edges
-mark cross-store coupling (auth→voice→members) — known structural debt, not
-yet scheduled.
+**What this shows.** In the normal case, data flows one way:
+
+1. a WebSocket frame arrives at the Rust `ws_proxy`;
+2. `ws.ts` parses it;
+3. `dispatcher.ts` routes it to store mutators;
+4. subscribed components re-render.
+
+The 10 stores in the diagram are the ones in `src/stores/`. Some features also
+keep a domain store of their own (`src/features/moderation/store.ts`,
+`src/features/safety/store.ts`, `src/features/message-requests/store.ts`);
+the dispatcher is their only writer from the WebSocket too.
+
+All three paths to your own server — WebSocket, REST and LiveKit — end their
+TLS inside Rust proxies that share one TOFU module (`tofu.rs`). The WebSocket
+and HTTP proxies use a "capture, then decide" verifier. The LiveKit proxy
+refuses to start without an existing pin. Deciding never writes a pin: a first
+connection is _rejected_ and shown to the user as a blocking trust prompt.
+Only the user's Accept stores the pin. (The old behaviour that pinned silently
+on first use was removed in the 2026-07-22 security fixes.)
+
+Content that other users link to takes a different path: the
+`external_content.rs` broker. It reaches only public addresses and never
+carries the session token. On Linux, voice and video run in the Rust
+`native_voice/` module instead of the webview
+([voice-e2ee.md](voice-e2ee.md)).
+
+The dashed edges between stores mark cross-store coupling
+(auth → voice → members). This is known structural debt that is not yet
+scheduled.
 
 ### Key mechanisms
 
@@ -105,15 +136,15 @@ yet scheduled.
 | ------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reconnect           | `src/lib/ws.ts`                                                                        | Exponential backoff (cap 30s), heartbeat 30s, `last_seq` replay + bounded dedup set, generation counter invalidates stale listeners                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Cert trust          | `src-tauri/src/tofu.rs` (shared by `ws_proxy.rs`, `http_proxy.rs`, `livekit_proxy.rs`) | TOFU with explicit consent: fingerprints stored per host in `certs.json`, but _deciding never writes a pin_ — first use and mismatch both reject the connection and emit a `cert-tofu` event; the TS side shows a blocking modal (`CertMismatchModal.ts`) and only an explicit Accept stores/updates the pin — except a routine public-CA renewal, where the pinned and the new leaf are both web-PKI valid for the same DNS name (recorded in `cert_web_pki.json`) and `tofu::evaluate` re-pins silently. The updater uses a fourth, host-scoped verifier (pin for the OwnCord host, WebPKI for GitHub).                                         |
-| Voice E2EE identity | `src/lib/identity.ts` + `src-tauri/src/commands.rs`                                    | Long-term ECDSA identity key in the OS keyring (`identity:{userId}@{host}`); peer identity keys pinned in `identity_pins.json`; changed peer key that signed the announce → accepted and re-pinned, with a persistent notice and a "key changed" badge carrying the safety number; missing key or bad signature → blocked, identity-mismatch modal                                                                                                                                                                                                                                                                                                |
+| Voice E2EE identity | `src/lib/identity.ts`, `src-tauri/src/credentials.rs` (key) and `commands.rs` (pins)   | Long-term ECDSA identity key in the OS keyring (`identity:{userId}@{host}`); peer identity keys pinned in `identity_pins.json`; changed peer key that signed the announce → accepted and re-pinned, with a persistent notice and a "key changed" badge carrying the safety number; missing key or bad signature → blocked, identity-mismatch modal                                                                                                                                                                                                                                                                                                |
 | Credentials         | `src-tauri/src/credentials.rs`                                                         | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS — the frontend gets `has_password` and shows a placeholder, and `login_with_saved_password` does the login inside Rust. `save_credential` preserves the stored password unless `clear_password` is set, so a re-save never has to resend it                                                                                                                                                                                                                                                                                                                 |
-| Multi-server        | `src/lib/profiles.ts`                                                                  | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| HTTP capability     | `src-tauri/capabilities/default.json`                                                  | `http:allow-fetch` is the only URL-scoped identifier (the other two `fetch_*` commands take a validated `ResourceId`); allows `https://*` + `http://127.0.0.1:*`, denies https loopback. Wildcard is required by link previews — see [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md)                                                                                                                                                                                                                                                                                                                           |
+| Multi-server        | `src/lib/profiles.ts` + `src/main.ts`                                                  | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| HTTP capability     | `src-tauri/capabilities/default.json`                                                  | `http:allow-fetch` is the only URL-scoped identifier (the other `fetch_*` commands take an already-validated `ResourceId`). It allows only `http://127.0.0.1:*`, the loopback TOFU proxies, and denies https loopback. Link previews and other external content no longer need a wildcard: they go through the `external_content.rs` broker instead. Background: [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md)                                                                                                                                                                                               |
 | Updates             | `src/lib/updater.ts` + `update_commands.rs`                                            | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified. On Windows the NSIS pre-install hook (`src-tauri/nsis/hooks.nsh`) waits for the old executable to unlock before the installer overwrites it, so a first update after install cannot skip the copy and relaunch the old binary                                                                                                                                                                                                                                                                                                      |
 | Settings            | `commands.rs` + `src/lib/preferences.ts`                                               | Split persistence: Rust store (`settings.json`, key-allowlisted) _and_ raw `localStorage` for UI prefs/themes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Local stores        | `src-tauri/src/json_store.rs`                                                          | `settings.json`, `certs.json`, `cert_web_pki.json`, `identity_pins.json` and `credential_fallback.json` in the app data dir. Every save writes a temp file, fsyncs it and renames it over the original, so a crash never leaves a torn file; clippy bans truncating writers (`fs::write`, `File::create`, `OpenOptions::truncate`, `tokio::fs::write`) elsewhere. A file that does not parse is copied to `<name>.corrupt-<unix seconds>` and logged; the two pin stores then fail closed until it is removed and the client restarted, the others start empty. A file that cannot be read, or whose copy fails, never opens, whatever the store. |
 | Theming             | `src/lib/themes.ts` + `styles/tokens.css`                                              | CSS custom properties; 4 built-in themes + custom overrides                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| GIF picker          | `src/lib/gifProvider.ts` + `components/GifPicker.ts`                                   | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN.                                                                                                                                                                                                                                             |
+| GIF picker          | `src/lib/gifProvider.ts` + `components/GifPicker.ts`                                   | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN, and the GIF images themselves are fetched through the external-content broker.                                                                                                                                                              |
 
 #### Lifecycle ownership
 
@@ -178,24 +209,35 @@ no growth across cycles, because the webview counters cannot see Rust memory.
 
 ### Quality tooling
 
-224 test files (~83k LOC — about 2× the source): Vitest unit + integration
-(70% coverage gate, blocking in CI), Playwright E2E (two blocking web jobs —
-`client-e2e-parity` runs the full 694-test suite against the production bundle,
-and `client-e2e` runs a 137-test smoke set against the Vite dev server, widening
-to the full suite when the specs or fixtures themselves change — plus a native
-Tauri suite that **is** wired to CI: the `client-native` job on `windows-latest`,
-a 100-minute budget, on pull requests to `main` and `dev`, which builds the app,
-runs the `native-core` Playwright project, then the auth, UI and
-native-extra projects listed in `docs/testing-behavior.md`, then the
-signed-NSIS install/relaunch script; and a four-target installed-artifact smoke,
-`client-artifact-smoke.yml`, which installs the Windows x64/ARM64 NSIS and
-Linux x64/ARM64 AppImage + deb bundles on their own architecture and drives
-install, boot, connect, media and recovery — nightly on unsigned builds, and in
-`release.yml` before `publish` on the signed bundles, where it also updates from
-the previous release and rolls back), Stryker mutation testing
-(manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
-strict `tsc`. Rust: the `cargo test --lib` suite lives beside the code across 22
-of the 26 modules, blocking in CI together with `cargo clippy -D warnings`.
+The client has about 540 test files, roughly 208,000 lines (about 2.3× the
+source): 411 Vitest files and 132 Playwright specs.
+
+- **Vitest** unit and integration tests, with coverage floors that block CI
+  (70% for branches, functions and lines; the statements floor comes from
+  `Client/coverage-floor.json`).
+- **Playwright web E2E**, two blocking jobs:
+  - `client-e2e-parity` runs the full 694-test suite against the production
+    bundle;
+  - `client-e2e` runs a 137-test smoke set against the Vite dev server. It
+    widens to the full suite when the specs or fixtures themselves change.
+- **Native Tauri suite**, the `client-native` job on `windows-latest` (a
+  100-minute budget, on pull requests to `main` and `dev`). It builds the app,
+  runs the `native-core` Playwright project, then the auth, UI and
+  native-extra projects listed in `docs/testing-behavior.md`, then the
+  signed-NSIS install and relaunch script.
+- **Installed-artifact smoke**, `client-artifact-smoke.yml`, on four targets.
+  It installs the Windows x64/ARM64 NSIS and the Linux x64/ARM64 AppImage and
+  deb bundles, each on its own architecture, and drives install, boot,
+  connect, media and recovery. It runs nightly on unsigned builds, and in
+  `release.yml` before `publish` on the signed bundles. There it also updates
+  from the previous release and rolls back.
+- **Stryker mutation testing**: a sharded nightly baseline
+  (`nightly-test-depth.yml`), plus a pull-request step for the
+  `permissions.ts` hotspot when that code changes.
+- **Static checks**: oxlint, type-checked ESLint, Prettier, Knip (blocking)
+  and strict `tsc`.
+- **Rust**: the `cargo test --lib` suite lives beside the code in 33 of the 39
+  source files. It blocks CI together with `cargo clippy -D warnings`.
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),

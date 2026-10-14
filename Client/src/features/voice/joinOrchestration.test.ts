@@ -53,6 +53,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     resolveLiveKitUrl: vi.fn(async (p: string) => p),
     restoreLocalVoiceState: vi.fn(async () => {}),
     reapplyMuteGain: vi.fn(),
+    restateSelfVoiceState: vi.fn(),
     startTokenRefreshTimer: vi.fn(),
     syncModuleRooms: vi.fn(),
     leaveVoice: vi.fn(() => {
@@ -164,6 +165,36 @@ describe("connectAndSetup", () => {
     await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
 
     expect(host.sweepPublications).toHaveBeenCalledExactlyOnceWith(room);
+  });
+
+  it("restates the member's own mute and deafen once the join is connected", async () => {
+    store.currentChannelId = 6;
+    const { host, join } = setup();
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
+
+    expect(host.restateSelfVoiceState).toHaveBeenCalledOnce();
+    expect(host.restateSelfVoiceState.mock.invocationCallOrder[0]).toBeGreaterThan(
+      host.restoreLocalVoiceState.mock.invocationCallOrder[0] ?? Infinity,
+    );
+  });
+
+  it("leaves the restate to the switch when the user already moved on", async () => {
+    store.currentChannelId = 99;
+    const { host, join } = setup();
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(true);
+
+    expect(host.restateSelfVoiceState).not.toHaveBeenCalled();
+  });
+
+  it("does not restate for a join that fails", async () => {
+    const { host, join } = setup();
+    host.restoreLocalVoiceState.mockRejectedValueOnce(new Error("mic denied"));
+
+    await expect(join.connectAndSetup("t", "/livekit", 6)).resolves.toBe(false);
+
+    expect(host.restateSelfVoiceState).not.toHaveBeenCalled();
   });
 
   it("SRE-M2: records a failure after the room connected at stage activate", async () => {

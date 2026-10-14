@@ -149,8 +149,8 @@ describe("SidebarArea — Mark All as Read", () => {
 
     expect(button().tagName).toBe("BUTTON");
     expect(button().getAttribute("type")).toBe("button");
-    expect(button().getAttribute("aria-label")).toBe("Mark All as Read");
-    expect(button().getAttribute("title")).toBe("Mark All as Read");
+    expect(button().getAttribute("aria-label")).toBe("Mark Server as Read");
+    expect(button().getAttribute("title")).toBe("Mark Server as Read");
     expect(button().textContent).toBe("");
     expect(button().querySelector("svg")).not.toBeNull();
   });
@@ -178,7 +178,7 @@ describe("SidebarArea — Mark All as Read", () => {
     });
   });
 
-  it("shows the button for a DM-only unread, whose badge lives in dm.store", async () => {
+  it("does not show the button for a DM-only unread: DMs are not part of the server", async () => {
     mount([CHANNELS[1]!]);
     expect(shown(button())).toBe(false);
 
@@ -200,8 +200,38 @@ describe("SidebarArea — Mark All as Read", () => {
     }));
 
     // Store notifications are batched on a microtask.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(shown(button())).toBe(false);
+  });
+
+  it("leaves DM unread, DM read state and the DM badge alone when clicked", async () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 50,
+          recipient: { id: 9, username: "alice", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 2,
+          mentionCount: 1,
+        },
+      ],
+    }));
+    mount(CHANNELS);
+
+    button().click();
+
+    expect(sent).toEqual([1]);
+    expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
+    expect(dmStore.getState().channels[0]?.unreadCount).toBe(2);
+    expect(dmStore.getState().channels[0]?.mentionCount).toBe(1);
     await vi.waitFor(() => {
-      expect(shown(button())).toBe(true);
+      expect(shown(button())).toBe(false);
     });
   });
 

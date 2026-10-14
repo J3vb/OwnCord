@@ -11,7 +11,7 @@
 
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
-import { installRealTransport } from "../support/real-transport";
+import { installRealTransport, TUNNEL_TOKEN } from "../support/real-transport";
 import type { TestServer } from "../support/server";
 import { openSettings } from "../helpers";
 
@@ -21,9 +21,10 @@ async function shot(page: Page, name: string): Promise<void> {
   if (EVIDENCE) await page.screenshot({ path: `${EVIDENCE}/${name}.png` });
 }
 
-/** Record every HTTP request and broker invocation the page makes from now on. */
+/** Record every HTTP request and broker invocation the page makes from now on,
+ *  with the tunnel's path token removed so lines read as server paths. */
 async function recordTraffic(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  await page.evaluate((token) => {
     const w = window as unknown as {
       __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
       __traffic: string[];
@@ -33,13 +34,17 @@ async function recordTraffic(page: Page): Promise<void> {
     w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
       if (command === "plugin:http|fetch") {
         const { method, url } = args.clientConfig as { method: string; url: string };
-        w.__traffic.push(`${method} ${new URL(url).pathname}${new URL(url).search}`);
+        const { pathname, search } = new URL(url);
+        const path = pathname.startsWith(`/${token}/`)
+          ? pathname.slice(token.length + 1)
+          : pathname;
+        w.__traffic.push(`${method} ${path}${search}`);
       } else if (command.startsWith("external_")) {
         w.__traffic.push(`broker ${command}`);
       }
       return inner(command, args);
     };
-  });
+  }, TUNNEL_TOKEN);
 }
 
 /** Content requests (history, pins, search, attachments) and broker calls for `channelId`. */

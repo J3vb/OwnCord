@@ -4,6 +4,7 @@ import type { NativeVoiceScreenSources } from "../../../platform/contracts/nativ
 interface FakePickOptions {
   readonly sources: readonly unknown[];
   readonly portal: boolean;
+  readonly sourceOnly?: boolean;
 }
 type FakePick = {
   source: string;
@@ -24,7 +25,13 @@ vi.mock("../../../platform/desktop", () => ({
   desktop: { nativeVoice: { screenSources: () => Promise.resolve(host.sources) } },
 }));
 
-import { pickScreenSource } from "./screenPicker";
+import {
+  armScreenRestart,
+  disarmScreenRestart,
+  noteChangedSource,
+  pickChangeSource,
+  pickScreenSource,
+} from "./screenPicker";
 import { setScreenSourcePicker } from "./screenPickerSlot";
 
 const x11: NativeVoiceScreenSources = {
@@ -137,5 +144,107 @@ describe("pickScreenSource", () => {
   it("resolves null when no picker is registered (headless), without touching the host", async () => {
     setScreenSourcePicker(null);
     await expect(pickScreenSource()).resolves.toBeNull();
+  });
+});
+
+describe("armScreenRestart (WP 1C-6)", () => {
+  beforeEach(() => {
+    host.sources = x11;
+    setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));
+  });
+  afterEach(() => {
+    disarmScreenRestart();
+    setScreenSourcePicker(null);
+  });
+
+  it("reuses the last pick, with no dialog, while the host still lists its source", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    const first = await pickScreenSource();
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    const shown = vi.fn(() => null);
+    host.pick = shown;
+    await expect(pickScreenSource()).resolves.toEqual(first);
+    expect(shown).not.toHaveBeenCalled();
+    // Used once: the next share asks again.
+    await expect(pickScreenSource()).resolves.toBeNull();
+    expect(shown).toHaveBeenCalledOnce();
+  });
+
+  it("refuses when the shared window is gone", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    await pickScreenSource();
+    host.sources = { portal: false, sources: x11.sources.filter((s) => s.id !== "window:81") };
+
+    await expect(armScreenRestart()).resolves.toBe(false);
+  });
+
+  it("refuses on Wayland, where only the portal dialog can pick", async () => {
+    host.sources = { portal: true, sources: [] };
+    host.pick = () => ({ source: "portal", quality: "medium", fps: 30 });
+    await pickScreenSource();
+
+    await expect(armScreenRestart()).resolves.toBe(false);
+  });
+
+  it("disarming puts the dialog back", async () => {
+    host.pick = () => ({ source: "screen:277", quality: "medium", fps: 30 });
+    await pickScreenSource();
+    await armScreenRestart();
+    disarmScreenRestart();
+    const shown = vi.fn(() => null);
+    host.pick = shown;
+
+    await expect(pickScreenSource()).resolves.toBeNull();
+    expect(shown).toHaveBeenCalledOnce();
+  });
+});
+
+describe("pickChangeSource", () => {
+  beforeEach(() => {
+    host.sources = x11;
+    setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));
+  });
+  afterEach(() => {
+    disarmScreenRestart();
+    setScreenSourcePicker(null);
+  });
+
+  it("asks for the source only, and a later restart shares the new one", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    const first = await pickScreenSource();
+    host.pick = (opts) => {
+      expect(opts.sourceOnly).toBe(true);
+      return { source: "screen:277", quality: "low", fps: 5 };
+    };
+    await expect(pickChangeSource()).resolves.toBe("screen:277");
+    noteChangedSource("screen:277");
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    // Same capture and encoding as the share's own pick, the new source.
+    await expect(pickScreenSource()).resolves.toEqual({ ...first, source: "screen:277" });
+  });
+
+  it("leaves the pick to the portal on Wayland, with no dialog", async () => {
+    host.sources = { portal: true, sources: [] };
+    const shown = vi.fn(() => null);
+    host.pick = shown;
+    await expect(pickChangeSource()).resolves.toBe("portal");
+    expect(shown).not.toHaveBeenCalled();
+  });
+
+  it("a picked source the host never swapped in leaves the restart on the old one", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    const first = await pickScreenSource();
+    host.pick = () => ({ source: "screen:277", quality: "low", fps: 5 });
+    await expect(pickChangeSource()).resolves.toBe("screen:277");
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    await expect(pickScreenSource()).resolves.toEqual(first);
+  });
+
+  it("resolves null when the dialog is dismissed", async () => {
+    host.pick = () => null;
+    await expect(pickChangeSource()).resolves.toBeNull();
   });
 });

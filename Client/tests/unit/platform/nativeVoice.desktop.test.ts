@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   preview: { width: 0, height: 0, frames: "" },
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
+  changeRefusal: null as string | null,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -32,6 +33,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "native_voice_screen_sources") return Promise.resolve(state.screen.sources);
     if (cmd === "native_voice_start_screen") return Promise.resolve(state.screen.started);
     if (cmd === "native_voice_publish_screen") return Promise.resolve(state.screen.sid);
+    if (cmd === "native_voice_change_screen") {
+      const refusal = state.changeRefusal;
+      state.changeRefusal = null;
+      // Tauri rejects with the command's error string.
+      return refusal === null ? Promise.resolve(state.screen.started) : Promise.reject(refusal);
+    }
     return Promise.resolve();
   },
 }));
@@ -68,6 +75,9 @@ describeNativeVoiceSuite(async () => {
       },
       sharesScreenAs(sources, started, sid) {
         state.screen = { sources, started, sid };
+      },
+      refusesScreenChange(reason) {
+        state.changeRefusal = reason;
       },
       commands: () => state.commands,
       async emits(envelope) {

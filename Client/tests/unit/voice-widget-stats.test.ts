@@ -81,8 +81,6 @@ function mount(): { widget: ReturnType<typeof createVoiceWidget>; container: HTM
   document.body.appendChild(container);
   const widget = createVoiceWidget({
     onDisconnect: vi.fn(),
-    onMuteToggle: vi.fn(),
-    onDeafenToggle: vi.fn(),
     onCameraToggle: vi.fn(),
     onScreenshareToggle: vi.fn(),
   });
@@ -243,11 +241,12 @@ describe("VoiceWidget connection panel (Option C)", () => {
     widget.destroy?.();
   });
 
-  it("keeps five equal controls with the screen-share state on the button, no text label", () => {
+  it("keeps three equal controls with the screen-share state on the button, no text label", () => {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     const { widget, container } = mount();
 
-    expect(container.querySelectorAll(".vw-controls button")).toHaveLength(5);
+    // Mute and deafen moved to the user panel (WP 1D-1).
+    expect(container.querySelectorAll(".vw-controls button")).toHaveLength(3);
     const shareBtn = container.querySelector('[aria-label="Screenshare"]')!;
     expect(shareBtn.getAttribute("aria-pressed")).toBe("true");
     expect(shareBtn.classList.contains("active-ctrl")).toBe(true);

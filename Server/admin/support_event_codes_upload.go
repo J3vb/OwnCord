@@ -9,6 +9,7 @@ import "maps"
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
 		"failed to clean up refused upload file": "failed_to_clean_up_refused_upload",
+		"failed to delete discarded upload":      "failed_to_delete_discarded_upload",
 		"failed to remove orphaned avatar row":   "failed_to_remove_orphaned_avatar_row",
 	})
 }

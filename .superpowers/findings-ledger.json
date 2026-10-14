@@ -1,5 +1,5 @@
 {
-  "nextId": 487,
+  "nextId": 489,
   "findings": [
     {
       "id": "OC-0001",
@@ -11266,6 +11266,54 @@
         "revertProof": "pass (disabling the broadcastUnban call reproduced the miss: BroadcastMemberUnban calls = [], want [3]; restoring it is green)"
       },
       "note": "Found in the BUG-09 second pass over the server moderation/appeal service (D11g). Distinct from OC-0058, which fixed the admin unban path; this is the appeal-overturn sibling. D11g is now complete. Its stop rule is two consecutive dry rounds over the same full scope: the server moderation handlers and db wrappers, the admin SPA roles-channels.js/server.js/setup.js/boot, the client B9 moderation/reports/safety/message-requests views, and the Linux native video/screen paths (video.rs, screen.rs, session.rs publication paths, videoRenderer.ts, cameraUplink.ts, screenTrack.ts, screenPicker.ts, devices.ts, nativeRoom.ts, lib/screenShare.ts). The earlier passes that covered only part of that scope (a native video/screen-only pass and a re-sweep of just the moderation, admin SPA and client B9 surfaces) came back dry but are not counted toward it. Full-scope round A came back dry, then full-scope rounds B and C (rounds four and five of the pass overall) came back dry back-to-back, which meets the stop rule. One suspected low note from the moderation/admin/client re-sweep was not confirmed and is not filed: ReportService.PublicIDFor maps any GetReport error to ErrNotFound, so a transient read failure after the report already committed could return 404 (no deterministic repro)."
+    },
+    {
+      "id": "OC-0487",
+      "title": "An admin backup restore makes the restarting server exit 1, so the nightly restore drill (phase R) has failed since 2026-10-02",
+      "file": "Server/internal/app/conn_writes.go",
+      "line": 34,
+      "severity": "low",
+      "why": "POST /admin/api/backups/{name}/restore closes the database before it requests the restart. Teardown then runs the conn-writes close step added in #2049, whose final flush of session touches and connection stamps hits the closed handle (\"sql: database is closed\"). App.Close reports that as its first error, runServer returns it and main exits 1 after the handoff. In spawn mode the replacement is still started and the restore takes effect, and the common supervisor policies (Docker restart, systemd Restart=always/on-failure, NSSM) relaunch on exit 1 too, so the visible effect is an ERROR line and a non-zero exit on every restore. The restore drill treats that exit as a broken restart handoff, and because runDrills stops at the first failed phase, phases C, D and S have not run nightly since.",
+      "repro": "cd Server && go build -o /tmp/chatserver . && go run ./cmd/smoke -drills -phases R /tmp/chatserver: fails with \"the server exited with exit status 1, want a clean exit for the restart handoff\", and the server log ends with \"server exited with error\" error=\"stopping conn-writes: ... StampConnections begin: sql: database is closed\". Same in nightly upgrade-rehearsal run 38044722865 (2026-10-10).",
+      "evidence": "Server/admin/handlers_backup.go closes the database (closeDatabase) before commitRestartPending/requestRestart. Server/internal/app/conn_writes.go startConnWrites' close step returned w.Flush(ctx). Server/internal/app/app.go Close returns the first step error. Server/main.go exits 1 when runServer returned an error and the handoff did not wait. Introduced by fcbf6671 (#2049, 2026-10-01); shipped in v2.2.0-beta.1, beta.2 and beta.3. Root cause is product code, not harness drift.",
+      "suggestedFix": "Let the conn-writes close step know the database handle was already closed (db.DB.Closed) and drop the pending writes then, since they belong to the replaced database; keep failing teardown when the flush fails against an open database.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-11",
+      "hunt": "roadmap-wp-0-1-2026-10-11",
+      "lens": "lifecycle",
+      "finder": "wp-0-1",
+      "fixedDate": "2026-10-11",
+      "fix": {
+        "commit": "7ae99d09",
+        "test": "Server/internal/app/conn_writes_test.go (TestConnWritesStop_DatabaseClosedByRestore, plus TestConnWritesStop_FlushFailureStillReported as the negative control); drill phase R passes locally",
+        "revertProof": "pass (before the fix TestConnWritesStop_DatabaseClosedByRestore failed with the nightly's error: flushing connection stamps: StampConnections begin: sql: database is closed; phase R failed on the base binary and passed on the fixed one)"
+      },
+      "note": "Roadmap phase 0, WP 0-1 (architecture audit ARCH-001). Phase C also passes locally on the fixed binary; phases D (needs a size-limited filesystem) and S (needs livekit-server) were left to the nightly."
+    },
+    {
+      "id": "OC-0488",
+      "title": "The admin backup restore could leave a write-ahead log beside the restored file, or copy while a connection was still open, so the next open could replay old pages onto the restored database",
+      "file": "Server/admin/handlers_backup.go",
+      "line": 300,
+      "severity": "medium",
+      "why": "Affected property: after a restore the database must be exactly the backup. The admin restore ran wal_checkpoint(TRUNCATE) and ignored its result, closed the pools, and copied the backup over the main file without removing <db>-wal and <db>-shm (the CLI restore already removed them). database/sql Close only closes idle connections; a connection mid-query closes when its query returns, and the last SQLite connection to close checkpoints its log into the main file. A log left beside the file, or a connection that closed after the copy, could put pre-restore pages into the restored file.",
+      "repro": "Server/admin/handlers_backup_restore_wal_test.go TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL: writers and a briefly held reader run across the restore and a valid log is left beside the file after the pools close. Before the fix the -wal survived the restore and the reopened database had 5 rows from the stale log instead of the backup's 50.",
+      "evidence": "Server/admin/handlers_backup.go handleRestoreBackup (checkpoint result discarded, no sidecar removal); Server/restore_cli.go replaceLiveDatabase (removes them); Go database/sql DB.Close closes only free connections. Architecture audit ARCH-002 (alternative C).",
+      "suggestedFix": "Read the checkpoint result and refuse with 409 before anything is closed or announced when the log could not be emptied; after Close wait until both pools report no open connection; remove -wal/-shm through a helper shared with the CLI before copying.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-12",
+      "hunt": "roadmap-wp-0-3-2026-10-12",
+      "lens": "data-integrity",
+      "finder": "wp-0-3",
+      "fixedDate": "2026-10-12",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_backup_restore_wal_test.go (TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL, TestHandleRestoreBackup_RefusesWhenCheckpointBusy)",
+        "revertProof": "pass (before the fix the busy test got 200 instead of 409, and the load test found the -wal beside the restored file and 5 rows instead of 50)"
+      },
+      "note": "Roadmap phase 0, WP 0-3 (stop-gap). The staged restore is Phase 5."
     }
   ]
 }

@@ -215,6 +215,24 @@
 .toast-count:empty {
   display: none;
 }
+.toast-action {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+}
+.toast-action:hover {
+  background: var(--bg-hover);
+}
+.toast-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .toast-close {
   flex-shrink: 0;
   margin-left: 4px;
@@ -551,4 +569,41 @@
 }
 .report-dialog .btn-modal-save[aria-disabled="true"] {
   cursor: progress;
+}
+
+/* ── "What's new" dialog after an update ── */
+.whats-new-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.whats-new-eyebrow {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.whats-new-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.whats-new-footer {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.whats-new-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-link);
+  font-weight: 600;
+}
+.whats-new-actions {
+  display: flex;
+  gap: var(--space-2);
 }

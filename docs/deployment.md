@@ -1,39 +1,82 @@
 # Deployment Guide
 
-Production deployment guide for OwnCord server on Windows and Linux.
+This guide is for anyone who runs their own OwnCord server. It covers Windows,
+Linux, Docker and Unraid. It explains how to install the server, keep it
+running, back it up, upgrade it and fix it when something goes wrong.
+
+New to OwnCord? Start with the [Quick Start](quick-start.md). Come back here
+when you are ready to run a server for real.
+
+## On this page
+
+- [Prerequisites](#prerequisites)
+- [Building from Source](#building-from-source) and release downloads
+- [Docker (Linux)](#docker-linux), including [Unraid](#unraid)
+- [First run](#first-run)
+- Running as a service: [Linux (systemd)](#running-as-a-linux-service-systemd)
+  or [Windows](#running-as-a-windows-service)
+- [TLS Setup](#tls-setup) and [Reverse Proxy Topology](#reverse-proxy-topology)
+- [Backup Strategy](#backup-strategy) and [Restore](#restore)
+- [Storage growth](#storage-growth)
+- [Upgrade and Rollback](#upgrade-and-rollback)
+- [Capacity limits](#capacity-limits)
+- [Monitoring](#monitoring) and [When it fails](#when-it-fails)
+- [Auto-Update](#auto-update) and [Verifying a Download](#verifying-a-download)
+- [Firewall and Ports](#firewall-and-ports)
+- [Command-line reference](#command-line-reference)
+- [Hardening Checklist](#hardening-checklist)
+- [Background Maintenance](#background-maintenance) and
+  [Graceful Shutdown](#graceful-shutdown)
 
 ## Prerequisites
 
-- **Windows 10+** (x64) or **Linux** (x64). For how much one server carries on
-  which hardware, see [Capacity](capacity.md)
-- **Go 1.27+** (only if building from source)
-- **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
-- Required port: `8443` (OwnCord HTTPS/WebSocket)
-- Additional ports for voice/video: `7881/TCP`, `50000-60000/UDP` — or a single UDP port when `voice.udp_port` is set (`7880/TCP` is LiveKit's own API endpoint and is not needed — remote clients tunnel signalling through `/livekit`)
-- Additional port for ACME TLS: `80/TCP`
+You need:
+
+- **A computer to run the server.** Windows 10 or later, or Linux. Both x64
+  and ARM64 are supported. For how many people one server can carry on which
+  hardware, see [Capacity](capacity.md).
+- **Go 1.27 or later**, but only if you build from source.
+- **LiveKit**, but only for voice and video. You usually do not need to
+  install it yourself: the server can download and run it for you. See
+  [LiveKit Setup](livekit-setup.md).
+
+Ports the server uses:
+
+- `8443/TCP` for chat, the API and the admin panel. Always needed.
+- `7881/TCP` plus UDP media ports for voice and video. The media ports are
+  `50000-60000/UDP` by default, or one UDP port if you set `voice.udp_port`.
+- `80/TCP` only if you use the built-in Let's Encrypt mode (`tls.mode: acme`).
+
+You do **not** need to open `7880/TCP`. That is LiveKit's own API port.
+Clients reach LiveKit through the server's `/livekit` path on port 8443
+instead. The full list is under [Firewall and Ports](#firewall-and-ports).
 
 ## Building from Source
 
-**Windows:**
+You can build the server yourself or download a ready-made binary.
+
+**Build on Windows:**
 
 ```bash
 cd Server
 go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 ```
 
-**Linux:**
+**Build on Linux:**
 
 ```bash
 cd Server
 CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 ```
 
-- `-s -w` strips debug info (smaller binary)
-- `-X main.version=...` embeds the version string; a source build reports `dev`
-  unless you set it to the tag you built from
-- `CGO_ENABLED=0` produces a fully static binary on Linux
+What the flags do:
 
-Alternatively, download a pre-built binary from GitHub Releases:
+- `-s -w` removes debug information, so the binary is smaller.
+- `-X main.version=...` sets the version the server reports. A source build
+  reports `dev` unless you set it to the tag you built from.
+- `CGO_ENABLED=0` makes a fully static binary on Linux.
+
+**Or download a release.** Each GitHub Release has these server assets:
 
 | Platform      | Asset                           |
 | ------------- | ------------------------------- |
@@ -42,113 +85,146 @@ Alternatively, download a pre-built binary from GitHub Releases:
 | Linux x64     | `chatserver-linux-amd64.tar.gz` |
 | Linux ARM64   | `chatserver-linux-arm64.tar.gz` |
 
-The Linux archives extract to a binary named `chatserver`. Download the asset
-matching your machine's architecture: the server refuses an update built for a
-different one rather than installing something it cannot execute, so a mismatch
-leaves you stranded on the version you installed.
+The Linux archives contain one binary named `chatserver`.
 
-Every asset is built on its own architecture and, before release, run through a
-full lifecycle check — it starts, migrates a fresh database, reports healthy,
-shuts down cleanly on a stop signal, and restarts on the same data directory.
+Pick the asset that matches your machine's architecture. The server refuses
+an update built for a different architecture, so a mismatch leaves you stuck
+on the version you installed.
+
+Every asset is built on its own architecture. Before release, each one goes
+through a full lifecycle check. It must start, migrate a fresh database,
+report healthy, shut down cleanly when asked to stop, and restart on the same
+data.
+
+To check that a download is genuine, see
+[Verifying a Download](#verifying-a-download).
 
 ## Docker (Linux)
 
-The easiest way to run OwnCord on Linux. The compose stack runs the chat server and LiveKit voice/video as separate containers on a shared internal network; the image itself also bundles LiveKit (see [LiveKit in Docker](#livekit-in-docker)), so a single container can serve both. The server image is built `FROM gcr.io/distroless/static-debian12` and runs as a non-root user (`65532`), so there is no shell inside the container.
+Docker is the easiest way to run OwnCord on Linux. You have two choices:
 
-`ghcr.io/j3vb/owncord-server` is published as a single multi-architecture tag
-covering **`linux/amd64` and `linux/arm64`** — a Raspberry Pi 4/5, an Ampere or
-Graviton VPS and an ordinary x86-64 box all pull the same tag and get the right
-image. Both architectures are built and lifecycle-checked on their own hardware
-before any tag is pushed: the image boots on an empty volume, migrates a fresh
-database, reports healthy, shuts down cleanly on `docker stop`, and is then
-replaced by a new container that finds the old data intact.
+- **The compose stack** (`Server/docker-compose.yml`). It runs the chat server
+  and LiveKit as two separate containers on a private network. Use it when you
+  want to restart or upgrade LiveKit on its own.
+- **One container.** The image also bundles LiveKit, so a single container can
+  serve both chat and voice. See [LiveKit in Docker](#livekit-in-docker).
+
+About the image `ghcr.io/j3vb/owncord-server`:
+
+- One tag covers both `linux/amd64` and `linux/arm64`. A Raspberry Pi 4 or 5,
+  an ARM cloud server and an ordinary x86-64 machine all pull the same tag and
+  get the right image.
+- It is built on `gcr.io/distroless/static-debian12`. This base image has no
+  shell and no tools like `curl`, which keeps it small and hard to attack.
+- It runs as a non-root user with user ID `65532`.
+- Before any tag is published, both architectures are tested on their own
+  hardware. The image must boot on an empty volume, migrate a fresh database,
+  report healthy and stop cleanly. A new container must then find the old data
+  intact.
 
 ### Prerequisites
 
-- Docker Engine 24+ and Docker Compose v2
-- `linux/amd64` or `linux/arm64` host
-- Ports available: `8443` (chat), `7881` TCP, and the LiveKit media UDP port(s) — `7882` for the bundled image (its default), or `50000-60000` for the two-container compose stack (see [LiveKit in Docker](#livekit-in-docker))
-
-### Health and privilege
-
-The image declares its own `HEALTHCHECK`, so `docker ps` reports a health state
-even without the compose file. The binary is its own probe (`chatserver
-healthcheck`) because distroless ships no shell or `curl`. Docker only
-_surfaces_ `unhealthy` — it does not restart on it; add an external watchdog if
-you want that.
-
-The shipped `docker-compose.yml` runs the server with no Linux capabilities at
-all and with privilege escalation blocked:
-
-```yaml
-cap_drop:
-  - ALL
-security_opt:
-  - no-new-privileges:true
-```
-
-If you run the container by hand rather than through compose, pass the same
-two: `--cap-drop=ALL --security-opt=no-new-privileges:true`. The server binds
-`8443`, above the privileged-port range, so it needs no capability. A read-only
-root filesystem is _not_ supported: the server writes its default
-`config.yaml` into `/app` on first boot.
+- Docker Engine 24 or later, and Docker Compose v2.
+- A `linux/amd64` or `linux/arm64` host.
+- Free ports: `8443/TCP` for chat, `7881/TCP`, and the voice media UDP
+  port(s). The single-container image uses `7882/UDP` by default. The compose
+  stack uses the range `50000-60000/UDP`. See
+  [LiveKit in Docker](#livekit-in-docker).
 
 ### Quick Start
 
-The `docker-compose.yml`, `.env.example`, `livekit.yaml.example` and
-`config.yaml.example` copied below are **not release assets**: take them from
-the source snapshot attached to each release (or the repository's `Server/`
-directory).
+These steps use the compose stack.
 
-```bash
-cd Server
+The files `docker-compose.yml`, `.env.example`, `livekit.yaml.example` and
+`config.yaml.example` are **not** separate release downloads. Take them from
+the source snapshot attached to each release, or from the repository's
+`Server/` folder.
 
-# 1. Create your secrets file
-cp .env.example .env
-# Edit .env — set LIVEKIT_API_KEY and LIVEKIT_API_SECRET (secret must be 32+ chars)
+1. Go to the folder with the files:
 
-# 2. Create your LiveKit config
-cp livekit.yaml.example livekit.yaml
-# Edit livekit.yaml — paste the same key/secret (use_external_ip detects the
-# public IP; only on a tailnet-only host, replace it with node_ip)
+   ```bash
+   cd Server
+   ```
 
-# 3. Create config.yaml from the shipped example
-cp config.yaml.example config.yaml
-# Edit it for non-secret settings (server name, TLS, etc.). The compose file
-# already points the server at the LiveKit service (voice.livekit_url =
-# "ws://livekit:7880") and turns auto-download off, so no voice edit is needed
-# here. Leave voice.livekit_api_key, voice.livekit_api_secret and
-# voice.livekit_binary unset: compose injects the key and secret from .env, and
-# LiveKit runs as its own container.
+2. Create your secrets file, then edit `.env`. Set `LIVEKIT_API_KEY` and
+   `LIVEKIT_API_SECRET`. The secret must be at least 32 characters.
 
-# 4. Start
-docker compose up -d
-```
+   ```bash
+   cp .env.example .env
+   ```
 
-`docker compose` bind-mounts `./config.yaml` into the container, so the file
-must exist before the first start: without it Docker creates a _directory_ at
-that path and the server fails to read its configuration.
+3. Create your LiveKit config, then edit `livekit.yaml`. Paste in the same key
+   and secret. Leave `use_external_ip: true` as it is, so LiveKit finds your
+   public address. Only on a host reached through Tailscale alone do you
+   replace it with `node_ip`.
 
-On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account, with the setup token from `docker compose logs owncord`.
+   ```bash
+   cp livekit.yaml.example livekit.yaml
+   ```
 
-The admin panel and the setup wizard are gated by `server.admin_allowed_cidrs`
-(loopback and private networks by default), so on a VPS the wizard is
-unreachable from your laptop until you either tunnel to it —
-`ssh -L 8443:localhost:8443 user@your-server`, then browse to
-`https://localhost:8443/admin` — or add your address to that setting in
-`config.yaml`. A refusal names the setting in its `403` body.
+4. Create your server config, then edit `config.yaml` for settings such as the
+   server name and TLS. You do not need to change anything for voice. See
+   [config.yaml for Docker](#configyaml-for-docker).
+
+   ```bash
+   cp config.yaml.example config.yaml
+   ```
+
+5. Start the stack:
+
+   ```bash
+   docker compose up -d
+   ```
+
+> **Create `config.yaml` before the first start.** Compose mounts
+> `./config.yaml` into the container. If the file does not exist, Docker
+> creates an empty _folder_ with that name instead, and the server cannot read
+> its configuration.
+
+On first start the server creates its database and default files in
+`/app/data`. Then:
+
+1. Read the setup token from the log: `docker compose logs owncord`.
+2. Open `https://<your-ip>:8443/admin`.
+3. Enter the token and create the Owner account.
+
+**On a cloud server (VPS) the admin panel may refuse you.** The admin panel and
+the setup wizard only accept connections from the addresses in
+`server.admin_allowed_cidrs`. By default that is the local machine and private
+networks. From your own computer you have two options:
+
+- Tunnel to the server over SSH, then browse to
+  `https://localhost:8443/admin`:
+
+  ```bash
+  ssh -L 8443:localhost:8443 user@your-server
+  ```
+
+- Or add your address to `server.admin_allowed_cidrs` in `config.yaml`.
+
+When the server refuses you, its `403` reply names this setting.
 
 ### config.yaml for Docker
 
-The shipped compose file injects the LiveKit key and secret from `.env`, and
-it also sets `voice.livekit_url` to `ws://livekit:7880` and
-`voice.auto_download_livekit` to `false` as environment variables, so those two
-keys need not be set in `config.yaml`: the environment value wins over
-anything the file says, so the copied example's values are harmless. Leave
-`voice.livekit_binary` unset, and do not set `voice.livekit_api_key` /
-`voice.livekit_api_secret` in the file either (compose injects them from `.env`,
-and keeping secrets out of `config.yaml` is the point of `.env`). Set everything
-else as normal:
+The compose file already sets some values for you, through environment
+variables:
+
+- `OWNCORD_VOICE_LIVEKIT_API_KEY` and `OWNCORD_VOICE_LIVEKIT_API_SECRET`, taken
+  from your `.env`.
+- `OWNCORD_VOICE_LIVEKIT_URL` set to `ws://livekit:7880`, the LiveKit
+  container.
+- `OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT` set to `false`, because LiveKit runs in
+  its own container.
+
+An environment variable always wins over `config.yaml`. So whatever the copied
+example says about these keys does no harm.
+
+In `config.yaml`:
+
+- **Do not set** `voice.livekit_api_key` or `voice.livekit_api_secret`. Keeping
+  secrets out of `config.yaml` is the point of `.env`.
+- **Do not set** `voice.livekit_binary`.
+- Set everything else as normal. For example:
 
 ```yaml
 server:
@@ -162,11 +238,46 @@ tls:
   mode: "self_signed" # or "acme" / "manual" for production
 ```
 
+**Compose mounts `config.yaml` read-only.** Nothing inside the container can
+change it. The admin panel and the setup wizard cannot save a startup setting
+to it. If they try, you see a warning and an `ERROR` line in the container log.
+To change a startup setting, edit the file on the host and recreate the
+container.
+
+### Health and privilege
+
+**Health check.** The image has its own `HEALTHCHECK`, so `docker ps` shows a
+health state even without the compose file. The binary checks itself with
+`chatserver healthcheck`, because the image has no shell or `curl`.
+
+Docker only _reports_ `unhealthy`. It does not restart the container. If you
+want automatic restarts on a hang, add an external watchdog.
+
+**Privilege.** The shipped `docker-compose.yml` removes every Linux capability
+and blocks privilege escalation:
+
+```yaml
+cap_drop:
+  - ALL
+security_opt:
+  - no-new-privileges:true
+```
+
+If you run the container by hand, pass the same two options:
+`--cap-drop=ALL --security-opt=no-new-privileges:true`. The server listens on
+port 8443, which needs no special capability.
+
+A read-only root filesystem is **not** supported. On first boot the server
+writes its default `config.yaml` into `/app`.
+
 ### Data Persistence
 
-The `owncord-data` Docker volume maps to `/app/data` inside the container. This holds the SQLite database, TLS certs, uploads, and backups. It persists across container restarts and upgrades.
+The Docker volume `owncord-data` is mounted at `/app/data` inside the
+container. It holds the SQLite database, TLS certificates, uploads and
+backups. It survives container restarts and upgrades.
 
-To back up, use the admin backup endpoint as normal — backups land in `/app/data/backups/` which is part of the named volume.
+Backups from the admin panel land in `/app/data/backups/`, which is inside the
+volume. For safer places to keep them, see [Backup Strategy](#backup-strategy).
 
 ### Upgrading
 
@@ -175,30 +286,36 @@ docker compose pull
 docker compose up -d
 ```
 
-The named volume is preserved — no data loss. Take the pre-upgrade archive
-first, and know what a rollback costs before you need one:
-[Upgrade and Rollback](#upgrade-and-rollback) covers both, for Docker and for a
-standalone install.
+The named volume is kept, so no data is lost. Before you upgrade, take an
+archive and learn what a rollback costs. Both are in
+[Upgrade and Rollback](#upgrade-and-rollback).
 
-Pulling the image is the **only** upgrade path in Docker: the admin panel's
-in-place update is refused in container deployments (503
-`CONTAINER_DEPLOYMENT`), because the running binary is image content — a
-replacement written next to it would die with the container. The shipped
-image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the
-server binary into a container and genuinely want in-place self-update can
-set `OWNCORD_CONTAINER=0` to opt back in.
+**Pulling a new image is the only way to upgrade in Docker.** The admin panel's
+in-place update is refused in a container. It answers
+`503 CONTAINER_DEPLOYMENT`. The running binary is part of the image, so a new
+binary written beside it would vanish with the container.
 
-The admin panel's backup **restore**, its **Restart server** and **Restart
-now** buttons, and a setup-wizard restart do work in containers: the server
-drains and exits cleanly, relying on the container's restart policy to
-relaunch it. The shipped `docker-compose.yml`
-sets `restart: unless-stopped`, which covers this; if you run the container
-by hand, pass `--restart unless-stopped` or a restore or restart leaves the
-container stopped.
+The image sets `OWNCORD_CONTAINER=1` to mark this. If you mount the server
+binary into a container yourself and really want in-place updates, set
+`OWNCORD_CONTAINER=0`.
+
+**Restarts rely on the restart policy.** These actions make the server stop
+cleanly and expect Docker to start it again:
+
+- a backup restore from the admin panel
+- the **Restart server** and **Restart now** buttons
+- a restart from the setup wizard
+
+The shipped `docker-compose.yml` sets `restart: unless-stopped`, which covers
+this. If you run the container by hand, pass `--restart unless-stopped`.
+Without it, a restore or restart leaves the container stopped.
 
 ### LiveKit in Docker
 
-The image bundles the pinned, checksum-verified `livekit-server` (the version in `ws.DefaultLiveKitVersion`) and sets `OWNCORD_VOICE_LIVEKIT_BINARY=/livekit-server`, so the server starts it as its companion process, exactly as on bare metal. One container serves chat and voice:
+**One container (bundled LiveKit).** The image includes a pinned,
+checksum-checked `livekit-server`. It sets
+`OWNCORD_VOICE_LIVEKIT_BINARY=/livekit-server`, so the server starts LiveKit
+itself, just as on bare metal. One container then serves chat and voice:
 
 ```bash
 docker run -d -v owncord-data:/app/data \
@@ -206,288 +323,433 @@ docker run -d -v owncord-data:/app/data \
   ghcr.io/j3vb/owncord-server:latest
 ```
 
-The image also sets `OWNCORD_VOICE_UDP_PORT=7882`, so all media rides one UDP port rather than the `50000-60000` range. Override either variable to change that. LiveKit's credentials and `livekit.yaml` live in `/app/data` (the volume).
+The image also sets `OWNCORD_VOICE_UDP_PORT=7882`. All voice media then uses
+that one UDP port instead of the `50000-60000` range. Override either variable
+to change this. LiveKit's credentials and its `livekit.yaml` are kept in
+`/app/data`, the volume.
 
-The shipped `docker-compose.yml` instead runs `livekit/livekit-server:v1.13.7` as its own container: it clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to `0` for the server, so the bundled copy never starts there. Use it when you want to size, restart or upgrade LiveKit independently. See [LiveKit Setup — Docker](livekit-setup.md#docker).
+**Two containers (the compose stack).** The shipped `docker-compose.yml` runs
+`livekit/livekit-server:v1.13.7` as its own container. For the server it
+clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to
+`0`, so the bundled copy never starts. Choose this when you want to size,
+restart or upgrade LiveKit separately. See
+[LiveKit Setup — Docker](livekit-setup.md#docker).
 
 ### Unraid
 
-[`deploy/unraid/owncord.xml`](../deploy/unraid/owncord.xml) is a template for Unraid's Docker tab: one container, with voice from the bundled LiveKit. Add its raw URL under **Docker > Template repositories** (or paste the file into `/boot/config/plugins/dockerMan/templates-user/`), then **Add Container > OwnCord**.
+[`deploy/unraid/owncord.xml`](../deploy/unraid/owncord.xml) is a template for
+Unraid's Docker tab. It runs one container, with voice from the bundled
+LiveKit.
 
-It publishes `8443/tcp` (chat and the admin panel), `7881/tcp` and `7882/udp` (voice). Forward the last two from your router for voice outside your LAN ([port-forwarding.md](port-forwarding.md)).
+To install it:
 
-- **Ownership.** The image runs as uid `65532`, but Unraid creates appdata as `99:100` (`nobody:users`), so the template adds `--user 99:100` and the container writes its files as that user. To move an install between the two, `chown -R` the appdata folder to the new owner.
-- **`config.yaml`.** Mounting a single file that does not exist yet makes Docker create a directory in its place. The template mounts the folder `/app` (default `/mnt/user/appdata/owncord`) instead, so the server writes its default `config.yaml` there on first start; edit it and restart the container. `/app/data` is a second mount for the database and uploads.
-- **First start.** Read the setup token from the container log, then open `https://<unraid-ip>:8443/admin`.
+1. Add the template's raw URL under **Docker > Template repositories**. Or copy
+   the file into `/boot/config/plugins/dockerMan/templates-user/`.
+2. Choose **Add Container > OwnCord**.
+3. Start the container.
+4. Read the setup token from the container log.
+5. Open `https://<unraid-ip>:8443/admin` and create the Owner account.
+
+Ports it publishes:
+
+- `8443/tcp` for chat and the admin panel.
+- `7881/tcp` and `7882/udp` for voice. Forward these two from your router for
+  voice outside your home network. See [port-forwarding.md](port-forwarding.md).
+
+Things to know:
+
+- **File ownership.** The image normally runs as user `65532`. Unraid creates
+  appdata folders owned by `99:100` (`nobody:users`). So the template adds
+  `--user 99:100`, and the container writes its files as that user. To move an
+  install between the two, run `chown -R` on the appdata folder for the new
+  owner.
+- **`config.yaml`.** If you mount a single file that does not exist yet,
+  Docker creates a folder in its place. So the template mounts the folder
+  `/app` instead (default `/mnt/user/appdata/owncord`). The server writes its
+  default `config.yaml` there on first start. Edit it, then restart the
+  container.
+- **Data.** `/app/data` is a second mount, for the database and uploads.
+- **Other settings.** The template also sets a 60-second stop timeout, the
+  open-file limit, `--restart=unless-stopped`, `--cap-drop=ALL` and
+  `no-new-privileges`.
 
 ### Linux desktop voice
 
-Two limits apply to Linux desktop clients:
+Two problems with the Linux desktop client's voice were fixed in
+**v2.0.1-beta.1**. They only affect you if the Linux client or the server is
+older than that. Updating fixes both.
 
-- **The server must be 2.0.0-beta.1 or later.** The Linux client's native voice
-  sends its room credential as an `Authorization` header; the server forwards it
-  through `/livekit` from 2.0.0-beta.1 on, and a `1.2.0-alpha.*` server drops it
-  and refuses the join. Update the server.
-- **A 2.0.0-beta.1 or older client on the Docker host cannot join as
-  `localhost` against a 2.0.0-beta.1 or older server.** Those servers hand the
-  client LiveKit's own address, `ws://livekit:7880`, as its `direct_url`; a
-  client that reaches the server as `localhost`, `127.0.0.1` or `::1` uses it
-  as-is, and that name does not resolve outside the container network. Update
-  the server: it now sends a `direct_url` only when it is loopback, so the
-  client routes voice through the server's `/livekit` tunnel. Updating the
-  client also fixes it, since the next client release tunnels any non-loopback
-  `direct_url`. Until then, connect using the host's LAN address or hostname
-  instead, or run the client on another machine.
+- **An old Linux client could not join voice on an older server.** The
+  2.0.0-beta.1 Linux client sent its voice sign-in in a way that servers older
+  than 2.0.0-beta.1 dropped, so the join failed. From v2.0.1-beta.1 the Linux
+  client sends it the same way as Windows and macOS. Fix: update the client.
+- **On the Docker host itself, voice could fail.** This hit a Linux client
+  connecting as `localhost`, `127.0.0.1` or `::1`, to a server on the same
+  Docker host. Older servers sent LiveKit's internal address,
+  `ws://livekit:7880`, and the old client tried to use it directly. That name
+  only works inside the container network. Fix: update either side to
+  v2.0.1-beta.1 or later.
+  - The server now sends LiveKit's address only when that address is itself
+    local.
+  - The client now uses a LiveKit address directly only when it is a local
+    `ws:` or `http:` address. Anything else goes through the server's
+    `/livekit` tunnel.
+  - Until you update, connect using the host's LAN address or hostname, or run
+    the client on another machine.
 
 ---
 
-## First Run Behavior
+## First run
 
-When `chatserver.exe` starts for the first time:
+When the server starts for the first time, it does this:
 
-1. **Config creation** -- `config.yaml` is written to the working directory with defaults
-2. **Data directory** -- `data/` is created (database, certs, uploads, backups)
-3. **TLS certificate** -- A self-signed certificate is generated at `data/cert.pem` / `data/key.pem`
-4. **Database migration** -- SQLite database is created and all migrations run
-5. **Status reset** -- All user statuses are set to `offline`, stale voice states are cleared
-6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard. It asks for the setup token printed in the start-up output (the terminal, `docker compose logs owncord`, or the service's log). The token is regenerated at every start and is printed only while setup is open; restart the server to get a fresh one — including after re-opening setup ([security.md](security.md#first-run-setup)).
+1. **Writes `config.yaml`** with default values, in the working directory.
+2. **Creates the `data/` folder** for the database, certificates, uploads and
+   backups.
+3. **Creates a self-signed TLS certificate** at `data/cert.pem` and
+   `data/key.pem`.
+4. **Creates the SQLite database** and runs all migrations.
+5. **Resets status.** Every user is set to `offline`, and old voice states are
+   cleared.
+6. **Prints a setup token** in its start-up output.
 
-The setup wizard creates the Owner account and walks through the basics (server
-name, port, TLS mode, upload limit, voice, registration, welcome message and
-the owner's recovery kit). Choices are saved for you: live settings go to the database, and
-startup settings are written into `config.yaml` — comments and any hand edits
-in the file are preserved. The wizard also persists the generated LiveKit
-credentials so voice keeps working across restarts. If the port or TLS mode
-changed, the server restarts itself once and the wizard shows the new address.
-The finish screen shows the address members enter in the desktop app (with TLS
-off, it points them to your HTTPS reverse proxy's address instead), the invite
-code, for a certificate the server already serves, its fingerprint, and the
-owner's recovery kit — shown once, only its verifier is stored
-([security.md](security.md#account-recovery)). While the kit is on screen the
-page does not follow a restart on its own; save the kit, then open the link.
-"Skip" runs the legacy minimal flow: just the Owner account and its recovery
-kit, everything else on defaults.
+Then open `https://localhost:8443/admin` to run the setup wizard. It asks for
+the setup token. You find the token in:
 
-Voice works out of the box: with `voice.auto_download_livekit` enabled (the
-default in a freshly generated `config.yaml`, and a toggle in the wizard), the
-server downloads a pinned `livekit-server` release from the official LiveKit
-GitHub releases in the background — verified against the release checksum
-file — into `data/livekit/` and manages the process itself. Operators who run
-their own LiveKit can turn the toggle off or set `voice.livekit_binary`.
+- the terminal, if you started the server by hand
+- `docker compose logs owncord`, in Docker
+- the service log, under systemd or NSSM
 
-The server listens on `https://0.0.0.0:8443` by default. See [Server Configuration](server-configuration.md) for all options.
+The token changes every time the server starts. It is only printed while setup
+is still open. To get a fresh one, restart the server. This includes after you
+re-open setup ([security.md](security.md#first-run-setup)).
+
+**What the wizard does:**
+
+- It creates the Owner account.
+- It asks for the basics: server name, port, TLS mode, upload limit, voice,
+  registration, welcome message, and the Owner's recovery kit.
+- It saves your choices. Live settings go into the database. Startup settings
+  go into `config.yaml`. Comments and your own edits in the file are kept.
+- It saves the generated LiveKit credentials, so voice keeps working across
+  restarts.
+- If you changed the port or TLS mode, the server restarts once. The wizard
+  then shows the new address.
+
+**The finish screen shows:**
+
+- the address members type into the desktop app (with TLS off, it points them
+  to your HTTPS reverse proxy instead)
+- the invite code
+- the certificate fingerprint, if the server already serves a certificate
+- the Owner's recovery kit
+
+The recovery kit is shown only once. The server stores only a check value for
+it ([security.md](security.md#account-recovery)). While the kit is on screen,
+the page does not follow a restart by itself. Save the kit first, then open
+the link.
+
+**Skip** runs a shorter setup. It creates only the Owner account and its
+recovery kit. Everything else keeps its default.
+
+**Voice works out of the box.** In a freshly written `config.yaml`,
+`voice.auto_download_livekit` is on. It is also a switch in the wizard. With it
+on, the server:
+
+1. downloads a pinned `livekit-server` release from LiveKit's official GitHub
+   releases, in the background
+2. checks it against the release's checksum file
+3. stores it in `data/livekit/`
+4. starts and manages the LiveKit process itself
+
+If you run your own LiveKit, turn the switch off or set `voice.livekit_binary`.
+
+By default the server listens on `https://0.0.0.0:8443`, meaning every network
+interface. For every option, see [Server Configuration](server-configuration.md).
 
 ## Running as a Linux Service (systemd)
 
-A crash — a panic under load, the OOM killer, a failed self-update — leaves a
-bare-metal server down until someone notices, so run the binary under a
-supervisor. A ready-made unit template ships in the repo at
-[`deploy/owncord.service`](../deploy/owncord.service); installation steps are
-in its header comments. The important choices it encodes:
+If the server crashes, it stays down until someone notices. Causes include a
+crash under load, the out-of-memory killer, or a failed self-update. So run it
+under a supervisor such as systemd.
 
-- `Restart=always` — two deliberate exits rely on it: the server exits
-  nonzero (rather than limping along) when its WebSocket dispatch loop dies,
-  and it exits **cleanly** after an admin-panel self-update, backup restore,
-  Restart server, or setup-wizard restart, expecting systemd to relaunch it
-  running the swapped binary (the server auto-detects systemd via `INVOCATION_ID` and
-  hands off this way instead of spawning a child that the unit's cgroup
-  cleanup would kill). `systemctl stop` still stops it — systemd never
-  auto-restarts an explicitly stopped unit. **Update the unit file before
-  applying server updates from the admin panel** — it also repairs the
-  update handoff when updating from older OwnCord releases, whose spawned
-  replacement gets reaped by the cgroup cleanup.
-- `TimeoutStopSec=60` — the server drains gracefully on SIGTERM, each
-  shutdown step on its own budget — up to 30s for the HTTP drain and 10s
-  for each other step — so one step that overruns cannot starve the next,
-  and the whole teardown is capped at 50s; a normal stop takes about 5–10s,
-  so systemd's 60s is only reached by a wedged teardown, which it SIGKILLs;
-  the server's own 90s restart backstop covers non-systemd supervisors.
-- `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
-  directory must stay writable or the admin panel's self-update (which
-  renames the new binary into place) breaks. `ProtectSystem=strict` mounts
-  the rest of the filesystem read-only, so **every directory the server
-  writes to outside `/opt/owncord` must be added to `ReadWritePaths` as
-  well** — most commonly the off-disk `backup.dir` or `upload.storage_dir`
-  documented below. Without that line, `MkdirAll` and `VACUUM INTO` fail with
-  `EROFS`, so manual, scheduled and pre-restore backups all fail under the
-  shipped unit. Example: `ReadWritePaths=/mnt/backup-disk/owncord`.
-- `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
-  `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
-  user.
-- `LimitNOFILE=65536` — the open-file ceiling. Each WebSocket holds a
-  descriptor. The Go runtime already lifts the soft limit to just under the
-  hard one at init, and the server raises it the rest of the way, so this hard
-  limit is the real cap on how many people can be online (see
-  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 is well above
-  what 2,000 online need (the boot budget for 2,000 is 4,256) and only needs
-  raising past roughly 30,000 connections; an old systemd default hard limit
-  of 1,024 would stop at a few hundred online.
+A ready-made unit file ships in the repository:
+[`deploy/owncord.service`](../deploy/owncord.service).
 
-Pair it with the scheduled backups in the admin panel — or an external cron
-line (see Backup Strategy below) if you prefer driving backups outside the
-server.
+**To install it:**
+
+1. Create a service user and the install folder:
+
+   ```bash
+   sudo useradd --system --home /opt/owncord --shell /usr/sbin/nologin owncord
+   sudo mkdir -p /opt/owncord && sudo chown owncord:owncord /opt/owncord
+   ```
+
+2. Put the `chatserver` binary in `/opt/owncord/`.
+3. Copy the unit file and start the service:
+
+   ```bash
+   sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
+   sudo systemctl daemon-reload && sudo systemctl enable --now owncord
+   ```
+
+4. Read the log with `journalctl -u owncord -f`.
+
+**What the unit file sets, and why:**
+
+- **`Restart=always`.** The server exits on purpose in two cases and expects
+  systemd to start it again:
+  - It exits with an error code if its WebSocket dispatch loop dies, rather
+    than keep running broken.
+  - It exits cleanly after an admin-panel self-update, a backup restore, a
+    **Restart server** click, or a setup-wizard restart. systemd then starts
+    the new binary.
+
+  The server spots systemd through the `INVOCATION_ID` variable. Under systemd
+  it exits and lets systemd restart it, instead of starting its own copy that
+  systemd would kill. `systemctl stop` still stops it: systemd never restarts
+  a unit you stopped yourself.
+
+  **Update the unit file before you apply a server update from the admin
+  panel.** With older OwnCord releases, the new process was killed by systemd's
+  cleanup. The current unit file fixes that.
+
+- **`TimeoutStopSec=60`.** On `SIGTERM` the server shuts down gracefully. It
+  allows up to 30 seconds to finish open HTTP requests and up to 10 seconds
+  for each other step. The whole shutdown is capped at 50 seconds. A normal
+  stop takes about 5 to 10 seconds. systemd only reaches its 60-second limit if
+  shutdown is stuck, and then it kills the process. For other supervisors, the
+  server has its own 90-second restart backstop.
+
+- **`ReadWritePaths=/opt/owncord` with `ProtectSystem=strict`.**
+  `ProtectSystem=strict` makes the rest of the filesystem read-only for the
+  service. The install folder must stay writable, because self-update puts the
+  new binary there.
+
+  **Add every other folder the server writes to.** The usual ones are an
+  off-disk `backup.dir` or `upload.storage_dir`. Without that, writes fail with
+  `EROFS`, and every backup fails: manual, scheduled and pre-restore. Example:
+
+  ```ini
+  ReadWritePaths=/mnt/backup-disk/owncord
+  ```
+
+- **`AmbientCapabilities=CAP_NET_BIND_SERVICE`.** Only needed for
+  `tls.mode: acme`, which listens on port 80 as a non-root user.
+
+- **`LimitNOFILE=65536`.** The open-file limit. Each WebSocket connection uses
+  one file descriptor, so this caps how many people can be online. 65,536 is
+  far more than 2,000 people need (about 4,256). Raise it only past about
+  30,000 connections. An old systemd default of 1,024 would stop you at a few
+  hundred people. See [Open-file limit](#open-file-limit-file-descriptors).
+
+Pair the service with scheduled backups from the admin panel. Or drive backups
+from cron instead: see
+[Scheduling backups from outside the server](#scheduling-backups-from-outside-the-server).
 
 ## Running as a Windows Service
 
-### Option 1: NSSM (Non-Sucking Service Manager)
+### Option 1: NSSM
+
+NSSM ("Non-Sucking Service Manager") runs any program as a Windows service.
 
 ```powershell
-# Install NSSM (via Chocolatey or download from nssm.cc)
+# Install NSSM (with Chocolatey, or download it from nssm.cc)
 choco install nssm
 
-# Create service
+# Create the service
 nssm install OwnCord "C:\OwnCord\chatserver.exe"
 nssm set OwnCord AppDirectory "C:\OwnCord"
 nssm set OwnCord DisplayName "OwnCord Chat Server"
 nssm set OwnCord Start SERVICE_AUTO_START
 
-# REQUIRED: tell the server NSSM supervises it. On a self-update/restore the
-# server then exits cleanly and NSSM's default AppExit=Restart relaunches it
-# with the new binary. (NSSM 2.24 is not auto-detectable, so without this the
-# server spawns its own replacement, which races NSSM's relaunch.)
+# REQUIRED: tell the server that NSSM supervises it.
 nssm set OwnCord AppEnvironmentExtra OWNCORD_SERVER_RESTART_MODE=supervised
 
-# Capture the log. The server writes to stdout only, so without AppStdout/
-# AppStderr the service discards every log line. Create C:\OwnCord\logs first.
+# Keep the log. Create C:\OwnCord\logs first.
 nssm set OwnCord AppStdout "C:\OwnCord\logs\server.log"
 nssm set OwnCord AppStderr "C:\OwnCord\logs\server.log"
 nssm set OwnCord AppRotateFiles 1
 
-# Manage
+# Manage the service
 nssm start OwnCord
 nssm stop OwnCord
 nssm restart OwnCord
 ```
 
+Why the two important lines matter:
+
+- **`OWNCORD_SERVER_RESTART_MODE=supervised` is required.** After a
+  self-update or restore, the server then exits cleanly and NSSM starts it
+  again with the new binary. NSSM 2.24 cannot be detected automatically.
+  Without this line, the server starts its own replacement, which races with
+  NSSM's restart.
+- **`AppStdout` and `AppStderr` keep the log.** The server writes its log only
+  to standard output. Without these lines, the service throws every log line
+  away.
+
 ### Option 2: Task Scheduler
 
-1. Open Task Scheduler, create a new task
-2. Trigger: **At startup**
-3. Action: Start `chatserver.exe`
-4. Set "Start in" to the directory containing `config.yaml`
-5. Check "Run whether user is logged on or not"
-6. Check "Run with highest privileges"
+1. Open Task Scheduler and create a new task.
+2. Trigger: **At startup**.
+3. Action: start `chatserver.exe`.
+4. Set **Start in** to the folder that holds `config.yaml`.
+5. Tick **Run whether user is logged on or not**.
+6. Tick **Run with highest privileges**.
 
-Task Scheduler starts the process but does not supervise it, so leave
-`server.restart_mode` on its default (`auto` resolves to `spawn` here): on a
-self-update or restore the server starts its own replacement after draining.
+Task Scheduler starts the server but does not watch it. So leave
+`server.restart_mode` on its default, `auto`. Here `auto` means `spawn`: after
+a self-update or restore, the server starts its own replacement.
 
-Task Scheduler discards the process's stdout: point the action at a redirect
-(wrap it as `cmd /c chatserver.exe >> logs\server.log 2>&1`) or the log is
-gone.
+Task Scheduler also throws away the server's output. To keep the log, wrap the
+action in a redirect:
+
+```powershell
+cmd /c chatserver.exe >> logs\server.log 2>&1
+```
 
 ### Running from a console window
 
-A server started by double-clicking `chatserver.exe`, or from cmd or
-PowerShell, is not supervised, so `auto` resolves to `spawn`. After a
-self-update, backup restore or setup-wizard restart, the replacement runs in the
-same console window and its log keeps printing there. The old process stays
-behind, idle, until the replacement exits, and then exits with the
-replacement's exit code. That keeps the window open under Windows Terminal,
-which closes a tab when the process it started exits, and a shell that started
-the server keeps waiting instead of printing its prompt over the log.
+You can also start the server by double-clicking `chatserver.exe`, or from
+cmd or PowerShell. Nothing supervises it then, so `auto` means `spawn`.
 
-`Ctrl+C` stops the replacement, which drains as usual, and then the old process
-exits with it. Closing the window stops both, and LiveKit. Each self-restart
-leaves one more idle process behind until the window closes or the server stops.
+What happens on a self-restart (after a self-update, backup restore or setup
+wizard restart):
 
-The one exception is a restart whose teardown wedges past the 90-second restart
-backstop. The old process may still hold the port or the database lock, so it
-exits instead of staying behind, and the replacement opens in a new console
-window of its own.
+- The replacement runs in the same console window, and its log keeps printing
+  there.
+- The old process stays behind, idle, until the replacement exits. Then it
+  exits too, with the same exit code.
+- This keeps Windows Terminal from closing the tab. It also stops a shell from
+  printing its prompt over the log.
+- Each self-restart leaves one more idle process, until the window closes or
+  the server stops.
 
-A server started without a console (by a service wrapper, for example) gets a
-new console window of its own on a self-restart.
+To stop the server:
+
+- **`Ctrl+C`** stops the replacement, which shuts down as usual. The old
+  process then exits with it.
+- **Closing the window** stops everything, including LiveKit.
+
+**One exception.** If a restart's shutdown gets stuck past the 90-second
+restart backstop, the old process may still hold the port or the database
+lock. So it exits instead of staying behind, and the replacement opens in a
+new console window of its own.
+
+A server started without a console, for example by a service wrapper, also
+gets a new console window of its own when it restarts itself.
 
 ## TLS Setup
 
-What each mode means for the people connecting — desktop pinning, what a
-browser will need, and what the operator can read regardless of TLS — is in
-[trust-model.md](trust-model.md).
+TLS is the encryption between clients and the server. The server supports four
+modes in `tls.mode`. What each mode means for the people who connect is in
+[trust-model.md](trust-model.md). That page covers certificate pinning in the
+desktop app, what a browser would need, and what the operator can read no
+matter which mode you use.
 
-**What this build does not do.** Self-signed is qualified and is the default;
-domain ACME is implemented but not exercised at release quality (it has not
-been run against expiry, rotation and restart); there is no HTTPS on a bare
-public IP, and no guided LAN/offline device-trust install. The certificate
-lifecycle — renewal state across restart, hot reload, rotation with margin —
-is not qualified. Stated plainly because it decides your TLS mode today, not
-because anything is missing at runtime; the details are in
+| Mode          | Use it when                                                        |
+| ------------- | ------------------------------------------------------------------ |
+| `self_signed` | The default. Works anywhere, including on a bare IP address.       |
+| `acme`        | You have a domain and want the server to get Let's Encrypt itself. |
+| `manual`      | You already have certificate files.                                |
+| `off`         | Only behind a reverse proxy that handles HTTPS.                    |
+
+**Limits of this build.** These decide your TLS mode today, so they are stated
+up front:
+
+- `self_signed` is fully tested and is the default.
+- `acme` with a domain works, but it has not been tested at release quality
+  against expiry, rotation and restart.
+- There is no HTTPS on a bare public IP with a public certificate.
+- There is no guided way to install trust for a LAN or offline device.
+- Certificate lifecycle is not fully tested: renewal state across restart,
+  hot reload, and rotation with margin.
+
+Details are in
 [What this build does not do](port-forwarding.md#what-this-build-does-not-do).
 
 ### Self-Signed (default)
-
-Generated on first run and valid for **two years**. Loaded as-is on every
-later start: the expiry date is never checked, the certificate is never
-renewed and never reloaded while the server runs — it is served until you
-replace the pair. The desktop client pins the leaf certificate's fingerprint
-on first connect and shows a mismatch modal if it changes; a browser client
-(B8) is out of scope of this guide.
 
 ```yaml
 tls:
   mode: "self_signed"
 ```
 
-An expired self-signed pair keeps working, measured rather than asserted
-(`Server/auth/tls_expiry_test.go`, `TestExpiredSelfSignedCertIsServedAsIs`):
-the server loads and serves a certificate whose `NotAfter` is in the past, and
-the desktop keeps connecting past expiry because the pin is the fingerprint,
-not the validity window — `Client/src-tauri/src/tofu.rs`'s verifiers decide
-trust on the fingerprint alone; the validity dates feed only the public-CA
-renewal check, which a self-signed certificate never passes. **Rotate before the
-two years are up**; the Dashboard's attention panel warns three weeks ahead.
+The server creates the certificate on first run. It is valid for **two
+years**.
+
+How it behaves:
+
+- The server loads the same certificate on every start.
+- It never checks the expiry date, never renews it, and never reloads it while
+  running. It keeps serving it until you replace the files.
+- The desktop client remembers ("pins") the certificate's fingerprint on first
+  connect. If the certificate changes, the client shows a mismatch warning.
+
+**An expired self-signed certificate keeps working.** This is tested, not
+assumed. The server still serves it after its end date. The desktop app keeps
+connecting, because it trusts the fingerprint, not the dates. The dates only
+matter for public certificates, which a self-signed one never is.
+
+Still, **replace it before the two years are up.** The Dashboard's attention
+panel warns you three weeks ahead.
 
 #### Rotating the self-signed certificate
 
-There is no server-side push of a new pin — rotation is a stop, a file move,
-a start, and a message to every user:
+The server cannot push a new fingerprint to clients. Rotation is a stop, a
+file move, a start, and a message to every user:
 
 1. Stop the server.
-2. Move `data/cert.pem` and `data/key.pem` aside (do not delete them yet).
-3. Start the server: a fresh pair is generated because both files are absent.
-4. Read the new certificate's fingerprint from the start-up banner (also shown
-   on the admin Dashboard and the setup wizard's finish step).
-5. **Every desktop client sees the certificate-mismatch modal and must accept
-   the new fingerprint.** Publish the new fingerprint out of band — a channel
-   post on another platform, a call — and have each person **compare it,
-   character for character, against the prompt their client shows** before
-   accepting. A mismatch is indistinguishable from an interception attempt
-   ([trust-model.md](trust-model.md)).
+2. Move `data/cert.pem` and `data/key.pem` somewhere else. Do not delete them
+   yet.
+3. Start the server. It creates a new pair, because both files are missing.
+4. Read the new fingerprint. It is in the start-up banner, on the admin
+   Dashboard, and on the setup wizard's finish step.
+5. Tell every member. **Every desktop client shows the certificate-mismatch
+   warning and must accept the new fingerprint.**
+   - Publish the new fingerprint somewhere else they trust, such as a post on
+     another platform or a call.
+   - Ask each person to **compare it, character for character, with the one
+     their client shows** before accepting.
+   - A mismatch looks exactly like someone intercepting the connection
+     ([trust-model.md](trust-model.md)).
 
 ### Let's Encrypt (ACME)
 
-> **Not the recommended path for a domain (owner decision, 2026-09-20).** Put
-> a reverse proxy in front instead — see
-> [Reverse Proxy Topology](#reverse-proxy-topology). Built-in ACME works and
-> is staying, but this project does not qualify it: renewal across expiry,
-> restart and rotation has never been exercised here, so renewal is your
-> responsibility. Caddy, nginx and Traefik are built for that job and are
-> tested by far more operators than OwnCord has. Choose built-in ACME only if
-> you would rather not run a proxy, and read the pinning note below first.
+> **For a domain, a reverse proxy is the recommended setup.** See
+> [Reverse Proxy Topology](#reverse-proxy-topology). Built-in ACME works and is
+> staying. But this project has not tested renewal across expiry, restart and
+> rotation, so renewal is your responsibility. Caddy, nginx and Traefik are
+> built for that job and far more widely used. Choose built-in ACME only if you
+> would rather not run a proxy, and read the note on pinning below first.
 
-Automatic certificate issuance and renewal. Requires port 80 open and a public domain.
+ACME gets and renews a Let's Encrypt certificate automatically.
 
 ```yaml
 tls:
   mode: "acme"
   domain: "chat.example.com"
-  acme_cache_dir: "data/acme_certs" # where certificates are cached
+  acme_cache_dir: "data/acme_certs" # where certificates are stored
 ```
 
-The facts a stranger needs before choosing it: port 80 must be reachable from
-the internet (the HTTP-01 challenge), the configured domain must resolve to
-this server, and an IP address is rejected — there is no HTTPS on a bare
-public IP in this build
-([What this build does not do](port-forwarding.md#what-this-build-does-not-do)).
-Certificates are cached under `acme_cache_dir`. And the sentence owners do not
-expect: **the desktop client pins this certificate too** — the first-use
-prompt is the same in every `tls.mode`, so members compare the fingerprint
-once. A routine Let's Encrypt renewal is then re-pinned without a prompt,
-because both the old and the new certificate are publicly valid for the
-domain ([trust-model.md](trust-model.md)). The admin Dashboard shows the
-fingerprint once the first HTTPS connection has been made, and the new one
-after each renewal
-([Publishing the fingerprint](#publishing-the-fingerprint-after-a-renewal)).
+What you need:
+
+- Port 80 reachable from the internet, for the HTTP-01 challenge.
+- A domain that points at this server. An IP address is refused. There is no
+  HTTPS on a bare public IP in this build
+  ([What this build does not do](port-forwarding.md#what-this-build-does-not-do)).
+
+Certificates are stored in `acme_cache_dir`.
+
+**The desktop client pins this certificate too.** Members see the same
+first-use prompt in every TLS mode, so they compare the fingerprint once.
+After that, a normal Let's Encrypt renewal is accepted without a prompt,
+because both old and new certificates are publicly valid for your domain
+([trust-model.md](trust-model.md)).
+
+The admin Dashboard shows the fingerprint after the first HTTPS connection.
+It shows the new one after each renewal. See
+[Publishing the fingerprint after a renewal](#publishing-the-fingerprint-after-a-renewal).
 
 ### Manual Certificate
 
@@ -500,106 +762,127 @@ tls:
   key_file: "path/to/key.pem"
 ```
 
-The desktop pins this certificate too, the same way. The files are loaded
-once at start-up, so replacing them takes a restart; keep the key at file
-mode `0600`.
+- The desktop pins this certificate too, in the same way.
+- The files are read once, at start-up. After you replace them, restart the
+  server.
+- Keep the key file private, with file mode `0600`.
 
 ### TLS Off
-
-Only behind a TLS-terminating reverse proxy
-([Reverse Proxy Topology](#reverse-proxy-topology)). The desktop app connects
-only over `wss://`, so without one it cannot connect at all:
 
 ```yaml
 tls:
   mode: "off"
 ```
 
-Every connection is plaintext HTTP — passwords, tokens and messages are
-readable by anyone on the path;
-[trust-model.md](trust-model.md) states that plainly.
+Use this **only** behind a reverse proxy that handles HTTPS
+([Reverse Proxy Topology](#reverse-proxy-topology)). The desktop app only
+connects over `wss://` (secure WebSocket). Without a proxy, it cannot connect
+at all.
+
+With TLS off, every connection to the server is plain HTTP. Passwords, tokens
+and messages can be read by anyone on the path.
+[trust-model.md](trust-model.md) says this plainly.
 
 ### Publishing the fingerprint after a renewal
 
-The desktop client pins the certificate it sees. A renewal from a public CA
-(Let's Encrypt, directly or through a reverse proxy) is re-pinned without a
-prompt, provided the certificate members first accepted was publicly valid for
-your domain. Any other change — a new self-signed or private-CA certificate, or
-any change on a server reached by IP address — gives every member a
-"Certificate Changed" prompt that asks them to get the current fingerprint from
-you through another channel. Members also need it the first time they connect.
-Publish it whenever the certificate changes:
+The desktop client pins the certificate it sees. Members need the fingerprint
+the first time they connect, and again whenever the certificate changes in a
+way that prompts them.
+
+When members are **not** prompted:
+
+- A renewal from a public certificate authority (Let's Encrypt, directly or
+  through a reverse proxy). This only holds if the certificate they first
+  accepted was publicly valid for your domain.
+
+When members **are** prompted ("Certificate Changed"):
+
+- A new self-signed or private-CA certificate.
+- Any change on a server reached by IP address.
+
+The prompt asks them to get the current fingerprint from you through another
+channel. Where to find it:
 
 - **`self_signed`, `manual` and `acme`:** copy it from the admin Dashboard's
-  **Certificate fingerprint** card (in `acme` mode it appears after the first
-  HTTPS connection and updates after each renewal).
+  **Certificate fingerprint** card. In `acme` mode it appears after the first
+  HTTPS connection, and updates after each renewal.
 - **`off` behind a reverse proxy:** the proxy serves the certificate, so
-  OwnCord cannot read it. Run this on any machine with OpenSSL, with your
-  domain (and your HTTPS port, if it is not 443):
+  OwnCord cannot read it. Run this on any machine with OpenSSL. Use your
+  domain, and your HTTPS port if it is not 443:
 
   ```sh
   openssl s_client -connect chat.example.com:443 -servername chat.example.com </dev/null 2>/dev/null \
     | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr 'A-F' 'a-f'
   ```
 
-  It prints the fingerprint in the lower-case colon-hex form the app shows.
-  Run it from outside your network when you can, so it sees what members see.
+  It prints the fingerprint in the same lower-case form the app shows. Run it
+  from outside your network if you can, so it sees what members see.
 
-Post it somewhere members already trust — another chat platform, a call — not
-inside OwnCord, which they cannot reach until they have accepted.
+Post the fingerprint somewhere members already trust, such as another chat
+platform or a call. Do not post it inside OwnCord: they cannot reach it until
+they have accepted.
 
 ## Reverse Proxy Topology
 
-OwnCord terminates its own TLS by default and does not require a reverse
-proxy. **For a public domain, fronting it with one is nonetheless the
-recommended setup (owner decision, 2026-09-20):** the proxy owns certificate
-issuance and renewal, which is the part this project does not qualify (see
-[Let's Encrypt (ACME)](#lets-encrypt-acme)). Caddy obtains and renews
-certificates with no configuration beyond the hostname; nginx and Traefik do
-the same with certbot or their own ACME support. Set `tls.mode: "off"` on
-OwnCord when the proxy terminates TLS.
+A reverse proxy is a web server, such as Caddy, nginx or Traefik, that sits in
+front of OwnCord and handles HTTPS for it.
 
-The server listens on every interface and has no bind-address setting, so with
-`tls.mode: "off"` you must make port 8443 reachable only from the proxy:
+OwnCord handles its own TLS by default, so a proxy is optional. **For a public
+domain, a proxy is the recommended setup.** The proxy then gets and renews
+certificates, which is the part this project has not fully tested (see
+[Let's Encrypt (ACME)](#lets-encrypt-acme)). Caddy does this with nothing more
+than your hostname. nginx and Traefik do it with certbot or their own ACME
+support.
 
-- **Docker:** publish the port on loopback only (`127.0.0.1:8443:8443`), or put
-  the proxy on the compose network and drop the `ports:` entry. The supplied
-  `Server/docker-compose.yml` publishes `8443:8443` on all interfaces and must
-  be changed for this setup.
-- **Bare metal or VM:** add a host firewall rule that admits 8443 only from the
-  proxy (loopback for a same-host proxy), and do not port-forward 8443 on your
-  router.
-- **Check:** with `tls.mode: "off"` the port speaks plain HTTP, so from another
-  machine run `curl --max-time 5 http://<host>:8443/api/v1/health`; it must
-  fail to connect. A reply means the port is still exposed.
+When the proxy handles TLS, set `tls.mode: "off"` on OwnCord.
 
-One consequence worth knowing before you choose: with a proxy terminating TLS,
-desktop clients pin the _proxy's_ certificate. When the proxy uses a public CA,
-its renewals are re-pinned without a prompt, as described under
-[Let's Encrypt (ACME)](#lets-encrypt-acme); a self-signed or private-CA proxy
-certificate prompts on every change ([trust-model.md](trust-model.md)).
+### Keep port 8443 private
 
-Whatever your reason for fronting it (shared host, existing nginx, central
-cert management), three things matter:
+The server listens on every network interface. There is no setting to bind it
+to one address. So with `tls.mode: "off"` you must make port 8443 reachable
+only from the proxy:
 
-1. **What the proxy can front.** Everything on port 8443 — the REST API, the
+- **Docker:** publish the port on loopback only (`127.0.0.1:8443:8443`). Or put
+  the proxy on the compose network and remove the `ports:` entry. The supplied
+  `Server/docker-compose.yml` publishes `8443:8443` on all interfaces, so you
+  must change it.
+- **Bare metal or VM:** add a host firewall rule that allows 8443 only from the
+  proxy (loopback, if the proxy is on the same host). Do not forward 8443 on
+  your router.
+- **Check it:** with TLS off, port 8443 speaks plain HTTP. From another machine
+  run the command below. It must fail to connect. If you get a reply, the port
+  is still exposed.
+
+  ```bash
+  curl --max-time 5 http://<host>:8443/api/v1/health
+  ```
+
+**Pinning with a proxy.** Desktop clients pin the _proxy's_ certificate. If the
+proxy uses a public certificate authority, its renewals are accepted without a
+prompt. A self-signed or private-CA proxy certificate prompts on every change
+([trust-model.md](trust-model.md)).
+
+### What the proxy carries, and what it cannot
+
+1. **What the proxy can carry.** Everything on port 8443: the REST API, the
    WebSocket at `/api/v1/ws`, the admin panel, uploads, **and LiveKit
-   signaling**, which the server already proxies at `/livekit/*`. You do NOT
-   need to expose LiveKit's port 7880 through your proxy.
-2. **What the proxy cannot front.** WebRTC media: UDP 50000–60000 — or the
-   single port when the LiveKit config sets `udp_port` — plus the TCP 7881
-   fallback; these must remain directly reachable on the host running LiveKit.
-   An HTTP reverse proxy never carries this traffic.
+   signalling**, which the server already forwards at `/livekit/*`. You do
+   **not** need to expose LiveKit's port 7880 through the proxy.
+2. **What the proxy cannot carry.** Voice and video media. That is UDP
+   `50000-60000` (or the single UDP port if you set one) plus the `7881/TCP`
+   fallback. These must stay directly reachable on the host that runs
+   LiveKit. An HTTP proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
-   proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
-   `X-Forwarded-For` for rate limiting, the admin IP allowlist, the access
-   and WebSocket logs, and the `ws_connect` audit row. List only
-   the proxy hops, never client networks. A proxy on the same host is
-   `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
-   loopback address on every request, and the server warns about this shape
-   at start-up and again on the first forwarded request it admits.
+   proxy's own address or addresses, for example `["10.0.0.2/32"]`. OwnCord
+   then reads each client's real address from `X-Forwarded-For`. It uses that
+   address for rate limits, the admin allowlist, the access and WebSocket logs,
+   and the `ws_connect` audit entry.
+   - List only the proxy hops. Never list client networks.
+   - A proxy on the same host is `["127.0.0.1/32", "::1/128"]`.
+   - Without this, every request seems to come from the proxy. The server warns
+     about this at start-up, and again on the first forwarded request.
 
-Working nginx snippet:
+A working nginx example:
 
 ```nginx
 server {
@@ -625,17 +908,19 @@ server {
 
 ### A CDN in front of the proxy
 
-With a CDN such as Cloudflare in front of your reverse proxy, a request
-crosses two hops, and `server.trusted_proxies` must list every hop. OwnCord
-reads `X-Forwarded-For` from the right and takes the first address that is not
-a trusted proxy. If only the reverse proxy is listed, that address is the CDN
-edge that connected to it, which many users share: per-IP rate limits and
-lockouts then apply to everyone arriving through the same edge. Do one of the
-following:
+With a CDN such as Cloudflare in front of your proxy, each request passes two
+hops. `server.trusted_proxies` must list every hop.
+
+OwnCord reads `X-Forwarded-For` from the right. It takes the first address that
+is not a trusted proxy. If you list only your reverse proxy, that address is the
+CDN server that connected to it. Many users share one CDN server. Per-address
+rate limits and lockouts would then hit everyone coming through it.
+
+Do one of these:
 
 - **List the CDN's ranges in OwnCord.** Add Cloudflare's published IPv4 and
   IPv6 ranges ([cloudflare.com/ips](https://www.cloudflare.com/ips/)) next to
-  the proxy hop, and update them when Cloudflare changes the list:
+  your proxy. Update them when Cloudflare changes the list.
 
   ```yaml
   server:
@@ -646,9 +931,9 @@ following:
 
 - **Let the proxy restore the client address.** In nginx (in Nginx Proxy
   Manager, the proxy host's Advanced tab), take the address from Cloudflare's
-  header only when the connection comes from a Cloudflare range, and keep
-  `trusted_proxies` at the proxy hop alone. `$proxy_add_x_forwarded_for` then
-  appends the real client address:
+  header, but only for connections from a Cloudflare range. Keep
+  `trusted_proxies` at your proxy alone. `$proxy_add_x_forwarded_for` then adds
+  the real client address:
 
   ```nginx
   real_ip_header CF-Connecting-IP;
@@ -657,203 +942,228 @@ following:
 
 ## Backup Strategy
 
-The built-in backup endpoint covers the **database only**. What a restore
-needs is the whole of `data/` plus your `config.yaml` — [Restore](#restore)
-states that rule once, with what was measured about it. The admin panel's
-[full archive](#the-full-archive) is all of it in one download. Restore is not
-rollback: putting yesterday's database back is not the same operation as
-reverting an upgrade — the costs are different and
-[Rolling back](#rolling-back) is a separate procedure.
+**The built-in backup covers the database only.** A full restore needs the
+whole `data/` folder plus your `config.yaml`. The admin panel's
+[full archive](#the-full-archive) gives you all of it in one download.
 
-If you copy selectively anyway, these are the pieces, and what leaving each
-one out costs you:
+The simple rule: **copy `data/` as a whole, plus `config.yaml`, on the same
+schedule as your database backups.** Not only before an upgrade.
 
-- **The backup from `POST /admin/api/backup`** — without it your only copy of
-  the database is the file-level one, and nothing verified it. The backup
-  endpoint runs `integrity_check` when it writes the file and again before it
-  is allowed to overwrite a live database, and the admin panel can put it back
-  on its own. See [Admin Backup Endpoint](#admin-backup-endpoint).
-- **`data/uploads/`** — every attachment 404s. The database rows survive, so
-  messages still show their attachments; the bytes are gone and the download
-  returns 404. The built-in backup covers the database only
-  ([Backup Strategy](#backup-strategy)); this directory is never in it.
-- **`data/totp.key`** — every 2FA user is locked out, and emergency recovery
-  codes do not help. Stored TOTP secrets are AES-256 ciphertext under this key;
-  a server that cannot find the file generates a fresh one and boots happily,
-  and every second factor on it is then undecryptable. The verify path decrypts
-  the stored secret _before_ it will look at the submitted code, so it fails
-  first and never reaches the recovery-code branch
-  (`Server/service/auth.go:673`). There is no admin endpoint and no CLI
-  subcommand that clears a user's second factor — disabling 2FA needs an
-  already-authenticated session, which is exactly what the user cannot get. The
-  only way back is to put this file back from the archive.
-- **`data/erasure.key`** — a restore cannot recognise erased accounts. A
-  deletion marker names its subject as `HMAC-SHA256(key, user id)`, so without
-  the key the markers name no one and a restore can resurrect what they guard.
-- **`data/erasure/markers.sqlite`** — worse than losing the key, because the
-  file carries two more things. It holds `sequence_floors`: without them an
-  erased account's id is handed out again, and its innocent new holder is
-  erased by the old marker. It also holds the account markers that keep the
-  first-run setup gate closed against a restore of a pre-owner backup. The
-  server refuses rather than adopting a mismatched file, so this is an outage
-  you resolve by hand, not one you can delete your way out of.
-- **`data/push_vapid.key`** — every push subscription is invalidated. Each
-  `push_subscriptions` row records the key id it was created under; under a new
-  key those rows are invisible and the maintenance sweep removes them. Every
-  device has to subscribe again, and no push is delivered until it does.
-- **`config.yaml`** — the server boots on compiled-in defaults instead: port
-  8443, self-signed TLS, and freshly generated LiveKit credentials, which
-  breaks every voice token. It does **not** rotate a self-signed certificate:
-  `self_signed` loads an existing `data/cert.pem` / `data/key.pem` and
-  generates only on confirmed absence, and those are in the archive. Clients
-  lose their pinned certificate only if the lost config said
-  `tls.mode: acme` or `manual`, because the fallback to self-signed then
-  serves a different one.
-- **`data/config-overrides.json`** — the settings saved from the admin panel's
-  Server configuration page are lost. The keys it held fall back to
-  `config.yaml` and `OWNCORD_*` at the next boot, so a restore silently reverts
-  them (see [Server Configuration](server-configuration.md#changing-settings-from-the-admin-panel)).
+Restore and rollback are different things. Putting yesterday's database back
+is a [Restore](#restore). Going back to an older version after an upgrade is
+[Rolling back](#rolling-back). They cost different things and have separate
+procedures.
 
-None of these are in a database backup. `data/uploads/`, the three key files
-and `data/erasure/` all live under the data directory, so copying `data/`
-wholesale covers every one of them. Back them up on the same schedule as the
-database, not only before an upgrade.
+### What each file is for
+
+If you copy files one by one anyway, here is what each one does, and what you
+lose without it:
+
+- **The database backup** (from `POST /admin/api/backup`). Without it, your
+  only copy of the database is a plain file copy that nothing has checked. The
+  backup is checked with SQLite's `integrity_check` when it is written. It is
+  checked again before it may replace a live database. The admin panel can put
+  it back by itself. See [Admin Backup Endpoint](#admin-backup-endpoint).
+- **`data/uploads/`** holds every attachment. Without it, messages still show
+  their attachments, but downloading one returns 404. The database backup
+  never includes this folder.
+- **`data/totp.key`** unlocks every user's two-factor (2FA) secret. Without it,
+  **every 2FA user is locked out**, and their recovery codes do not help.
+  - The stored 2FA secrets are encrypted with this key.
+  - A server that cannot find the file makes a new one and starts normally.
+    The old secrets can then never be decrypted.
+  - Login decrypts the secret _before_ it looks at the code you typed. So it
+    fails before it ever reaches the recovery-code check.
+  - No admin action or command clears a user's 2FA. Turning 2FA off needs a
+    signed-in session, which is exactly what the user cannot get.
+  - The only way back is to restore this file from your archive.
+- **`data/erasure.key`** lets the server recognise accounts that were erased.
+  Each deletion record names its account through this key. Without it, the
+  records name no one, and a restore can bring erased accounts back.
+- **`data/erasure/markers.sqlite`** is the deletion record file. Losing it is
+  worse than losing the key:
+  - It stores counters that stop an erased account's ID from being handed out
+    again. Without them, a new user could get that ID and then be erased by the
+    old record.
+  - It keeps first-run setup closed when you restore a backup taken before the
+    Owner account existed.
+  - The server refuses to use a file that does not match. You then have to fix
+    it by hand. Deleting files does not get you out.
+- **`data/push_vapid.key`** signs push notifications. Without it, every push
+  subscription stops working. The maintenance sweep removes them, and every
+  device has to subscribe again before it gets pushes.
+- **`config.yaml`.** Without it, the server starts on built-in defaults: port
+  8443, self-signed TLS, and new random LiveKit credentials. New credentials
+  break every voice token.
+  - It does **not** change a self-signed certificate. That mode reuses the
+    existing `data/cert.pem` and `data/key.pem`, and those are in the archive.
+  - Clients lose their pinned certificate only if the lost config said
+    `tls.mode: acme` or `manual`. The server then falls back to a different,
+    self-signed certificate.
+- **`data/config-overrides.json`** holds the settings saved from the admin
+  panel's **Server configuration** page. Without it, those keys go back to
+  `config.yaml` and `OWNCORD_*` values at the next start. A restore silently
+  undoes them (see
+  [Server Configuration](server-configuration.md#changing-settings-from-the-admin-panel)).
+
+None of these files are in a database backup. All of them except `config.yaml`
+live under `data/`, which is why copying `data/` whole covers them.
 
 ### SQLite WAL Considerations
 
-The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the server is running -- use the backup endpoint instead.
+The database runs in SQLite's WAL (write-ahead log) mode. **Do not copy the
+`.db` file while the server is running.** The copy may be inconsistent. Use
+the backup endpoint instead, or stop the server first.
 
 ### Admin Backup Endpoint
 
-| Endpoint                            | Method | Description                                                                         |
-| ----------------------------------- | ------ | ----------------------------------------------------------------------------------- |
-| `/admin/api/backup`                 | POST   | Create a new backup (owner-only)                                                    |
-| `/admin/api/backups`                | GET    | List all backups (newest first)                                                     |
-| `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
-| `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
-| `/admin/api/backups/{name}/link`    | POST   | Issue a short-lived single-use download link for one backup (owner-only)            |
-| `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
-| `/admin/api/archive/link`           | POST   | Issue a short-lived single-use archive download link (owner-only)                   |
+All of these are Owner-only.
 
-Backups are stored in the configured backup directory (default
-`data/backups/`) with timestamps. Point it somewhere safer than the data
-volume — another disk, or a mount that is shipped off-host (rsync, rclone,
-a synced folder) — so backups don't share a single point of failure with the
-live database and uploads:
+| Endpoint                            | Method | What it does                                                    |
+| ----------------------------------- | ------ | --------------------------------------------------------------- |
+| `/admin/api/backup`                 | POST   | Create a new backup                                             |
+| `/admin/api/backups`                | GET    | List all backups, newest first                                  |
+| `/admin/api/backups/{name}`         | DELETE | Delete a backup                                                 |
+| `/admin/api/backups/{name}/restore` | POST   | Restore a backup (takes a safety copy first)                    |
+| `/admin/api/backups/{name}/link`    | POST   | Get a short-lived, single-use download link for one backup      |
+| `/admin/api/archive`                | GET    | Download the full archive (database, `data/` and `config.yaml`) |
+| `/admin/api/archive/link`           | POST   | Get a short-lived, single-use download link for the archive     |
+
+**Where backups go.** Backups are saved with a timestamp in `backup.dir`
+(default `data/backups/`). Point it somewhere safer than the data volume:
+another disk, or a folder that is copied off the machine (rsync, rclone, a
+synced folder). Then a single disk failure cannot take both your data and your
+backups.
 
 ```yaml
 backup:
   dir: "/mnt/backup-disk/owncord"
 ```
 
-Under the shipped systemd unit, add that directory to the unit's
-`ReadWritePaths` too (see
-[Running as a Linux Service](#running-as-a-linux-service-systemd)): with
-`ProtectSystem=strict` the rest of the filesystem is read-only for the
-service, and a backup to a path the unit has not allowed fails.
+Under the shipped systemd unit, also add that folder to `ReadWritePaths`. See
+[Running as a Linux Service](#running-as-a-linux-service-systemd). Without it,
+backups to that folder fail.
 
-Every backup is verified with SQLite's `integrity_check` right after it is
-written (a failed backup is removed, never listed), and again before a
-restore is allowed to overwrite the live database.
+**How a backup works:**
 
-A backup runs `VACUUM INTO` on the database's **reader** connection and
-publishes the result with an atomic rename only once the copy is complete:
-writers keep serving for the whole duration, and a backup that is killed
-part-way leaves a `.tmp` file no listing offers as restorable, which the
-maintenance tick removes once it is a day old. Backups are created
-owner-only (mode `0600`), so an off-host copy job must run as the server's
-user or adjust the permissions itself. The server
-logs `duration_ms` when the backup lands, so a shrinking window is visible
-before it becomes a problem.
+- It uses SQLite's `VACUUM INTO` on a read connection. Chat keeps working while
+  it runs.
+- The file only appears under its final name once it is complete. A backup
+  that is killed half-way leaves a `.tmp` file. It is never offered for
+  restore, and maintenance deletes it once it is a day old.
+- Each backup is checked with `integrity_check` right after it is written. A
+  failed backup is deleted, never listed.
+- Backups are readable only by the server's user (mode `0600`). A job that
+  copies them elsewhere must run as that user or change the permissions.
+- The server logs `duration_ms` for each backup, so you can see if backups get
+  slower over time.
 
 ### Scheduled Backups
 
-The **Automatic backups** schedule (off / daily / weekly) and **Keep backups
-for (days)** on the admin panel's Backups & restore page are enforced by the
-server's maintenance loop (checked every 15 minutes). Only the Owner can
-change them, and that page is the Owner's alone:
+The admin panel's **Backups & restore** page has two settings:
 
-- A scheduled backup is taken when the newest backup on disk is older than
-  the schedule interval — a manual backup resets the clock too.
-- Retention is `0` (keep forever) or between 7 and 3650 days. It deletes
-  backups older than that, but always keeps the newest one, so a stale
-  schedule can never delete your last copy, and it never removes the
-  `pre_restore_*` or `pre_migrate_*` safety copies — delete those by hand.
+- **Automatic backups:** off, daily or weekly.
+- **Keep backups for (days):** `0` keeps them forever. Otherwise 7 to 3650
+  days.
+
+Only the Owner can see that page and change them. The server's maintenance
+loop applies them, checking every 15 minutes:
+
+- A scheduled backup runs when the newest backup is older than the schedule.
+  A manual backup resets the clock too.
+- Old backups are deleted after the number of days you set. The newest backup
+  is always kept, so a schedule that stopped can never delete your last copy.
+- Safety copies named `pre_restore_*` and `pre_migrate_*` are never deleted
+  automatically. Delete them by hand.
 
 ### The full archive
 
-A database backup is not a complete restore: it does not carry uploads, the
-key files or `config.yaml` ([Backup Strategy](#backup-strategy) lists what
-each omission costs). **Download full archive** on the Backups & restore page
-returns one zip with all of it — the database as a `VACUUM INTO` snapshot, the
-whole data directory (uploads, `totp.key`, `erasure.key`,
-`erasure/markers.sqlite`, `push_vapid.key`, TLS material), and `config.yaml`.
-An `upload.storage_dir` outside the data directory is archived as
-`data/uploads/`. Stored backups (`backup.dir`) are left out. The archive is
-built inside `backup.dir` before it is sent, so that volume needs room for
-about the size of the data directory plus the database again; when building
-it would leave less free than `server.min_free_disk_mb`, the server refuses
-the download instead of filling the disk. It is Owner-only, because the
-archive holds password hashes and the key files. Only one archive is built at
-a time; a second request while one is being prepared is refused.
+A database backup alone is not a complete restore. It does not include
+uploads, the key files or `config.yaml`. **Download full archive** on the
+**Backups & restore** page gives you one zip with all of it:
 
-The panel asks the server for a short-lived single-use link and opens it as a
-plain download, so the browser streams the archive straight to disk — there is
-no size limit imposed by the page's memory. The download must still finish
-within 2 hours of the request, so for a very large server on a slow link take
-the archive by hand with the procedure in
-[Before upgrading: take the archive](#before-upgrading-take-the-archive), or
-rely on a database backup, which `chatserver restore` can put back. The
-link token is random, single-use, Owner-bound and expires within a minute;
-nothing else can use it. The build starts when the browser opens the link, so
-a refusal from the free-space check arrives as a failed download in the
-browser rather than as a panel message.
+- the database, as a consistent `VACUUM INTO` snapshot
+- the whole data folder: uploads, `totp.key`, `erasure.key`,
+  `erasure/markers.sqlite`, `push_vapid.key` and TLS files
+- `config.yaml`
 
-The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
-even while the server runs. The archive is still taken with WAL-mode writes in
-flight, so prefer the manual stop-the-server procedure in
-[Before upgrading: take the archive](#before-upgrading-take-the-archive) when
-you can, and keep the download off the host either way.
+Details:
+
+- An `upload.storage_dir` outside the data folder is still included, as
+  `data/uploads/`.
+- Stored backups (`backup.dir`) are left out.
+- The archive is built inside `backup.dir` before it is sent. That volume
+  needs free space of about the data folder's size plus the database again. If
+  building it would leave less than `server.min_free_disk_mb` free, the server
+  refuses.
+- Only the Owner can download it, because it contains password hashes and the
+  key files.
+- Only one archive is built at a time. A second request during a build is
+  refused.
+
+**How the download works.** The panel asks the server for a single-use link and
+opens it as a normal download. The browser saves the archive straight to disk,
+so its size is not limited by the page's memory.
+
+- The link is random, single-use, tied to the Owner, and expires within a
+  minute.
+- The download must finish within 2 hours. For a very large server on a slow
+  link, take the archive by hand instead (see
+  [Before upgrading: take the archive](#before-upgrading-take-the-archive)). Or
+  rely on a database backup, which `chatserver restore` can put back.
+- The build starts when the browser opens the link. So if there is not enough
+  free space, you see a failed download in the browser, not a panel message.
+
+The database part is a consistent snapshot even while the server runs. But
+other files are copied while chat is still writing. When you can, prefer the
+stop-the-server procedure in
+[Before upgrading: take the archive](#before-upgrading-take-the-archive).
+Either way, keep the download off the server machine.
 
 ### Backups taken automatically before an upgrade
 
-A server that starts with migrations pending — the state every upgrade leaves
-behind, including a Docker `docker compose pull` — takes a database backup
-**before** it applies them, so a schema move is never unbacked-up. The copy
-lands in the configured backup directory as
-`pre_migrate_<first-migration>.db` (with a `_2`, `_3`, … suffix when that name
-is already taken, so an earlier copy is never overwritten), is verified with
-`integrity_check`, and is
-kept out of retention pruning like the `pre_restore_*` copies. A boot that
-cannot write it refuses to start rather than migrate without it. If the
-database has not changed since the newest copy for that migration — a
-migration that fails on every boot, say — the boot reuses that copy instead of
-writing another.
+An upgrade leaves database migrations waiting to run. This includes a Docker
+`docker compose pull`. When the server starts with migrations waiting, it
+**first** takes a database backup. So a schema change is never made without a
+backup.
 
-This protects the schema, not your uploads or keys: it is a database copy, so
-pair it with the full [archive](#before-upgrading-take-the-archive) for a
-complete rollback.
+- The copy is named `pre_migrate_<first-migration>.db`, in `backup.dir`. If
+  that name is taken, it adds `_2`, `_3` and so on, so an earlier copy is never
+  overwritten.
+- It is checked with `integrity_check`.
+- It is never deleted by the retention setting, like `pre_restore_*` copies.
+- If the server cannot write it, it refuses to start rather than migrate
+  without it.
+- If the database has not changed since the last copy for that migration (for
+  example, a migration that fails on every start), the server reuses that copy.
 
-External scheduling still works if you prefer it, but the admin API accepts
-**Bearer tokens only** — there is no cookie session for it — so the job needs an
-API token first. Mint one on the server and keep the raw value, because it is
-printed once and never recoverable:
+This protects the database only, not your uploads or keys. For a complete
+rollback, also take the full
+[archive](#before-upgrading-take-the-archive).
+
+### Scheduling backups from outside the server
+
+You can also trigger backups from your own scheduler, such as cron. The admin
+API accepts **Bearer tokens only**, not a browser login. So first create an API
+token on the server:
 
 ```bash
-# On the server host. Defaults to the owner account, no expiry; --expires 720h
-# or --label for a managed one.
+# On the server host. --label is required. The token belongs to the Owner
+# account and never expires, unless you add --user or --expires (e.g. 720h).
 ./chatserver token create --label backup
-# prints the raw token ONCE — store it now, it is never recoverable
+# Prints the raw token ONCE. Store it now: it can never be shown again.
 ```
 
-Put it in `OWNCORD_TOKEN` and schedule the call. Linux cron:
+Put the token in `OWNCORD_TOKEN` and schedule the call.
+
+**Linux cron:**
 
 ```bash
 # Nightly at 03:00 via the admin API token
 0 3 * * * curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" https://localhost:8443/admin/api/backup
 ```
 
-Windows Task Scheduler with PowerShell — same Bearer header, not a cookie:
+**Windows Task Scheduler with PowerShell** (the same Bearer header):
 
 ```powershell
 $headers = @{ "Authorization" = "Bearer $env:OWNCORD_TOKEN" }
@@ -865,225 +1175,251 @@ Manage tokens with `./chatserver token list` and
 
 ### Restore
 
-In the admin panel, **Restore** asks for the backup's file name typed out,
+In the admin panel, **Restore** asks you to type the backup's file name. It
 then waits for the restart and reloads the page.
 
-Restoring replaces the live database file, in this order: the server runs
-`integrity_check` on the backup file and refuses a broken one; it writes the
-`backup_restore` audit row; it takes the `pre_restore_<ts>.db` safety copy
-and aborts before anything is touched if that copy cannot be written; it
-broadcasts the restart so connected clients are told to reconnect; then it
-replaces the database and the process restarts. With `server.restart_mode` on
-`supervised` — which `auto` picks for systemd, NSSM and containers — it drains
-and exits cleanly and the supervisor relaunches it instead; the shipped
-`docker-compose.yml` sets `restart: unless-stopped` for exactly this
-([Upgrading](#upgrading)). On the first boot after a restore, every deletion
-marker recorded since the backup was taken is replayed before anything serves
-([data-lifecycle.md](architecture/data-lifecycle.md)) — which is why the
-marker file and `erasure.key` have to travel with the backup.
+What happens, in order:
 
-**A restorable install is a set, not one file.** The backup endpoint's file is
-the database only. What has to travel with it is everything the database
-_points at_ — the uploads, and the three key files plus the marker file that
-live beside `data/`. **Back up `data/` wholesale on the same schedule as the
-database**, not only before an upgrade: the list of what each file costs you if
-it is missing is [Backup Strategy](#backup-strategy)'s list, and it is the
-same list here. What a restore cannot bring back: the uploads (they are never
-in the backup), and everything that happened after the backup was taken —
-accounts, messages, settings and bans created since are gone. And the two
-refusals the marker file can produce at boot are described in
-[security.md](security.md#erasure-marker-key), which carries the matching rule
-in full.
+1. The server checks the backup with `integrity_check` and refuses a broken
+   one.
+2. It writes a `backup_restore` audit entry.
+3. It takes a `pre_restore_<time>.db` safety copy. If that fails, it stops
+   before changing anything.
+4. It tells connected clients to reconnect.
+5. It replaces the database and restarts.
 
-Measured, because both halves are easy to assume the wrong way round
-(`cmd/smoke -drills` phase R, and the B6-11 block in
-[data-lifecycle.md](architecture/data-lifecycle.md)):
+How it restarts depends on `server.restart_mode`. With `supervised`, which
+`auto` chooses under systemd, NSSM and containers, the server exits cleanly
+and the supervisor starts it again. The shipped `docker-compose.yml` sets
+`restart: unless-stopped` for this reason ([Upgrading](#upgrading)).
 
-- Restore a backup **without** `data/erasure/markers.sqlite` and every account
-  erased since that backup comes back, and nothing removes it again — the
-  markers were the only record that they were erased, and the restored database
-  does not carry one. The server boots and logs an `ERROR` naming the absent
-  erasure history — an error in the log, not a refusal to start. It is gated on
-  the key file existing, so a first boot says nothing: an install that never had
-  erasure history has none to lose. An install holding its key in
-  `OWNCORD_ERASURE_KEY` has no key file either way, so this check stays silent
-  for it — the loud case is the key on disk.
-- Restore a backup **without** `data/erasure.key` and the server **refuses to
-  start**, naming the reason. That is deliberate: without the key the markers
-  cannot name anybody, so a server that booted would be serving a database it
-  cannot reconcile with its own deletion history.
+On the first start after a restore, the server replays every deletion recorded
+since the backup was taken, before it serves anyone
+([data-lifecycle.md](architecture/data-lifecycle.md)). This is why the marker
+file and `erasure.key` must travel with the backup.
+
+**A restorable install is a set of files, not one file.** The backup file is
+the database only. Everything the database points at must travel with it: the
+uploads, the three key files, and the marker file. The list is in
+[What each file is for](#what-each-file-is-for).
+
+What a restore cannot bring back:
+
+- uploads, because they are never in the backup
+- anything that happened after the backup: accounts, messages, settings and
+  bans created since then are gone
+
+Two things that were tested, because both are easy to get backwards:
+
+- **Restore without `data/erasure/markers.sqlite`:** every account erased since
+  that backup comes back, and nothing removes it again. The server still
+  starts, but logs an `ERROR` about the missing erasure history. It only checks
+  this when the key file exists, so a first start says nothing. If your key is
+  in `OWNCORD_ERASURE_KEY` instead of a file, the check stays silent too.
+- **Restore without `data/erasure.key`:** the server **refuses to start** and
+  says why. This is on purpose. Without the key, the deletion records cannot
+  name anyone, so the server cannot match the database to its own deletion
+  history.
+
+The rules for the marker file, and the two refusals it can cause at start-up,
+are in [security.md](security.md#erasure-marker-key).
 
 ### Restoring without a running server
 
-The restore endpoint above needs a running server. When the server will not
-boot — a failed migration, a corrupt database — the admin API is unreachable.
-Two offline paths cover it: `chatserver restore` puts a database backup back,
-and the archive rollback restores the whole pre-failure state.
+The admin panel's restore needs a running server. When the server will not
+start, for example after a failed migration or with a corrupt database, you
+have two offline options:
 
-**A database backup, with `chatserver restore`.** The CLI does what the admin
-endpoint does, without the panel:
+- `chatserver restore` puts a database backup back.
+- Restoring the archive puts back the whole state from before the failure.
 
-```bash
-# Stop the server first — it holds the database's process lock, and the
-# command refuses while it is running.
-sudo systemctl stop owncord          # or: docker compose down
+**Option 1: a database backup, with `chatserver restore`.** This does what the
+admin panel does, without the panel.
 
-# Without --force it changes nothing and explains itself; with it, the live
-# database is replaced after a pre_restore_* safety copy is taken.
-./chatserver restore --force /path/to/chatserver_20260101_030000.db
+1. Stop the server. The command refuses while the server is running, because
+   the server holds a lock on the database.
 
-# Docker: the image's entrypoint is the binary and its working dir is /app,
-# so run it in a one-off container against the same volume, naming the
-# backup by its path inside that volume.
-docker compose run --rm --no-deps owncord restore --force data/backups/chatserver_20260101_030000.db
-```
+   ```bash
+   sudo systemctl stop owncord          # or: docker compose down
+   ```
 
-It verifies the file is a readable database that a newer server version did
-not write — and refuses one whose `-wal` still holds transactions, since only
-the main file is copied — before touching the live one, takes a
-`pre_restore_*` safety copy, preserves the message-retry cutoff, and uses the
-same `database.path` and `backup.dir` from `config.yaml` the server does. When the live database is too
-broken to copy, it is moved aside with its `-wal` and `-shm` files as
-`chatserver.db.pre_restore_<time>` instead, and the command prints where. This
-restores the database alone — a full archive below is still the supported path
-when uploads, the key files or `config.yaml` changed too.
+2. Run the restore. Without `--force` it changes nothing and explains what it
+   would do. With `--force` it takes a `pre_restore_*` safety copy, then
+   replaces the live database.
 
-**The whole state, from an archive.** Put the whole pre-failure state back,
-then start the same version that wrote it.
+   ```bash
+   ./chatserver restore --force /path/to/chatserver_20260101_030000.db
+   ```
+
+   In Docker, the image's entry point is the binary and its working folder is
+   `/app`. So run it in a one-off container on the same volume. Name the backup
+   by its path inside the volume:
+
+   ```bash
+   docker compose run --rm --no-deps owncord restore --force data/backups/chatserver_20260101_030000.db
+   ```
+
+3. Start the server again.
+
+Before it touches the live database, the command checks that:
+
+- the file is a readable database
+- a newer server version did not write it
+- its `-wal` file holds no unsaved changes, because only the main file is
+  copied
+
+It also keeps the message-retry cutoff, and uses the same `database.path` and
+`backup.dir` from `config.yaml` as the server.
+
+If the live database is too broken to copy, the command moves it aside with
+its `-wal` and `-shm` files, as `chatserver.db.pre_restore_<time>`, and prints
+where.
+
+This restores the database only. If uploads, key files or `config.yaml` changed
+too, use the archive instead.
+
+**Option 2: the whole state, from an archive.** Put back everything from
+before the failure, then run the same version that wrote it.
 
 1. Stop the server if it is still running (`sudo systemctl stop owncord`, or
    `docker compose down`).
-2. Take the pre-upgrade archive described under
-   [Before upgrading: take the archive](#before-upgrading-take-the-archive) —
-   `data/` wholesale plus `config.yaml`, and the binary you are restoring to.
-   If the failure _is_ the upgrade, that archive is your rollback.
-3. Replace, do not merge: remove the live `data/` directory and copy the
-   archive's back (the Docker volume has to be emptied rather than copied
-   into). The archive carries `config.yaml`,
-   `data/erasure.key`, `data/erasure/markers.sqlite` and the other key files,
-   which a database-only backup does not — see [Restore](#restore).
-4. Start the server and confirm it serves.
+2. Find your pre-upgrade archive, from
+   [Before upgrading: take the archive](#before-upgrading-take-the-archive). It
+   holds `data/`, `config.yaml`, and the binary you are going back to. If the
+   upgrade caused the failure, this archive is your rollback.
+3. **Replace, do not merge.** Remove the live `data/` folder and copy the
+   archive's one back. For Docker, empty the volume rather than copy into it.
+   The archive carries `config.yaml`, `data/erasure.key`,
+   `data/erasure/markers.sqlite` and the other key files, which a database
+   backup does not.
+4. Start the server and check that it works.
 
-If you have only a database backup file (`POST /admin/api/backup`'s output),
-not a full archive, you can still put it back by hand — stop the server, keep
-the current `data/chatserver.db` aside as your own safety copy, replace it with
-the backup file (the backup is a consistent `VACUUM INTO` snapshot, so it is
-safe to drop in directly, unlike a live file copy under WAL), and start again.
-Do this only with the matching `data/erasure/` files in place: a restore
-without the marker file can serve an account that was erased since the backup
-was taken ([Restore](#restore)). A full archive is the supported path; a
+**If you only have a database backup file** and no archive, you can still put
+it back by hand:
+
+1. Stop the server.
+2. Move the current `data/chatserver.db` aside as your own safety copy.
+3. Copy the backup file in its place. This is safe, because a backup is a
+   consistent snapshot, unlike a live copy under WAL.
+4. Start the server.
+
+Only do this with the matching `data/erasure/` files in place. Without the
+marker file, the server can serve an account that was erased after the backup
+was taken ([Restore](#restore)). The full archive is the supported path. A
 database file alone is the fallback.
 
 ## Storage growth
 
-Most of what the server writes lives beside the binary under `data/` by
-default, but **`server.data_dir` is not the root of all of it** (REL-04): it
-holds the key files (`totp.key`, `erasure.key`, `push_vapid.key`), the erasure
-marker store and the managed LiveKit binary, while `database.path`,
-`upload.storage_dir`, `backup.dir` and the TLS `cert_file`/`key_file` each have
-their own independent `data/...` default. What each path holds, what bounds it
-and what — if anything — ever deletes it:
+Most of what the server writes lives under `data/` next to the binary. But
+**`server.data_dir` is not the root of everything.** It holds the key files,
+the erasure marker store and the managed LiveKit binary. The database, uploads,
+backups and TLS files each have their own setting, with its own `data/...`
+default. If you move one, the others do not follow.
 
-| Path                                        | Written by                                                                                    | Bounded by                                                                                                         | Pruned by                                                                                                                                      |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chatserver.db` + `chatserver.db-wal`       | every feature                                                                                 | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes          |
-| `uploads/`                                  | attachments, avatars, emoji, and a kept preview of a large image (`thumbs/`)                  | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick        |
-| `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` and `pre_migrate_*.db` safety copies | `Keep backups for (days)` on the admin panel's Backups & restore page                                              | retention always keeps the newest backup and never removes the `pre_restore_*` or `pre_migrate_*` safety copies, which must be deleted by hand |
-| `acme_certs/`                               | `tls.mode: acme` only                                                                         | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                         |
-| `livekit/`                                  | `voice.auto_download_livekit`                                                                 | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                                      |
-| `plugins/`                                  | plugins loaded by `-tags wazero` builds                                                       | what the plugins themselves write                                                                                  | never                                                                                                                                          |
-| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                                            | one TLS pair                                                                                                       | never — replacing them is the rotation procedure under [TLS Setup](#tls-setup)                                                                 |
-| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                                                     | three small files                                                                                                  | never — and must never be: each loss is permanent (see [Before upgrading](#before-upgrading-take-the-archive))                                 |
-| `erasure/markers.sqlite`                    | every account erasure and every swept channel                                                 | one row per erased account or swept channel                                                                        | never; small by construction                                                                                                                   |
+This table lists what each path holds, what limits its size, and what deletes
+old data:
 
-Four facts the table cannot carry:
+| Path                                        | Written by                                                                | Size limited by                                                                                       | Cleaned up by                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `chatserver.db` + `chatserver.db-wal`       | every feature                                                             | messages: the server's or a channel's retention window (`0` = keep forever); stored events: 24 hours  | the retention sweep (up to 5,000 messages per run); the event pruner, every 60 minutes; the WAL after an erasure  |
+| `uploads/`                                  | attachments, avatars, emoji, and a preview of large images (`thumbs/`)    | `upload.max_size_mb` per file (default 100); `upload.user_quota_mb` per user (default `0` = no limit) | the orphan sweep (files unlinked for over 1 hour), retention, erasure, and reconciliation (up to 500 files a run) |
+| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and never deletes `pre_restore_*` or `pre_migrate_*` copies          |
+| `acme_certs/`                               | `tls.mode: acme` only                                                     | one certificate for your domain                                                                       | the ACME client handles renewal                                                                                   |
+| `livekit/`                                  | `voice.auto_download_livekit`                                             | one pinned LiveKit release                                                                            | never; delete the file to force a fresh download                                                                  |
+| `plugins/`                                  | plugins, in builds made with `-tags wazero`                               | whatever the plugins write                                                                            | never                                                                                                             |
+| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                        | one TLS pair                                                                                          | never; replacing them is [rotation](#rotating-the-self-signed-certificate)                                        |
+| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                                 | three small files                                                                                     | never, and they must never be: losing one is permanent (see [Backup Strategy](#backup-strategy))                  |
+| `erasure/markers.sqlite`                    | every account erasure and every swept channel                             | one row per erased account or swept channel                                                           | never; it stays small                                                                                             |
 
-- **The audit log is never pruned.** No maintenance step touches it — it is
-  the tamper-evident trail, and the doc says so rather than leaving it to be
-  assumed: on a busy server `audit_log` is the slowest-growing large table,
-  and it grows for the life of the server.
-- **Message retention is off by default.** `settings.retention_days` is `0`
-  on a fresh and on an upgraded server, so message growth is unbounded until
-  an owner sets a window in the admin panel. `GET /admin/api/retention/preview`
-  (admin panel, Message retention) shows exactly which messages a window would delete
-  before it runs. Pinned messages and DMs are never swept.
-- **Report content and moderation actions age out on their own:**
-  `moderation.report_retention_days` 180, `moderation.action_retention_days`
-  90 (a closed report's content, and a warning/timeout action row after
-  acknowledgement or expiry — ban, kick and removal rows are never touched).
-- **The disk floor.** Everything in the table shares one volume with the WAL.
-  The server stops accepting uploads at `server.min_free_disk_mb` and reports
-  `degraded`/`disk` on `/health`; messages keep flowing. What each stage of a
-  filling disk looks like and how to recover is under
-  [Health Endpoint](#health-endpoint); that table is not repeated here.
+Four things the table cannot show:
+
+- **The audit log is never pruned.** No maintenance step touches it, because
+  it is the tamper-evident record. On a busy server it grows slowly, for the
+  whole life of the server.
+- **Message retention is off by default.** `settings.retention_days` is `0` on
+  new and upgraded servers. Messages grow without limit until the Owner sets a
+  window in the admin panel. The **Message retention** section, backed by
+  `GET /admin/api/retention/preview`, shows exactly which messages a window
+  would delete before it runs. Pinned messages and direct messages are never
+  swept.
+- **Report content and moderation actions expire on their own.**
+  `moderation.report_retention_days` is 180 days and
+  `moderation.action_retention_days` is 90. The first covers a closed report's
+  content. The second covers warning and timeout entries after they are
+  acknowledged or expire. Ban, kick and removal entries are never touched.
+- **The disk floor.** Everything above shares one volume with the database's
+  WAL. Below `server.min_free_disk_mb` free, the server stops accepting uploads
+  and `/health` reports `degraded` with reason `disk`. Messages keep flowing.
+  What each stage of a filling disk looks like, and how to recover, is under
+  [Health Endpoint](#health-endpoint).
 
 ## Upgrade and Rollback
 
-An upgrade swaps the binary (or the image) under an install directory that
-nothing else touches. A **rollback is restore-then-downgrade**: put the
-pre-upgrade copy back, then run the old version on it. Migrations are
-forward-only. A full down-migration is not a supported upgrade path — the
-`Server/rollback/*.down.sql` reversals exist only for rehearsing a rollback of
-a specific migration and are run by hand (see `Server/rollback/README.md`).
-There is no supported way to run an older binary against a database a newer
-one has already migrated; the server refuses to start on such a schema rather
-than risk it, because doing it anyway is how you lose the database, not how you
-go back. The copy you take before upgrading is therefore the only complete
-rollback that exists; the server's own
+An upgrade replaces the binary (or the Docker image). Nothing else in the
+install folder changes.
+
+A **rollback** means restore, then downgrade. You put the pre-upgrade copy
+back, then run the old version on it.
+
+**Migrations only go forward.** You cannot run an older binary on a database a
+newer one has already migrated. The server refuses to start on such a database,
+because doing it anyway is how you lose it. So **the copy you take before
+upgrading is the only complete rollback that exists.** The server's own
 [pre-migration copy](#backups-taken-automatically-before-an-upgrade) holds the
 database alone.
 
+There are hand-run reversal scripts in `Server/rollback/`. They exist to
+rehearse undoing one specific migration, not as an upgrade path. See
+[`Server/rollback/README.md`](../Server/rollback/README.md).
+
 ### Before upgrading: take the archive
 
-Take it with the server **stopped**. The archive carries `data/chatserver.db`
-as a file, and the database runs in WAL mode — a copy taken out from under a
-running server is not a consistent snapshot (see
-[SQLite WAL Considerations](#sqlite-wal-considerations)).
+Take it with the server **stopped**. The archive copies `data/chatserver.db`
+as a plain file, and a plain copy of a running WAL database is not consistent
+(see [SQLite WAL Considerations](#sqlite-wal-considerations)).
 
-**Standalone:**
+**Standalone install:**
 
 ```bash
-# 1. Backup while the server is still up. It is verified with integrity_check
-#    as it is written and lands in data/backups/, inside the copy at step 3.
+# 1. Back up while the server is still running. The backup is checked with
+#    integrity_check and lands in data/backups/, inside the copy at step 3.
 curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
   https://localhost:8443/admin/api/backup
 
-# 2. Stop the server -- not "quiesce it", stop it.
+# 2. Stop the server. Really stop it.
 sudo systemctl stop owncord          # or: nssm stop OwnCord
 
-# 3. Copy the state off this disk, not into the directory being upgraded.
-#    The destination must exist: `cp` with two sources refuses to create it.
+# 3. Copy the state to another disk, not into the folder you are upgrading.
+#    The destination must exist: cp with two sources will not create it.
 sudo mkdir -p /mnt/backup-disk/owncord-pre-upgrade
 sudo cp -a /opt/owncord/data /opt/owncord/config.yaml \
   /mnt/backup-disk/owncord-pre-upgrade/
 
-# 4. Keep the binary you are upgrading FROM. Step 3 is only half a rollback
-#    without it -- see "Rolling back" below.
+# 4. Keep the binary you are upgrading FROM. Without it, step 3 is only half a
+#    rollback -- see "Rolling back" below.
 sudo cp -a /opt/owncord/chatserver \
   /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous
 ```
 
-**Docker:** `data/` lives in the named volume and `config.yaml` does not —
-the compose file bind-mounts it from the host, so a copy of the volume does
-not contain it. Both have to be taken, separately:
+**Docker:** `data/` lives in the named volume, but `config.yaml` does not. The
+compose file mounts it from the host. So you must copy both, separately:
 
 ```bash
-# 1. Backup, then stop. `down` also releases the volume for step 3.
+# 1. Back up, then stop. `down` also frees the volume for step 3.
 curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" \
   https://localhost:8443/admin/api/backup
 docker compose down
 
-# 2. The host-side config.yaml. Note the tag you are upgrading FROM: without
-#    it there is nothing to pin the rollback to.
+# 2. The host's config.yaml. Also record the image you are upgrading FROM:
+#    without it there is nothing to roll back to.
 mkdir -p /mnt/backup-disk/owncord-pre-upgrade
 cp config.yaml /mnt/backup-disk/owncord-pre-upgrade/config.yaml
 docker image inspect ghcr.io/j3vb/owncord-server:latest \
   --format '{{index .RepoDigests 0}}' > /mnt/backup-disk/owncord-pre-upgrade/image
 
 # 3. The volume, through a throwaway container -- the only way to read a named
-#    volume from the host. alpine because the OwnCord image is distroless and
-#    ships no shell and no `cp`. The rm -rf keeps a re-run from nesting the
-#    copy inside the previous one.
+#    volume from the host. alpine, because the OwnCord image has no shell and
+#    no `cp`. The rm -rf stops a re-run from nesting the copy inside the old one.
 rm -rf /mnt/backup-disk/owncord-pre-upgrade/data
 docker run --rm \
   -v server_owncord-data:/app/data:ro \
@@ -1092,21 +1428,18 @@ docker run --rm \
 ```
 
 `server_owncord-data` is the name Compose gives the `owncord-data` volume when
-it runs in `Server/` (project name plus volume name); run `docker volume ls` to
-confirm yours.
+it runs in `Server/`: the project name plus the volume name. Run
+`docker volume ls` to check yours.
 
-Copy `data/` **wholesale**, not a list of names. A version you have not
-installed yet is allowed to add files to it, and a hand-written list is exactly
-what silently misses one. What each file costs you if it is missing — the
-backup file, `data/uploads/`, `data/totp.key`, `data/erasure.key`,
-`data/erasure/markers.sqlite`, `data/push_vapid.key` and `config.yaml` — is
-[Backup Strategy](#backup-strategy)'s list, and it is the same list here.
+**Copy `data/` as a whole, not a list of file names.** A newer version may add
+files to it, and a hand-written list silently misses them. What each file is
+for is in [What each file is for](#what-each-file-is-for).
 
 ### Performing the upgrade
 
-**Standalone** — replace the binary and start it again. Nothing else moves: no
-directory is renamed, no configuration is rewritten, and the new version
-migrates the database forward on its first boot.
+**Standalone:** replace the binary and start it again. Nothing else changes.
+No folder is renamed and no configuration is rewritten. The new version
+migrates the database on its first start.
 
 ```bash
 sudo systemctl stop owncord
@@ -1114,40 +1447,43 @@ sudo install -m 0755 ./chatserver /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
 
-The admin panel's in-place update performs the same swap for you, including the
-supervisor handoff — see [Auto-Update](#auto-update). Its update dialog backs
-up the database first unless you untick that, but the copy is the database
-alone, so take the archive first either way.
+The admin panel's in-place update does the same swap for you, including the
+hand-off to your supervisor. See [Auto-Update](#auto-update). Its dialog backs
+up the database first unless you untick that box. That copy is the database
+only, so take the archive first either way.
 
-**Docker** — `docker compose pull && docker compose up -d`, with the container
-specifics under [Upgrading](#upgrading) in the Docker section.
+**Docker:** `docker compose pull && docker compose up -d`. Container details
+are under [Upgrading](#upgrading) in the Docker section.
 
-**Upgrade the server before the clients.** Desktop clients fetch updates from
-the server they connect to, and the server only offers releases whose protocol
-epoch it can speak itself (`docs/protocol.md`, Compatibility). A release that
-changes the wire protocol therefore reaches your users' clients only once the
-server runs it; releases that do not change the protocol reach them regardless.
-A client that is already too old for the server sees "update the client" on its
-connect screen, with the usual Update Now button.
+**Upgrade the server before the clients.** Desktop clients get their updates
+from the server they connect to. The server only offers client releases whose
+protocol it can speak itself (`docs/protocol.md`, Compatibility).
 
-Upgrade rehearsals do not need a donated production database:
-`Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` is a committed, anonymised,
-alpha.4-schema dataset shaped like a month-old server (see the README beside
-it), and `Server/db/alpha_snapshot_test.go` proves on every test run that the
-current migrations still apply to it cleanly.
+- A release that changes the protocol reaches your users only after the server
+  runs it.
+- Releases that do not change the protocol reach them either way.
+- A client that is already too old for the server shows "update the client"
+  on its connect screen, with an **Update Now** button.
+
+**Rehearsing an upgrade.** You do not need a copy of a real server's database.
+`Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` is an anonymised test
+database shaped like a month-old server (see the README beside it).
+`Server/db/alpha_snapshot_test.go` checks on every test run that current
+migrations still apply to it cleanly.
 
 ### Rolling back
 
-**Everything written after the archive was taken is lost** — messages,
-uploads, accounts, settings, every backup created since. That is the price of a
-rollback, nothing about the procedure avoids it, and the only lever you have is
-how recent the archive is.
+**Everything written after the archive was taken is lost.** That includes
+messages, uploads, accounts, settings, and every backup made since. Nothing in
+the procedure avoids this. The only thing you control is how recent the
+archive is.
 
-You also need the version you are rolling back **to**. Keep the binary, or the
-image tag, you upgraded from: GitHub Releases usually still has it, but an
-in-place self-update leaves nothing local (it rotates the old binary to
-`.old-*` and the replacement deletes that), and a yanked or air-gapped release
-leaves you no rollback at all. Step 4 of the archive above is that copy.
+You also need the version you are going back **to**. Keep the binary, or the
+image tag, that you upgraded from. GitHub Releases usually still has it. But an
+in-place self-update leaves nothing on disk: it renames the old binary to
+`.old-*`, and the new one deletes that. A withdrawn release, or a machine with
+no internet, leaves you with no rollback at all. Step 4 of the archive above is
+that copy.
 
 **Standalone:**
 
@@ -1161,21 +1497,21 @@ sudo install -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
 sudo systemctl start owncord
 ```
 
-**Replace `data/`; never merge into it.** The newer version can write files the
-archive has never heard of — upgrading out of alpha.4, `data/erasure.key`,
-`data/push_vapid.key` and `data/erasure/` all arrive that way — and copying
-over the top leaves them behind. The result is half one version and half the other, a state no
-release has ever been tested in. Remove the directory first, then restore.
+**Replace `data/`. Never merge into it.** The newer version can write files the
+archive does not know about. For example, upgrading out of alpha.4 adds
+`data/erasure.key`, `data/push_vapid.key` and `data/erasure/`. Copying over the
+top leaves them behind. The result is half one version and half the other, a
+state no release was ever tested in. Remove the folder first, then restore.
 
-**Docker** — the same shape, except the volume has to be emptied rather than
-copied into, because a copy into a volume can only add files:
+**Docker:** the same steps, except you must empty the volume rather than copy
+into it. Copying into a volume can only add files.
 
 ```bash
 docker compose down
 docker volume rm server_owncord-data
 docker volume create server_owncord-data
 
-# Restore into the empty volume, owned by the image's uid -- alpine again
+# Restore into the empty volume, owned by the image's user ID -- alpine again,
 # because the OwnCord image has no shell to run this in.
 docker run --rm \
   -v server_owncord-data:/app/data \
@@ -1188,161 +1524,168 @@ cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml config.yaml
 docker compose up -d
 ```
 
-The admin panel's backup restore is not a rollback. It puts a database back
-under **the version that is running**, which migrates it forward again on the
-spot — see [Restore](#restore). Going back a version is the procedure above,
-and only that.
+**The admin panel's backup restore is not a rollback.** It puts a database back
+under **the version that is running**, which migrates it forward again
+straight away. See [Restore](#restore). Going back a version means the
+procedure above, and only that.
 
 ### How this procedure is checked
 
-Both halves are executed on every run, not merely described.
-`Server/cmd/smoke` drives the newest published release through exactly this
-sequence — populate, stop, archive, upgrade, verify, stop, restore,
-downgrade, verify the rollback — in both shapes an owner deploys: two binaries in one install
-directory, and two images on a named volume. It runs on **every pull request**
-(the standalone leg, inside `ci.yml`'s server build job), and
-`.github/workflows/upgrade-rehearsal.yml` runs both legs nightly, on demand,
-and from the release workflow before anything is pushed or published, so a red
-rehearsal stops the release.
+Both the upgrade and the rollback are run automatically, not just described.
 
-What it asserts across the swap, by name: `config.yaml`, every credential key
-file the pre-upgrade install had, and every file under `data/uploads/`
-byte-identical; every pre-upgrade backup
-still listed; the attachment uploaded before the upgrade still downloading
-byte-identical through the API; the session token issued before the upgrade
-still authenticating as the same owner; and the reported version actually
-changing — then changing back across the rollback, with the old binary still
-stopping cleanly on the restored install.
+`Server/cmd/smoke` takes the newest published release through exactly this
+sequence: fill with data, stop, archive, upgrade, check, stop, restore,
+downgrade, check the rollback. It does this in both shapes owners use: two
+binaries in one install folder, and two images on a named volume.
 
-Two things it does not cover, stated because a rehearsal you misread is worse
-than none:
+- The standalone run happens on **every pull request**, inside the server
+  build job in `ci.yml`.
+- `.github/workflows/upgrade-rehearsal.yml` runs both shapes nightly, on
+  demand, and from the release workflow before anything is published. A failed
+  rehearsal stops the release.
 
-- **ARM64 upgrades are not rehearsed.** `v1.2.0-alpha.4` published no ARM64
-  server asset, so there is no published alpha to upgrade _from_. The ARM64
-  assets are covered by the per-architecture lifecycle check described under
-  [Building from Source](#building-from-source) and [Docker](#docker-linux) —
-  boot, migrate, drain, restart — but not by an upgrade out of a previous
-  release. That becomes rehearsable one release after the ARM64 assets ship.
-- **In Docker, `config.yaml` is yours alone to manage.** The compose file
-  mounts it read-only, so nothing inside the container can rewrite it: the
-  admin panel and the setup wizard cannot persist a startup setting there, and
-  an attempt comes back as a warning plus an `ERROR` line in the container log.
-  Edit the host file and recreate the container instead. The rehearsal's
-  "`config.yaml` is untouched" check is correspondingly weaker on that leg —
-  it catches an in-place rewrite, but the kernel refuses the rename over a
-  single-file bind mount that the server actually uses to save configuration.
-  The standalone leg is the one that proves an upgrade leaves `config.yaml`
-  alone.
+What it checks across the upgrade:
+
+- `config.yaml`, every key file, and every file under `data/uploads/` are
+  byte-for-byte unchanged
+- every pre-upgrade backup is still listed
+- an attachment uploaded before the upgrade still downloads unchanged
+- a login session from before the upgrade still works as the same Owner
+- the reported version changes, then changes back after the rollback
+- the old binary still stops cleanly on the restored install
+
+Two things it does **not** cover:
+
+- **ARM64 upgrades are not rehearsed.** `v1.2.0-alpha.4` had no ARM64 server
+  asset, so there is no older ARM64 release to upgrade from. ARM64 assets do
+  get the per-architecture lifecycle check (see
+  [Building from Source](#building-from-source) and
+  [Docker](#docker-linux)): start, migrate, stop, restart. They do not get an
+  upgrade from a previous release. That becomes possible one release after the
+  ARM64 assets ship.
+- **In Docker, the `config.yaml` check is weaker.** Compose mounts the file
+  read-only, so nothing in the container can rewrite it (see
+  [config.yaml for Docker](#configyaml-for-docker)). The check catches an
+  in-place edit. But the way the server really saves its config, a rename over
+  the file, is refused by the system on a single-file mount anyway. The
+  standalone run is the one that proves an upgrade leaves `config.yaml` alone.
 
 ## Capacity limits
 
-What one server carries on which hardware, and the size to buy for a
-community of 1,000–2,000 online, is in [Capacity](capacity.md#sizing-for-10002000-online).
-The qualified profile is **250 registered users, 100 simultaneous connections
-and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
+What one server can carry on which hardware is in
+[Capacity](capacity.md#sizing-for-10002000-online). That page also has an
+estimate, not yet measured, for 1,000 to 2,000 people online.
+
+The tested profile is **250 registered users, 100 connections at once and 25
+voice sessions at once, on 2 vCPU and 4 GB RAM**. See
 [The profile](capacity.md#the-profile) and
-[Reference hardware](capacity.md#reference-hardware) in
-[Capacity](capacity.md), where it is reproduced rather than owned. The keys
-below are the ceilings an owner configures; each carries its default, what an
-outgrowing community sees, and the metric in `GET /api/v1/metrics` that says
-which one is near:
+[Reference hardware](capacity.md#reference-hardware).
 
-- `server.max_ws_connections` (default `0` = unlimited) → further WebSocket
-  upgrades are refused with 503 before the upgrade completes, until
-  connections free up → `ws_conn_rejects` (nonzero means you hit it).
-- `database.max_readers` (default `0` = automatic, `max(8, 2× CPU count)`,
-  clamped to 1–64) → read queries queue behind the pool →
+These are the limits you set. Each item shows the default, what users see when
+you hit it, and the metric in `GET /api/v1/metrics` that warns you:
+
+- **`server.max_ws_connections`** (default `0` = no limit). New WebSocket
+  connections are refused with `503` until others close. Metric:
+  `ws_conn_rejects` above zero means you hit it.
+- **`database.max_readers`** (default `0` = automatic, which is
+  `max(8, 2 × CPU count)`, kept between 1 and 64). Read queries queue up. Metric:
   `db_reader_wait_seconds` growing.
-- `upload.max_size_mb` (default `100`) → a larger file is refused with
-  `400 BAD_REQUEST`. `upload.user_quota_mb` (default `0` = unlimited) → an
-  upload past it is refused with `507 STORAGE_QUOTA_EXCEEDED` →
-  `upload_storage_used_mb` for where the number is.
-- `server.min_free_disk_mb` (default `256`) → uploads are refused with
-  `507 STORAGE_LOW_DISK` and `/health` reports `degraded`/`disk` → `disk_low`
-  on metrics.
-- `security.auth_rate_limit_multiplier` (default `1.0`) → auth requests
-  and WebSocket upgrades refused with `429 RATE_LIMITED`; raise it for a community behind one shared
-  NAT (office, school) — the defaults assume roughly one person per IP.
+- **`upload.max_size_mb`** (default `100`). A larger file is refused with
+  `400 BAD_REQUEST`, or `413 PAYLOAD_TOO_LARGE` when the whole request is over
+  the limit.
+- **`upload.user_quota_mb`** (default `0` = no limit). An upload past a user's
+  quota is refused with `507 STORAGE_QUOTA_EXCEEDED`. Metric:
+  `upload_storage_used_mb` shows the total.
+- **`server.min_free_disk_mb`** (default `256`). Uploads are refused with
+  `507 STORAGE_LOW_DISK`, and `/health` reports `degraded` with reason `disk`.
+  Metric: `disk_low`.
+- **`security.auth_rate_limit_multiplier`** (default `1.0`). Logins and
+  WebSocket connections are refused with `429 RATE_LIMITED`. The defaults
+  assume about one person per IP address. Raise it for a community that shares
+  one internet connection, such as an office or school.
 
-The reading of these and the other growth signals is covered once, under
-[Metrics Endpoint](#metrics-endpoint); that list is the one to alert on.
+How to read these and the other growth signals is under
+[Metrics Endpoint](#metrics-endpoint). That list is the one to alert on.
 
 ### Open-file limit (file descriptors)
 
-Every WebSocket holds a file descriptor, so the number of people who can be
-online at once is bounded by the process's `RLIMIT_NOFILE`. The Go runtime
-already lifts the soft limit to just under the hard one at init, and the server
-**raises its soft limit to the hard limit at start-up** and logs the result
-under `open-file limit`; the number that matters is therefore the **hard**
-limit, which the supervisor or shell sets. The risk is a low hard limit — a
-plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — enough for
-a small community but not for 1,000–2,000, which need about 2,100 descriptors:
+Every WebSocket connection uses one file descriptor. So the number of people
+online at once is capped by the process's open-file limit (`RLIMIT_NOFILE`).
+
+There are two limits, soft and hard. At start-up the server raises its soft
+limit up to the hard limit and logs the result under `open-file limit`. So the
+**hard** limit is what matters. Your supervisor or shell sets it.
+
+The risk is a low hard limit, such as a plain `ulimit -n 1024` or an old
+default of 1,024. That is enough for a small community, but not for 1,000 to
+2,000 people, who need about 2,100 descriptors.
+
+How to set it:
 
 - **systemd:** `LimitNOFILE=65536` in the unit (the shipped
   [`deploy/owncord.service`](../deploy/owncord.service) sets it), or
-  `infinity`. `systemctl edit owncord` overrides it without touching the file.
-- **Docker Compose:** `ulimits.nofile` on the `owncord` service (the shipped
-  `Server/docker-compose.yml` sets 65,536). Without it the hard limit is
-  whatever the host daemon passes down, which an old or tuned-down daemon can
-  set to 1,024.
-- **Bare binary or another supervisor:** set the soft and hard limit with
-  `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
+  `infinity`. `systemctl edit owncord` changes it without editing the file.
+- **Docker Compose:** `ulimits.nofile` on the `owncord` service. The shipped
+  `Server/docker-compose.yml` sets 65,536. Without it, the hard limit is
+  whatever the Docker daemon passes down, which can be as low as 1,024.
+- **Plain binary or another supervisor:** set the soft and hard limits with
+  `ulimit -n` (or your supervisor's equivalent) before the server starts.
 
-The server also warns at boot when the resulting limit is below
-`2 × max_ws_connections + 256` — the descriptors that many connections need,
-doubled for headroom, plus a fixed allowance for the database, LiveKit, TLS
-and the rest of the process. With `server.max_ws_connections` unset
-(unlimited), the budget is the 2,000-online target: 4,256. A server started
-under `ulimit -n 1024` reports a raised limit or a warning naming this setting,
-never a silent fall-over at 1,000 connections.
+The server also warns at start-up when the limit is below
+`2 × max_ws_connections + 256`. That is two descriptors per connection, for
+headroom, plus a fixed allowance for the database, LiveKit, TLS and the rest.
+With `server.max_ws_connections` unset (no limit), the server plans for 2,000
+online: 4,256. So a server started under `ulimit -n 1024` either raises the
+limit or warns you, naming this setting. It never fails silently at 1,000
+connections.
 
 ## Monitoring
 
 ### Logs
 
-The server logs to **stdout** as `slog` text and keeps the most recent 2 000
-lines in memory for the admin panel's live view. There is no log file and no
-rotation inside the server: every record is teed to stdout and to the ring
-buffer by the logging setup in `Server/main.go`. Where the log lives is
-therefore where your supervisor puts stdout, not a server setting:
+The server writes its log to **standard output** (stdout), as `slog` text. It
+also keeps the last 2,000 lines in memory for the admin panel's live log view.
+There is no log file and no rotation inside the server. So where the log ends
+up depends on your supervisor:
 
-| Supervisor      | Where stdout goes                                  | How to read it                                                                                        |
-| --------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| systemd (Linux) | the journald journal                               | `journalctl -u owncord -f`; retention follows journald's configuration, not the server's              |
-| Docker          | the `json-file` log driver on the host             | `docker compose logs -f owncord`; the shipped compose file caps the driver at 10 MB per file, 3 files |
-| NSSM (Windows)  | **nowhere** unless `AppStdout`/`AppStderr` are set | the file you point `AppStdout` at — see the Windows service install above                             |
+| Supervisor      | Where the log goes                             | How to read it                                                                         |
+| --------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| systemd (Linux) | the journald journal                           | `journalctl -u owncord -f`. journald's settings decide how long it is kept             |
+| Docker          | Docker's `json-file` log driver on the host    | `docker compose logs -f owncord`. The shipped compose file keeps 3 files of 10 MB each |
+| NSSM (Windows)  | **nowhere**, unless you set `AppStdout/Stderr` | the file you set in `AppStdout`. See [Option 1: NSSM](#option-1-nssm)                  |
 
-One key controls verbosity: `logging.level` (`debug`/`info`/`warn`/`error`,
-default `info`). `OWNCORD_LOGGING_LEVEL` overrides it without editing
-`config.yaml`, and an administrator can switch a running server to debug for
-a while from the admin panel's Logs page
+**Log level.** `logging.level` sets how much is logged: `debug`, `info`,
+`warn` or `error`. The default is `info`. `OWNCORD_LOGGING_LEVEL` overrides it
+without editing `config.yaml`. An administrator can also switch a running
+server to `debug` for a while from the admin panel's **Logs** page
 ([server-configuration.md](server-configuration.md#logging-logging)).
 
-A LiveKit that OwnCord supervises logs through the same pipeline, as
-`livekit companion output` entries with `component=livekit` and LiveKit's own
-line in the `line` attribute. An external LiveKit, including
-the Docker `livekit` service, logs only to its own stdout: read it with
-`docker compose logs livekit` (or wherever that process's supervisor puts
-stdout). Its output is not in the admin live log or the support bundle.
+**LiveKit's log.**
 
-A log line is `time level msg key=value ...`, and every request-scoped
-record carries a `req_id` so a line can be tied back to the HTTP request
-that produced it.
+- When OwnCord runs LiveKit itself, LiveKit's lines appear in the same log, as
+  `livekit companion output` entries. They have `component=livekit`, and
+  LiveKit's own text in the `line` attribute.
+- An external LiveKit, including the Docker `livekit` container, logs only to
+  its own output. Read it with `docker compose logs livekit`, or wherever its
+  supervisor puts it. It is not in the admin live log or the support bundle.
 
-What is **never** in a log line, by construction rather than by call-site
-discipline: the LiveKit API key and secret, the GitHub token and the GIF API
-key are redacted at the logging boundary no matter how the value reaches a
-record. What **is** in it at `info`: usernames, ids and client addresses —
-so a pasted log excerpt is personal data. Treat it as such when attaching
-one to an issue; the support bundle deliberately omits raw log lines for
-this reason.
+**Log format.** A line looks like `time level msg key=value ...`. Every line
+from a web request carries a `req_id`, so you can tie it back to that request.
 
-The admin panel's live log view is the same stream at the same level,
-delivered over a single-use SSE ticket — see the Diagnostics section below.
+**What is never in the log.** The LiveKit API key and secret, the GitHub token
+and the GIF API key are always hidden, however they reach a log line.
+
+**What is in the log.** At `info` level, usernames, IDs and client addresses
+appear. So a copied log excerpt is personal data. Treat it that way when you
+attach it to an issue. The support bundle leaves raw log lines out for this
+reason.
+
+The admin panel's live log view shows the same lines at the same level. See
+[Diagnostics](#diagnostics) below.
 
 ### Health Endpoint
 
-`GET /health` -- public, no authentication required.
+`GET /health` is public and needs no login. (`/api/v1/health` is the same.)
 
 ```json
 {
@@ -1352,41 +1695,48 @@ delivered over a single-use SSE ticket — see the Diagnostics section below.
 }
 ```
 
-`status` is a real verdict, not a constant: the server probes its own
-WebSocket dispatch loop, runs a bounded `SELECT 1` against the database, and
-checks free disk space on the data volume. When any of those fail, the
-endpoint returns HTTP 503 with `"status": "degraded"` and a `reason` field
-naming the subsystem (`hub`, `database`, or `disk` — no further detail, since
-the endpoint is unauthenticated). Checks are cached for a few seconds, so
-polling it aggressively does not multiply database load. Point your uptime
-monitor or container healthcheck at this endpoint and treat any 503 as
-actionable. It does not cover voice — see
+`status` is a real check, not a fixed value. The server checks three things:
+
+- its own WebSocket dispatch loop is alive
+- a quick `SELECT 1` against the database succeeds within 1 second
+- there is enough free disk space on the data volume
+
+If any check fails, the endpoint returns HTTP `503` with `"status":
+"degraded"` and a `reason` field: `hub`, `database` or `disk`. It gives no more
+detail, because anyone can call it.
+
+Results are cached for 5 seconds, so frequent polling does not load the
+database. Point your uptime monitor or container health check here, and treat
+any `503` as a problem to act on.
+
+This endpoint does **not** check voice. See
 [Monitor voice as well as liveness](#monitor-voice-as-well-as-liveness).
 
-The server version is deliberately not exposed on this unauthenticated
-endpoint (anti-fingerprinting hardening).
+The server version is deliberately left out of this public endpoint, so
+outsiders cannot easily tell which version you run.
 
-**Disk, in the three stages an operator can be in.** The check is free space on
-the volumes the server writes to against `server.min_free_disk_mb` (default
-256 MiB; `0` disables the floor — see
+**Disk space, in three stages.** The check compares free space on the volumes
+the server writes to with `server.min_free_disk_mb`. The default is 256 MiB.
+`0` turns the check off (see
 [server-configuration.md](server-configuration.md)). All three stages were
-measured against a filesystem that was actually filled (`cmd/smoke -drills`
-phase D):
+tested on a disk that was really filled:
 
-| Free space                 | `/health`                                                 | Everything else                                                                                                                                                                                                                                                                                                              |
-| -------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Above the floor            | `200` `ok`                                                | Normal.                                                                                                                                                                                                                                                                                                                      |
-| Below the floor            | `503` `degraded`, `"reason": "disk"`                      | Uploads and other writes that need headroom are refused with `507 STORAGE_LOW_DISK`. **Messages still flow**, and a backup still runs — and a backup taken here is still either refused or a file `integrity_check` accepts, never a partial one.                                                                            |
-| Completely full (`ENOSPC`) | `503` `degraded`, `"reason": "disk"` — it keeps answering | Writes that touch the database are refused, each with an error frame rather than silence, and the log carries `database or disk is full`. **The server does not exit.** Give the space back — delete the junk, grow the volume, move `backup.dir` elsewhere — and chat, uploads and `/health` recover **without a restart**. |
+| Free space                 | `/health`                                           | Everything else                                                                                                                                                                                                                                                      |
+| -------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Above the floor            | `200` `ok`                                          | Normal.                                                                                                                                                                                                                                                              |
+| Below the floor            | `503` `degraded`, `"reason": "disk"`                | Uploads and other writes that need space are refused with `507 STORAGE_LOW_DISK`. **Messages still flow.** A backup still runs. It is either refused or produces a file that passes `integrity_check`, never a partial one.                                          |
+| Completely full (`ENOSPC`) | `503` `degraded`, `"reason": "disk"`, still answers | Database writes are refused, each with an error reply, and the log says `database or disk is full`. **The server does not exit.** Free some space (delete junk, grow the volume, move `backup.dir`). Chat, uploads and `/health` then recover **without a restart**. |
 
-The floor is a reserved headroom for the upload path, not a message-path limit:
-a server below its floor still accepts chat, which is what keeps a filled disk
-from becoming a silent outage. Set it below what your database grows by and you
-have chosen the third stage as your normal state.
+The floor is spare room kept for uploads. It does not limit messages. A server
+below its floor still accepts chat, so a full disk does not become a silent
+outage. If you set the floor lower than your database grows, you will end up in
+the third stage as normal.
 
 ### Metrics Endpoint
 
-`GET /api/v1/metrics` -- admin IP restricted.
+`GET /api/v1/metrics` is limited by IP address. It accepts the addresses in
+`server.metrics_allowed_cidrs`. If that is empty, it uses
+`server.admin_allowed_cidrs`.
 
 ```json
 {
@@ -1432,196 +1782,234 @@ have chosen the third stage as your normal state.
   "db_reader_wait_seconds": 0.004,
   "perm_cache_hits": 5120,
   "perm_cache_misses": 84,
+  "push_dispatched": 0,
+  "push_failed": 0,
+  "push_pruned": 0,
   "event_persister": { "persisted": 4021, "dropped": 0, "flushes": 311, "errors": 0 }
 }
 ```
 
-Signals worth watching as a community grows (see `docs/api.md` for full field
-descriptions):
+Signals worth watching as your community grows. Every field is described in
+`docs/api.md`.
 
-- `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
-  and sequenced events were lost; alert on any growth. `topic_sheds_total`
-  growing → a sender exceeded its per-channel topic limit and frames
-  were shed before sequencing; replay cannot recover them, so alert on any
-  growth too. A content frame lost to either counter also forces the next
-  reconnect of a client at or behind the loss onto the full-ready path, so
-  that client recovers the message from the database.
-- `ws_dispatch_lag_ms.p95` climbing → the single hub dispatch goroutine is
-  falling behind its queue; `hub_broadcast_queue_depth` approaching 1024 is the
-  same signal from the other side.
-- `hub_seqmu_max_hold_ms` above ~100 ms → a critical section that serializes
-  every broadcast (a replay purge's full scan is the known one) is stalling
-  delivery.
-- `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
-  on SQLite's single write connection; the write path is saturating.
-- `db_reader_wait_seconds` growing → read queries are queueing behind all
-  reader-pool connections (`database.max_readers`); raise it or check for slow
-  reads. (On in-memory databases this pair duplicates the writer's.)
-- `reconnect_tier_full` becoming a noticeable share of reconnects → the replay
-  budget is too small for real disconnect gaps.
-- `backpressure_queue_disconnects` growing → clients are being force-cycled
-  because they drain too slowly (slow links or an overloaded server).
+- **`broadcast_drops` growing at all.** The server-wide broadcast queue
+  overflowed and events were lost. Alert on any growth.
+- **`topic_sheds_total` growing.** A sender went over its per-channel limit
+  and messages were dropped before delivery. They cannot be replayed, so alert
+  on any growth too. A client that missed a message this way reloads it from
+  the database on its next reconnect.
+- **`ws_dispatch_lag_ms.p95` climbing.** The single delivery loop is falling
+  behind. `hub_broadcast_queue_depth` getting close to 1024 is the same signal
+  from the other side.
+- **`hub_seqmu_max_hold_ms` above about 100 ms.** Something that blocks every
+  broadcast is holding things up. A replay purge's full scan is the known
+  cause.
+- **`db_writer_wait_seconds` climbing faster than uptime.** Requests are
+  queuing for SQLite's single write connection. Writes are near their limit.
+- **`db_reader_wait_seconds` growing.** Read queries are waiting for a free
+  read connection (`database.max_readers`). Raise it, or look for slow reads.
+  For an in-memory database this pair just repeats the writer's numbers.
+- **`reconnect_tier_full` becoming a large share of reconnects.** The replay
+  buffer is too small for real disconnect gaps.
+- **`backpressure_queue_disconnects` growing.** Clients are being disconnected
+  because they read too slowly. Causes are slow links or an overloaded server.
 
 ### LiveKit Health
 
-`GET /api/v1/livekit/health` -- checks LiveKit companion process reachability.
-It is gated by `server.livekit_webhook_allowed_cidrs`, which is empty by
-default and so falls back to `server.admin_allowed_cidrs` (loopback and private
-networks unless you changed it). Setting the key **replaces** that fallback
-rather than adding to it, and the same list gates LiveKit's webhook
-(`POST /api/v1/livekit/webhook`). To admit an off-host monitor, list the ranges
-LiveKit posts from (loopback and private networks, or the SFU's address) plus
-the monitor's own `/32` — never `0.0.0.0/0`. Listing only the monitor blocks
-the webhook, and stale voice seats then wait for the slower reconcile to clear.
+`GET /api/v1/livekit/health` checks that LiveKit answers.
+
+Who may call it:
+
+- It uses `server.livekit_webhook_allowed_cidrs`. That is empty by default, so
+  it falls back to `server.admin_allowed_cidrs` (the local machine and private
+  networks, unless you changed it).
+- Setting the key **replaces** that fallback. It does not add to it.
+- The same list also controls LiveKit's webhook
+  (`POST /api/v1/livekit/webhook`).
+
+To let an outside monitor in, list the ranges LiveKit posts from (the local
+machine and private networks, or LiveKit's own address), **plus** the
+monitor's own `/32`. Never use `0.0.0.0/0`. If you list only the monitor, you
+block the webhook. Stale voice seats then wait for the slower once-a-minute
+check to clear.
 
 ### Monitor voice as well as liveness
 
-`/health` checks the hub, database and disk, but **not voice**. A green
-`/health` therefore does not mean voice works: LiveKit can be down while
-`/health` says `ok` (joins are then refused), and a blocked media path — a call
-that connects and then carries no audio — is invisible from the server, which
-never probes it. To catch a voice outage, poll both endpoints:
+`/health` checks the hub, the database and the disk, but **not voice**. So a
+green `/health` does not mean voice works:
 
-- **Server liveness:** `GET /health` (public, no allowlist entry). Any `503`
-  is actionable; `reason` names the subsystem (`hub`, `database`, `disk`).
-- **Voice reachability:** `GET /api/v1/livekit/health` — `{"status": "ok"}`
-  means LiveKit answered, a `503` with `"livekit_reachable": false` means it did
-  not. It is behind the LiveKit allowlist, so an external monitor must be
-  admitted as described under [LiveKit Health](#livekit-health).
+- LiveKit can be down while `/health` says `ok`. Voice joins are then refused.
+- A blocked media path, where a call connects and then carries no sound, is
+  invisible to the server. It never tests it.
 
-There is no watchdog in the server itself. The systemd unit and the compose
-file both leave "restart a hung process" to the supervisor, and for Docker to
-an external watchdog (see the compose file's `healthcheck` note). The binary
-does not implement `sd_notify`, so `WatchdogSec=` will not work with a plain
-`Type=simple` unit — a cron job or uptime service that probes the two endpoints
-above and restarts the service after repeated failures is the portable recipe.
+To catch a voice outage, poll both endpoints:
+
+- **Server liveness:** `GET /health`. Public, no allowlist needed. Any `503`
+  needs action. `reason` names the part that failed (`hub`, `database`,
+  `disk`).
+- **Voice reachability:** `GET /api/v1/livekit/health`. `{"status": "ok"}`
+  means LiveKit answered. A `503` with `"livekit_reachable": false` means it
+  did not. An outside monitor must be allowed in, as described under
+  [LiveKit Health](#livekit-health).
+
+**The server has no watchdog of its own.** The systemd unit and the compose
+file leave "restart a hung process" to the supervisor. For Docker, use an
+external watchdog. The binary does not support `sd_notify`, so systemd's
+`WatchdogSec=` does not work with the plain `Type=simple` unit. The portable
+recipe is a cron job or uptime service that polls the two endpoints above and
+restarts the service after repeated failures.
 
 ### Diagnostics
 
-`GET /api/v1/diagnostics/connectivity` -- connectivity diagnostics for troubleshooting.
+`GET /api/v1/diagnostics/connectivity` gives a connectivity report for
+troubleshooting. Only administrators can call it. In the admin panel it is the
+**Connectivity check** card on the Dashboard. See
+[port-forwarding.md](port-forwarding.md).
 
 ### Support bundle
 
-When you need help, the admin panel writes a support bundle you can attach to
-a report. The flow, in the operator's words: admin panel → **Diagnostics** →
-**Create support bundle preview** → review the item list, byte sizes and
-SHA-256 hashes → **Confirm download**. Previewing or discarding downloads
-nothing.
+When you need help, the admin panel can write a support bundle for you to
+attach to a report.
 
-The ZIP holds six fixed files: `build.json` (application/Go version, OS and
-architecture), `configuration.json` (an explicit scalar allowlist from the
-running startup configuration), `database.json` (applied migration names,
-table names and row counts), `health.json` (a database, memory and hub
-snapshot), `events.json` (up to 200 recent log records, each mapped to a fixed
-event code with its redacted detail, such as an error's reason; Warn/Error
-records are kept in preference to lower levels, so a routine INFO burst cannot
-push a failure out of the bundle) and
-`manifest.json` (sizes, hashes and the omission report).
-What it deliberately does not hold: no message content, no attachments or
-avatars, no backups, no raw log lines, and no names, paths, addresses, URLs
-or credentials — the configuration item structurally omits every one of
-those, log detail drops identifying attributes and keeps only error vocabulary
-from the rest (every other word, path, host and address becomes `[x]`), and
-table counts are counts, never rows.
+To make one:
 
-Nothing uploads: the bundle is a local download, and sharing that file
-remains your decision. Confirming a download writes a `support_bundle_create`
-audit row carrying the item list, never contents. Only a logged-in
-`ADMINISTRATOR` session can make one — API tokens are refused. The data
-contract (what may appear, and the redaction each item receives) is in the
-[support-bundle data contract](architecture/diagnostics.md#support-bundle-data-contract);
-this guide does not copy it.
+1. Open the admin panel and go to **Diagnostics**.
+2. Click **Create support bundle preview**.
+3. Review the list of items, with their sizes and SHA-256 hashes.
+4. Click **Confirm download**.
+
+Previewing, or closing the preview, downloads nothing.
+
+The zip holds six fixed files:
+
+- `build.json`: app and Go version, operating system and architecture.
+- `configuration.json`: a fixed list of safe settings from the running
+  configuration.
+- `database.json`: applied migration names, table names and row counts.
+- `health.json`: a snapshot of the database, memory and hub.
+- `events.json`: up to 200 recent log events. Each is mapped to a fixed event
+  code with a cleaned-up detail, such as an error's reason. Warnings and errors
+  are kept ahead of lower levels, so a burst of routine messages cannot push a
+  failure out.
+- `manifest.json`: sizes, hashes and a list of what was left out.
+
+What it deliberately leaves out:
+
+- message content, attachments, avatars and backups
+- raw log lines
+- names, paths, addresses, URLs and credentials
+
+The configuration file leaves all of those out by design. Log details keep only
+error words; every other word, path, host and address becomes `[x]`. Table
+counts are counts only, never rows.
+
+**Nothing is uploaded.** The bundle is a local download, and sharing it is your
+choice. Confirming a download writes a `support_bundle_create` audit entry
+with the list of items, never their contents. Only an administrator signed in
+to the admin panel can make one. API tokens are refused.
+
+The full data contract, with what may appear and how each item is cleaned, is
+in the
+[support-bundle data contract](architecture/diagnostics.md#support-bundle-data-contract).
 
 ## When it fails
 
-Symptom first; each entry says how to tell, what it means, and what to do.
-The failure drills that measured each answer are linked from
+Find your symptom below. Each entry says how to tell, what it means and what
+to do. The tests behind each answer are linked from
 [data-lifecycle.md](architecture/data-lifecycle.md).
 
 ### `/health` returns 503
 
-The `reason` field names the failing subsystem:
+The `reason` field names the part that failed:
 
-- `hub` — the WebSocket dispatch loop died. The server exits nonzero on its
-  own and the supervisor relaunches it; nothing to do but confirm it came
-  back.
-- `database` — the 1-second ping failed: the disk, a lock, or a wedged
-  writer. Read the log's last `database` lines.
-- `disk` — free space is below `server.min_free_disk_mb`. Free space or move
-  `backup.dir` elsewhere; uploads refuse first, messages keep flowing, and
-  the three stages are in
-  [Health Endpoint](#health-endpoint).
+- **`hub`:** the WebSocket dispatch loop died. The server exits with an error
+  by itself, and the supervisor starts it again. Just check that it came back.
+- **`database`:** the 1-second database check failed. Causes are the disk, a
+  lock, or a stuck write. Read the last `database` lines in the log.
+- **`disk`:** free space is below `server.min_free_disk_mb`. Free some space,
+  or move `backup.dir` elsewhere. Uploads are refused first, and messages keep
+  flowing. The three stages are under [Health Endpoint](#health-endpoint).
 
 ### The server refuses to start
 
-Three named refusals, each with the one thing to do:
+There are three named reasons, each with one fix:
 
-- A bad `config.yaml` — the start-up message names the file; fix the value it
-  names.
-- An erasure-key fingerprint that does not match the marker file — the log
-  prints both fingerprints; the matching rule is in
-  [security.md](security.md#erasure-marker-key). Put the right `erasure.key`
-  back from your archive.
-- An unsupported `database.type` — SQLite is the only one; correct the key
+- **A bad `config.yaml`.** The start-up message names the file and the value.
+  Fix that value.
+- **An erasure key that does not match the marker file.** The log prints both
+  fingerprints. Put the right `erasure.key` back from your archive. The rule is
+  in [security.md](security.md#erasure-marker-key).
+- **An unsupported `database.type`.** SQLite is the only one. Correct the key
   ([server-configuration.md](server-configuration.md)).
 
 ### Voice joins but nobody hears anything
 
-The UDP media port(s) — the `50000-60000` range by default, or the single
-`voice.udp_port` when set — are not forwarded, or a pinned
-`voice.node_ip` is not your current public address (leave it empty so LiveKit
-detects it, and restart after the address changes). This is the one
-failure the server cannot see, because the media never reaches it. The
-check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
+Usually one of these:
+
+- The UDP media port(s) are not forwarded. That is the `50000-60000` range by
+  default, or your single `voice.udp_port`.
+- `voice.node_ip` is pinned to an old public address. Leave it empty so
+  LiveKit finds the address itself, and restart after your address changes.
+
+The server cannot see this failure, because the media never reaches it. The
+step-by-step check is in the [Port Forwarding Guide](port-forwarding.md).
 
 ### Voice cannot join at all
 
-The supervised LiveKit process is down. `livekit_healthy: false` on
-`GET /api/v1/metrics`, `GET /api/v1/livekit/health` answers
-`degraded` with the reason, and the Dashboard's attention panel raises its
-`voice` signal. LiveKit's own errors are the `livekit companion output` entries
-(`component=livekit`, text in the `line` attribute) in the server log. The companion process restarts it with
-exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
-failures; the recovery steps are in
+**When OwnCord runs LiveKit itself**, the LiveKit process is down. You will see:
+
+- `livekit_healthy: false` in `GET /api/v1/metrics`
+- `degraded` with a reason from `GET /api/v1/livekit/health`
+- the `voice` warning on the Dashboard's attention panel
+
+LiveKit's own errors are the `livekit companion output` entries in the server
+log (`component=livekit`, text in the `line` attribute). The server restarts
+LiveKit with growing waits, from 3 seconds up to 60. It gives up after ten
+quick failures in a row. The recovery steps are in
 [LiveKit Setup](livekit-setup.md).
 
-An externally managed LiveKit (no `voice.livekit_binary`, auto-download off)
-is probed at each join instead: when it does not answer at
-`voice.livekit_url` within 3 s, the join is refused with "voice is temporarily
-unavailable — LiveKit is not reachable" and the server logs
+**When you run LiveKit yourself** (no `voice.livekit_binary`, auto-download
+off), the server checks it at each join. If LiveKit does not answer at
+`voice.livekit_url` within 3 seconds, the join is refused with "voice is
+temporarily unavailable — LiveKit is not reachable". The server logs
 `handleVoiceJoin: external LiveKit unreachable`.
 
 ### Clients see a certificate mismatch
 
-You rotated or renewed the certificate, or restored a `config.yaml` whose
-`tls.mode` differs from what they pinned. They must accept the new
-fingerprint you publish out of band —
+You replaced or renewed the certificate, or restored a `config.yaml` with a
+different `tls.mode` from the one they pinned. Members must accept the new
+fingerprint, which you publish through another channel. See
 [Rotating the self-signed certificate](#rotating-the-self-signed-certificate).
 
 ### Every 2FA user is locked out after a restore
 
-`totp.key` was not in the restore set — its loss cost and the only way back
-are in [Backup Strategy](#backup-strategy).
+`totp.key` was not restored. What it costs and the only way back are in
+[What each file is for](#what-each-file-is-for).
 
 ### Uploads refused with 507
 
-The error code tells you which ceiling: `STORAGE_QUOTA_EXCEEDED` is the
-per-file or per-user limit ([Capacity limits](#capacity-limits));
-`STORAGE_LOW_DISK` is the disk floor — free space (see
-[Health Endpoint](#health-endpoint)).
+The error code tells you which limit:
+
+- **`STORAGE_QUOTA_EXCEEDED`:** the user's quota, `upload.user_quota_mb` (see
+  [Capacity limits](#capacity-limits)).
+- **`STORAGE_LOW_DISK`:** the disk floor. Free some space (see
+  [Health Endpoint](#health-endpoint)).
+
+A single file that is too large is refused with `400` or `413`, not `507`.
 
 ### An update did not come back
 
-[If the update fails](#if-the-update-fails) — audit rows, the `.old-*`
-fallback and the Docker refusal are there.
+See [If the update fails](#if-the-update-fails). It covers the audit entries,
+the `.old-*` fallback, and the Docker refusal.
 
 ### What to send when asking for help
 
-A [support bundle](#support-bundle) — it never uploads and holds no
-messages, usernames, addresses or raw log lines. Add the last 200 lines of
-your supervisor's log by hand if the problem is in it, and say what you are
-sending: that excerpt carries usernames and client addresses, which is
-exactly why the bundle itself omits raw lines.
+Send a [support bundle](#support-bundle). It is never uploaded and holds no
+messages, usernames, addresses or raw log lines.
+
+If the problem shows in the log, add the last 200 lines of your supervisor's
+log by hand. Say what you are sending: that excerpt contains usernames and
+client addresses, which is exactly why the bundle leaves raw lines out.
 
 ## Auto-Update
 
@@ -1629,140 +2017,159 @@ exactly why the bundle itself omits raw lines.
 
 The server checks GitHub Releases for updates:
 
-- Compares semver versions
-- Results are cached for 1 hour
-- Downloads the asset matching this machine's OS and architecture, with detached Ed25519/minisign signature verification on Windows
-- Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
-- Cross-checks the binary SHA256 against `checksums.sha256`
+- It compares versions using semantic versioning.
+- It caches the result for 1 hour.
+- It downloads the asset for this machine's operating system and
+  architecture.
+- On Windows, it checks a detached Ed25519 (minisign) signature.
+- It checks a signed `server-update-manifest.json`, which ties the binary's
+  hash to the release version.
+- It checks the binary's SHA256 against `checksums.sha256`.
 
-The admin panel's update dialog links the release notes, warns that database
-migrations only run forward, and takes a database backup first unless you
-untick it; if that backup fails, nothing is updated.
+The admin panel's update dialog links the release notes. It warns that
+database migrations only go forward. It takes a database backup first unless
+you untick that box. If that backup fails, nothing is updated.
 
-Applying an update runs in this order:
+**What applying an update does, in order:**
 
-1. Download and verify the replacement beside the installed executable.
-2. Give connected clients a "restarting in 5s" notice, then rotate the current
-   binary to a uniquely named `.old-*` beside it (for example
-   `chatserver.exe.old-123456789`) and put the verified download at the
-   installation path.
-3. Drain HTTP requests, stop the WebSocket hub and the managed `livekit-server`,
-   flush queued event/audit writes, and close the database and its process lock.
-   LiveKit's process must finish exiting before the handoff can continue. Unix
-   companions receive SIGTERM with a five-second grace period before a forced
-   kill; Windows companions are terminated and waited on until they exit.
-4. Launch the replacement from the original installation path, or exit for
-   systemd/NSSM to relaunch it (see `server.restart_mode` in
-   [Server Configuration](server-configuration.md)). Normal teardown and the
-   emergency restart backstop share one handoff, so only one replacement is
-   launched. The backstop also waits for the managed LiveKit process to exit.
-5. Once every start-up stage has come up — data dir, TLS, database, migrations,
-   and the rest — the new process removes every `.old-*` (and a `.old` left by
-   an older release). One that Windows still holds open, because that binary
-   is still running, is left for a later start: a server started from a
-   console window stays behind until its replacement exits (see
-   [Running from a console window](#running-from-a-console-window)). A
-   start-up stage that fails before then leaves `.old-*` in place.
-6. That removal is the only recovery start-up performs. A new process does not
-   put `.old-*` back if the installed binary turns out to be broken after it has
-   started serving, and it does not delete a stale `.new` left by an interrupted
-   download — staging refuses to write through an existing `.new`, and the next
-   update attempt removes it before downloading. If the server dies between
-   step 2 and step 5, the previous binary is still beside the installation path
-   as a `.old-*` (the most recently modified one, if there are several);
-   restoring it is a manual rename.
+1. Downloads and checks the new binary, next to the installed one.
+2. Tells connected clients "restarting in 5s". Then renames the current binary
+   to a unique `.old-*` name next to it (for example
+   `chatserver.exe.old-123456789`), and puts the new binary in its place.
+3. Shuts down: finishes HTTP requests, stops the WebSocket hub and the managed
+   `livekit-server`, saves queued event and audit writes, and closes the
+   database and its lock. It waits for LiveKit to fully exit. On Linux and
+   macOS, LiveKit gets `SIGTERM` and 5 seconds before it is killed. On Windows
+   it is ended and waited for.
+4. Starts the new binary from the original path, or exits for systemd or NSSM
+   to restart it (see `server.restart_mode` in
+   [Server Configuration](server-configuration.md)). Normal shutdown and the
+   emergency restart backstop share one hand-off, so only one new process
+   starts. The backstop also waits for LiveKit to exit.
+5. The new process starts up: data folder, TLS, database, migrations and the
+   rest. Once every stage is up, it deletes every `.old-*` file (and any
+   `.old` from an older release).
+   - Windows may still hold an `.old-*` file open, because that binary is still
+     running. It is then left for a later start. For example, a server started
+     from a console window stays behind until its replacement exits (see
+     [Running from a console window](#running-from-a-console-window)).
+   - If a start-up stage fails before then, `.old-*` stays in place.
+6. That cleanup is the only recovery start-up does.
+   - The new process does not put `.old-*` back if the new binary turns out to
+     be broken after it started serving.
+   - It does not delete a leftover `.new` file from an interrupted download.
+     The next update attempt removes it before downloading.
+   - If the server dies between step 2 and step 5, the previous binary is still
+     next to the installed one as `.old-*` (the newest one, if there are
+     several). Putting it back is a manual rename.
+
+Setting `github.token` raises GitHub's API limit for update checks from 60 to
+5,000 requests per hour.
+
+Containers upgrade by pulling a new image, as described above. A LiveKit you
+run yourself is left running during an update.
+
+**First update to a release with this hand-off.** The version you are running
+does the shutdown for that first update. So it cannot benefit from the fix
+until it has been replaced. That first update may need a manual stop, replace
+and start.
 
 #### If the update fails
 
-The audit log tells you which stage failed: every apply writes `update_apply`,
-then `update_applied` or `update_failed` (see
-[security.md](security.md)). Three shapes:
+The audit log tells you which stage failed. Every update writes
+`update_apply`, then either `update_applied` or `update_failed` (see
+[security.md](security.md)). There are three cases:
 
-- **The verification refused the download** — the manifest signature, the
-  manifest's version or asset binding, or the SHA256 checksum did not match.
-  The installed binary is untouched and the admin panel says why; retry, and
-  if it persists compare your version against the release page.
-- **The rotation succeeded and the server died before or during the handoff**
-  — the previous binary is still beside the installation path as a `.old-*`
-  until a successor passes its start-up stages. If the new one never boots,
-  put that file back by hand (rename it over the broken binary) and start.
-  This is a rollback of the binary only: if the failed start was a migration, the
-  database has already moved forward, and an older binary refuses to start on
-  it rather than corrupting it (restore the pre-upgrade database first).
-- **Docker refuses the whole flow** — the panel answers `503
-CONTAINER_DEPLOYMENT` because the running binary is image content; the way
-  back is the image tag (`docker compose pull && docker compose up -d`).
+- **The check refused the download.** The manifest signature, the manifest's
+  version or asset, or the SHA256 checksum did not match. The installed binary
+  is untouched, and the admin panel says why. Try again. If it keeps failing,
+  compare your version with the release page.
+- **The server died during or after the swap.** The previous binary is still
+  next to the installed one as `.old-*`, until a new process passes its
+  start-up stages. If the new one never starts, rename that file back over the
+  broken binary and start it.
+  - This rolls back the binary only. If the failure was a migration, the
+    database has already moved forward. An older binary refuses to start on it
+    rather than damage it. Restore the pre-upgrade database first.
+- **Docker refuses the whole thing.** The panel answers
+  `503 CONTAINER_DEPLOYMENT`, because the binary is part of the image. Upgrade
+  with the image instead: `docker compose pull && docker compose up -d`.
 
-And the pre-checks that make the failure cases rare: take the
-[archive](#before-upgrading-take-the-archive) before the update; on systemd,
-update the unit file before applying server updates (see
-[Running as a Linux Service](#running-as-a-linux-service-systemd)); under
-NSSM, the service must be installed with `OWNCORD_SERVER_RESTART_MODE=supervised`
-(see [Running as a Windows Service](#running-as-a-windows-service)).
+To make failures rare:
 
-Externally managed LiveKit is left running. Containers use image upgrades as
-described above. Installing the first release with this handoff fix may require
-a manual stop/replacement/start: the version already running performs that
-first update's shutdown, so it cannot benefit from the fix until replaced.
-
-Set `github.token` in config for higher API rate limits (5000/hr vs 60/hr unauthenticated).
+- Take the [archive](#before-upgrading-take-the-archive) before you update.
+- On systemd, update the unit file first (see
+  [Running as a Linux Service](#running-as-a-linux-service-systemd)).
+- Under NSSM, install the service with
+  `OWNCORD_SERVER_RESTART_MODE=supervised` (see
+  [Running as a Windows Service](#running-as-a-windows-service)).
 
 ### Client
 
-The Tauri client uses NSIS installer updates:
+The desktop client also updates itself. The server passes on client update
+files from GitHub Releases:
 
-- Server exposes client update assets from GitHub Releases
-- Ed25519 signature verification before applying
+- **Windows:** NSIS installer updates.
+- **Linux:** AppImage updates. A client installed from the `.deb` package does
+  not update itself; install the new `.deb` by hand.
+
+Each update is checked with an Ed25519 signature before it is applied.
 
 #### Client support bundle and logs
 
-When a _user_ has a problem, the desktop client can write its own support bundle
-without contacting the server: **Settings → Diagnostics & logs → Export Support Bundle**. It is a local zip
-you choose where to save; like the server bundle it uploads nothing, but unlike
-it the client log lines are copied verbatim (the client logger does not redact),
-so review it before sharing — the Diagnostics & logs tab says so too.
+When a _user_ has a problem, the desktop client can write its own support
+bundle, without contacting the server: **Settings → Diagnostics & logs →
+Export Support Bundle**.
 
-The raw client log lives per user:
+- It is a local zip, saved where the user chooses. Nothing is uploaded.
+- Unlike the server bundle, it copies client log lines as they are. The client
+  log is not cleaned. So review it before sharing. The **Diagnostics & logs**
+  tab says this too.
+- It contains both client logs, plus diagnostic sections the client collects
+  itself. Ask for this bundle first.
+
+The client keeps **two** logs: the webview's own rotating log (JSON lines),
+and the native log below.
+[Desktop client support bundle](architecture/diagnostics.md#desktop-client-support-bundle)
+lists every file in the bundle.
+
+Where the native client log is:
 
 - **Windows:** `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log`
-- **Linux:** the app log directory, `~/.local/share/com.owncord.client/logs/owncord-client.log`
-  on a default setup.
+- **Linux:** the app log folder, which is
+  `~/.local/share/com.owncord.client/logs/owncord-client.log` on a default
+  setup.
 
-It rolls over at ten megabytes and keeps the two previous files beside it as
-`owncord-client_<date>.log`. The tray icon's **Open Log Folder** opens that
-directory, which is the route in when the window never came up: the log then
-says `frontend not ready` 30 seconds after start, and a crash is logged as a
-`[panic]` line with a backtrace.
+The log rolls over at 10 MB. It keeps the two previous files next to it, as
+`owncord-client_<date>.log`.
 
-The desktop client keeps **two** logs, the webview's own rotating JSONL log and
-the native log above, and the exported bundle carries both;
-[Desktop client support bundle](architecture/diagnostics.md#desktop-client-support-bundle)
-lists every file it holds.
-
-Ask for the exported bundle first; it carries both logs plus the diagnostic
-sections the client can collect on its own.
+The tray icon's **Open Log Folder** opens that folder. Use it when the window
+never appeared. In that case the log says `frontend not ready` 30 seconds
+after start. A crash is logged as a `[panic]` line with a backtrace.
 
 ## Verifying a Download
 
-Checksums, signatures, provenance attestations and SBOMs are all on the release
-page, and none of them require trusting the copy of the file you are checking.
-Verification needs the [GitHub CLI](https://cli.github.com/) (`gh`); the image
-steps also need Docker. Releases published before these were added carry
-checksums and minisign signatures only.
+Each release page has checksums, signatures, build provenance records and
+SBOMs (lists of what is inside). None of these checks trust the file you are
+checking.
+
+You need the [GitHub CLI](https://cli.github.com/) (`gh`). The image steps
+also need Docker. Releases from before these were added have only checksums
+and minisign signatures.
 
 ```bash
-# 1. Checksums. Download the assets and checksums.sha256 into ONE directory --
+# 1. Checksums. Download the assets and checksums.sha256 into ONE folder --
 #    gh release download <tag> -R J3vb/OwnCord puts them all there. The file
-#    lists bare filenames, so it has to be checked from that directory, and
-#    --ignore-missing skips the assets you chose not to download.
+#    lists bare file names, so check it from that folder.
+#    --ignore-missing skips assets you chose not to download.
 sha256sum --check --ignore-missing checksums.sha256
 
 # 2. Provenance. This proves the file was built by this repository's release
-#    workflow at the commit the tag points to, not merely uploaded by whoever
-#    holds the release. Run it on the asset you downloaded, and again on
-#    checksums.sha256 and on the source snapshot. Set TAG to the release you
-#    downloaded, e.g. TAG=v2.2.0-beta.1; the signer-workflow and source-ref
-#    flags reject a build from any other workflow or ref, such as a dry run.
+#    workflow at the commit the tag points to -- not just uploaded by whoever
+#    controls the release. Run it on the asset you downloaded, then again on
+#    checksums.sha256 and on the source snapshot. Set TAG to your release,
+#    e.g. TAG=v2.2.0-beta.1. The --signer-workflow and --source-ref flags
+#    reject a build from any other workflow or ref, such as a dry run.
 gh attestation verify chatserver-linux-amd64.tar.gz --repo J3vb/OwnCord \
   --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
   --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
@@ -1770,22 +2177,21 @@ gh attestation verify checksums.sha256 --repo J3vb/OwnCord \
   --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
   --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
 
-# 3. The image. Resolve the tag to the digest you are actually running first:
-#    a tag is mutable and a digest is not.
+# 3. The image. First find the digest you are actually running:
+#    a tag can change, a digest cannot.
 DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{index .RepoDigests 0}}')
 
-# 4. Verify the attestation the release run pushed beside that digest, then
-#    read the inventory BuildKit attached to the image.
+# 4. Check the image's provenance record, then read its SBOM.
 gh attestation verify "oci://$DIGEST" --repo J3vb/OwnCord \
   --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
   --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
 docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{json .SBOM}}'
 
-# 5. Windows binaries additionally carry a detached minisign signature, which is
-#    what the updater itself checks before applying an update. The public key
-#    lives in the repository; both the key and the .sig are base64.
+# 5. Windows binaries also have a detached minisign signature. This is what the
+#    updater itself checks. The public key is in the repository. Both the key
+#    and the .sig file are base64.
 curl -sSfL -o server_update_public_key.txt \
   https://raw.githubusercontent.com/J3vb/OwnCord/main/Server/updater/server_update_public_key.txt
 base64 -d chatserver.exe.sig > chatserver.exe.minisig
@@ -1793,134 +2199,189 @@ base64 -d server_update_public_key.txt > server_update.pub
 minisign -Vm chatserver.exe -x chatserver.exe.minisig -p server_update.pub
 ```
 
-| Asset class                                             | Signature                                                    | SBOM                        | Who verifies it                                  |
-| ------------------------------------------------------- | ------------------------------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `chatserver.exe`, `chatserver-windows-arm64.exe`        | detached minisign signature, plus the signed update manifest | CycloneDX, one per binary   | the updater on every update; by hand with step 5 |
-| `chatserver-linux-*.tar.gz`                             | none detached — the SHA256 in the signed update manifest     | CycloneDX, one per archive  | the updater, through the manifest                |
-| Tauri client bundles (Windows and Linux, x64 and arm64) | updater signature                                            | none yet                    | the client's own updater                         |
-| `ghcr.io/j3vb/owncord-server` image                     | Sigstore provenance attestation, stored in the registry      | SPDX, attached to the index | an operator, with steps 3 and 4                  |
+| Asset                                                  | Signature                                          | SBOM                        | Who checks it                               |
+| ------------------------------------------------------ | -------------------------------------------------- | --------------------------- | ------------------------------------------- |
+| `chatserver.exe`, `chatserver-windows-arm64.exe`       | detached minisign signature, plus signed manifest  | CycloneDX, one per binary   | the updater on every update; you, by step 5 |
+| `chatserver-linux-*.tar.gz`                            | none detached; SHA256 in the signed manifest       | CycloneDX, one per archive  | the updater, through the manifest           |
+| Desktop client bundles (Windows and Linux, x64, arm64) | updater signature                                  | none yet                    | the client's own updater                    |
+| `ghcr.io/j3vb/owncord-server` image                    | Sigstore provenance record, stored in the registry | SPDX, attached to the image | you, by steps 3 and 4                       |
 
-What this does and does not prove:
+What this proves, and what it does not:
 
-- Attestations here are **SLSA Build L2**: a hosted runner, a signature minted
-  from the workflow's own OIDC identity, and provenance naming the workflow and
-  commit, all from the same run. It is not L3, which needs a hardened and
-  isolated build platform.
-- Provenance binds a file to a build, not to a person: it says which commit and
-  which workflow produced it, and nothing about whether that commit is
-  trustworthy. Read the commit.
-- The Tauri client bundles carry a provenance attestation but **no SBOM**; that
-  arrives with the client-bundle work in B8. The updater signature on them is
-  the check that matters today.
-- Windows Authenticode/SmartScreen code signing is still separate work (see
-  [Known Limitations](security.md#known-limitations)), so SmartScreen keeps
-  warning on the binaries even when every check above passes.
+- The provenance records meet **SLSA Build Level 2**. The build ran on a
+  hosted runner. The signature comes from the workflow's own identity. The
+  record names the workflow and commit, all from the same run. It is not Level
+  3, which needs a hardened, isolated build platform.
+- Provenance ties a file to a build, not to a person. It says which commit and
+  workflow made it, not whether that commit can be trusted. Read the commit.
+- The desktop client bundles have a provenance record but **no SBOM** yet. The
+  updater signature is the check that matters for them today.
+- Windows code signing (Authenticode) is separate work (see
+  [Known Limitations](security.md#known-limitations)). So Windows SmartScreen
+  still warns about the binaries, even when every check above passes.
 
 ## Firewall and Ports
 
-This is the canonical port table — the guides that repeat any of it
-([Port Forwarding Guide](port-forwarding.md),
-[LiveKit Setup](livekit-setup.md)) point here, and their own tables carry
-only the rows their instructions need.
+This is the main port table. Other guides that repeat parts of it
+([Port Forwarding Guide](port-forwarding.md), [LiveKit Setup](livekit-setup.md))
+point here.
 
-| Port          | Protocol | Purpose                                           |
-| ------------- | -------- | ------------------------------------------------- |
-| `8443`        | TCP      | HTTPS server (configurable via `server.port`)     |
-| `80`          | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
-| `7881`        | TCP      | LiveKit server (RTC/TURN over TCP)                |
-| `50000-60000` | UDP      | LiveKit WebRTC media (ICE candidates)             |
+| Port          | Protocol | Purpose                                             |
+| ------------- | -------- | --------------------------------------------------- |
+| `8443`        | TCP      | HTTPS server (change it with `server.port`)         |
+| `80`          | TCP      | ACME HTTP-01 challenge (only with `tls.mode: acme`) |
+| `7881`        | TCP      | LiveKit media over TCP (fallback)                   |
+| `50000-60000` | UDP      | LiveKit voice and video media                       |
 
-With LiveKit in single-port mode (`rtc.udp_port` in its `livekit.yaml`, or
-`voice.udp_port` when OwnCord runs it), the last row is that one UDP port
-instead of the range.
+**Single UDP port.** If LiveKit uses one UDP port, the last row is that port
+instead of the range. You set it with `voice.udp_port` when OwnCord runs
+LiveKit, or with `rtc.udp_port` in your own `livekit.yaml`. The Docker image
+with bundled LiveKit uses `7882/UDP`.
 
-`7880/TCP` (LiveKit's own WebSocket/REST API) is **not** in the required set:
-the server proxies signalling to clients at `:8443/livekit`, so only clients
-that reach LiveKit directly need it.
+**Port 7880 is not needed.** `7880/TCP` is LiveKit's own API port. The server
+passes signalling to clients through `:8443/livekit`, so only clients that
+connect to LiveKit directly would need it.
 
-For remote access, see the [Port Forwarding Guide](port-forwarding.md) or
-[Tailscale Guide](tailscale.md). The port-forwarding guide also covers the
-limits OwnCord cannot detect from inside your network — blocked ports, CGNAT,
-hairpin NAT and a changing public IP — and how to check each one yourself.
+For remote access, see the [Port Forwarding Guide](port-forwarding.md) or the
+[Tailscale Guide](tailscale.md). The port-forwarding guide also covers what
+OwnCord cannot detect from inside your network: blocked ports, CGNAT, hairpin
+NAT and a changing public IP. It shows how to check each one yourself.
 
-The TLS limits this build's certificate modes carry are stated where you
-choose one: [TLS Setup](#tls-setup).
+The limits of each TLS mode are under [TLS Setup](#tls-setup).
+
+## Command-line reference
+
+`chatserver` has a few subcommands. Run `chatserver --help` to see them.
+
+| Command                                  | What it does                                                                 |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| `chatserver`                             | Starts the server. Reads `config.yaml` in the working folder, or creates it. |
+| `chatserver --version`                   | Prints the version and exits.                                                |
+| `chatserver --help`                      | Prints help and exits.                                                       |
+| `chatserver healthcheck`                 | Checks the running server's `/health`. Exits 0 if healthy, 1 if not.         |
+| `chatserver token create --label <name>` | Creates an API token. Options: `--user <username>`, `--expires <duration>`.  |
+| `chatserver token list`                  | Lists API tokens. Never prints the raw token.                                |
+| `chatserver token revoke <id\|label>`    | Revokes a token by ID or label.                                              |
+| `chatserver restore [--force] <file>`    | Puts a database backup back while the server is stopped.                     |
+
+See [Scheduling backups from outside the server](#scheduling-backups-from-outside-the-server)
+and [Restoring without a running server](#restoring-without-a-running-server).
 
 ## Hardening Checklist
 
-- [ ] **Set a strong Owner password at setup** -- there is no default password to change; the first-run wizard creates the Owner account
-- [ ] **Set `admin_allowed_cidrs`** -- restrict admin access to specific IPs if needed
-- [ ] **Serve TLS end to end** -- keep the qualified default (`self_signed`) or, for a public domain, front the server with a reverse proxy that owns certificate renewal; built-in `acme` works but is not qualified ([TLS Setup](#tls-setup)). Never expose `tls.mode: off` directly: publish 8443 on loopback (`127.0.0.1:8443:8443`) or firewall it to the proxy only
-- [ ] **Set `trusted_proxies`** -- only if behind a reverse proxy, list the proxy's own addresses so client IPs come from `X-Forwarded-For`
-- [ ] **Leave `allowed_origins` empty unless you know why** -- empty denies cross-origin WebSocket connections, which is what a desktop-only deployment wants; set it only to admit browser clients from your own domain
-- [ ] **Set stable voice credentials** -- set `livekit_api_key` and `livekit_api_secret` to avoid token breakage on restart
-- [ ] **Check the voice media address** -- leave `voice.node_ip` empty so LiveKit detects the public address (Docker: `use_external_ip: true` in `livekit.yaml`, replaced by `node_ip` when pinned); pin it only when detection cannot work, such as a tailnet-only host ([Port Forwarding](port-forwarding.md#dynamic-public-ip))
-- [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
-- [ ] **Configure GitHub token** -- optional, for reliable update checks
-- [ ] **Schedule backups** -- use the built-in schedule on the admin panel's Backups & restore page, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
-- [ ] **Monitor health** -- poll `/health` and `/api/v1/livekit/health` for uptime monitoring ([Monitor voice as well as liveness](#monitor-voice-as-well-as-liveness)); both are poll-only, the server does not push alerts
+- [ ] **Choose a strong Owner password during setup.** There is no default
+      password. The first-run wizard creates the Owner account.
+- [ ] **Set `admin_allowed_cidrs`** to limit admin access to specific addresses,
+      if needed.
+- [ ] **Serve TLS end to end.** Keep the tested default (`self_signed`). Or, for
+      a public domain, put a reverse proxy in front that renews certificates.
+      Built-in `acme` works but is not fully tested ([TLS Setup](#tls-setup)).
+      Never expose `tls.mode: off` directly. Publish 8443 on loopback only
+      (`127.0.0.1:8443:8443`), or allow it only from the proxy.
+- [ ] **Set `trusted_proxies`**, only if you use a reverse proxy. List the
+      proxy's own addresses, so client addresses come from `X-Forwarded-For`.
+- [ ] **Leave `allowed_origins` empty unless you know why.** Empty refuses
+      WebSocket connections from other websites, which is right for desktop-only
+      use. Set it only to allow browser clients from your own domain.
+- [ ] **Set fixed voice credentials.** Set `livekit_api_key` and
+      `livekit_api_secret`, so voice tokens keep working after a restart.
+- [ ] **Check the voice media address.** Leave `voice.node_ip` empty so LiveKit
+      finds your public address. In Docker, keep `use_external_ip: true` in
+      `livekit.yaml`, and replace it with `node_ip` only when you pin one. Pin
+      it only when detection cannot work, such as on a Tailscale-only host
+      ([Port Forwarding](port-forwarding.md#dynamic-public-ip)).
+- [ ] **Review upload limits.** Adjust `upload.max_size_mb` for your community.
+- [ ] **Set a GitHub token** (optional) for reliable update checks.
+- [ ] **Schedule backups.** Use the built-in schedule on the **Backups &
+      restore** page, or call the endpoint from your own cron
+      ([Scheduled Backups](#scheduled-backups)).
+- [ ] **Monitor health.** Poll `/health` and `/api/v1/livekit/health` from an
+      uptime monitor
+      ([Monitor voice as well as liveness](#monitor-voice-as-well-as-liveness)).
+      The server does not send alerts itself.
 
 ## Background Maintenance
 
-A maintenance loop runs every 15 minutes, thirteen steps in this order
-(later steps only see what earlier ones stranded this tick). A failing step
-is logged and the rest of the pass still runs; five consecutive failed passes
-open a circuit breaker that skips one tick and then retries:
+A maintenance loop runs every 15 minutes. It runs thirteen steps in this
+order. Later steps see what earlier ones left this run.
 
-1. Expired user sessions are purged
-2. Expired message delivery receipts are deleted
-3. Expired second-factor state is cleaned up
-4. Stale push subscriptions are swept
-5. Backup maintenance runs (schedule check, retention pruning)
-6. Orphaned attachments are deleted (uploaded but never linked, older than 1 hour)
-7. The retention sweep runs (messages past the configured window, if any)
-8. Closed reports' content past `moderation.report_retention_days` is pruned
-9. Orphaned voice mutes are reconciled
-10. Retired moderation actions past `moderation.action_retention_days` are removed (never one that still owns a voice mute)
-11. Pending erasure jobs resume
-12. Storage files are reconciled against the database (at most 500 files per tick)
-13. A storage recount runs — last on purpose, so it measures what the sweeps above freed
+1. Delete expired login sessions.
+2. Delete expired message delivery receipts.
+3. Clean up expired two-factor state.
+4. Remove stale push subscriptions.
+5. Run backup maintenance: the schedule check and retention.
+6. Delete orphaned attachments: uploaded but never linked, older than 1 hour.
+7. Run the message retention sweep, if a window is set.
+8. Remove closed reports' content older than
+   `moderation.report_retention_days`.
+9. Clean up orphaned voice mutes.
+10. Remove retired moderation actions older than
+    `moderation.action_retention_days`. An action that still owns a voice mute
+    is never removed.
+11. Resume pending account erasures.
+12. Check stored files against the database (up to 500 files per run).
+13. Recount storage use. This runs last on purpose, so it counts what the steps
+    above freed.
+
+If a step fails, it is logged and the rest of the run continues. After five
+failed runs in a row, the loop skips one run and then tries again.
 
 ## Graceful Shutdown
 
-The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
+The server handles `Ctrl+C` (`SIGINT`) and `SIGTERM`. It shuts down in this
+order:
 
-1. Shuts down the ACME listener, ends any open admin Logs stream, then
-   drains in-flight HTTP handlers; a file upload or download still in
-   progress gets up to 20 seconds to finish and is then cut, so the drain
-   stays inside the 30-second budget
-2. Stops the hub on a budget of its own: sends the restart notice, waits
-   out the notice window, closes every WebSocket connection and only then
-   stops the LiveKit process, so clients leave voice while it is still up
-3. Unregisters the signal handler, so a second `Ctrl+C` during steps 1–2 does
-   not cut the drain short
-4. Joins the maintenance loop, flushes the audit queue and drains event
-   persistence
-5. Stops the router's cleanup goroutine, closes the plugin runtime, shuts
-   telemetry down and releases the deletion-marker file
-6. Closes the database
+1. Stops the ACME listener and ends any open admin **Logs** stream. Then waits
+   for open HTTP requests to finish. A file upload or download still running
+   gets up to 20 seconds, then is cut, so this stays inside the 30-second
+   budget.
+2. Stops the hub, on its own time budget. It sends the restart notice, waits
+   out the notice, closes every WebSocket connection, and only then stops
+   LiveKit. So clients leave voice while LiveKit is still up.
+3. Stops listening for signals, so a second `Ctrl+C` during steps 1 and 2 does
+   not cut the shutdown short.
+4. Stops the maintenance loop, saves the queued audit entries, and saves the
+   queued events.
+5. Stops the router's cleanup task, closes the plugin runtime, shuts down
+   telemetry, and releases the deletion-marker file.
+6. Closes the database.
 
-The drain comes **before** the WebSocket close, not after: in-flight handlers
-broadcast on their way out, and those frames have to reach a live hub and event
-persister or they vanish from the replay store across the restart. Shutdown
-does not wait on hijacked WebSocket connections, so connected clients do not
-delay the drain — they get the restart notice immediately afterwards. The order
-is the reverse of the start sequence in `Server/internal/app/stages.go`, not
-a hand-written teardown.
+Open HTTP requests finish **before** WebSockets close. This is on purpose:
+requests send events on their way out, and those must reach a live hub, or
+they are missing after the restart. The shutdown does not wait for WebSocket
+connections, so connected clients do not slow it down. They get the restart
+notice straight after. The order is the reverse of the start-up order in
+`Server/internal/app/stages.go`.
 
-A managed livekit-server never outlives the server, even when the server dies
-without running this sequence: on Linux the kernel kills it with its parent
-(`Pdeathsig`), and on Windows it runs in a job object that is killed when the
-server exits. On Windows, closing the server's console window stops the server
-and LiveKit together, including after a self-restart (see
+**LiveKit never outlives the server**, even if the server dies without this
+sequence. On Linux, the kernel stops LiveKit when its parent dies. On Windows,
+LiveKit runs in a job object that is closed when the server exits. On Windows,
+closing the server's console window stops both the server and LiveKit,
+including after a self-restart (see
 [Running from a console window](#running-from-a-console-window)).
 
 ## See Also
 
-- [Server Configuration](server-configuration.md) -- full config key reference
-- [Capacity](capacity.md) -- the measured 250/100/25 profile, its hardware and its commands
-- [LiveKit Setup](livekit-setup.md) -- voice/video setup
-- [Quick Start](quick-start.md) -- getting started
-- [Port Forwarding](port-forwarding.md) -- port forwarding for remote access
-- [Tailscale](tailscale.md) -- zero-config networking
-- [Security](security.md) -- security guidelines
+- [Server Configuration](server-configuration.md) — every config key
+- [Capacity](capacity.md) — the tested 250/100/25 profile, its hardware and
+  its commands
+- [LiveKit Setup](livekit-setup.md) — voice and video setup
+- [Quick Start](quick-start.md) — getting started
+- [Port Forwarding](port-forwarding.md) — reaching your server from outside
+- [Tailscale](tailscale.md) — remote access without port forwarding
+- [Security](security.md) — security guidance
+
+## Sources
+
+For readers who want the evidence behind the claims above:
+
+- Expired self-signed certificates keep working:
+  `Server/auth/tls_expiry_test.go` (`TestExpiredSelfSignedCertIsServedAsIs`),
+  and the fingerprint checks in `Client/src-tauri/src/tofu.rs`.
+- 2FA secrets are decrypted before the code is checked:
+  `Server/service/auth.go`.
+- The disk-full and restore behaviour was measured by the failure drills in
+  `Server/cmd/smoke` (`-drills`), described in
+  [data-lifecycle.md](architecture/data-lifecycle.md).
+- The upgrade and rollback rehearsal: `Server/cmd/smoke` and
+  `.github/workflows/upgrade-rehearsal.yml`.

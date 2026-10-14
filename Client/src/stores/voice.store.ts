@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import type { WsClient } from "@lib/ws";
 import type {
   ReadyVoiceState,
   VoiceStatePayload,
@@ -15,6 +16,7 @@ import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
+import { loadPref, savePref } from "@lib/preferences";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -90,6 +92,11 @@ export interface VoiceState {
    *  member chose survives the lift. Follows localDeafened, so it outlives a
    *  leave (a moderator move) and clears on any undeafen. */
   readonly moderatorDeafened?: boolean;
+  /** The member was already muted when they deafened, so undeafening restores
+   *  that mute instead of lifting it. Written by the widget's deafen toggle and
+   *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
+   *  re-join restates the same pair. Optional for the fixture reason above. */
+  readonly mutedBeforeDeafen?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
    *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
    *  separate flag from localMuted: PTT never writes the flag that represents
@@ -100,6 +107,12 @@ export interface VoiceState {
   readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Bumped when the live share changes source or quality without stopping:
+   *  its preview and the stream card redraw. */
+  readonly localShareRev?: number;
+  /** The SFU grant leaves out screen share (no Share Screen permission here).
+   *  Absent reads as allowed. Written from the voice session. */
+  readonly shareDenied?: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
   readonly joinedAt: number | null;
   /** True when joined in listen-only mode (mic permission denied or no mic found). */
@@ -141,6 +154,7 @@ const INITIAL_STATE: VoiceState = {
   localServerMuted: false,
   localServerDeafened: false,
   moderatorDeafened: false,
+  mutedBeforeDeafen: false,
   pttGated: false,
   localCamera: false,
   localScreenshare: false,
@@ -187,6 +201,7 @@ export function resetVoiceStore(): void {
     localServerMuted: false,
     localServerDeafened: false,
     moderatorDeafened: false,
+    mutedBeforeDeafen: false,
     pttGated: false,
     localGateSpeaking: null,
     localCamera: false,
@@ -354,6 +369,24 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
+/** No LiveKit update reaches a channel this client is no longer in, so a ring
+ *  lit there as it left would never clear. */
+function withoutRings(
+  voiceUsers: VoiceState["voiceUsers"],
+  channelId: number | null,
+): VoiceState["voiceUsers"] {
+  const channel = channelId === null ? undefined : voiceUsers.get(channelId);
+  if (channelId === null || channel === undefined) return voiceUsers;
+  const next = new Map(voiceUsers);
+  next.set(
+    channelId,
+    new Map(
+      [...channel].map(([id, user]) => [id, user.speaking ? { ...user, speaking: false } : user]),
+    ),
+  );
+  return next;
+}
+
 /** Set the current voice channel (local join) and record the join timestamp.
  *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
@@ -362,11 +395,13 @@ export function joinVoiceChannel(channelId: number): void {
     if (prev.currentChannelId === channelId) return prev;
     return {
       ...prev,
+      voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
       currentChannelId: channelId,
       joinedAt: Date.now(),
       // Optimistic: the widget shows "Connecting…" the moment the user clicks,
       // before the voice_token round-trip. livekitSession advances it from here.
       voiceStatus: "joining",
+      shareDenied: false,
       // A fresh join starts clean — any degraded flag belongs to the
       // previous session's worker, not this one.
       encryptionDegraded: false,
@@ -386,16 +421,18 @@ export function leaveVoiceChannel(): void {
       localServerMuted: false,
       localServerDeafened: false,
       encryptionDegraded: false,
+      shareDenied: false,
     };
     const channelId = prev.currentChannelId;
+    const voiceUsers = withoutRings(prev.voiceUsers, channelId);
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, ...cleared };
+      return { ...prev, ...cleared, voiceUsers };
     }
-    const existingChannel = prev.voiceUsers.get(channelId);
+    const existingChannel = voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, ...cleared };
+      return { ...prev, ...cleared, voiceUsers };
     }
-    const nextChannels = new Map(prev.voiceUsers);
+    const nextChannels = new Map(voiceUsers);
     const nextUsers = new Map(existingChannel);
     nextUsers.delete(currentUserId);
     if (nextUsers.size === 0) {
@@ -433,6 +470,11 @@ export function setModeratorDeafened(applied: boolean): void {
   );
 }
 
+/** Remember whether the member was muted at the moment they deafened. */
+export function setMutedBeforeDeafen(muted: boolean): void {
+  voiceStore.setState((prev) => ({ ...prev, mutedBeforeDeafen: muted }));
+}
+
 /** Toggle local mute state. */
 export function setLocalMuted(muted: boolean): void {
   voiceStore.setState((prev) => withLocalRing({ ...prev, localMuted: muted }));
@@ -448,6 +490,36 @@ export function setLocalDeafened(deafened: boolean): void {
     ...prev,
     localDeafened: deafened,
     moderatorDeafened: deafened && prev.moderatorDeafened === true,
+  }));
+}
+
+const SELF_MUTED_PREF = "localMuted";
+const SELF_DEAFENED_PREF = "localDeafened";
+const MUTED_BEFORE_DEAFEN_PREF = "mutedBeforeDeafen";
+
+/** Save the member's own mute and deafen so they survive a restart. Called
+ *  after the member's own toggles only. A moderator's deafen is not saved,
+ *  and while a moderator's mute holds the saved mute keeps its last value. */
+export function saveSelfVoiceState(): void {
+  const state = voiceStore.getState();
+  if (state.localServerMuted !== true) savePref(SELF_MUTED_PREF, state.localMuted);
+  savePref(SELF_DEAFENED_PREF, state.localDeafened && state.moderatorDeafened !== true);
+  savePref(MUTED_BEFORE_DEAFEN_PREF, state.mutedBeforeDeafen === true);
+}
+
+/** Load the saved mute and deafen into the store at session start. Outside a
+ *  call only: a live call already carries the state its join applied. */
+export function restoreSavedSelfVoiceState(): void {
+  if (voiceStore.getState().currentChannelId !== null) return;
+  const deafened = loadPref<boolean>(SELF_DEAFENED_PREF, false);
+  setVoiceDeafened(deafened);
+  voiceStore.setState((prev) => ({
+    ...prev,
+    // A deafen always mutes, as the deafen toggle does.
+    localMuted: deafened || loadPref<boolean>(SELF_MUTED_PREF, false),
+    localDeafened: deafened,
+    moderatorDeafened: false,
+    mutedBeforeDeafen: loadPref<boolean>(MUTED_BEFORE_DEAFEN_PREF, false),
   }));
 }
 
@@ -481,6 +553,7 @@ export function isSelfMuted(state: VoiceState): boolean {
  *  Defaults to false so an un-wired or unsupported poller never causes a
  *  join-time mute that nothing can later lift. */
 let pttPollingLive = false;
+const pttPollingListeners = new Set<() => void>();
 
 /** Report whether the PTT key-polling backend can actually observe key state.
  *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
@@ -489,7 +562,16 @@ let pttPollingLive = false;
  *  `DeviceState::checked_new()` returns None, so no `ptt-state` event can ever
  *  arrive to lift a join-time mute. */
 export function setPttPollingLive(live: boolean): void {
+  if (pttPollingLive === live) return;
   pttPollingLive = live;
+  for (const listener of pttPollingListeners) listener();
+}
+
+/** Run `listener` whenever the poller goes live or stops, so the sensitivity
+ *  gate can hand over to Push to Talk only once a key can actually gate. */
+export function onPttPollingLiveChange(listener: () => void): () => void {
+  pttPollingListeners.add(listener);
+  return () => pttPollingListeners.delete(listener);
 }
 
 /** Whether the PTT poller is live (see `setPttPollingLive`). */
@@ -511,6 +593,20 @@ export function setLocalScreenshare(enabled: boolean): void {
     ...prev,
     localScreenshare: enabled,
   }));
+}
+
+/** The live share changed source or quality. */
+export function bumpLocalShareRev(): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localShareRev: (prev.localShareRev ?? 0) + 1,
+  }));
+}
+
+export function setShareDenied(denied: boolean): void {
+  voiceStore.setState((prev) =>
+    (prev.shareDenied === true) === denied ? prev : { ...prev, shareDenied: denied },
+  );
 }
 
 /** Set listen-only mode (mic permission denied or no mic found). */
@@ -571,6 +667,7 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
  *  gate runs: then the gate decides (see setLocalGateSpeaking). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
+    if (payload.channel_id !== prev.currentChannelId) return prev;
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     if (!existingChannel) return prev;
 
@@ -640,4 +737,39 @@ export function getChannelVoiceUsers(channelId: number): readonly VoiceUser[] {
     if (!channelUsers) return [];
     return Array.from(channelUsers.values());
   });
+}
+
+// Re-tells the server our own mute/deafen when its row for us can differ from
+// the local state: a fresh join or channel switch (the server writes the new
+// row unmuted and undeafened, while the client keeps localMuted/localDeafened
+// across a leave) and a chat socket that came back after the user toggled
+// mute offline (the toggles apply locally and send nothing while it is down).
+// skipMute/skipDeafen: the caller knows that state is a moderator's, not ours.
+export function restateSelfVoiceState(
+  ws: Pick<WsClient, "send">,
+  skipMute = false,
+  skipDeafen = false,
+): void {
+  const state = voiceStore.getState();
+  if (state.currentChannelId === null) return;
+  const userId = authStore.getState().user?.id ?? 0;
+  if (userId === 0) return;
+
+  const row = state.voiceUsers.get(state.currentChannelId)?.get(userId);
+
+  // A moderator's mute or deafen is not the member's own state to restate:
+  // sending it would turn it into a self-mute that outlives the lift.
+  const moderated = state.localServerDeafened === true || state.moderatorDeafened === true;
+
+  if (
+    !skipMute &&
+    !moderated &&
+    state.localServerMuted !== true &&
+    state.localMuted !== (row?.muted ?? false)
+  ) {
+    ws.send({ type: "voice_mute", payload: { muted: state.localMuted } });
+  }
+  if (!skipDeafen && !moderated && state.localDeafened !== (row?.deafened ?? false)) {
+    ws.send({ type: "voice_deafen", payload: { deafened: state.localDeafened } });
+  }
 }

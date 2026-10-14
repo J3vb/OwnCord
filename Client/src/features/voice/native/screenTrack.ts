@@ -72,20 +72,24 @@ export interface ScreenPublishEncoding {
 export class NativeScreenTrack {
   readonly kind = "video";
   readonly source = "screen_share";
-  readonly capture: number;
-  readonly width: number;
-  readonly height: number;
+  /** The host capture going out; a Change source moves it (`retarget`). */
+  capture: number;
+  width: number;
+  height: number;
   private readonly renderer: NativeVideoRenderer;
   private stopped = false;
 
   /** `previewUrl`: the frame socket's `/screen` route. `onStop` stops the
    *  host capture. `publishEncoding` is the per-share quality the picker
-   *  chose. */
+   *  chose and `captureRequest` its capture pacing and size; a Change source
+   *  (`onChangeSource`) keeps both. */
   constructor(
     started: NativeVoiceScreenStarted,
     previewUrl: string,
     private readonly onStop: (track: NativeScreenTrack) => void,
     readonly publishEncoding: ScreenPublishEncoding,
+    readonly captureRequest: NativeVoiceScreenCapture,
+    private readonly onChangeSource: (track: NativeScreenTrack) => Promise<void>,
   ) {
     this.capture = started.capture;
     this.width = started.width;
@@ -105,6 +109,22 @@ export class NativeScreenTrack {
     if (this.stopped) return;
     this.mediaStreamTrack.stop();
     this.mediaStreamTrack.dispatchEvent(new Event("ended"));
+  }
+
+  /** Share another screen or window under the same publication: the picker
+   *  opens and the host swaps the capture once the new one runs. Rejects
+   *  with a `NotAllowedError` when the pick is cancelled; the old source
+   *  keeps going on any rejection. */
+  changeSource(): Promise<void> {
+    return this.onChangeSource(this);
+  }
+
+  /** The host moved this share onto capture `started`. The preview socket
+   *  carries on, so the renderer and its track stay. */
+  retarget(started: NativeVoiceScreenStarted): void {
+    this.capture = started.capture;
+    this.width = started.width;
+    this.height = started.height;
   }
 
   stop(): void {

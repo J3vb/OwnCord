@@ -26,7 +26,7 @@ describeNativeProxiesSuite(async () => {
     native: {
       succeedWith(port: number) {
         let n = 0;
-        invoke.mockImplementation(() => Promise.resolve(port + n++));
+        invoke.mockImplementation(() => Promise.resolve({ port: port + n++, token: "tun" }));
       },
       failWith(error: unknown) {
         invoke.mockRejectedValue(error);

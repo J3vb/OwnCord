@@ -43,6 +43,7 @@ import {
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
+import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { MountableComponent } from "@lib/safe-render";
@@ -117,7 +118,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
     e.preventDefault();
-    void desktop.devTools.open();
+    desktop.devTools.open().catch((err: unknown) => log.warn("devtools open failed", err));
   }
 });
 
@@ -131,7 +132,9 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   const href = (link as HTMLAnchorElement).href;
   if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    void desktop.urlOpener.open(href);
+    desktop.urlOpener
+      .open(href)
+      .catch((err: unknown) => log.warn("external link open failed", err));
   }
 });
 
@@ -147,7 +150,12 @@ void initLogPersistence();
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
-// Start push-to-talk listener (Rust-side polling, non-consuming)
+// A profile from before automatic sensitivity keeps a tuned slider.
+migrateAutoInputSensitivity();
+
+// Start push-to-talk listener (Rust-side polling, non-consuming), once the
+// input mode is settled: a profile from before Input Mode keeps its PTT key.
+migrateInputMode();
 void desktop.pushToTalk.init();
 
 const appEl = document.getElementById("app");
@@ -378,7 +386,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
 
 // Register the global cert-tofu listener now so first-use / mismatch prompts
 // are received during the connect page's health checks, before any WS connect.
-void ws.startCertListener();
+ws.startCertListener().catch((err: unknown) => log.warn("cert listener registration failed", err));
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
 // the same path the in-app StatusPicker uses (UserBar.ts): persist through

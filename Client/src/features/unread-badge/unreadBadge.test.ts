@@ -134,11 +134,23 @@ describe("unread badge", () => {
     expect(unreadBadgeCount()).toBe(1);
   });
 
-  it("counts nothing at the 'nothing' notification level", () => {
-    setChannelList([channel(1, { mentionCount: 3 })]);
-    setDms([dm(20, 5)]);
+  it("at the 'nothing' level, drops server channels but still counts DMs", () => {
+    setChannelList([
+      channel(1, { mentionCount: 3 }),
+      channel(20, { type: "dm", unreadCount: 5, mentionCount: 1 }),
+    ]);
+    setDms([dm(20, 5, 1)]);
     setGlobalNotificationLevel("nothing");
-    expect(unreadBadgeCount()).toBe(0);
+    expect(unreadBadgeCount()).toBe(5);
+    setGlobalNotificationLevel("mentions");
+    expect(unreadBadgeCount()).toBe(3 + 5);
+  });
+
+  it("at the 'nothing' level a muted DM still counts only its mentions", () => {
+    setDms([dm(20, 5, 2)]);
+    muteChannel(20);
+    setGlobalNotificationLevel("nothing");
+    expect(unreadBadgeCount()).toBe(2);
   });
 
   it("clears the badge when it stops, and not again if already clear", () => {

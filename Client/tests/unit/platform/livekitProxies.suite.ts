@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import type { NativeProxies } from "../../../src/platform/contracts/nativeProxies";
 
 export interface NativeControl {
-  /** The native tunnel starts, listening on `port`. */
+  /** The native tunnel starts, listening on `port` with path token `tun`. */
   succeedWith(port: number): void;
   failWith(error: unknown): void;
 }
@@ -44,7 +44,7 @@ export function describeLiveKitProxiesSuite(
       ctx.subject.setLiveKitServerHost("chat.example:8443");
       await expect(
         ctx.subject.resolveLiveKitUrl("/livekit/rtc", "wss://chat.example:7880"),
-      ).resolves.toBe("ws://127.0.0.1:40123/livekit/rtc");
+      ).resolves.toBe("ws://127.0.0.1:40123/tun/livekit/rtc");
     });
 
     check("returns the direct URL unchanged for a local server", async () => {
@@ -66,7 +66,7 @@ export function describeLiveKitProxiesSuite(
         ctx.native.succeedWith(40123);
         ctx.subject.setLiveKitServerHost("localhost:8443");
         await expect(ctx.subject.resolveLiveKitUrl("/livekit/rtc", directUrl)).resolves.toBe(
-          "ws://127.0.0.1:40123/livekit/rtc",
+          "ws://127.0.0.1:40123/tun/livekit/rtc",
         );
       });
     }

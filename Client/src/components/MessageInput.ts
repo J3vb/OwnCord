@@ -5,7 +5,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/dialogOpen";
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
@@ -45,6 +45,9 @@ export interface MessageInputOptions {
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
   ) => Promise<{ id: string; url: string; filename: string }>;
+  /** Withdraw an upload that will never be sent, so its quota is free at
+   *  once. Best effort: a rejection is ignored. */
+  readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -53,8 +56,7 @@ export interface MessageInputOptions {
 
 /** A channel's unsent composer state, captured before a channel switch and
  *  restored when the user returns (UX-1). Uploads settled before the switch
- *  keep their server id; an upload still in flight is not carried (it is
- *  cancelled on unmount, per SRV-05). */
+ *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: { readonly messageId: number; readonly username: string } | null;
@@ -63,7 +65,31 @@ export interface ComposerDraft {
     readonly filename: string;
     /** Date.now() when the upload settled; ages the chip on restore. */
     readonly uploadedAt: number;
+    /** The picked file, so a restored chip past its age can re-upload. */
+    readonly file?: File;
   }[];
+  /** Uploads still running when the composer was torn down. They keep going
+   *  and the composer that restores the draft shows them again. */
+  readonly uploads?: readonly DraftUpload[];
+}
+
+/** One running upload, owned by the draft between composers. */
+export interface DraftUpload {
+  readonly filename: string;
+  readonly file: File;
+  /** Destroying it cancels the upload. */
+  readonly owner: Disposable;
+  /** Resolves with the server's id; rejects on failure or cancel. */
+  readonly result: Promise<{ readonly id: string; readonly filename: string }>;
+  /** Date.now() when `result` resolved, else undefined. */
+  readonly settledAt: number | undefined;
+  /** Last reported progress, null before the first tick. */
+  readonly fraction: number | null;
+  /** The chip showing this upload sets this to drive its progress bar. */
+  onProgress: ((fraction: number) => void) | null;
+  /** Set while this upload refreshes a stale chip: the chip's old id and
+   *  age, so a failed refresh keeps the chip even after a channel switch. */
+  refreshing: { readonly id: string; readonly uploadedAt: number } | null;
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -226,9 +252,10 @@ const MAX_ATTACHMENTS = 10;
 const MAX_MESSAGE_LEN = 4000;
 // The server's maintenance sweep deletes unlinked attachments about an hour
 // after upload (Server/internal/app/maintenance.go), and a send silently skips
-// an id it no longer knows. A restored draft drops chips past this age, with
-// a margin under the sweep, rather than posting the message without the file.
-const DRAFT_ATTACHMENT_TTL_MS = 50 * 60 * 1000;
+// an id it no longer knows. A staged chip past this age (a margin under the
+// sweep) is never sent: it re-uploads from its file, or is marked expired when
+// the file is gone (a restored draft), and Send refuses until it is fresh.
+const ATTACHMENT_TTL_MS = 50 * 60 * 1000;
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
 
@@ -306,19 +333,27 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Index of the ":" the open emoji popup is completing; -1 when closed. */
   let emojiStart = -1;
 
-  /** Pending attachment IDs to send with the next message. `owner` is set
-   *  exactly while the upload is in flight, so it alone is what blocks Send:
-   *  destroying it cancels that upload when the user removes the preview, and
-   *  it is detached once the upload succeeds. A `Disposable` rather than a raw
-   *  AbortController keeps the upload token in the lifecycle primitives,
-   *  matching MessageList's per-row owner. */
+  /** Pending attachment IDs to send with the next message. `upload` is set
+   *  exactly while the upload is in flight, which blocks Send (as does a chip
+   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying its owner cancels
+   *  that upload when the user removes the preview, and it is detached once
+   *  the upload succeeds. A `Disposable` rather than a raw AbortController
+   *  keeps the upload token in the lifecycle primitives, matching
+   *  MessageList's per-row owner. */
   const pendingAttachments: {
     id: string;
     filename: string;
     readonly previewEl: HTMLDivElement;
-    owner?: Disposable;
+    upload?: DraftUpload;
     uploadedAt?: number;
+    /** The picked file, kept so a chip past ATTACHMENT_TTL_MS can re-upload.
+     *  Absent on chips restored from an older draft. */
+    file?: File;
+    /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
+    expired?: boolean;
   }[] = [];
+  /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
+  const handedOff = new Set<DraftUpload>();
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
   /** Timer IDs for cleanup on destroy. */
@@ -667,9 +702,26 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     // Block send while uploads are still in flight
-    if (pendingAttachments.some((a) => a.owner)) {
+    if (pendingAttachments.some((a) => a.upload !== undefined)) {
       showUploadError(messagingText("error.uploadsPending"));
       return;
+    }
+
+    // The age timer can fire late (a sleeping machine, a throttled window), so
+    // Send checks the age itself and never posts an id the sweep may have taken.
+    if (state.editing === null) {
+      const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
+      if (stale.length > 0) {
+        for (const a of stale) refreshStale(a);
+        showUploadError(
+          messagingText(
+            stale.some((a) => a.expired === true)
+              ? "error.attachmentExpired"
+              : "error.attachmentRefreshing",
+          ),
+        );
+        return;
+      }
     }
 
     // Debounce to prevent double-click duplicate sends
@@ -704,6 +756,44 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Unique counter for preview items (before upload completes and we have a server ID). */
   let previewCounter = 0;
 
+  function isStale(a: (typeof pendingAttachments)[number]): boolean {
+    return a.uploadedAt !== undefined && Date.now() - a.uploadedAt >= ATTACHMENT_TTL_MS;
+  }
+
+  /** Re-upload a stale chip from its file, or mark it expired when there is none. */
+  function refreshStale(a: (typeof pendingAttachments)[number]): void {
+    if (a.upload !== undefined || a.expired === true) return;
+    if (a.file !== undefined) {
+      // The old copy goes first, so a user near their quota has room for
+      // the new one. It is never sent again either way.
+      void runUpload(a, a.file, discard(a.id));
+      return;
+    }
+    a.expired = true;
+    a.previewEl.classList.add("expired");
+    a.previewEl.title = messagingText("attach.expired");
+  }
+
+  /** Mark a chip with no file expired once it reaches ATTACHMENT_TTL_MS. A
+   *  chip that has its file waits for Send to re-upload it, so an idle
+   *  composer never uploads in the background. */
+  function scheduleExpiry(a: (typeof pendingAttachments)[number]): void {
+    if (a.uploadedAt === undefined || a.file !== undefined) return;
+    setOwnedTimeout(
+      signal,
+      () => {
+        if (pendingAttachments.includes(a)) refreshStale(a);
+      },
+      Math.max(0, a.uploadedAt + ATTACHMENT_TTL_MS - Date.now()),
+    );
+  }
+
+  /** Withdraw a settled upload's server copy. The promise resolves when that
+   *  is done or has failed, never rejecting; undefined when nothing withdraws. */
+  function discard(id: string): Promise<void> | undefined {
+    return options.onDiscardUpload?.(id).catch(() => {});
+  }
+
   function removePreviewItem(el: HTMLDivElement): void {
     const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
     const att = idx !== -1 ? pendingAttachments[idx] : undefined;
@@ -711,7 +801,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       // SRV-05: removing an in-flight attachment cancels its upload and frees
       // Send immediately, instead of leaving a doomed request running and the
       // composer blocked on it until the request settles.
-      att.owner?.destroy();
+      att.upload?.owner.destroy();
       const img = att.previewEl.querySelector("img");
       if (img !== null && img.src.startsWith("blob:")) {
         URL.revokeObjectURL(img.src);
@@ -748,6 +838,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "click",
       (e) => {
         e.stopPropagation();
+        const att = pendingAttachments.find((a) => a.previewEl === item);
+        if (att !== undefined && att.upload === undefined && att.uploadedAt !== undefined) {
+          void discard(att.id);
+        }
         removePreviewItem(item);
       },
       { signal },
@@ -833,45 +927,122 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       appendFileLabel(item, file.name);
     }
 
-    // A native progress bar on the chip: indeterminate (no value) while the
-    // transport reports nothing, determinate from its first tick.
-    const progressBar = createElement("progress", { "aria-label": file.name });
-    item.appendChild(progressBar);
-
     appendRemoveButton(item, file.name);
     attachmentPreviewBar.appendChild(item);
-    const uploadOwner = new Disposable();
     const pending: (typeof pendingAttachments)[number] = {
       id: tempId,
       filename: file.name,
       previewEl: item,
-      owner: uploadOwner,
+      file,
     };
     pendingAttachments.push(pending);
+    await runUpload(pending, file);
+  }
 
-    // Upload in background
+  /** Start uploading `file`, after `before` when given; the returned upload
+   *  outlives any one chip. */
+  function startUpload(
+    upload: NonNullable<MessageInputOptions["onUploadFile"]>,
+    file: File,
+    before?: Promise<void>,
+  ): DraftUpload {
+    const owner = new Disposable();
+    let settledAt: number | undefined;
+    let fraction: number | null = null;
+    const onProgress = (f: number): void => {
+      fraction = f;
+      handle.onProgress?.(f);
+    };
+    const result =
+      before === undefined
+        ? upload(file, owner.signal, onProgress)
+        : before.then(() => {
+            owner.signal.throwIfAborted();
+            return upload(file, owner.signal, onProgress);
+          });
+    // Also keeps a rejection in a draft that is never restored from
+    // surfacing as unhandled; whichever chip follows the upload reads it.
+    result.then(
+      () => (settledAt = Date.now()),
+      () => {},
+    );
+    const handle: DraftUpload = {
+      filename: file.name,
+      file,
+      owner,
+      get settledAt() {
+        return settledAt;
+      },
+      get fraction() {
+        return fraction;
+      },
+      onProgress: null,
+      refreshing: null,
+      result,
+    };
+    return handle;
+  }
+
+  /** Upload `file` for `pending`'s chip; also re-uploads a stale chip. */
+  async function runUpload(
+    pending: (typeof pendingAttachments)[number],
+    file: File,
+    before?: Promise<void>,
+  ): Promise<void> {
+    const upload = options.onUploadFile;
+    if (upload === undefined) return;
+    await followUpload(pending, startUpload(upload, file, before));
+  }
+
+  /** Show `handle` on `pending`'s chip until it settles. */
+  async function followUpload(
+    pending: (typeof pendingAttachments)[number],
+    handle: DraftUpload,
+  ): Promise<void> {
+    const item = pending.previewEl;
+    // A native progress bar on the chip: indeterminate (no value) while the
+    // transport reports nothing, determinate from its first tick.
+    const progressBar = createElement("progress", { "aria-label": handle.filename });
+    if (handle.fraction !== null) progressBar.value = handle.fraction;
+    item.insertBefore(progressBar, item.querySelector(".attachment-preview-remove"));
+    item.classList.add("uploading");
+    pending.upload = handle;
+    handle.onProgress = (fraction) => (progressBar.value = fraction);
+    /** Set when refreshing a stale chip; a failed refresh keeps the chip. */
+    const staleUploadedAt = pending.uploadedAt;
+    if (staleUploadedAt !== undefined) {
+      handle.refreshing = { id: pending.id, uploadedAt: staleUploadedAt };
+    }
+    pending.uploadedAt = undefined;
+    // Removed preview (cancelled) or composer torn down (handed to a draft).
+    const abandoned = (): boolean => handle.owner.signal.aborted || signal.aborted;
+
     try {
-      // A late tick after the preview is removed writes a detached node only.
-      const result = await options.onUploadFile(
-        file,
-        uploadOwner.signal,
-        (fraction) => (progressBar.value = fraction),
-      );
-      // Replace temp ID with real server ID, unless the preview was removed
-      if (!uploadOwner.signal.aborted) {
-        pending.id = result.id;
-        pending.filename = result.filename;
-        pending.owner = undefined;
-        pending.uploadedAt = Date.now();
-        item.classList.remove("uploading");
-        progressBar.remove();
+      const result = await handle.result;
+      if (abandoned()) return;
+      pending.id = result.id;
+      pending.filename = result.filename;
+      pending.upload = undefined;
+      pending.uploadedAt = handle.settledAt ?? Date.now();
+      item.classList.remove("uploading");
+      progressBar.remove();
+      if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
+        clearUploadError();
       }
     } catch (err) {
       // A user-cancelled upload (removed preview) is not a failure: the
       // preview is already gone and there is nothing to report.
-      if (uploadOwner.signal.aborted) return;
-      // Upload failed — remove preview and show error
-      removePreviewItem(item);
+      if (abandoned()) return;
+      if (staleUploadedAt !== undefined) {
+        // A failed refresh keeps the chip stale, so the next Send retries it
+        // and still never sends the old id.
+        pending.upload = undefined;
+        pending.uploadedAt = staleUploadedAt;
+        item.classList.remove("uploading");
+        progressBar.remove();
+      } else {
+        removePreviewItem(item);
+      }
       const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     }
@@ -1089,10 +1260,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
         if (
           e.key === "ArrowUp" &&
+          !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) &&
           disabledReason === null &&
           textarea !== null &&
           textarea.value.length === 0
         ) {
+          // The browser's own ArrowUp runs after this handler and would move
+          // the caret of the just-loaded edit text to the start.
+          e.preventDefault();
           root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
         }
       },
@@ -1333,9 +1508,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
-    // SRV-05: a channel switch or unmount must not leave an upload running
-    // against a composer that no longer exists.
-    for (const att of pendingAttachments) att.owner?.destroy();
+    // SRV-05: an unmount must not leave an upload running against a composer
+    // that no longer exists, unless getDraft() handed it to the draft.
+    for (const att of pendingAttachments) {
+      if (att.upload === undefined) continue;
+      att.upload.onProgress = null;
+      if (!handedOff.has(att.upload)) att.upload.owner.destroy();
+    }
+    handedOff.clear();
     disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
@@ -1356,27 +1536,44 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     openPicker?.();
   }
 
-  /** Capture the unsent state for a channel switch. Only settled attachments
-   *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
-   *  it on unmount). Mid-edit this is the draft the edit displaced: the edit
-   *  text itself is never stashed, since restored outside edit mode it would
-   *  send as a duplicate new message. */
+  /** Capture the unsent state for a channel switch. Settled attachments carry
+   *  their server id; an upload still in flight is handed to the draft, and
+   *  destroy() then leaves it running for the composer that restores it.
+   *  The caller owns those uploads: store the draft or destroy each owner.
+   *  Mid-edit this is the draft the edit displaced: the edit text itself is
+   *  never stashed, since restored outside edit mode it would send as a
+   *  duplicate new message. */
   function getDraft(): ComposerDraft {
     const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
+    const uploads: DraftUpload[] = [];
+    for (const a of pendingAttachments) {
+      if (a.upload === undefined) continue;
+      handedOff.add(a.upload);
+      uploads.push(a.upload);
+    }
     return {
       content: stashed.text,
       replyTo: stashed.replyTo,
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
-          : [{ id: a.id, filename: a.filename, uploadedAt: a.uploadedAt }],
+          : [
+              {
+                id: a.id,
+                filename: a.filename,
+                uploadedAt: a.uploadedAt,
+                ...(a.file === undefined ? {} : { file: a.file }),
+              },
+            ],
       ),
+      ...(uploads.length === 0 ? {} : { uploads }),
     };
   }
 
-  /** Restore a captured draft into this (fresh) composer: text, reply bar and
-   *  a ready chip (no spinner) per still-live upload, so its id sends without
-   *  re-uploading. */
+  /** Restore a captured draft into this (fresh) composer: text, reply bar, a
+   *  ready chip (no spinner) per still-live upload, so its id sends without
+   *  re-uploading, and an uploading chip per upload still in flight. A chip
+   *  past its age with its file stays and re-uploads at Send. */
   function restoreDraft(draft: ComposerDraft): void {
     if (textarea !== null) {
       textarea.value = draft.content;
@@ -1384,7 +1581,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
     const now = Date.now();
-    const live = draft.attachments.filter((a) => now - a.uploadedAt < DRAFT_ATTACHMENT_TTL_MS);
+    const live = draft.attachments.filter(
+      (a) => a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
+    );
     for (const att of live) {
       if (attachmentPreviewBar === null) break;
       const item = createElement("div", { class: "attachment-preview-item" });
@@ -1392,7 +1591,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       appendRemoveButton(item, att.filename);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
-      pendingAttachments.push({ ...att, previewEl: item });
+      const restored = { ...att, previewEl: item };
+      pendingAttachments.push(restored);
+      scheduleExpiry(restored);
+    }
+    for (const handle of draft.uploads ?? []) {
+      if (handle.owner.signal.aborted) continue;
+      if (attachmentPreviewBar === null) {
+        handle.owner.destroy();
+        continue;
+      }
+      const item = createElement("div", { class: "attachment-preview-item" });
+      appendFileLabel(item, handle.filename);
+      appendRemoveButton(item, handle.filename);
+      attachmentPreviewBar.classList.add("visible");
+      attachmentPreviewBar.appendChild(item);
+      const pending: (typeof pendingAttachments)[number] = {
+        id: handle.refreshing?.id ?? `pending-${++previewCounter}`,
+        filename: handle.filename,
+        previewEl: item,
+        file: handle.file,
+      };
+      if (handle.refreshing !== null) pending.uploadedAt = handle.refreshing.uploadedAt;
+      pendingAttachments.push(pending);
+      void followUpload(pending, handle);
     }
     if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));

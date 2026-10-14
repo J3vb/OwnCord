@@ -39,6 +39,9 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 			return last
 		}},
 		{name: "full broadcast queue", lose: func(t *testing.T, h *Hub, emit func() int64) int64 {
+			saved := contentEnqueueWait
+			contentEnqueueWait = 0
+			t.Cleanup(func() { contentEnqueueWait = saved })
 			for range cap(h.broadcast) {
 				h.BroadcastToAll([]byte(`{"type":"server_filler"}`))
 			}

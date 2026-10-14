@@ -36,7 +36,7 @@ func TestConnWritesStop_FlushesPendingTouches(t *testing.T) {
 	w := service.NewConnWrites(database)
 	sessions := service.NewSessionService(database)
 	sessions.SetConnWrites(w)
-	stop := startConnWrites(ctx, w, nil, nil)
+	stop := startConnWrites(ctx, w, nil, nil, nil)
 
 	if err := sessions.TouchSession(ctx, "tok"); err != nil {
 		t.Fatalf("TouchSession: %v", err)
@@ -85,7 +85,7 @@ func TestConnWritesStop_StampsUsersStillConnected(t *testing.T) {
 	w := service.NewConnWrites(database)
 	users := service.NewUserService(database)
 	users.SetConnWrites(w)
-	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{online, dnd} })
+	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{online, dnd} }, nil)
 	if err := stop(ctx); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -100,5 +100,73 @@ func TestConnWritesStop_StampsUsersStillConnected(t *testing.T) {
 		if status != want || !fresh {
 			t.Errorf("user %d after stop: status %q fresh last_seen %v, want %q and true", id, status, fresh, want)
 		}
+	}
+}
+
+// A backup restore closes the database while the lifecycle is still up, so
+// the writes queued before it have nowhere to go. The close step drops them
+// instead of failing teardown: that failure made the restarting process exit
+// 1, which broke the restart handoff the restore asked for.
+func TestConnWritesStop_DatabaseClosedByRestore(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "restored", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, uid, "tok", "dev", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	w := service.NewConnWrites(database)
+	users := service.NewUserService(database)
+	users.SetConnWrites(w)
+	sessions := service.NewSessionService(database)
+	sessions.SetConnWrites(w)
+	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{uid} }, database.Closed)
+
+	if err := sessions.TouchSession(ctx, "tok"); err != nil {
+		t.Fatalf("TouchSession: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := stop(ctx); err != nil {
+		t.Fatalf("stop after the database was closed: %v, want nil", err)
+	}
+}
+
+// The restore exemption is only for a closed database: a final flush that
+// fails against an open one still fails teardown.
+func TestConnWritesStop_FlushFailureStillReported(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "stamped", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `ALTER TABLE users RENAME TO users_gone`); err != nil {
+		t.Fatalf("break users table: %v", err)
+	}
+
+	w := service.NewConnWrites(database)
+	users := service.NewUserService(database)
+	users.SetConnWrites(w)
+	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{uid} }, database.Closed)
+	if err := stop(ctx); err == nil {
+		t.Fatal("stop with a failing flush against an open database returned nil, want the flush error")
 	}
 }

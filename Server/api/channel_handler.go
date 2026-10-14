@@ -81,7 +81,9 @@ func handleListChannels(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleGetMessages returns paginated messages for a channel.
+// handleGetMessages returns paginated messages for a channel: newest-first
+// pages behind `before` (the default), or the oldest-first page that follows
+// `after`.
 func handleGetMessages(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -104,12 +106,38 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			before = v
 		}
 
+		// `after` pages downward from a detached around-window toward the live
+		// tail. It is a different direction from `before`, so the two cannot be
+		// combined.
+		after := int64(0)
+		if raw := r.URL.Query().Get("after"); raw != "" {
+			if r.URL.Query().Get("before") != "" {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "after and before cannot be combined")
+				return
+			}
+			v, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || v <= 0 {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "after must be a positive integer")
+				return
+			}
+			after = v
+		}
+
 		limit, ok := parseLimitParam(w, r)
 		if !ok {
 			return
 		}
 
-		msgs, hasMore, err := svc.Messages.GetMessages(r.Context(), user.ID, channelID, before, limit)
+		var (
+			msgs    []db.MessageAPIResponse
+			hasMore bool
+			err     error
+		)
+		if after > 0 {
+			msgs, hasMore, err = svc.Messages.GetMessagesAfter(r.Context(), user.ID, channelID, after, limit)
+		} else {
+			msgs, hasMore, err = svc.Messages.GetMessages(r.Context(), user.ID, channelID, before, limit)
+		}
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return

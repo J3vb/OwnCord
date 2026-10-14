@@ -1118,6 +1118,56 @@ describe("renderers", () => {
 
       ac.abort();
     });
+
+    it("a reply to a deleted message is not a jump link", () => {
+      const onJumpToMessage = vi.fn();
+      const loaded = makeMessage({ id: 1, content: "Original", deleted: true });
+      const replyToLoaded = makeMessage({ id: 2, replyTo: 1, content: "reply" });
+      const replyToSnippet = makeMessage({
+        id: 3,
+        replyTo: 999,
+        referencedMessage: {
+          id: 999,
+          user: null,
+          content: "",
+          deleted: true,
+          has_attachments: false,
+        },
+      });
+      const ac = new AbortController();
+      const all = [loaded, replyToLoaded, replyToSnippet];
+      for (const msg of [replyToLoaded, replyToSnippet]) {
+        container.appendChild(
+          renderMessage(msg, false, all, makeOpts({ onJumpToMessage }), ac.signal),
+        );
+      }
+
+      const bars = container.querySelectorAll<HTMLElement>(".msg-reply-ref");
+      expect(bars).toHaveLength(2);
+      for (const bar of bars) {
+        expect(bar.getAttribute("role")).toBeNull();
+        expect(bar.getAttribute("tabindex")).toBeNull();
+        bar.click();
+        bar.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+      }
+      expect(onJumpToMessage).not.toHaveBeenCalled();
+      ac.abort();
+    });
+
+    it("a reply to an unknown message stays a jump link", () => {
+      const onJumpToMessage = vi.fn();
+      const reply = makeMessage({ id: 2, replyTo: 999, content: "replying" });
+      const ac = new AbortController();
+      container.appendChild(
+        renderMessage(reply, false, [reply], makeOpts({ onJumpToMessage }), ac.signal),
+      );
+
+      const bar = container.querySelector<HTMLElement>(".msg-reply-ref")!;
+      expect(bar.getAttribute("role")).toBe("button");
+      bar.click();
+      expect(onJumpToMessage).toHaveBeenCalledWith(999);
+      ac.abort();
+    });
   });
 
   // ---------------------------------------------------------------------------

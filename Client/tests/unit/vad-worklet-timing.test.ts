@@ -150,6 +150,25 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     expect(periodMs).toBeLessThan(65);
   });
 
+  it("a threshold message moves the level without reopening the gate or resetting the hold", () => {
+    // Automatic sensitivity re-sends the threshold as the noise floor moves:
+    // unlike config, that must not reopen a closed gate.
+    const proc = freshUngatedProcessor();
+    callsUntilMessageOfType(proc, SILENT, "gate", 200);
+    postMessageMock(proc).mockClear();
+    const QUIET = 0.02; // below 0.05, above 0.01
+    for (let i = 0; i < 20; i++) proc.process([[frame(QUIET)]]);
+
+    proc.port.onmessage({ data: { type: "threshold", threshold: 0.01 } });
+    expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: false });
+    expect(proc._threshold).toBe(0.01);
+    // The level now clears the moved threshold: speech opens the gate after
+    // the usual ~32 ms attack, not at once.
+    const calls = callsUntilMessageOfType(proc, QUIET, "gate", 200);
+    expect(calls * FRAME_MS).toBeGreaterThan(20);
+    expect(calls * FRAME_MS).toBeLessThan(55);
+  });
+
   it("acknowledges stop from its final process() call", () => {
     // audioPipeline.ts closes the AudioContext on this acknowledgement.
     const proc = freshUngatedProcessor();

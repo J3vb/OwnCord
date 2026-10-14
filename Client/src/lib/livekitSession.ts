@@ -8,11 +8,14 @@ import {
   setLocalScreenshare,
   setPttGated as setPttGatedState,
   isPttPollingLive,
+  onPttPollingLiveChange,
   setListenOnly,
   setVoiceStatus,
   setLocalGateSpeaking,
+  restateSelfVoiceState,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
+import { inputMode } from "@lib/inputMode";
 import { createLogger } from "@lib/logger";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
@@ -21,6 +24,7 @@ import { DeviceManager } from "@lib/deviceManager";
 import {
   type CameraTrackState,
   type ScreenTrackState,
+  type StreamQuality,
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
@@ -36,9 +40,15 @@ import type {
   SessionState,
 } from "../features/voice/sessionState";
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
+import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
-import { MediaControl } from "../features/voice/mediaControl";
+import { MediaControl, syncShareGrant } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
+import {
+  dismissMediaLostNotice,
+  restoreLostMedia,
+  type LostMedia,
+} from "../features/voice/mediaLostNotice";
 import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
@@ -268,6 +278,9 @@ export class LiveKitSession {
     resolveLiveKitUrl: (p, d) => this.resolveLiveKitUrl(p, d),
     restoreLocalVoiceState: (mode) => this.restoreLocalVoiceState(mode),
     reapplyMuteGain: () => this.reapplyMuteGain(),
+    restateSelfVoiceState: () => {
+      if (this.ws !== null) restateSelfVoiceState(this.ws);
+    },
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
     leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),
@@ -301,6 +314,7 @@ export class LiveKitSession {
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
     microphonePublishingAllowed: (room) => this._media.microphonePublishingAllowed(room),
     applyMicMuteState: (muted) => this.applyMicMuteState(muted),
+    dropDeniedVideo: (room) => this._media.dropDeniedVideo(room),
   });
   /** Mute/deafen policy, mic publishing, camera/screenshare/device/volume control. */
   private _media = new MediaControl({
@@ -319,7 +333,7 @@ export class LiveKitSession {
     },
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
   });
-  private _audioPipeline = new AudioPipeline();
+  private _audioPipeline = new AudioPipeline(isPttPollingLive);
   private _audioElements = new AudioElements();
   private _deviceManager = new DeviceManager();
   private _eventHandlers: RoomEventHandlers;
@@ -395,6 +409,13 @@ export class LiveKitSession {
         // webhook clears a reconnected, non-rogue participant), occupying a
         // max_video slot the user can never free.
         const { localCamera, localScreenshare } = voiceStore.getState();
+        // Merged: a second drop before the first reconnect lands finds both
+        // already off, and must not erase what the first drop stopped.
+        const prev = this._lostOnReconnect;
+        this._lostOnReconnect = {
+          camera: localCamera || (prev?.camera ?? false),
+          screenshare: localScreenshare || (prev?.screenshare ?? false),
+        };
         if (this.ws !== null) {
           if (localCamera) {
             this.ws.send({ type: "voice_camera", payload: { enabled: false } });
@@ -424,6 +445,10 @@ export class LiveKitSession {
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });
   }
+
+  /** What teardownForReconnect stopped, restored once the reconnect (or its
+   *  rejoin) lands. Cleared by leaveVoice, so a give-up restores nothing. */
+  private _lostOnReconnect: LostMedia | null = null;
 
   /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
    *  callback sequence so setReconnectAc can form the "reconnecting" state atomically. */
@@ -481,10 +506,13 @@ export class LiveKitSession {
           : "released";
       },
       rejoinVoice: () => {
+        // The rejoin's join brings back what the drop stopped, as a reconnect does.
+        const lost = this._lostOnReconnect;
         this.leaveVoice(false, true);
+        this._lostOnReconnect = lost;
         this._rejoinPending = true;
         setVoiceStatus("joining");
-        this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
+        noteJoinSent(this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } }));
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       sweepPublications: (room) => this.sweepPublications(room),
@@ -496,7 +524,56 @@ export class LiveKitSession {
       clearPendingReconnectFields: () => {
         this._pendingReconnectFields = null;
       },
+      noticeLostMedia: () => this.restoreLostMedia(),
     });
+  }
+
+  /** Once a reconnect (or its rejoin) lands: bring back what the drop stopped. */
+  private restoreLostMedia(): void {
+    const lost = this._lostOnReconnect;
+    this._lostOnReconnect = null;
+    const room = this._room;
+    if (lost === null || room === null) return;
+    const stillCurrent = (): boolean => this._room === room;
+    const restore = restoreLostMedia(lost, {
+      isOn: (kind) =>
+        kind === "camera"
+          ? voiceStore.getState().localCamera
+          : voiceStore.getState().localScreenshare,
+      enableCamera: () => this.enableCamera(),
+      restartScreenshare: async () => {
+        if (!isLinuxDesktop()) return false;
+        const picker = await import("../features/voice/native/screenPicker");
+        if (!(await picker.armScreenRestart().catch(() => false))) return false;
+        try {
+          // The user may have shared meanwhile: leave theirs alone.
+          if (stillCurrent() && !voiceStore.getState().localScreenshare)
+            await this.enableScreenshare();
+        } finally {
+          picker.disarmScreenRestart();
+        }
+        return true;
+      },
+      stillCurrent,
+      turnOn: {
+        camera: () => void this.enableCamera().catch((e) => log.error("Camera restart failed", e)),
+        screenshare: () =>
+          void this.enableScreenshare().catch((e) => log.error("Screenshare restart failed", e)),
+      },
+    });
+    restore
+      .then(() => {
+        // Dropped again mid-restore: the next reconnect restores it all,
+        // including what teardownForReconnect saw as still off.
+        if (stillCurrent() || this._state.type !== "reconnecting") return;
+        const prev = this._lostOnReconnect;
+        this._lostOnReconnect = {
+          camera: lost.camera || (prev?.camera ?? false),
+          screenshare: lost.screenshare || (prev?.screenshare ?? false),
+        };
+      })
+      // Runs after the reconnect succeeded: a failure here must not undo it.
+      .catch((e) => log.warn("Restoring media after reconnect failed", e));
   }
 
   // --- URL resolution (delegated to LiveKitUrlResolver) ---
@@ -558,9 +635,11 @@ export class LiveKitSession {
   private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
     const room = this._room;
     if (room === null) return;
+    syncShareGrant(room);
 
     const state = voiceStore.getState();
-    // A bound PTT key means transmission is gated by press/release, but the
+    // In Push to Talk mode a bound key means transmission is gated by
+    // press/release (a key bound in Voice Activity mode gates nothing), but the
     // Rust poller only emits ptt-state on a state TRANSITION — an idle key
     // produces no event at all, so without this the freshly published mic
     // would stay hot and transmitting until the user's first press+release.
@@ -580,7 +659,7 @@ export class LiveKitSession {
     // reconnect.
     const pttArmed =
       mode === "join"
-        ? isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0
+        ? isPttPollingLive() && inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0
         : state.pttGated === true;
     if (mode === "join") setPttGatedState(pttArmed);
     this._audioPipeline.setPttGated(pttArmed);
@@ -695,8 +774,13 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<void> {
+    const rejoin = this._rejoinPending;
     this._rejoinPending = false;
-    return this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+    await this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+    if (!rejoin) return;
+    const s = this._state;
+    if (s.type === "connected" && s.channelId === channelId) this.restoreLostMedia();
+    else this._lostOnReconnect = null;
   }
 
   /** A refused voice_join ends a reconnect's rejoin for good: tell the user
@@ -704,6 +788,7 @@ export class LiveKitSession {
   failPendingRejoin(): void {
     if (!this._rejoinPending) return;
     this._rejoinPending = false;
+    this._lostOnReconnect = null;
     this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
   }
 
@@ -766,6 +851,8 @@ export class LiveKitSession {
 
   leaveVoice(sendWs = true, keepWatched = false): void {
     this._rejoinPending = false;
+    this._lostOnReconnect = null;
+    dismissMediaLostNotice();
     if (!keepWatched) this._remoteTracks.clearWatched();
     this._lifecycle.leaveVoice(sendWs);
   }
@@ -816,6 +903,27 @@ export class LiveKitSession {
     return this._media.disableScreenshare();
   }
 
+  /** `ready`'s camera/share flags for this user, checked against what we send. */
+  reconcileVideoFlags(camera: boolean, screenshare: boolean): void {
+    this._media.reconcileVideoFlags(camera, screenshare);
+  }
+
+  changeScreenshareSource(): Promise<void> {
+    return this._media.changeScreenshareSource();
+  }
+
+  setScreenshareQuality(quality: StreamQuality): Promise<void> {
+    return this._media.setScreenshareQuality(quality);
+  }
+
+  getScreenshareQuality(): StreamQuality | null {
+    return this._media.getScreenshareQuality();
+  }
+
+  canChangeScreenshareSource(): boolean {
+    return this._media.canChangeScreenshareSource();
+  }
+
   async switchInputDevice(deviceId: string): Promise<void> {
     return this._media.switchInputDevice(deviceId);
   }
@@ -824,12 +932,24 @@ export class LiveKitSession {
     return this._media.switchOutputDevice(deviceId);
   }
 
+  async switchVideoDevice(deviceId: string): Promise<void> {
+    return this._media.switchVideoDevice(deviceId);
+  }
+
   setUserVolume(userId: number, volume: number): void {
     this._media.setUserVolume(userId, volume);
   }
 
   getUserVolume(userId: number): number {
     return this._media.getUserVolume(userId);
+  }
+
+  setUserLocalMute(userId: number, muted: boolean): void {
+    this._media.setUserLocalMute(userId, muted);
+  }
+
+  getUserLocalMute(userId: number): boolean {
+    return this._media.getUserLocalMute(userId);
   }
 
   setScreenshareAudioVolume(userId: number, volume: number): void {
@@ -862,6 +982,12 @@ export class LiveKitSession {
 
   setVoiceSensitivity(sensitivity: number): void {
     this._media.setVoiceSensitivity(sensitivity);
+  }
+
+  /** Re-run the sensitivity gate for the saved input mode (Voice Activity
+   *  gates on sensitivity, Push to Talk does not). */
+  applyInputMode(): void {
+    this._media.applyInputMode();
   }
 
   /** Push-to-talk: close (key up) or open (key down) the gate — the mic
@@ -918,6 +1044,11 @@ export class LiveKitSession {
   /** Watch a remote camera or screen share, or stop: opt-in watching. */
   setRemoteVideoWatched(userId: number, type: "camera" | "screenshare", on: boolean): void {
     this._remoteTracks.watch(userId, type, on);
+  }
+
+  /** A remote stream ended: drop its watch without counting as Stop watching. */
+  forgetRemoteVideoWatch(userId: number, type: "camera" | "screenshare"): void {
+    this._remoteTracks.forgetWatch(userId, type);
   }
 
   getRoom(): Room | null {
@@ -998,13 +1129,24 @@ export const enableCamera = session.enableCamera.bind(session);
 export const disableCamera = session.disableCamera.bind(session);
 export const enableScreenshare = session.enableScreenshare.bind(session);
 export const disableScreenshare = session.disableScreenshare.bind(session);
+export const reconcileVideoFlags = session.reconcileVideoFlags.bind(session);
+export const changeScreenshareSource = session.changeScreenshareSource.bind(session);
+export const setScreenshareQuality = session.setScreenshareQuality.bind(session);
+export const getScreenshareQuality = session.getScreenshareQuality.bind(session);
+export const canChangeScreenshareSource = session.canChangeScreenshareSource.bind(session);
 export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
+export const switchVideoDevice = session.switchVideoDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);
 export const getUserVolume = session.getUserVolume.bind(session);
+export const setUserLocalMute = session.setUserLocalMute.bind(session);
+export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
+export const applyInputMode = session.applyInputMode.bind(session);
+// Push to Talk takes over from the sensitivity gate only once its poller is live.
+onPttPollingLiveChange(applyInputMode);
 export const setPttGated = session.setPttGated.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const reapplyEnhancedNoiseSuppression =
@@ -1016,6 +1158,7 @@ export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(se
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
+export const forgetRemoteVideoWatch = session.forgetRemoteVideoWatch.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);

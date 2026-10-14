@@ -8,6 +8,8 @@ const {
   mockVoiceStoreGetState,
   mockJoinVoiceChannel,
   mockLeaveVoiceChannel,
+  mockSetMutedBeforeDeafen,
+  mockSaveSelfVoiceState,
   mockVoiceSessionLeave,
   mockSetMuted,
   mockSetDeafened,
@@ -21,6 +23,8 @@ const {
   mockVoiceStoreGetState: vi.fn(),
   mockJoinVoiceChannel: vi.fn(),
   mockLeaveVoiceChannel: vi.fn(),
+  mockSetMutedBeforeDeafen: vi.fn(),
+  mockSaveSelfVoiceState: vi.fn(),
   mockVoiceSessionLeave: vi.fn(),
   mockSetMuted: vi.fn(),
   mockSetDeafened: vi.fn(),
@@ -45,6 +49,8 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   voiceStore: { getState: mockVoiceStoreGetState },
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
+  setMutedBeforeDeafen: mockSetMutedBeforeDeafen,
+  saveSelfVoiceState: mockSaveSelfVoiceState,
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
 }));
 
@@ -74,6 +80,7 @@ import {
 } from "../../src/pages/main-page/VoiceCallbacks";
 import type { WsClient } from "../../src/lib/ws";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
+import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,6 +107,7 @@ interface VoiceStateStub {
   localServerDeafened: boolean;
   pttGated?: boolean;
   voiceStatus?: string;
+  mutedBeforeDeafen?: boolean;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -170,6 +178,40 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetMuted).toHaveBeenCalledWith(true);
       expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
+    });
+
+    // WP 1D-1: outside a call the toggle changes the local (saved) state only;
+    // the next join restates it to the server.
+    it("mutes and unmutes outside a call without sending anything", () => {
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+      expect(mockSetMuted).toHaveBeenLastCalledWith(true);
+
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: null, localMuted: true, localDeafened: true }),
+      );
+      cbs.onMuteToggle();
+      expect(mockSetMuted).toHaveBeenLastCalledWith(false);
+      expect(mockSetDeafened).toHaveBeenLastCalledWith(false);
+
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not save a refused unmute under a moderator's mute", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localServerMuted: true }),
+      );
+      const cbs = createVoiceWidgetCallbacks(makeWs(), makeLimiters());
+
+      cbs.onMuteToggle();
+
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).not.toHaveBeenCalled();
     });
 
     it("unmutes and undeafens when muted+deafened", () => {
@@ -244,6 +286,47 @@ describe("createVoiceWidgetCallbacks", () => {
     // Deleted "lifts the mute outright where no press can arrive": that is now the only path.
   });
 
+  describe("while the chat socket is down", () => {
+    beforeEach(() => {
+      mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+    });
+
+    it("mutes locally and sends nothing", () => {
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("unmutes and undeafens locally and sends nothing", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localDeafened: true }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+
+      expect(mockSetMuted).toHaveBeenCalledWith(false);
+      expect(mockSetDeafened).toHaveBeenCalledWith(false);
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("deafens locally and sends nothing", () => {
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetDeafened).toHaveBeenCalledWith(true);
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+  });
+
   describe("onDeafenToggle", () => {
     it("deafens and mutes when undeafened", () => {
       const ws = makeWs();
@@ -253,6 +336,21 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetDeafened).toHaveBeenCalledWith(true);
       expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
+    });
+
+    it("deafens outside a call without sending anything", () => {
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetMutedBeforeDeafen).toHaveBeenCalledWith(false);
+      expect(mockSetDeafened).toHaveBeenCalledWith(true);
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).toHaveBeenCalledOnce();
     });
 
     it("undeafens and unmutes when deafened", () => {
@@ -266,6 +364,46 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetDeafened).toHaveBeenCalledWith(false);
       expect(mockSetMuted).toHaveBeenCalledWith(false);
+    });
+
+    it("deafen then undeafen after a prior mute stays muted", () => {
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localMuted: true }));
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+      expect(mockSetMutedBeforeDeafen).toHaveBeenLastCalledWith(true);
+
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localDeafened: true, mutedBeforeDeafen: true }),
+      );
+      vi.clearAllMocks();
+      cbs.onDeafenToggle();
+
+      expect(mockSetDeafened).toHaveBeenCalledWith(false);
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_deafen", payload: { deafened: false } });
+      expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    });
+
+    it("records that the user was not muted when deafening", () => {
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetMutedBeforeDeafen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("clears the remembered mute on undeafen", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localDeafened: true, mutedBeforeDeafen: true }),
+      );
+      const cbs = createVoiceWidgetCallbacks(makeWs(), makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetMutedBeforeDeafen).toHaveBeenLastCalledWith(false);
     });
 
     it("does not double-mute when already muted", () => {
@@ -402,8 +540,18 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockJoinVoiceChannel).toHaveBeenCalledWith(42);
     expect(ws.send).toHaveBeenCalledWith({
       type: "voice_join",
-      payload: { channel_id: 42 },
+      payload: { channel_id: 42, user_initiated: true },
     });
+  });
+
+  it("onVoiceJoin records the join's envelope id so only its refusal rolls it back", () => {
+    const ws = { send: vi.fn(() => "join-42") } as unknown as WsClient;
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceJoin(42);
+
+    expect(takeJoinRefusal("FORBIDDEN", "other")).toBe(false);
+    expect(takeJoinRefusal("FORBIDDEN", "join-42")).toBe(true);
   });
 
   it("onVoiceJoin is a no-op when already in the requested voice channel (OC-0289)", () => {
@@ -457,7 +605,10 @@ describe("createSidebarVoiceCallbacks", () => {
     );
 
     cbs.onVoiceJoin(42);
-    expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 42 } });
+    expect(ws.send).toHaveBeenCalledWith({
+      type: "voice_join",
+      payload: { channel_id: 42, user_initiated: true },
+    });
 
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 42, voiceStatus: "joining" }),

@@ -80,17 +80,17 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
-| Distinct `invoke` command names called from `Client/src/`  | 65    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 68    |
+| Distinct `invoke` command names called from `Client/src/`  | 66    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 69    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 68 distinct registrations
+The handler count covers the 69 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the twenty-seven `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build registers 67 on Linux
+`#[cfg(feature = "devtools")]` and the twenty-eight `native_voice_*` commands
+behind `#[cfg(target_os = "linux")]`, so a default build registers 68 on Linux
 and 40 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -129,6 +129,7 @@ load_pending_messages
 login_with_saved_password
 native_voice_build_info
 native_voice_camera_support
+native_voice_change_screen
 native_voice_clear_key
 native_voice_connect
 native_voice_debug_info
@@ -218,7 +219,7 @@ native surface itself lives only in `platform/desktop/`.
 | Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
 | Global shortcuts  | `pages/MainPage.ts`, `settings/KeybindsTab.ts`                                | `api/core`, `api/event`; 3 invokes, 1 event listen                                                                                                    | unsupported — a page cannot observe keys outside itself     |
 | Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
-| App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                                                                                                                             | build-time constant                                         |
+| App metadata      | `settings/AboutTab.ts`                                                        | `api/app`                                                                                                                                             | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
 | System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                   | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
 

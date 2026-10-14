@@ -1,14 +1,17 @@
 /**
- * Voice & Audio settings tab — input/output device, sensitivity, audio processing.
+ * Voice & Video settings tab — input/output device, sensitivity, audio processing.
  */
 
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
 import { createLogger } from "@lib/logger";
+import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
   switchOutputDevice,
+  switchVideoDevice,
   setVoiceSensitivity,
+  applyInputMode,
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
@@ -22,7 +25,7 @@ import {
   startVadDetector,
   vadThreshold,
 } from "@lib/audioPipeline";
-import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
+import { GATE_LOOKAHEAD_S, createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import {
   nativeAudioDevices,
@@ -30,16 +33,34 @@ import {
   nativeCameraSupport,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { getVideoCodecPref } from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { autoInputSensitivity, inputMode, type InputMode } from "@lib/inputMode";
+import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
 
 /** A microphone itself, not the browser's "default"/"communications" alias. */
 function isRealInput(d: MediaDeviceInfo): boolean {
   return d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications";
+}
+
+/** Play the mic test on the saved output device, where the host can choose one. */
+function applyMicTestSink(el: HTMLAudioElement): void {
+  if (typeof el.setSinkId !== "function") return;
+  el.setSinkId(loadPref<string>("audioOutputDevice", "")).catch((err: unknown) => {
+    log.warn("Failed to set output device on mic test", err);
+  });
+}
+
+/** Output Volume percent as an element volume, which caps at 1: above 100 %
+ *  the test plays at 100 %. A corrupt pref plays at full. */
+function micTestVolume(percent: number): number {
+  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 1;
 }
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
@@ -142,8 +163,8 @@ function buildVoiceAudioTabInner(
   // the engine's playout mixer applies it with each user's volume.
   const nativeAudio = isLinuxDesktop();
 
-  // Four cards: what you speak into, what you hear, what you show, and how
-  // your voice is processed.
+  // Five cards: when you transmit, what you speak into, what you hear, what
+  // you show, and how your voice is processed.
   const card = (title: string): HTMLElement => {
     const el = createElement("section", { class: "settings-card" });
     const head = createElement("div", { class: "settings-card-head" });
@@ -152,6 +173,7 @@ function buildVoiceAudioTabInner(
     section.appendChild(el);
     return el;
   };
+  const inputModeCard = card(t("voiceAudio.card.inputMode"));
   const micCard = card(t("voiceAudio.card.microphone"));
   const speakersCard = card(t("voiceAudio.card.speakers"));
   const cameraCard = card(t("voiceAudio.card.camera"));
@@ -219,6 +241,7 @@ function buildVoiceAudioTabInner(
       // The meter's own processor measures after the same gain as the call's.
       inputVolumePercent = val;
       meterProcessor?.setInputGain(val / 100);
+      meterResetFloor?.();
     },
     { signal },
   );
@@ -232,6 +255,32 @@ function buildVoiceAudioTabInner(
     t("voiceAudio.inputSensitivity"),
   );
   micCard.appendChild(sensitivityHeader);
+
+  // Automatic sensitivity: the gate finds its own threshold above the room's
+  // noise, and the meter shows the level without a handle. The native engine
+  // gates on the saved slider alone, so it keeps the handle and no toggle.
+  let autoSensitivity = !nativeAudio && autoInputSensitivity();
+  const autoRow = createElement("div", {
+    class: "setting-row",
+    "data-testid": "auto-sensitivity",
+  });
+  const autoToggle = createToggle(autoSensitivity, {
+    signal,
+    label: t("voiceAudio.autoSensitivity"),
+    onChange: (nowOn) => {
+      autoSensitivity = nowOn;
+      savePref("autoInputSensitivity", nowOn);
+      paintSensitivity();
+      meterThresholdSetter?.(nowOn ? "auto" : vadThreshold(currentSensitivity));
+      applyInputMode();
+    },
+  });
+  appendChildren(
+    autoRow,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.autoSensitivity")),
+    autoToggle,
+  );
+  if (!nativeAudio) micCard.appendChild(autoRow);
 
   // Real-time mic level bar with embedded draggable threshold handle
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
@@ -257,7 +306,97 @@ function buildVoiceAudioTabInner(
   meterWrap.append(meterBar, sensitivityValue);
   micCard.appendChild(meterWrap);
 
+  // ── Mic test: plays the meter's processed microphone, after the voice gate,
+  // through the chosen output, so you hear what a call would send. The native
+  // engine's capture never reaches the webview, so there is nothing to play.
+  const micTestRow = createElement("div", {
+    class: "setting-row mic-test-row",
+    "data-testid": "mic-test",
+  });
+  const micTestInfo = createElement("div", {});
+  appendChildren(
+    micTestInfo,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.micTest.label")),
+    createElement(
+      "div",
+      { class: "setting-desc" },
+      nativeAudio ? t("voiceAudio.micTest.linux") : t("voiceAudio.micTest.desc"),
+    ),
+  );
+  const micTestButton = createElement(
+    "button",
+    { class: "ac-btn", type: "button", "aria-pressed": "false", "data-testid": "mic-test-button" },
+    t("voiceAudio.micTest.start"),
+  );
+  micTestButton.disabled = nativeAudio;
+  appendChildren(micTestRow, micTestInfo, micTestButton);
+  micCard.appendChild(micTestRow);
+
   let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
+
+  // ── Input mode: Voice Activity gates on the sensitivity above, Push to Talk
+  // on a held key (whose controls show only in that mode).
+  const modeGroup = createElement("div", {
+    class: "level-options input-mode-options",
+    role: "radiogroup",
+    "aria-label": t("voiceAudio.inputMode"),
+    "data-testid": "input-mode",
+  });
+  const pttBox = createElement("div", { class: "input-mode-ptt", "data-testid": "ptt-controls" });
+  pttBox.append(...buildPttControls(signal));
+  const modeButtons = new Map<InputMode, HTMLButtonElement>();
+  const paintMode = (): void => {
+    const mode = inputMode();
+    for (const [value, button] of modeButtons) {
+      button.classList.toggle("active", value === mode);
+      button.setAttribute("aria-checked", String(value === mode));
+    }
+    pttBox.hidden = mode !== "ptt";
+    sensitivityHeader.hidden = mode === "ptt";
+    autoRow.hidden = mode === "ptt";
+    meterWrap.hidden = mode === "ptt";
+  };
+  const chooseMode = (mode: InputMode): void => {
+    if (mode === inputMode()) return;
+    savePref("inputMode", mode);
+    paintMode();
+    applyInputMode();
+    syncMeterGate();
+    const vk = loadPref<number>("pttVk", 0);
+    if (mode === "vad") void desktop.pushToTalk.stop();
+    else if (vk !== 0)
+      // A saved key the backend refuses is cleared while arming; repaint so
+      // the control does not keep showing it.
+      void desktop.pushToTalk.updateKey(vk).then(() => {
+        if (!signal.aborted && loadPref<number>("pttVk", 0) === 0)
+          pttBox.replaceChildren(...buildPttControls(signal));
+      });
+  };
+  const modeLabels: Record<InputMode, string> = {
+    vad: t("voiceAudio.inputMode.vad"),
+    ptt: t("voiceAudio.inputMode.ptt"),
+  };
+  for (const mode of ["vad", "ptt"] as const) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `input-mode-${mode}`,
+      },
+      modeLabels[mode],
+    );
+    button.addEventListener("click", () => chooseMode(mode), { signal });
+    modeButtons.set(mode, button);
+    modeGroup.appendChild(button);
+  }
+  paintMode();
+  setRovingTabindex(modeGroup, "[role='radio']");
+  enableRovingNavigation(modeGroup, "[role='radio']", signal);
+  appendChildren(inputModeCard, modeGroup, pttBox);
 
   function updateThresholdIndicator(sensitivity: number): void {
     // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
@@ -273,6 +412,12 @@ function buildVoiceAudioTabInner(
   }
   updateThresholdIndicator(currentSensitivity);
 
+  function paintSensitivity(): void {
+    meterThreshold.hidden = autoSensitivity;
+    sensitivityValue.hidden = autoSensitivity;
+  }
+  paintSensitivity();
+
   /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
   function sensitivityFromPointer(clientX: number): number {
     const rect = meterBar.getBoundingClientRect();
@@ -282,9 +427,65 @@ function buildVoiceAudioTabInner(
   }
 
   /** The meter's detector, so a dragged threshold applies to it at once. */
-  let meterThresholdSetter: ((threshold: number) => void) | null = null;
+  let meterThresholdSetter: ((threshold: number | "auto") => void) | null = null;
+  /** The meter's detector, so an Input Volume move relearns its noise floor. */
+  let meterResetFloor: (() => void) | null = null;
   /** The meter's processor, so the Enhanced NS toggle re-routes it at once. */
   let meterProcessor: MicProcessor | null = null;
+  /** The meter detector's last verdict, which the mic test's gate follows. */
+  let meterGated = false;
+  /** Whether the mic test is on. Its playback follows the meter's processor
+   *  across restarts and stops with it when the tab or the overlay closes. */
+  let micTesting = false;
+  let micTestAudio: HTMLAudioElement | null = null;
+
+  /** Gate the meter's output as a call would: on the detector in Voice
+   *  Activity, open in Push to Talk (there the key decides, not the level). */
+  function syncMeterGate(): void {
+    if (meterProcessor === null) return;
+    const vad = inputMode() === "vad";
+    meterProcessor.setLookahead(vad ? GATE_LOOKAHEAD_S : 0);
+    meterProcessor.setGate("vad", vad && meterGated);
+  }
+
+  function startMicTestPlayback(processor: MicProcessor): void {
+    stopMicTestPlayback();
+    const track = processor.processedTrack;
+    if (track === undefined) return;
+    const el = document.createElement("audio");
+    el.srcObject = new MediaStream([track]);
+    el.volume = micTestVolume(loadPref<number>("outputVolume", 100));
+    applyMicTestSink(el);
+    micTestAudio = el;
+    void el.play()?.catch((err: unknown) => {
+      log.warn("Mic test playback failed", err);
+    });
+  }
+
+  function stopMicTestPlayback(): void {
+    if (micTestAudio === null) return;
+    micTestAudio.pause();
+    // Detached, or Chrome keeps the element (and this pane) alive.
+    micTestAudio.srcObject = null;
+    micTestAudio = null;
+  }
+
+  micTestButton.addEventListener(
+    "click",
+    () => {
+      if (nativeAudio || signal.aborted) return;
+      micTesting = !micTesting;
+      setText(
+        micTestButton,
+        micTesting ? t("voiceAudio.micTest.stop") : t("voiceAudio.micTest.start"),
+      );
+      micTestButton.classList.toggle("secondary", micTesting);
+      micTestButton.setAttribute("aria-pressed", String(micTesting));
+      if (!micTesting) stopMicTestPlayback();
+      else if (meterProcessor !== null) startMicTestPlayback(meterProcessor);
+    },
+    { signal },
+  );
 
   function previewSensitivity(val: number): void {
     currentSensitivity = val;
@@ -334,6 +535,7 @@ function buildVoiceAudioTabInner(
   meterBar.addEventListener(
     "click",
     (e: MouseEvent) => {
+      if (autoSensitivity) return;
       applySensitivity(sensitivityFromPointer(e.clientX));
     },
     { signal },
@@ -383,12 +585,15 @@ function buildVoiceAudioTabInner(
   );
   speakersCard.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
-  const savedOutputVolume = Math.min(100, loadPref<number>("outputVolume", 100));
+  const storedOutputVolume = loadPref<number>("outputVolume", 100);
+  const savedOutputVolume = Number.isFinite(storedOutputVolume)
+    ? Math.max(0, Math.min(200, storedOutputVolume))
+    : 100;
   const outputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
     min: "0",
-    max: "100",
+    max: "200",
     step: "1",
     value: String(savedOutputVolume),
     "aria-label": t("voiceAudio.outputVolume"),
@@ -400,6 +605,7 @@ function buildVoiceAudioTabInner(
       const val = Number(outputVolumeSlider.value);
       setText(outputVolumeLabel, `${val}%`);
       setOutputVolume(val);
+      if (micTestAudio !== null) micTestAudio.volume = micTestVolume(val);
     },
     { signal },
   );
@@ -514,6 +720,28 @@ function buildVoiceAudioTabInner(
   videoSelect.appendChild(defaultVideoOpt);
   cameraCard.append(videoHeader, videoSelect);
 
+  // Remote cameras play on their own; off, each one waits behind Watch stream.
+  const autoPlayRow = createElement("div", {
+    class: "setting-row",
+    "data-testid": "auto-play-cameras",
+  });
+  const autoPlayInfo = createElement("div", {});
+  appendChildren(
+    autoPlayInfo,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.autoPlayCameras")),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.autoPlayCamerasDesc")),
+  );
+  appendChildren(
+    autoPlayRow,
+    autoPlayInfo,
+    createToggle(autoPlayCameras(), {
+      signal,
+      label: t("voiceAudio.autoPlayCameras"),
+      onChange: (nowOn) => savePref(AUTO_PLAY_CAMERAS_PREF, nowOn),
+    }),
+  );
+  cameraCard.appendChild(autoPlayRow);
+
   // Camera preview
   const previewWrap = createElement("div", { class: "camera-preview" });
   // Said in words, so an empty box is not a mystery.
@@ -529,6 +757,23 @@ function buildVoiceAudioTabInner(
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
+  // The Linux native engine always publishes VP8 (lib/videoCodec).
+  if (!isLinuxDesktop()) {
+    cameraCard.append(
+      ...qualityGroup(
+        t("voiceAudio.videoCodec"),
+        t("voiceAudio.videoCodecDesc"),
+        "videoCodec",
+        getVideoCodecPref(),
+        [
+          ["vp8", t("voiceAudio.videoCodec.vp8")],
+          ["h264", t("voiceAudio.videoCodec.h264")],
+          ["auto", t("voiceAudio.videoCodec.auto")],
+        ],
+      ),
+      createElement("p", { class: "setting-desc" }, t("voiceAudio.videoCodecIntel")),
+    );
+  }
 
   // Device names seen while this tab is open, to name one that is unplugged.
   const deviceLabels = new Map<string, string>();
@@ -660,6 +905,7 @@ function buildVoiceAudioTabInner(
     () => {
       savePref("audioOutputDevice", outputSelect.value);
       void switchOutputDevice(outputSelect.value);
+      if (micTestAudio !== null) applyMicTestSink(micTestAudio);
     },
     { signal },
   );
@@ -718,7 +964,7 @@ function buildVoiceAudioTabInner(
   videoSelect.addEventListener(
     "change",
     () => {
-      savePref("videoInputDevice", videoSelect.value);
+      void switchVideoDevice(videoSelect.value);
       stopCameraPreview();
       stopNativeCameraPreview();
       if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
@@ -893,6 +1139,7 @@ function buildVoiceAudioTabInner(
 
         // The detector starts open, as the live gate does.
         let gateOpen = true;
+        meterGated = false;
         let level = 0;
         let lastHeardAt = Number.NEGATIVE_INFINITY;
         const paint = (): void => {
@@ -909,10 +1156,12 @@ function buildVoiceAudioTabInner(
         const detector = startVadDetector(
           processor.context,
           processor.analyser!,
-          vadThreshold(currentSensitivity),
+          autoSensitivity ? "auto" : vadThreshold(currentSensitivity),
           {
             onGate: (gated) => {
               gateOpen = !gated;
+              meterGated = gated;
+              syncMeterGate();
               paint();
             },
             onRms: (rms) => {
@@ -922,12 +1171,17 @@ function buildVoiceAudioTabInner(
           },
         );
         meterThresholdSetter = detector.setThreshold;
+        meterResetFloor = detector.resetFloor;
+        syncMeterGate();
         registerMic(() => {
+          stopMicTestPlayback();
           if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
+          if (meterResetFloor === detector.resetFloor) meterResetFloor = null;
           if (meterProcessor === processor) meterProcessor = null;
           void detector.stop().then(() => processor.destroy());
           stopStream();
         });
+        if (micTesting) startMicTestPlayback(processor);
       } catch (err) {
         if (signal.aborted || thisRequest !== micRequestId) return;
         log.warn("Mic access denied or unavailable — meter stays empty", err);

@@ -1,13 +1,19 @@
 # Capacity
 
-What one OwnCord server is qualified to carry, on stated hardware, with the
-commands that reproduce the measurement.
+This page says how much one OwnCord server has been measured to carry, on
+stated hardware, and gives the commands to repeat the measurement. Read it to
+size a server, or before you change anything that could slow the server down.
+
+If you only want a sizing answer, read [The profile](#the-profile),
+[Reference hardware](#reference-hardware) and
+[Sizing for 1,000–2,000 online](#sizing-for-10002000-online). The rest of the
+page is the method and the measured results.
 
 > **The hardware and the commands in this document were published before the
-> first qualifying run.** That ordering is deliberate and is visible in
-> `git log`: reference hardware chosen after seeing results is hardware chosen
-> to fit the numbers. If a target is missed, the miss is published here and
-> recorded in the findings ledger — it is never re-run on a bigger machine.
+> first qualifying run.** That order is deliberate, and the commit history
+> shows it. Hardware chosen after seeing the results is hardware chosen to fit
+> the numbers. If a target is missed, the miss is published here and recorded
+> in the findings ledger. It is never re-run on a bigger machine.
 
 ## The profile
 
@@ -83,23 +89,26 @@ Why each part of that is load-bearing:
 
 ### Sizing for 1,000–2,000 online
 
-The profile above is the **published floor** — the cheapest box an owner is
+The profile above is the **published floor**: the cheapest box an owner is
 likely to buy, qualified at 2 vCPU / 4 GB for 100 connections. The scaling
-target is larger, and on this hardware the two tiers below are the size to
-buy. They are a **recommendation for a community that size**, not a measured
-qualification: the qualifying runs for 1,000–2,000 are tracked by the scaling
-phase and will be published here as they land, per this document's rule that
-hardware is named before the numbers.
+target is larger, but **1,000–2,000 online is an estimate, not a
+measurement.** What has been measured is narrower: on the constrained
+reference cgroup, the [ceiling search](#ceiling-search) held every budget up
+to **300 stress-shape connections**, and step 400 broke the login budget. The
+scale profile has [no qualifying run yet](#measured). Until those runs are
+published here, the two tiers below are the size we would buy for a community
+that size, not a qualified result.
 
-| Tier  | Hardware            | Qualifies                                      | Why this one                                                                                        |
+| Tier  | Hardware            | Estimated to carry (not yet measured)          | Why this one                                                                                        |
 | ----- | ------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | Base  | 2 vCPU / 4 GB / SSD | the published profile and roughly 1,000 online | Steady state at realistic chat rates fits on 2 vCPU; the published 100-connection profile has room  |
 | 2,000 | 4 vCPU / 8 GB / SSD | about 2,000 online                             | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings |
 
-Memory is not the constraint at either tier: 2,000 idle connections measure
-about 266 MB resident, 324 MB at 100 messages/s and 443 MB at 200 messages/s,
-with 3 goroutines per connection. Buy the **4 vCPU tier for 2,000** for the
-CPU, not the RAM. Beyond 2,000, CPU fan-out is the next wall rather than
+Memory is not expected to be the constraint at either tier: the estimate is
+about 266 MB resident for 2,000 idle connections, 324 MB at 100 messages/s and
+443 MB at 200 messages/s, with 3 goroutines per connection; no published run
+backs these figures yet. Buy the **4 vCPU tier for 2,000** for the CPU, not
+the RAM. Beyond 2,000, CPU fan-out is expected to be the next wall rather than
 SQLite. Server-wide sustained message rate is bounded by SQLite's single
 writer; that limit will be revisited as the scaling runs are published.
 

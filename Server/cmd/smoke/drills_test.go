@@ -472,3 +472,51 @@ func TestTmpfsReachable_ReleasesAfterNoSpace(t *testing.T) {
 		t.Fatalf("release called %d times, want 1", f.released)
 	}
 }
+
+// The drill runner used to stop at the first failed phase, so phase R's
+// failure hid C, D and S for weeks. Every requested phase runs, the exit is
+// still non-zero, and the summary lists every phase with its result.
+func TestRunEachKeepsGoingPastAFailure(t *testing.T) {
+	phases := []phase{{'R', "restore"}, {'C', "config"}, {'D', "disk"}}
+	var ran []byte
+	results := runEach(phases, func(p phase) error {
+		ran = append(ran, p.letter)
+		if p.letter == 'R' {
+			return errors.New("phase R (restore): the server exited with exit status 1\n--- server log ---\nnoise")
+		}
+		return nil
+	})
+
+	if string(ran) != "RCD" {
+		t.Fatalf("phases run = %q, want every phase after the failure too (RCD)", ran)
+	}
+	err := failedPhases(results)
+	if err == nil {
+		t.Fatal("failedPhases = nil after phase R failed, want an error so the run exits non-zero")
+	}
+	if !strings.Contains(err.Error(), "1 of 3 phases (R)") {
+		t.Errorf("failedPhases = %q, want it to name phase R", err)
+	}
+
+	d := drill{skipped: []byte{'D'}}
+	table := d.table(results)
+	for _, want := range []string{
+		"R      FAILED   phase R (restore): the server exited with exit status 1\n",
+		"C      passed   \n",
+		"D      skipped  no measurement was made\n",
+	} {
+		if !strings.Contains(table, want) {
+			t.Errorf("table is missing row %q:\n%s", want, table)
+		}
+	}
+	if strings.Contains(table, "noise") {
+		t.Errorf("table carries the server log; want only the error's first line:\n%s", table)
+	}
+}
+
+func TestFailedPhasesNilWhenAllPass(t *testing.T) {
+	results := runEach([]phase{{'R', "restore"}, {'S', "sfu"}}, func(phase) error { return nil })
+	if err := failedPhases(results); err != nil {
+		t.Fatalf("failedPhases = %v, want nil when every phase passed", err)
+	}
+}

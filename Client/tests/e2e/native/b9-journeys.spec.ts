@@ -102,8 +102,12 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         // renderer's only first-party destination is that tunnel's loopback
         // host. start_http_proxy reuses a live tunnel, returning its port.
         const tunnelHost = `127.0.0.1:${await page.evaluate(
-          (host) =>
-            (window as any).__TAURI_INTERNALS__.invoke("start_http_proxy", { remoteHost: host }),
+          async (host) =>
+            (
+              await (window as any).__TAURI_INTERNALS__.invoke("start_http_proxy", {
+                remoteHost: host,
+              })
+            ).port,
           serverHost,
         )}`;
         // The startup traffic (health, server-info, ready) lands before the

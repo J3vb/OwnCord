@@ -30,7 +30,7 @@ export function describeNativeProxiesSuite(
     check("resolves the loopback origin for the started tunnel", async () => {
       ctx.native.succeedWith(51820);
       await expect(ctx.subject.ensureHttpProxy("chat.example")).resolves.toBe(
-        "http://127.0.0.1:51820",
+        "http://127.0.0.1:51820/tun",
       );
     });
 
@@ -48,7 +48,7 @@ export function describeNativeProxiesSuite(
       // Asserting `first === second` alone is satisfied trivially by a
       // subject that resolves nothing at all for both callers — pin what
       // that shared value actually is too.
-      expect(first).toBe("http://127.0.0.1:51820");
+      expect(first).toBe("http://127.0.0.1:51820/tun");
       expect(second).toBe(first);
     });
   });

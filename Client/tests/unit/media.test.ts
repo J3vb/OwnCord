@@ -644,6 +644,23 @@ describe("media.ts", () => {
       expect(embed.querySelector(".msg-embed-play")).not.toBeNull();
     });
 
+    it("the player frame is not allowed camera, microphone or screen capture", () => {
+      previewMock.mockResolvedValue(oembedResponse("Test Video"));
+
+      const embed = renderYouTubeEmbed("frame1", "https://www.youtube.com/watch?v=frame1");
+      document.body.appendChild(embed);
+      embed.querySelector<HTMLElement>(".msg-embed-thumb")!.parentElement!.click();
+
+      const iframe = embed.querySelector("iframe");
+      expect(iframe).not.toBeNull();
+      const allowed = (iframe!.getAttribute("allow") ?? "")
+        .split(";")
+        .map((s) => s.trim().split(/\s+/)[0]);
+      for (const feature of ["camera", "microphone", "display-capture"]) {
+        expect(allowed).not.toContain(feature);
+      }
+    });
+
     it("shows 'Loading...' while fetching the title", () => {
       previewMock.mockReturnValue(new Promise(() => {})); // Never resolves
 

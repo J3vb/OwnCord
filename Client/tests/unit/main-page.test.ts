@@ -102,16 +102,17 @@ vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
-const { capturedAutoIdleOptions } = vi.hoisted(() => ({
+const { capturedAutoIdleOptions, autoIdleSetInCall } = vi.hoisted(() => ({
   capturedAutoIdleOptions: {
-    current: null as null | { onStatusChange: (status: string) => void },
+    current: null as null | { onStatusChange: (status: string) => void; inCall?: boolean },
   },
+  autoIdleSetInCall: vi.fn(),
 }));
 
 vi.mock("@lib/autoIdle", () => ({
   startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
     capturedAutoIdleOptions.current = options;
-    return { destroy: vi.fn() };
+    return { destroy: vi.fn(), setInCall: autoIdleSetInCall };
   },
 }));
 
@@ -155,6 +156,8 @@ const {
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
         setExitVisible: ReturnType<typeof vi.fn>;
+        showMiniPlayer: ReturnType<typeof vi.fn>;
+        hideMiniPlayer: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -174,6 +177,7 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
     return {
       mountChannel: mockMountChannel,
       destroyChannel: mockDestroyChannel,
+      destroy: () => mockDestroyChannel(),
       openFilePicker: vi.fn(),
       currentChannelId: 0,
       messageList: null,
@@ -240,6 +244,9 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
       setExitVisible: vi.fn(),
+      showMiniPlayer: vi.fn(),
+      hideMiniPlayer: vi.fn(),
+      raiseCallPopout: vi.fn(() => false),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -504,8 +511,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
 
-    // Put the grid into video mode via a local camera start while in voice
-    // (the real, unmocked VideoModeController drives this off voiceStore).
+    // Open the call view while in voice with the camera on (the real,
+    // unmocked VideoModeController drives this off voiceStore).
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
@@ -513,6 +520,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       localCamera: true,
     }));
     voiceStore.flush();
+    // Your own camera alone no longer covers the chat (WP 1B-4).
+    expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
 
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("none");
 
@@ -661,6 +671,57 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     );
   });
 
+  it("opens the call view from the joined channel, and keeps its avatar tiles in step with who joins (1B-1)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    const user = (userId: number) => ({
+      userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map([[100, user(100)]])]]),
+    }));
+    voiceStore.flush();
+
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+
+    const { slots, videoGrid } = capturedChatAreaRef.current!;
+    expect(slots.messagesSlot.style.display).toBe("none");
+    const ids = () =>
+      (videoGrid.setPeople.mock.calls.at(-1)![0] as { userId: number }[]).map((p) => p.userId);
+    expect(ids()).toEqual([100]);
+
+    // A join with no video changes no camera/share flag.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [100, user(100)],
+            [101, user(101)],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+    expect(ids()).toEqual([100, 101]);
+    expect(slots.messagesSlot.style.display).toBe("none");
+  });
+
   it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -803,6 +864,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // attachments.ts); this one did not.
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://[2001:db8::1]",
+      keepChecking: true,
     });
   });
 
@@ -818,6 +880,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
+      keepChecking: true,
     });
   });
 
@@ -1164,7 +1227,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as {
       setWindowFullscreen: (on: boolean) => Promise<void>;
-      callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
+      callControls: {
+        onMuteToggle: () => void;
+        onDeafenToggle: () => void;
+        onLeave: () => void;
+        onCameraToggle: () => void;
+        onScreenshareToggle: () => void;
+      };
       getStreamStats: (tileId: number) => Promise<unknown>;
       getLocalShareFps: () => Promise<number | null>;
       setStreamView: (tileId: number, view: { enabled: boolean }) => void;
@@ -1198,6 +1267,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       muted: true,
       deafened: false,
       listenOnly: false,
+      camera: false,
+      screenshare: false,
+      connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
     // Joined without a microphone: the controls read listen-only.
     voiceStore.setState((prev) => ({ ...prev, localMuted: false, listenOnly: true }));
@@ -1206,7 +1280,60 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       muted: false,
       deafened: false,
       listenOnly: true,
+      camera: false,
+      screenshare: false,
+      connecting: false,
+      serverMuted: false,
+      serverDeafened: false,
     });
+    // The call view's control bar shows your camera and share state, and
+    // holds them inert while the join is still connecting.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      listenOnly: false,
+      localCamera: true,
+      localScreenshare: true,
+      voiceStatus: "joining",
+    }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: false,
+      deafened: false,
+      listenOnly: false,
+      camera: true,
+      screenshare: true,
+      connecting: true,
+      serverMuted: false,
+      serverDeafened: false,
+    });
+    // Its camera and share buttons run the same toggles as the voice widget.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localCamera: false,
+      localScreenshare: false,
+      voiceStatus: "connected",
+    }));
+    // A moderator mute and a dropped chat socket reach the bar too.
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ serverMuted: true }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offline: "reconnecting" }),
+    );
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    uiStore.flush?.();
+    expect(grid.setCallState).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offline: expect.anything() }),
+    );
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: false }));
+    cbs.callControls.onCameraToggle();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    cbs.callControls.onScreenshareToggle();
+    expect(lk.enableScreenshare).toHaveBeenCalledTimes(1);
     setFullscreen.mockRestore();
   });
 
@@ -1219,12 +1346,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         return () => shortcutHandlers.delete(handler);
       });
     const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
 
-    expect(start).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     for (const handler of shortcutHandlers) handler("mute");
 
     // The same toggle the in-app Ctrl+M runs: muting sends voice_mute(true).
@@ -1232,9 +1360,89 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     onShortcut.mockRestore();
     start.mockRestore();
+    supported.mockRestore();
   });
 
-  it("ignores a global shortcut outside a voice channel (U6)", async () => {
+  it("toggles once on a focused Ctrl+Shift+M while the global poller runs (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    // jsdom loads no CSS, so the closed Settings panel would read as an open dialog.
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+
+    // The poller sees the press and emits the shortcut; the in-app handler must not also toggle.
+    const event = new KeyboardEvent("keydown", {
+      key: "M",
+      code: "KeyM",
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    expect(voiceStore.getState().localMuted).toBe(false);
+
+    start.mockRestore();
+    supported.mockRestore();
+  });
+
+  it("keeps standing down after a remount while the running poller is re-checked (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    page.destroy?.();
+
+    // A logout or server switch remounts the page; the native poller is still live.
+    supported.mockReturnValue(new Promise<boolean>(() => {}));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+    );
+
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+
+    start.mockRestore();
+    supported.mockRestore();
+  });
+
+  it("toggles mute in-app on Ctrl+Shift+M where global keys are unsupported (1A-5)", async () => {
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.waitFor(() => expect(supported).toHaveBeenCalled());
+    await Promise.resolve();
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+    );
+
+    expect(start).not.toHaveBeenCalled();
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+
+    start.mockRestore();
+    supported.mockRestore();
+  });
+
+  // WP 1D-1: outside a call the shortcut toggles the local, saved state and
+  // sends nothing; the next join restates it to the server.
+  it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {
+    const lk = await import("@lib/livekitSession");
     const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
     const onShortcut = vi
       .spyOn(desktop.globalShortcuts, "onShortcut")
@@ -1252,16 +1460,16 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }));
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
+    vi.mocked(lk.setMuted).mockClear();
+    vi.mocked(lk.setDeafened).mockClear();
 
-    for (const handler of shortcutHandlers) {
-      handler("mute");
-      handler("deafen");
-    }
+    for (const handler of shortcutHandlers) handler("mute");
+    expect(lk.setMuted).toHaveBeenCalledWith(true);
+    for (const handler of shortcutHandlers) handler("deafen");
+    expect(lk.setDeafened).toHaveBeenCalledWith(true);
 
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
-    expect(voiceStore.getState().localMuted).toBe(false);
-    expect(voiceStore.getState().localDeafened).toBe(false);
 
     onShortcut.mockRestore();
     start.mockRestore();
@@ -2714,6 +2922,27 @@ describe("MainPage — presence", () => {
     vi.useRealTimers();
     localStorage.removeItem("owncord:settings:userStatus");
     localStorage.removeItem("owncord:settings:userStatusOrigin");
+  });
+
+  it("pauses auto-idle while in a voice call and resumes it on leave (1A-7)", () => {
+    autoIdleSetInCall.mockClear();
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    expect(capturedAutoIdleOptions.current!.inCall).toBe(false);
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7 }));
+    voiceStore.flush();
+    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(true);
+
+    // A channel switch is still a call: no new edge.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 8 }));
+    voiceStore.flush();
+    expect(autoIdleSetInCall).toHaveBeenCalledOnce();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(false);
+    expect(autoIdleSetInCall).toHaveBeenCalledTimes(2);
   });
 
   it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {

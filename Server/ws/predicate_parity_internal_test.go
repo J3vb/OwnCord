@@ -351,7 +351,7 @@ func TestVoiceJoinPrecheck_Parity(t *testing.T) {
 					for len(f.send) > 0 {
 						<-f.send
 					}
-					_, _, ok := f.h.voiceJoinPrecheck(ctx, f.client, json.RawMessage(fmt.Sprintf(`{"channel_id":%d}`, chID)))
+					_, _, _, ok := f.h.voiceJoinPrecheck(ctx, f.client, json.RawMessage(fmt.Sprintf(`{"channel_id":%d}`, chID)), "")
 					if ok {
 						t.Fatalf("chan=%d/%s/%s: precheck passed with no LiveKit configured", chID, c.name, branch)
 					}

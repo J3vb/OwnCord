@@ -151,35 +151,37 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	return false
 }
 
-// queueDropState records content-bearing frames the full broadcast queue
-// dropped in enqueue (SRV-03): dropped counts them, applied is how many
-// applyQueueContentDrops has settled into the resync watermark. applied is
-// guarded by seqMu.
+// queueDropState records frames the full broadcast queue dropped in enqueue
+// (SRV-03): dropped counts them, applied is how many applyQueueContentDrops
+// has settled into the resync watermark. applied is guarded by seqMu.
 type queueDropState struct {
 	dropped atomic.Uint64
 	applied uint64
 }
 
-// recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
-// content-bearing one, or a presence_batch window, is also left for
-// applyQueueContentDrops to settle into the resync watermark under seqMu
-// (SRV-03).
+// recordQueueDrop counts a frame enqueue dropped on a full broadcast queue and
+// leaves it for applyQueueContentDrops to settle into the resync watermark
+// under seqMu (SRV-03). Every queued frame would have been sequenced and
+// replayable, so any drop is a hole replay cannot fill, metadata included
+// (a lost chat_deleted leaves the message on screen). A presence snapshot
+// request is the exception: it carries no frame and flushPresenceQueue
+// retries it.
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
-	if bm.nsfwChannelID != 0 || bm.presence != nil {
+	if !bm.presenceSnapshot {
 		h.queueDrops.dropped.Add(1)
 	}
 	slog.Warn("hub: broadcast channel full, dropping "+kind,
 		"channel_id", bm.channelID, "msg_len", len(bm.msg))
 }
 
-// applyQueueContentDrops is SRV-03's recovery for a content-bearing frame the
-// full broadcast queue dropped in enqueue. Unlike a topic shed, that frame's
+// applyQueueContentDrops is SRV-03's recovery for a frame the full broadcast
+// queue dropped in enqueue. Unlike a topic shed, that frame's
 // place in the seq stream lies behind every frame still queued ahead of it, so
 // while such a drop is unsettled every call ratchets the watermark to the
 // current seq, and the drop only counts as settled once the queue is seen
 // empty — every frame queued before it has been sequenced by then. That proof
-// holds only on the dispatch goroutine, so deliverBroadcast is the sole caller,
+// holds only on the dispatch goroutine, so deliverGated is the sole caller,
 // under seqMu after each frame; mustFullResyncAtRegister bumps for an
 // unsettled drop but never settles it.
 func (h *Hub) applyQueueContentDrops() {
@@ -188,7 +190,8 @@ func (h *Hub) applyQueueContentDrops() {
 		return
 	}
 	h.bumpVisibilityWatermark()
-	if len(h.broadcast) == 0 {
+	// A parked frame (hub_content_gate.go) was dequeued but not sequenced.
+	if len(h.broadcast) == 0 && h.gates.parked == 0 {
 		h.queueDrops.applied = n
 	}
 }

@@ -140,6 +140,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // a global preference with a per-server override. This is the first gate
   // because `nothing` must silence the popup, the chime AND the taskbar flash —
   // unlike a channel mute, which deliberately lets a direct mention through.
+  // A DM passes every level; its own mute and Do Not Disturb still apply.
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
   if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm })) return;
 
@@ -202,6 +203,54 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   if (chime) {
     playNotificationSound();
   }
+}
+
+/**
+ * Announce a mention in a channel the reader is not looking at (WP 2B-1,
+ * interim). The server's `mention_count` frame is the only thing that reaches
+ * the client for such a channel (its `chat_message` goes to the focused
+ * channel alone), and it carries a total, not the message — so this alert has
+ * no author or body and its target opens the channel, not a message.
+ *
+ * Gates mirror notifyIncomingMessage for a mention: level (`nothing` silences
+ * all), channel mute (a mention passes it), Do Not Disturb, the popup/flash/
+ * chime preferences, and the focused-on-another-channel rule (chime only).
+ * Never coalesced — a mention is always announced. A DM is skipped: its badge
+ * and its own chat_message are handled separately.
+ *
+ * The server's total also counts @everyone and @here, and the frame does not
+ * say which kind raised it, so "Suppress @everyone" keeps these alerts off
+ * entirely rather than let every @everyone through.
+ */
+export function notifyMention(channelId: number): void {
+  const { name: channelName, isDm } = resolveNotificationChannel(channelId);
+  if (isDm) return;
+  if (loadPref<boolean>("suppressEveryone", false)) return;
+
+  const focused = isWindowFocused();
+  const activeChannelId = channelsStore.getState().activeChannelId;
+  if (focused && channelId === activeChannelId && !isWindowDetached(channelId)) return;
+  const focusedElsewhere = focused && channelId !== activeChannelId;
+
+  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned: true, isDm: false })) {
+    return;
+  }
+  if (!notificationAllowed(channelId, true)) return;
+
+  const dnd = loadUserStatus() === "dnd";
+  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+
+  if (showPopup) {
+    const title = sanitizeNotif(
+      connectText("notifications.mentionedIn", { channel: `#${channelName}` }),
+      80,
+    );
+    fireDesktopNotification(title, "", 0, { host: currentHost(), channelId });
+  }
+  if (flash) flashTaskbar();
+  if (chime) playNotificationSound();
 }
 
 /** Strip control characters from user-provided text and cap its length. */

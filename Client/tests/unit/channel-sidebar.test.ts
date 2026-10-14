@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { cascadedDeclaration, varToken } from "../helpers/app-css";
 
 // Mock livekitSession. rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
-const { mockRePinPeerIdentity } = vi.hoisted(() => ({
+const { mockRePinPeerIdentity, mockGetUserLocalMute } = vi.hoisted(() => ({
   mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
+  mockGetUserLocalMute: vi.fn((_userId: number) => false),
 }));
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
+  getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
   rePinPeerIdentity: mockRePinPeerIdentity,
 }));
 
@@ -38,7 +41,15 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+const { mockOpenUserProfilePopup } = vi.hoisted(() => ({
+  mockOpenUserProfilePopup: vi.fn(() => () => undefined),
+}));
+vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
+  openUserProfilePopup: mockOpenUserProfilePopup,
+  closeUserProfilePopup: vi.fn(),
+}));
+
+import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
 import {
   addChannel,
   channelsStore,
@@ -58,6 +69,7 @@ import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
+import { muteChannel, unmuteChannel, invalidateMuteCache } from "@lib/channel-mutes";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -201,15 +213,16 @@ describe("ChannelSidebar", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onVoiceJoin: Mock<(channelId: number) => void>;
-  let onVoiceLeave: Mock<() => void>;
+  let onOpenCall: Mock<() => void>;
 
   beforeEach(() => {
     resetStores();
+    mockOpenUserProfilePopup.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
     onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onVoiceLeave = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    onOpenCall = vi.fn<() => void>();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
   });
 
   afterEach(() => {
@@ -365,7 +378,9 @@ describe("ChannelSidebar", () => {
     // The sidebar re-renders on uiStore change, so channels under
     // collapsed category are not in the DOM
     const itemsAfter = container.querySelectorAll(".channel-item");
-    expect(itemsAfter.length).toBe(2); // only Voice + Info channels remain
+    // Voice + Info stay (their own categories); "general" is unread (2), so it
+    // is the one row a collapsed Text Channels keeps (WP 2B-5).
+    expect(itemsAfter.length).toBe(3);
 
     // Expand again
     const headersAfter = container.querySelectorAll(".category");
@@ -500,16 +515,19 @@ describe("ChannelSidebar", () => {
     expect(onVoiceJoin).not.toHaveBeenCalled();
   });
 
-  it("clicking joined voice channel calls onVoiceLeave", () => {
+  it("clicking the joined voice channel opens the call instead of leaving (V1)", () => {
+    // Discord parity: a click on the channel you are in shows the call; only
+    // the voice widget's Disconnect leaves. The sidebar has no leave callback.
     setChannels(testChannels);
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus: "connected" }));
     sidebar.mount(container);
 
     const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     voiceItem.click();
 
-    expect(onVoiceLeave).toHaveBeenCalled();
+    expect(onOpenCall).toHaveBeenCalledOnce();
     expect(onVoiceJoin).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(3);
   });
 
   it("a repeat click on the voice channel being joined does not leave it", () => {
@@ -523,12 +541,317 @@ describe("ChannelSidebar", () => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus }));
       voiceStore.flush();
       (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
-      expect(onVoiceLeave).not.toHaveBeenCalled();
+      expect(onOpenCall).not.toHaveBeenCalled();
     }
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
     voiceStore.flush();
     (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
-    expect(onVoiceLeave).toHaveBeenCalledOnce();
+    expect(onOpenCall).toHaveBeenCalledOnce();
+  });
+
+  // ── V9: a collapsed category keeps the voice channel you are in ──
+
+  it("a collapsed category still shows the joined voice channel (V9)", () => {
+    setChannels([
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ]);
+    // Nobody is in either channel, so only being joined can keep a row.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    uiStore.setState((prev) => ({
+      ...prev,
+      collapsedCategories: new Set(["Voice Channels"]),
+    }));
+    sidebar.mount(container);
+
+    expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+    expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
+
+    // Leaving hides it; joining the other channel shows that one instead.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5 }));
+    voiceStore.flush();
+    expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
+    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+
+    // Expanding restores every row.
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set<string>() }));
+    uiStore.flush();
+    expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+    expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
+  });
+
+  it("a collapsed category hides an empty voice channel the user is not in (V9)", () => {
+    setChannels(testChannels);
+    uiStore.setState((prev) => ({
+      ...prev,
+      collapsedCategories: new Set(["Voice Channels"]),
+    }));
+    sidebar.mount(container);
+
+    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    expect(container.querySelector(".voice-user-item")).toBeNull();
+  });
+
+  // ── WP 2B-5: a collapsed category keeps the rows that matter ──
+
+  describe("collapsed category shows what matters (WP 2B-5)", () => {
+    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+      id,
+      name: `text-${id}`,
+      type: "text",
+      category: "Text Channels",
+      position: id,
+      unread_count: 0,
+      last_message_id: 1,
+      ...extra,
+    });
+    const collapse = (...names: string[]): void => {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(names) }));
+    };
+    const rowIds = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+        (el) => el.dataset.channelId ?? "",
+      );
+    const dot = (): Element | null => container.querySelector(".category-unread-dot");
+
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    it("a collapsed group with one unread channel renders exactly that row", () => {
+      setChannels([text(1), text(2, { unread_count: 3 }), text(3)]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("a mentioned muted channel shows; an unread muted one hides and the header dot shows", () => {
+      setChannels([
+        text(1, { unread_count: 2, mention_count: 1 }),
+        text(2, { unread_count: 4 }),
+        text(3),
+      ]);
+      muteChannel(1);
+      muteChannel(2);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      const d = dot();
+      expect(d).not.toBeNull();
+      expect(d?.getAttribute("aria-label")).toBe("Unread channels hidden");
+    });
+
+    it("shows no dot when no hidden row is unread", () => {
+      setChannels([text(1, { unread_count: 2, mention_count: 1 }), text(2)]);
+      muteChannel(1);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("keeps a voice channel with a person and hides an empty one", () => {
+      setChannels([
+        text(1),
+        { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
+        { id: 5, name: "empty", type: "voice", category: "Voice Channels", position: 1 },
+      ]);
+      addVoiceUser(3, 30, "alice");
+      collapse("Voice Channels");
+      sidebar.mount(container);
+      expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+      expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
+      expect(container.querySelector('.voice-user-item[data-voice-uid="30"]')).not.toBeNull();
+      // Live: the last person leaving hides the row again.
+      voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map() }));
+      voiceStore.flush();
+      expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    });
+
+    it("keeps the active channel", () => {
+      setChannels([text(1), text(2), text(3)]);
+      setActiveChannel(2);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("rows appear and disappear live as unread state changes", () => {
+      setChannels([text(1), text(2), text(3)]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual([]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 1 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+      expect(rowIds()).toEqual(["2"]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 0 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+      expect(rowIds()).toEqual([]);
+    });
+
+    it("muting a collapsed unread row hides it and shows the dot; unmuting reverses", () => {
+      setChannels([text(1, { unread_count: 2 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+      muteChannel(1);
+      expect(rowIds()).toEqual([]);
+      expect(dot()).not.toBeNull();
+      unmuteChannel(1);
+      expect(rowIds()).toEqual(["1"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("an expanded category shows every row and no header dot", () => {
+      setChannels([text(1, { unread_count: 2 }), text(2), text(3, { unread_count: 1 })]);
+      muteChannel(3);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2", "3"]);
+      expect(dot()).toBeNull();
+    });
+
+    it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {
+      const onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+      sidebar.destroy?.();
+      setAdminUser();
+      sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onReorderChannel });
+      setChannels([text(1, { unread_count: 1 }), text(2), text(3, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+
+      container
+        .querySelector('[data-channel-id="3"]')!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
+
+      expect(onReorderChannel).toHaveBeenCalledWith([
+        { channelId: 3, newPosition: 1, previousPosition: 3 },
+        { channelId: 1, newPosition: 3, previousPosition: 1 },
+      ]);
+      expect(channelsStore.getState().channels.get(2)?.position).toBe(2);
+    });
+
+    it("a focused row that stops showing hands focus to the category arrow", () => {
+      setChannels([text(1), text(2, { unread_count: 1 })]);
+      collapse("Text Channels");
+      sidebar.mount(container);
+      const row = container.querySelector<HTMLElement>('[data-channel-id="2"]')!;
+      row.focus();
+      expect(document.activeElement).toBe(row);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        const ch = channels.get(2)!;
+        channels.set(2, { ...ch, unreadCount: 0 });
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+
+      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".category-arrow"));
+    });
+  });
+
+  // ── V11: a voice user with nothing to watch opens their profile ──
+
+  it("clicking a voice user without camera or stream opens their profile (V11)", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    setChannels(testChannels);
+    addVoiceUser(3, 30, "alice");
+    sidebar.mount(container);
+
+    const row = container.querySelector('.voice-user-item[data-voice-uid="30"]') as HTMLElement;
+    row.click();
+
+    expect(mockOpenUserProfilePopup).toHaveBeenCalledOnce();
+    expect(mockOpenUserProfilePopup).toHaveBeenCalledWith(expect.objectContaining({ userId: 30 }));
+    expect(onWatchStream).not.toHaveBeenCalled();
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+    expect(onOpenCall).not.toHaveBeenCalled();
+  });
+
+  it("Enter or Space on a voice user row opens the profile, own row included (V11)", () => {
+    setAdminUser();
+    setChannels(testChannels);
+    addVoiceUser(3, 1, "Admin");
+    addVoiceUser(3, 30, "alice");
+    sidebar.mount(container);
+
+    for (const [uid, key] of [
+      [1, "Enter"],
+      [30, " "],
+    ] as const) {
+      const row = container.querySelector(
+        `.voice-user-item[data-voice-uid="${uid}"]`,
+      ) as HTMLElement;
+      expect(row.tabIndex).toBe(0);
+      row.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      expect(mockOpenUserProfilePopup).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: uid }),
+      );
+    }
+    expect(mockOpenUserProfilePopup).toHaveBeenCalledTimes(2);
+  });
+
+  it("clicking a voice user with a stream watches it and opens no profile (V11)", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "alice",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: true,
+      screenshare: false,
+    });
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    sidebar.mount(container);
+
+    (container.querySelector('.voice-user-item[data-voice-uid="30"]') as HTMLElement).click();
+
+    expect(onWatchStream).toHaveBeenCalledWith(30);
+    expect(mockOpenUserProfilePopup).not.toHaveBeenCalled();
+  });
+
+  it("destroy closes a profile popup a voice user row opened (V11)", () => {
+    const close = vi.fn();
+    mockOpenUserProfilePopup.mockReturnValueOnce(close);
+    setChannels(testChannels);
+    addVoiceUser(3, 30, "alice");
+    sidebar.mount(container);
+
+    (container.querySelector('.voice-user-item[data-voice-uid="30"]') as HTMLElement).click();
+    sidebar.destroy?.();
+
+    expect(close).toHaveBeenCalledOnce();
   });
 
   // ── Voice join/leave freeze while the WS socket is not connected (§3) ──
@@ -561,7 +884,7 @@ describe("ChannelSidebar", () => {
     expect(onVoiceJoin).not.toHaveBeenCalled();
   });
 
-  it("frozen voice channel does not fire onVoiceLeave even when joined", () => {
+  it("frozen voice channel does not fire onOpenCall even when joined", () => {
     setChannels(testChannels);
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
@@ -571,7 +894,7 @@ describe("ChannelSidebar", () => {
     expect(voiceItem.classList.contains("disabled")).toBe(true);
 
     voiceItem.click();
-    expect(onVoiceLeave).not.toHaveBeenCalled();
+    expect(onOpenCall).not.toHaveBeenCalled();
   });
 
   it("a timeout disables joining voice with the server expiry, never leaving (B9-15)", () => {
@@ -589,14 +912,14 @@ describe("ChannelSidebar", () => {
     voiceItem.click();
     expect(onVoiceJoin).not.toHaveBeenCalled();
 
-    // Already in the channel: leaving stays available.
+    // Already in the channel: the row stays usable (it opens the call).
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     voiceStore.flush();
     voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
     expect(container.querySelector("[data-testid='voice-timeout-3']")).toBeNull();
     voiceItem.click();
-    expect(onVoiceLeave).toHaveBeenCalled();
+    expect(onOpenCall).toHaveBeenCalled();
 
     // The lift re-enables the row.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
@@ -781,7 +1104,7 @@ describe("ChannelSidebar", () => {
   it("calls onWatchStream when clicking a user row with active stream", () => {
     const onWatchStream = vi.fn();
     sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
 
     setChannels(testChannels);
     updateVoiceState({
@@ -808,7 +1131,7 @@ describe("ChannelSidebar", () => {
   it("clicking a peer's stream row also joins the channel when not already in it", () => {
     const onWatchStream = vi.fn();
     sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
 
     setChannels(testChannels);
     updateVoiceState({
@@ -836,7 +1159,7 @@ describe("ChannelSidebar", () => {
   it("opens no stream when the join backoff refuses the stream row's join", () => {
     const onWatchStream = vi.fn();
     sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
 
     setChannels(testChannels);
     updateVoiceState({
@@ -881,7 +1204,7 @@ describe("ChannelSidebar", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
     sidebar.mount(container);
 
     const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
@@ -982,6 +1305,7 @@ describe("ChannelSidebar", () => {
     // Update only speaking flag (structural signature stays the same).
     // setSpeakers is the only writer of speaking now (a voice_state no longer
     // clobbers the LiveKit-authoritative flag).
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     setSpeakers({ channel_id: 3, speakers: [60] });
     voiceStore.flush();
 
@@ -1003,6 +1327,9 @@ describe("ChannelSidebar", () => {
       camera: false,
       screenshare: false,
     });
+    // setSpeakers only applies to the channel the client is in; set it before
+    // mount so the later flip is speaking-only.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
     const rowBefore = container.querySelector('.voice-user-item[data-voice-uid="61"]');
@@ -1173,7 +1500,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onEditChannel,
       onDeleteChannel,
     });
@@ -1211,7 +1538,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onEditChannel,
     });
 
@@ -1242,7 +1569,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onDeleteChannel,
     });
 
@@ -1280,7 +1607,7 @@ describe("ChannelSidebar", () => {
     }));
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onEditChannel,
     });
 
@@ -1328,7 +1655,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1348,7 +1675,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onEditChannel: vi.fn(),
       onPurgeChannel,
     });
@@ -1373,7 +1700,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
     setChannels(testChannels);
     sidebar.mount(container);
     openChannelCtxMenu();
@@ -1394,7 +1721,7 @@ describe("ChannelSidebar", () => {
     sidebar.destroy?.();
     setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
     setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1422,7 +1749,7 @@ describe("ChannelSidebar", () => {
     sidebar.destroy?.();
     setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
     setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1441,7 +1768,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onCreateChannel,
     });
 
@@ -1459,7 +1786,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onCreateChannel,
     });
 
@@ -1480,7 +1807,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onCreateChannel,
     });
 
@@ -1511,7 +1838,7 @@ describe("ChannelSidebar", () => {
     }));
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onCreateChannel,
     });
 
@@ -1536,7 +1863,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1557,7 +1884,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1581,7 +1908,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1612,7 +1939,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1700,7 +2027,7 @@ describe("ChannelSidebar", () => {
       motd: null,
       isAuthenticated: true,
     }));
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onVoiceModerate });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onVoiceModerate });
 
     setChannels(
       channels.map((ch) => (verdict === null ? ch : { ...ch, can_moderate_voice: verdict })),
@@ -1855,6 +2182,48 @@ describe("ChannelSidebar", () => {
     expect(cb.onDisconnect).toHaveBeenCalledWith(80);
   });
 
+  it("greys the moderation rows with a reason while the socket is not connected", () => {
+    const cb = voiceModCallbacks();
+    const channels: ReadyChannel[] = [
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ];
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+
+    const why = menu!.querySelector('[data-action="voice-mod-offline"]');
+    expect(why!.textContent).toBe(
+      "Reconnecting. Voice moderation comes back once you are connected.",
+    );
+    for (const action of ["server-mute", "server-deafen", "voice-disconnect"]) {
+      const item = menu!.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!;
+      expect(item.disabled).toBe(true);
+      expect(item.classList.contains("disabled")).toBe(true);
+      item.click();
+    }
+    const move = menu!.querySelector('[data-action="move-to"]')!;
+    expect(move.getAttribute("aria-disabled")).toBe("true");
+    expect(move.querySelector("[data-move-channel]")).toBeNull();
+    expect(cb.onServerMute).not.toHaveBeenCalled();
+    expect(cb.onServerDeafen).not.toHaveBeenCalled();
+    expect(cb.onDisconnect).not.toHaveBeenCalled();
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+    const offline = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    expect(offline!.querySelector('[data-action="voice-mod-offline"]')!.textContent).toBe(
+      "Not connected. Voice moderation needs a connection to the server.",
+    );
+
+    // Back online: the rows are live again and the reason is gone.
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    const live = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    expect(live!.querySelector('[data-action="voice-mod-offline"]')).toBeNull();
+    const mute = live!.querySelector<HTMLButtonElement>('[data-action="server-mute"]')!;
+    expect(mute.disabled).toBe(false);
+    mute.click();
+    expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
+  });
+
   it("offers only the other voice channels as move targets", () => {
     const cb = voiceModCallbacks();
     const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
@@ -1877,7 +2246,7 @@ describe("ChannelSidebar", () => {
 
   it("marks a server-muted participant distinctly from a self-muted one", () => {
     sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,
@@ -1910,9 +2279,45 @@ describe("ChannelSidebar", () => {
     expect(icon.title).toBe("Muted by a moderator");
   });
 
+  it("shows a locally muted participant's icon and redraws on a local Mute change (WP 1D-5)", () => {
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    setChannels(testChannels);
+    addVoiceUser(3, 82, "loud");
+    sidebar.mount(container);
+    expect(container.querySelector(".vu-local-muted")).toBeNull();
+
+    mockGetUserLocalMute.mockImplementation((id) => id === 82);
+    try {
+      window.dispatchEvent(
+        new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 82 } }),
+      );
+      const icon = container.querySelector(
+        '.voice-user-item[data-voice-uid="82"] .vu-local-muted',
+      ) as HTMLElement;
+      expect(icon).not.toBeNull();
+      expect(icon.title).toBe("Muted for you");
+    } finally {
+      mockGetUserLocalMute.mockImplementation(() => false);
+    }
+  });
+
+  it("colours a self-mute grey and a moderator's mute red, with a steady speaking ring", () => {
+    expect(varToken(cascadedDeclaration(".voice-user-item .vu-muted", "color"))).toBe(
+      "--text-muted",
+    );
+    expect(varToken(cascadedDeclaration(".vu-muted.vu-server-muted", "color"))).toBe("--red");
+    // The ring is steady: no pulse on the sidebar row or on the user bar.
+    expect(cascadedDeclaration(".voice-user-item.speaking .vu-avatar", "box-shadow")).toBeDefined();
+    expect(
+      cascadedDeclaration(".voice-user-item.speaking .vu-avatar", "animation"),
+    ).toBeUndefined();
+    expect(cascadedDeclaration(".user-bar .ub-avatar.speaking", "animation")).toBeUndefined();
+  });
+
   it("keeps a moderator's mute on the single icon of a self-deafened user", () => {
     sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,
@@ -1984,7 +2389,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onReorderChannel,
     });
 
@@ -2008,7 +2413,7 @@ describe("ChannelSidebar", () => {
     }));
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onReorderChannel,
     });
 
@@ -2025,7 +2430,7 @@ describe("ChannelSidebar", () => {
     setAdminUser();
     sidebar = createChannelSidebar({
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
       onReorderChannel,
     });
 
@@ -2039,7 +2444,7 @@ describe("ChannelSidebar", () => {
     expect(container.querySelector('[data-testid="channel-sidebar"]')).toBeNull();
 
     // Re-create for afterEach cleanup
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
   });
 
   // ── Multiple voice users in same channel ──
@@ -2105,7 +2510,7 @@ describe("ChannelSidebar", () => {
   // T1: Screenshare click → offset tileId
   it("passes screenshare tile offset when clicking screensharing user", () => {
     const onWatchStream = vi.fn();
-    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
     voiceStore.setState(() => ({
       currentChannelId: 3,
@@ -2150,7 +2555,7 @@ describe("ChannelSidebar", () => {
   // T2: Camera-only click → raw userId
   it("passes raw userId when clicking camera-only user", () => {
     const onWatchStream = vi.fn();
-    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
     voiceStore.setState(() => ({
       currentChannelId: 3,
@@ -2239,7 +2644,7 @@ describe("ChannelSidebar", () => {
   it("uses shared SCREENSHARE_TILE_ID_OFFSET constant", async () => {
     // Verify the constant is imported and used by checking the offset value
     const onWatchStream = vi.fn();
-    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
     voiceStore.setState(() => ({
       currentChannelId: 3,
@@ -2293,7 +2698,7 @@ describe("ChannelSidebar voice identity badge", () => {
     setChannels(testChannels);
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
   });
 
   afterEach(() => {
@@ -2380,7 +2785,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(badge!.classList.contains("changed")).toBe(true);
     expect(badge!.getAttribute("title")).toContain("Security key changed");
     expect(badge!.getAttribute("title")).toContain("AB12 CD34");
-    expect(badge!.getAttribute("title")).not.toContain("Identity verified");
+    expect(badge!.getAttribute("title")).not.toContain("Same key as before");
   });
 
   it("shows a mismatch badge for a blocked peer", () => {
@@ -2644,7 +3049,7 @@ describe("ChannelSidebar identity-mismatch modal lifetime (OC-0281)", () => {
     setChannels(testChannels);
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
   });
 
   afterEach(() => {
@@ -2734,15 +3139,15 @@ describe("ChannelSidebar channel feature flags", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onVoiceJoin: Mock<(channelId: number) => void>;
-  let onVoiceLeave: Mock<() => void>;
+  let onOpenCall: Mock<() => void>;
 
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
     onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onVoiceLeave = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    onOpenCall = vi.fn<() => void>();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
   });
 
   afterEach(() => {
@@ -2899,7 +3304,7 @@ describe("ChannelSidebar channel context menu permissions", () => {
     }));
     sidebar = createChannelSidebar({
       onVoiceJoin: vi.fn(),
-      onVoiceLeave: vi.fn(),
+      onOpenCall: vi.fn(),
       onEditChannel: vi.fn(),
       onDeleteChannel: vi.fn(),
     });
@@ -2952,7 +3357,7 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
   });
 
   afterEach(() => {
@@ -3051,7 +3456,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
   });
 
   afterEach(() => {

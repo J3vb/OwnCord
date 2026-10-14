@@ -216,12 +216,24 @@
   border-color: var(--accent);
   color: var(--on-accent);
 }
+/* Input mode: the mode choice, then the Push to Talk key and delay. */
+.input-mode-options,
+.input-mode-ptt {
+  margin-top: 12px;
+}
 /* ── Mic Level Meter ── */
 .mic-meter-wrap {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   margin-bottom: 12px;
+}
+.mic-meter-wrap[hidden] {
+  display: none;
+}
+.mic-test-row .ac-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .mic-meter-bar {
   flex: 1;
@@ -527,6 +539,8 @@ details.disclose > summary {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Mirrored, like your own tile in a call. */
+  transform: scaleX(-1);
 }
 .camera-preview-label {
   position: absolute;
@@ -1005,4 +1019,125 @@ details.disclose[open] > summary .icon {
   margin-top: 2px;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
+}
+
+/* ── About tab and the bundled release notes ── */
+.about-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.about-name {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.about-repo-link,
+.about-notes-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--text-link);
+  font-weight: 600;
+}
+.about-notes {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.about-update {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.about-update-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.about-update-icon {
+  display: flex;
+  flex: none;
+  color: var(--accent);
+}
+.about-update-text {
+  flex: 1;
+  min-width: 200px;
+}
+.about-update-title {
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.about-update-notes {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+}
+.about-update-eyebrow {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--header-secondary);
+}
+.settings-nav-dot {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.about-history details.disclose {
+  border-top: 1px solid var(--border);
+}
+.about-history details.disclose > .changelog-body {
+  padding: 0 0 var(--space-3) var(--space-6);
+}
+.changelog-body {
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.changelog-body p,
+.changelog-body ul {
+  margin: 0 0 var(--space-2);
+}
+.changelog-body ul {
+  padding-left: var(--space-5);
+}
+.changelog-body li {
+  margin: 2px 0;
+}
+.changelog-body .changelog-heading {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.changelog-body .changelog-subheading {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.changelog-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.changelog-body a {
+  color: var(--text-link);
 }

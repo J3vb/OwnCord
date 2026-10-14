@@ -20,7 +20,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore } from "@stores/messages.store";
+import {
+  messagesStore,
+  setAroundMessages,
+  setChannelLoading,
+  setMessages as setTailMessages,
+} from "@stores/messages.store";
+import type { MessageResponse } from "@lib/types";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import {
@@ -121,6 +127,22 @@ function openChannelWithUnread(unread: number): void {
     },
   ]);
   setActiveChannel(CHANNEL_ID);
+}
+
+function toResponse(m: Message): MessageResponse {
+  return {
+    id: m.id,
+    channel_id: m.channelId,
+    user: m.user,
+    content: m.content,
+    reply_to: null,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    edited_at: null,
+    deleted: false,
+    timestamp: m.timestamp,
+  };
 }
 
 const unreadCount = () => channelsStore.getState().channels.get(CHANNEL_ID)!.unreadCount;
@@ -694,6 +716,90 @@ describe("MessageList — unread navigation (P4-03)", () => {
       handleChatMessage(createReconnectClock(), liveMessage(51));
 
       expect(unreadCount()).toBe(0);
+    });
+  });
+
+  // WP 2B-7: a jump into another channel mounts the list while the channel is
+  // loading (ChannelController order), then installs the around-window.
+  describe("jump into another channel (WP 2B-7)", () => {
+    const bar = () => container.querySelector<HTMLElement>('[data-testid="unread-bar"]');
+    const barShown = () => bar() !== null && !bar()!.hidden;
+
+    function mountThenJump(unread: number): void {
+      openChannelWithUnread(unread);
+      setChannelLoading(CHANNEL_ID);
+      mount();
+      setAroundMessages(CHANNEL_ID, range(1, 30).map(toResponse), true, true);
+      messagesStore.flush();
+    }
+
+    /** Jump to Present: the tail lands (newest-first, as the API sends it). */
+    function returnToTail(): void {
+      setTailMessages(CHANNEL_ID, range(1, 60).reverse().map(toResponse), true);
+      messagesStore.flush();
+    }
+
+    it("draws no NEW line and no bar in the around-window", async () => {
+      mountThenJump(5);
+      await nextFrame();
+
+      expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+      expect(barShown()).toBe(false);
+    });
+
+    it("places the NEW line above the first unread row once the tail returns", async () => {
+      mountThenJump(5);
+      await nextFrame();
+      scrollUp();
+      returnToTail();
+      await nextFrame();
+
+      const divider = container.querySelector('[data-testid="new-messages-divider"]');
+      expect((divider?.nextElementSibling as HTMLElement | null)?.dataset.testid).toBe(
+        "message-56",
+      );
+    });
+
+    it("hides a capped bar while detached and shows it again at the tail", async () => {
+      mountThenJump(500);
+      await nextFrame();
+      expect(barShown()).toBe(false);
+
+      scrollUp();
+      returnToTail();
+      await nextFrame();
+      expect(barShown()).toBe(true);
+      expect(container.querySelector('[data-testid="new-messages-divider"]')).not.toBeNull();
+    });
+
+    it("does not pull the reader up to the NEW line when a live row arrives after returning", async () => {
+      vi.useFakeTimers();
+      try {
+        mountThenJump(5);
+        await vi.advanceTimersByTimeAsync(50);
+        scrollUp();
+        returnToTail();
+        await vi.advanceTimersByTimeAsync(50);
+        scrollToEnd();
+        const bottom = root().scrollTop;
+
+        handleChatMessage(createReconnectClock(), {
+          id: 61,
+          channel_id: CHANNEL_ID,
+          user: { id: 2, username: "user2", avatar: null },
+          content: "Message 61",
+          reply_to: null,
+          attachments: [],
+          timestamp: new Date(Date.UTC(2024, 0, 15, 12, 1, 1)).toISOString(),
+        });
+        messagesStore.flush();
+        await vi.advanceTimersByTimeAsync(50);
+
+        // Following the live tail moves the view down, never back up to the line.
+        expect(root().scrollTop).toBeGreaterThanOrEqual(bottom);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

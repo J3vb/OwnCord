@@ -38,6 +38,7 @@ type Store interface {
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
@@ -316,6 +317,7 @@ type Store interface {
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
+	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
 	// IsMessageDeleted backs the tombstone half of attachment access; the
 	// avatar check backs the "public exactly while in use" half.

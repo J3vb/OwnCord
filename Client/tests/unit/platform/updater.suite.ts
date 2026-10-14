@@ -48,9 +48,10 @@ export function describeAppUpdaterSuite(
         });
       });
 
-      // Pinned as-is (B7-3): a failed check resolves the "nothing available"
-      // default rather than rejecting — the caller cannot distinguish "no
-      // update" from "couldn't check".
+      // Pinned (B7-3): a failed check resolves the "nothing available" default
+      // rather than rejecting. `failed: true` marks it, so a caller that must
+      // not claim "up to date" (Settings → Check for updates) can tell "no
+      // update" from "couldn't check"; the banner still reads it as no update.
       check("resolves the no-update default, not a rejection, when the check fails", async () => {
         ctx.native.checkFailsWith(new Error("network error"));
         await expect(ctx.subject.checkForUpdate("https://chat.example")).resolves.toEqual({
@@ -58,6 +59,7 @@ export function describeAppUpdaterSuite(
           version: null,
           body: null,
           manual_upgrade: false,
+          failed: true,
         });
       });
     });

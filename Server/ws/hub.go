@@ -48,12 +48,18 @@ type Hub struct {
 	// site invalidates synchronously (InvalidateUser on role change,
 	// InvalidateAll on channel-override change) — the cache TTL is a backstop.
 	perms *service.PermissionService
+	// focusDeps is the presence handlers' dependency set; the deferred-focus
+	// drain goroutine (focus_defer.go) reuses its limiter and channel service so
+	// it meters and authorises exactly like handleChannelFocusV2. ChannelSvc is
+	// nil in bare test hubs, which have nothing to defer to.
+	focusDeps PresenceDeps
 	// messageSvc gates plugin broadcasts through the same posting policy as a
 	// real message send (permissions, DM membership, DM blocks). Nil only in
 	// bare test hubs; the broadcast gate fails closed then.
 	messageSvc *service.MessageService
+	pubsub     *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
-	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
+	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
@@ -88,11 +94,21 @@ type Hub struct {
 	// dispatch loop dead, so nothing else makes the outage observable.
 	dispatchExited atomic.Bool
 
-	// runDone closes when Run returns, after dispatchExited is set. Stop and
+	// runDone closes when Run returns, after dispatchExited is set and the
+	// sweeps it started have returned. Stop and
 	// GracefulStopContext only signal the loop; whoever started Run joins it
 	// here (Done) before releasing what the loop reads. Made by NewHub; nil
 	// on the struct-literal hubs internal tests build.
 	runDone chan struct{}
+
+	// life is cancelled when the hub stops (closeStop). Each background sweep
+	// derives its ctx from it, so Stop interrupts a sweep blocked on the DB or
+	// LiveKit, and sweeps counts the ones still running so Run's exit — and
+	// with it Done — waits for them. Made by NewHub.
+	life     context.Context
+	stopLife context.CancelFunc
+	sweeps   sync.WaitGroup
+	gates    contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -142,18 +158,12 @@ type Hub struct {
 	// purge (PurgeUserFromReplay): a client resuming from a seq at or
 	// before it may have missed the purged member_ban and takes the full
 	// ready, since the purge left holes replay cannot fill. Ratcheted like
-	// visibilityChangeSeq. purgedUsers is the tombstone set behind it: a
-	// frame naming one of these ids that a producer sequences after the
-	// purge is dropped instead of buffered and persisted. Both guarded by
-	// seqMu on the write side; purgedUsers is read under seqMu too.
+	// visibilityChangeSeq; written under seqMu.
 	replayPurgeSeq atomic.Uint64
-	purgedUsers    map[int64]struct{}
-	// purgedMessages is the retention sweep's tombstone set
-	// (PurgeMessagesFromReplay): the ids of the last sweep's messages, so a
-	// frame about one of them that a producer sequences after the purge is
-	// dropped; replaced by the next sweep's ids, since a late frame reaches
-	// the hub within moments of the purge. Guarded by seqMu like purgedUsers.
-	purgedMessages map[int64]struct{}
+	// tombstones are the erased users and retention-swept messages whose
+	// late frames are dropped, plus the purge/cold-read lock
+	// (hub_tombstones.go).
+	tombstones replayPurgeState
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	// settings is the read seam the cache below refreshes through —
@@ -198,16 +208,18 @@ type Hub struct {
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
 	// DB transition with its paired LiveKit call (round 4, Codex review
-	// Part B) — see voice_mod_lock.go. Always non-nil (initialized in
+	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod *voiceModLocks
+	voiceMod    *userLocks
+	voiceMember userLocks // per-user voice membership lock (voiceLock); see user_locks.go
 
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
+	uploadPolicyMu     syncutil.Mutex // orders BroadcastUploadPolicy's saves (hub_settings.go)
 
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
@@ -230,10 +242,11 @@ type Hub struct {
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	if h.runDone != nil {
-		defer close(h.runDone)
+		defer h.finishRun()
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
+	h.sweeps.Go(h.runRemovedVoiceWatch)
 	var panicCount int
 	var lastPanicReset time.Time
 
@@ -288,19 +301,11 @@ func (h *Hub) Run() {
 				case <-h.stop:
 					return
 				case ev := <-h.clientEvents:
-					if ev.add {
-						// No handshake permission set on this path (and no DB
-						// call allowed on the hub goroutine) — nil denies the
-						// inherited voice-channel subscription. A wake
-						// refusal cannot occur here: the handshake paths
-						// refuse before queueing a Register event, and the
-						// event path never carries wakeReconnect.
-						h.registerNow(ev.c, nil)
-					} else {
-						h.unregisterNow(ev.c)
-					}
-				case bm := <-h.broadcast:
-					h.deliverBroadcast(bm)
+					h.onClientEvent(ev)
+				case bm := <-h.broadcastIn():
+					h.dispatch(bm)
+				case res := <-h.gates.results:
+					h.onGateResolved(res)
 				case <-staleTicker.C:
 					h.onStaleTick()
 				case <-sessionSweepTicker.C:
@@ -327,18 +332,6 @@ func (h *Hub) Run() {
 		default:
 		}
 	}
-}
-
-// Stop signals Run to exit. Safe to call multiple times.
-func (h *Hub) Stop() {
-	h.stopOnce.Do(func() { close(h.stop) })
-}
-
-// Done returns a channel that closes once Run has returned, with
-// DispatchAlive already false. Stop and GracefulStopContext do not wait for
-// that, so a caller that must know the loop is gone waits here.
-func (h *Hub) Done() <-chan struct{} {
-	return h.runDone
 }
 
 // StopLiveKit stops and reaps the owned companion before a restart handoff.
@@ -394,6 +387,6 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		h.StopLiveKit()
 
 		// Stop the hub dispatch loop.
-		h.stopOnce.Do(func() { close(h.stop) })
+		h.stopOnce.Do(h.closeStop)
 	})
 }

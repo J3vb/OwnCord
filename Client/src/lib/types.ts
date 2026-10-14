@@ -694,6 +694,16 @@ export interface EmojiUpdatePayload {
   readonly emoji: readonly EmojiResponse[];
 }
 
+/**
+ * `upload_policy` — the file-type lists in force after the owner saves them in
+ * the admin panel. Both are always present (`[]` when emptied) and replace the
+ * lists auth_ok gave; the size cap and thumbnails stay as auth_ok set them.
+ */
+export interface UploadPolicyPayload {
+  readonly blocked_extensions: readonly string[];
+  readonly allowed_extensions: readonly string[];
+}
+
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
@@ -901,6 +911,8 @@ export interface PresenceUpdatePayload {
 
 export interface VoiceJoinPayload {
   readonly channel_id: number;
+  /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
+  readonly user_initiated?: boolean;
 }
 
 /** Client → Server: leave current voice channel (no payload needed). */
@@ -985,6 +997,7 @@ export type ServerMessage =
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
+  | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })
@@ -1158,7 +1171,11 @@ export interface MessageResponse {
   readonly mentions_everyone?: boolean;
 }
 
-/** Paginated messages response. */
+/**
+ * Paginated messages response. Newest-first for the default and `before`
+ * pages; **oldest-first** for an `after` page (the window's downward
+ * continuation, already in render order).
+ */
 export interface MessagesResponse {
   readonly messages: readonly MessageResponse[];
   readonly has_more: boolean;

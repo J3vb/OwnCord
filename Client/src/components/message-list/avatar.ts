@@ -58,6 +58,18 @@ export function isRenderableAvatar(url: string | null | undefined): url is strin
   return isSafeUrl(resolveServerUrl(url));
 }
 
+const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
+
+/** The letter fallback's background for a voice roster entry: one of five
+ *  colours, stable per name (the sidebar row and the call view's tile agree). */
+export function pickAvatarColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = (hash * 31 + username.charCodeAt(i)) | 0;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
+}
+
 /**
  * Build an avatar element: the letter fallback immediately, the image swapped
  * in asynchronously when there is one to fetch.

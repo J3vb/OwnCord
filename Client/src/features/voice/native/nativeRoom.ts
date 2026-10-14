@@ -49,7 +49,7 @@ const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
-import { pickScreenSource } from "./screenPicker";
+import { noteChangedSource, pickChangeSource, pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
 
@@ -90,6 +90,9 @@ export class NativeRemotePublication {
   /** The host's last view update: the next one waits for it. */
   private viewSent: Promise<void> = Promise.resolve();
   isMuted: boolean;
+  /** livekit-client's shape for the server's encryption report (`Encryption_Type`:
+   *  0 none, 1 GCM), so the web path's refusal of unencrypted media applies here. */
+  readonly trackInfo: { encryption: number };
   /** Video only, while subscribed. Audio has none: playout is native. */
   track: NativeRemoteVideoTrack | undefined = undefined;
   constructor(
@@ -101,6 +104,7 @@ export class NativeRemotePublication {
     this.kind = info.kind;
     this.source = info.source;
     this.isMuted = info.muted;
+    this.trackInfo = { encryption: info.encrypted ? 1 : 0 };
   }
   setSubscribed(subscribed: boolean): void {
     if (this.isSubscribed === subscribed) return;
@@ -198,6 +202,9 @@ export class NativeRoom {
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   readonly name = "";
   readonly canPlaybackAudio = true;
+  /** Voice plays in the session's own mixer, so per-user gains above 1 are
+   *  fine here (audioElements checks for this marker). */
+  readonly nativePlayout = true;
   /** connectionStats/connectionDiagnostics read `engine.pcManager`; native
    *  has no browser peer connection, so they see "no transports". */
   readonly engine = { pcManager: undefined, client: { ws: undefined } };
@@ -563,11 +570,44 @@ export class NativeRoom {
       `${this.frames}/screen`,
       (t) => this.stopScreen(session, t),
       { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
+      pick.capture,
+      (t) => this.changeScreenSource(session, t),
     );
     this.screen?.stop();
     this.screen = track;
     if (this.endedCapture === track.capture) track.end();
     return [track];
+  }
+
+  /** Change source for the live share `track`: pick a source, then let the
+   *  host move the publication onto a new capture of it, at the share's own
+   *  capture settings and encoding. */
+  private async changeScreenSource(session: number, track: NativeScreenTrack): Promise<void> {
+    const live = (): boolean => this.sessionId === session && this.screen === track;
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new Error("screen share is no longer live");
+    const source = await pickChangeSource();
+    if (source === null) throw pickerDismissed();
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new Error("screen share ended during the pick");
+    const started = await desktop.nativeVoice
+      .changeScreen(session, source, track.captureRequest)
+      .catch((err: unknown) => {
+        throw startError(err);
+      });
+    if (!live()) {
+      // The share was stopped or ended while the host swapped it in: a stop
+      // that reached the host after the swap named the old capture, so stop
+      // the new one too (a no-op when the stop came first).
+      if (this.sessionId === session)
+        desktop.nativeVoice
+          .stopScreen(session, started.capture)
+          .catch((err) => log.warn("native stopScreen failed", { capture: started.capture, err }));
+      return;
+    }
+    track.retarget(started);
+    noteChangedSource(source);
+    if (this.endedCapture === track.capture) track.end();
   }
 
   /** A stopped screen track: stop its host capture (a no-op for a capture a
@@ -736,7 +776,8 @@ export class NativeRoom {
   /** The backend auto-subscribes every track, so a voice track that appears
    *  while deafened is unsubscribed here — the native counterpart of
    *  AudioElements.handleTrackSubscribedAudio's guard, which never runs on
-   *  Linux because no TrackSubscribed is raised. Stream audio is exempt. */
+   *  Linux because no TrackSubscribed is raised. Stream audio stays
+   *  subscribed; deafen silences it through its gain instead. */
   private addPublication(identity: string, track: NativeVoiceTrack): void {
     const p = this.participant(identity);
     if (p.trackPublications.has(track.sid)) return;
@@ -817,16 +858,18 @@ export class NativeRoom {
         );
         break;
       case "trackMuted": {
-        const pub = this.remoteParticipants.get(event.identity)?.trackPublications.get(event.sid);
-        if (pub !== undefined) pub.isMuted = event.muted;
+        const p = this.remoteParticipants.get(event.identity);
+        const pub = p?.trackPublications.get(event.sid);
+        if (pub === undefined) break;
+        pub.isMuted = event.muted;
+        if (event.muted) this.emit(RoomEvent.TrackMuted, pub, p);
         break;
       }
-      case "microphonePermission":
-        // The shape `MediaControl.microphonePublishingAllowed` reads; an empty
-        // source list means every source.
+      case "permission":
+        // The shape `publishAllowed` reads, as livekit-client keeps it.
         this.localParticipant.permissions = {
-          canPublish: event.allowed,
-          canPublishSources: [],
+          canPublish: event.canPublish,
+          canPublishSources: event.canPublishSources,
         };
         this.emit(RoomEvent.ParticipantPermissionsChanged, undefined, this.localParticipant);
         break;

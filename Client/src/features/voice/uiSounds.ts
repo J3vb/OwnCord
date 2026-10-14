@@ -16,45 +16,62 @@
  *    `voice_state`/`voice_leave` handlers bump. A reconnect therefore replays
  *    the roster with no sound storm.
  *
+ * Your own join sounds when the session reaches `connected`, not on the
+ * click, so a join that fails or is abandoned plays nothing; leave sounds only
+ * after a join did. A moderator move plays its own tone in place of the join.
+ *
  * DM calls are `call-ring.ts`'s; the incoming ringtone is exempt from the
  * deafen gate per D2, so it does not route through here.
  */
 
-import { voiceStore, getVoiceRosterRevision } from "@stores/voice.store";
+import { voiceStore, getVoiceRosterRevision, type VoiceStatus } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/preferences";
 import { loadUserStatus } from "@lib/userStatus";
-import { playVoiceSound } from "@lib/notificationSound";
+import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
+import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */
 interface SoundState {
   readonly channelId: number | null;
+  readonly voiceStatus: VoiceStatus;
   readonly rosterRevision: number;
   /** Other members (not self) in `channelId`, so a join/leave of the room can
    *  be told from a mute toggle. */
   readonly peers: ReadonlySet<number>;
+  /** Who in `channelId` is sharing their screen, by the server's roster:
+   *  your own share counts once the server has it, not on the click. */
+  readonly sharing: ReadonlySet<number>;
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
 }
 
-function remotePeers(channelId: number | null): ReadonlySet<number> {
-  if (channelId === null) return new Set();
-  const self = authStore.getState().user?.id ?? 0;
-  const users = voiceStore.getState().voiceUsers.get(channelId);
-  if (users === undefined) return new Set();
-  return new Set([...users.keys()].filter((id) => id !== self));
-}
-
 function snapshot(channelId: number | null): SoundState {
   const s = voiceStore.getState();
+  const self = authStore.getState().user?.id ?? 0;
+  const peers = new Set<number>();
+  const sharing = new Set<number>();
+  if (channelId !== null) {
+    for (const [id, user] of s.voiceUsers.get(channelId) ?? []) {
+      if (user.screenshare) sharing.add(id);
+      if (id !== self) peers.add(id);
+    }
+  }
   return {
     channelId,
+    voiceStatus: s.voiceStatus,
     rosterRevision: getVoiceRosterRevision(),
-    peers: remotePeers(channelId),
+    peers,
+    sharing,
     localMuted: s.localMuted,
     localDeafened: s.localDeafened,
   };
 }
+
+/** How long your own leave waits before it sounds. The server sends a
+ *  moderator move as voice_leave and then voice_moved, two frames apart; the
+ *  leave must not chime when the move is right behind it. */
+const LEAVE_GRACE_MS = 250;
 
 function canPlay(): boolean {
   if (loadUserStatus() === "dnd") return false;
@@ -67,8 +84,47 @@ function canPlay(): boolean {
  */
 export function startVoiceUiSounds(): () => void {
   let prev = snapshot(voiceStore.getState().currentChannelId);
+  /** The channel whose join was last announced: the one we are in for real.
+   *  A reconnect inside it is not a new join, and a failed join never set it,
+   *  so its teardown is not a leave. */
+  let announced: number | null =
+    prev.channelId !== null &&
+    (prev.voiceStatus === "connected" || prev.voiceStatus === "reconnecting")
+      ? prev.channelId
+      : null;
 
-  return voiceStore.subscribe((state) => {
+  let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelLeave = (): void => {
+    if (leaveTimer !== null) clearTimeout(leaveTimer);
+    leaveTimer = null;
+  };
+  /** Your own leave, unless a moderator move turns out to be behind it. */
+  const scheduleLeave = (): void => {
+    cancelLeave();
+    leaveTimer = setTimeout(() => {
+      leaveTimer = null;
+      if (!isVoiceMovePending()) playVoiceSound("leave");
+    }, LEAVE_GRACE_MS);
+  };
+
+  /** Your own join/move/leave edge, if this state has one. Runs on every
+   *  update (deafened or not), so `announced` always tracks the session. */
+  const selfEdge = (next: SoundState): VoiceSound | null => {
+    if (next.channelId === null) {
+      const wasIn = announced !== null;
+      announced = null;
+      // A join that ended before it connected (a move's included) spends the
+      // move note; a leave from a live call keeps it for the voice_moved
+      // that may follow.
+      if (!wasIn && prev.channelId !== null) takeVoiceMoved(null);
+      return wasIn ? "leave" : null;
+    }
+    if (next.voiceStatus !== "connected" || next.channelId === announced) return null;
+    announced = next.channelId;
+    return takeVoiceMoved(next.channelId) ? "moved" : "join";
+  };
+
+  const unsubscribe = voiceStore.subscribe((state) => {
     const next = snapshot(state.currentChannelId);
     const finish = (): void => {
       prev = next;
@@ -79,9 +135,14 @@ export function startVoiceUiSounds(): () => void {
     // not a user edge: without this guard the cleared channel/deafen/mute
     // flags read as leave/undeafen/mute over the logout screen.
     if (!authStore.getState().isAuthenticated) {
+      announced = null;
+      cancelLeave();
+      takeVoiceMoved(null);
       finish();
       return;
     }
+
+    const self = selfEdge(next);
 
     // A deafen edge is its own sound and owns the notification: the mute that
     // a deafen implies (the keybind mutes too) must not also blip.
@@ -101,10 +162,11 @@ export function startVoiceUiSounds(): () => void {
       return;
     }
 
-    // Self join/leave/move is the channel edge. A move plays the join sound;
-    // the leave half is skipped so a move is not two blips back to back.
-    if (next.channelId !== prev.channelId) {
-      playVoiceSound(next.channelId !== null ? "join" : "leave");
+    // Self join/leave/move. A switch plays nothing until the new channel
+    // connects, and then only the join: never a leave and a join back to back.
+    if (self !== null || next.channelId !== prev.channelId) {
+      if (self === "leave") scheduleLeave();
+      else if (self !== null) playVoiceSound(self);
       finish();
       return;
     }
@@ -113,12 +175,19 @@ export function startVoiceUiSounds(): () => void {
     // incremental roster revision reaches here — a setVoiceStates replacement
     // leaves it unchanged, so a reconnect replay is silent. The revision is
     // global, so diff the peer sets: a voice_state for a user in another
-    // channel (or a mute toggle) must not read as a join.
+    // channel (or a mute toggle) must not read as a join. Someone who stays
+    // (you included) and starts or stops sharing is a stream edge; one who
+    // joins or leaves while sharing plays only the join or leave.
     if (next.rosterRevision !== prev.rosterRevision && next.channelId !== null) {
       const joined = [...next.peers].some((id) => !prev.peers.has(id));
       const left = [...prev.peers].some((id) => !next.peers.has(id));
       if (joined) playVoiceSound("join");
       else if (left) playVoiceSound("leave");
+      else if ([...next.sharing].some((id) => !prev.sharing.has(id))) {
+        playVoiceSound("streamStart");
+      } else if ([...prev.sharing].some((id) => !next.sharing.has(id))) {
+        playVoiceSound("streamEnd");
+      }
       finish();
       return;
     }
@@ -129,4 +198,9 @@ export function startVoiceUiSounds(): () => void {
 
     finish();
   });
+  return () => {
+    unsubscribe();
+    cancelLeave();
+    takeVoiceMoved(null);
+  };
 }

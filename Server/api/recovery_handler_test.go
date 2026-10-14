@@ -174,3 +174,25 @@ func TestRecoverRoute_BoundsTheUsername(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoveryKitStatusRoute_StoreFaultYieldsAGenericBody(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	uid := seedUser(t, database, "kitfault", "KitFaultPass1!", 4)
+	token := issueSessionToken(t, database, uid)
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE recovery_kits`); err != nil {
+		t.Fatalf("drop recovery_kits: %v", err)
+	}
+
+	rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", token)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "INTERNAL_ERROR" || body["message"] != "internal error" {
+		t.Errorf("body = %v, want INTERNAL_ERROR / internal error", body)
+	}
+}

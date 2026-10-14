@@ -13,7 +13,8 @@ import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import type { CallState, VideoGridComponent } from "@components/VideoGrid";
+import { isConnecting } from "@components/VoiceWidget";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
@@ -24,17 +25,19 @@ import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
+import { shareBlockReason } from "../features/voice/shareGate";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
-import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
+import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore, isSelfMuted } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
+import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -50,6 +53,7 @@ import {
   getLocalScreenshareFps,
   setRemoteVideoView,
   setRemoteVideoWatched,
+  forgetRemoteVideoWatch,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -66,7 +70,7 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
-import { stepChannel } from "@lib/channel-navigation";
+import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
@@ -92,6 +96,7 @@ import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
+import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -103,6 +108,10 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
+
+/** Whether the native voice-shortcut poller runs. App-wide, not per page: the
+ *  poller outlives a logout or server switch, so a remount keeps standing down. */
+let globalPollerActive = false;
 /**
  * DP-24's call notification and missed-call notice. They are re-exported by the
  * DM call panel, which the page already loads at mount, so the ring's OS alert
@@ -219,6 +228,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
   setAudioVolumeHost(apiConfig.host ?? null);
+  // Mute and deafen outlive a restart; the next join applies them.
+  restoreSavedSelfVoiceState();
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a
   // profile switch isolates the cache even before this page is destroyed.
@@ -724,10 +735,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
+    // No idle while in a voice call; leaving one restarts the delay.
     autoIdle = startAutoIdle({
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
+      inCall: voiceStore.getState().currentChannelId !== null,
     });
+    unsubscribers.push(
+      voiceStore.subscribeSelector(
+        (s) => s.currentChannelId !== null,
+        (inCall) => autoIdle?.setInCall(inCall),
+      ),
+    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -771,6 +790,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
+      onOpenCall: () => videoModeCtrl?.openCall(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
@@ -1034,24 +1054,36 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
+        isGlobalPollerActive: () => globalPollerActive,
       }),
     );
 
     // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
     // while the app is unfocused. The native host polls the keys (Windows and
     // X11 Linux) and the tray emits the same event; both run the same toggles
-    // as the in-app shortcuts, and like them no-op outside a voice channel.
+    // as the in-app shortcuts, in a call or not.
     unsubscribers.push(
       desktop.globalShortcuts.onShortcut((action) => {
-        if (voiceStore.getState().currentChannelId === null) return;
         if (action === "mute") voiceKeybindActions.onMuteToggle();
         else voiceKeybindActions.onDeafenToggle();
       }),
     );
-    void desktop.globalShortcuts.start().catch(() => {
-      // Not a Tauri host, or the command was refused: the tray and the in-app
-      // shortcuts still work; the global key path simply is not live.
-    });
+    // Once the poller runs it also sees the keys while the window is focused,
+    // so the in-app handler stands down to avoid a double toggle. The flag is
+    // set before start() so a press during startup is missed, never doubled.
+    void desktop.globalShortcuts
+      .supported()
+      .then(async (supported) => {
+        if (tornDown) return;
+        globalPollerActive = supported;
+        if (!supported) return;
+        await desktop.globalShortcuts.start();
+      })
+      .catch(() => {
+        // Not a Tauri host, or the command was refused: the tray and the in-app
+        // shortcuts still work; the global key path simply is not live.
+        globalPollerActive = false;
+      });
     // Push the persisted rebind onto the running poller at startup, so a
     // choice made in Settings survives a restart (the native default is
     // Ctrl+Shift+M / Ctrl+Shift+D).
@@ -1410,6 +1442,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
+    const tileMenu = createTileMenuActions(ws, sidebar.messageUser, () =>
+      videoModeCtrl?.showChat(),
+    );
+    unsubscribers.push(tileMenu.destroy);
     // The cover on your own screen-share preview stops the share.
     chatAreaResult.videoGrid.setCallbacks({
       onStopSharing: () => {
@@ -1423,12 +1459,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
         onLeave: () => voiceKeybindActions.onDisconnect(),
+        onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onCameraDevice: (anchor, signal) =>
+          void import("../features/voice/cameraMenu")
+            .then((m) => m.showCameraMenu(anchor, signal))
+            .catch((err: unknown) => log.warn("Camera menu failed to open", err)),
+        onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
       getLocalShareFps: () => getLocalScreenshareFps(),
+      onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
@@ -1437,14 +1480,54 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoWatched(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", on)
           : setRemoteVideoWatched(tileId, "camera", on),
+      forgetStreamWatch: (tileId) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? forgetRemoteVideoWatch(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
+          : forgetRemoteVideoWatch(tileId, "camera"),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
+      onCallPopout: (out, restore) => videoModeCtrl?.setCallPoppedOut(out, restore),
+      // The mini-player's way back to the full stream view.
+      focusFallback: () => void focusReachable(),
+      onReturnToStream: (tileId) => {
+        videoModeCtrl?.showVideoGrid();
+        videoModeCtrl?.setFocus(tileId);
+      },
+      tileMenu,
     });
 
     let prevVideoSignature = "";
     let prevSpeaking = "";
     let prevAudioState = "";
     let prevCallState = "";
+    /** Your call state for the grid's call controls, from the voice store and
+     *  the chat socket (camera and share freeze while it is down). */
+    const syncCallState = (state: VoiceState): void => {
+      const socket = uiStore.getState().connectionStatus;
+      const shareBlock = shareBlockReason(state);
+      const callState: CallState = {
+        muted: isSelfMuted(state),
+        deafened: state.localDeafened,
+        listenOnly: state.listenOnly,
+        camera: state.localCamera,
+        screenshare: state.localScreenshare,
+        connecting: isConnecting(state.voiceStatus),
+        serverMuted: state.localServerMuted === true,
+        serverDeafened: state.localServerDeafened === true,
+        ...(socket === "connected" ? {} : { offline: socket }),
+        ...(shareBlock === null ? {} : { shareBlock }),
+      };
+      const callKey = JSON.stringify(callState);
+      if (callKey === prevCallState) return;
+      prevCallState = callKey;
+      videoGrid?.setCallState(callState);
+    };
+    unsubscribers.push(
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        () => syncCallState(voiceStore.getState()),
+      ),
+    );
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, remote-tile identity changes and who is speaking.
@@ -1480,16 +1563,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
           }
-          const selfMuted = isSelfMuted(state);
-          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}`;
-          if (callKey !== prevCallState) {
-            prevCallState = callKey;
-            videoGrid?.setCallState({
-              muted: selfMuted,
-              deafened: state.localDeafened,
-              listenOnly: state.listenOnly,
-            });
-          }
+          syncCallState(state);
 
           // Seed the signature with the channel id so ANY voice-channel
           // switch changes it, even one where the camera/screenshare flags
@@ -1502,11 +1576,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? "c" : "") +
-            (state.localScreenshare ? "s" : "");
+            (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);
             if (users) {
               for (const [uid, u] of users) {
+                // Everyone in the call: the call view draws an avatar tile each.
+                sig += `:u${uid}`;
                 if (u.camera) sig += `:c${uid}`;
                 if (u.screenshare) sig += `:s${uid}`;
                 // Relabel an already-open remote tile whose display name
@@ -1548,12 +1624,42 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // the updater silently reports "no update available" forever (OC-0332).
       // Same helper as ws.ts, admin-panel.ts and attachments.ts.
       const serverUrl = `https://${bracketBareIPv6Host(apiConfig.host)}`;
-      const updateNotifier = createUpdateNotifier({ serverUrl });
+      const updateNotifier = createUpdateNotifier({ serverUrl, keepChecking: true });
       updateNotifier.mount(root);
       children.push(updateNotifier);
     }
 
+    // Release notes, once, on the first start after an update. Loaded on
+    // demand so the prompt stays out of the eager MainPage chunk (bundle budget).
+    const promptHost = root;
+    void import("../features/whats-new/whatsNewPrompt").then(({ createWhatsNewPrompt }) => {
+      if (tornDown) return;
+      // i18n-exempt: settings tab key, not shown text
+      const whatsNewPrompt = createWhatsNewPrompt(() => openSettings("About"));
+      whatsNewPrompt.mount(promptHost);
+      unsubscribers.push(() => whatsNewPrompt.destroy?.());
+    });
+
     container.appendChild(root);
+
+    // Voice is the only channel type that should keep the grid up; text, dm
+    // and announcement all mount a chat surface and must dismiss it, not just
+    // "text" (a dm/announcement switch used to leave the grid covering an
+    // unrelated channel's chat). The DM that owns the current call is the
+    // exception: its call panel shows the video above the chat (its own
+    // update re-seats the grid through onVideoHostChange).
+    const showChatFor = (active: { id: number; type: string }): void => {
+      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
+      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+    };
+    // A click on the channel already open under the stream view changes no
+    // store, so the subscriber below never sees it.
+    unsubscribers.push(
+      onChannelReselect(() => {
+        const active = getActiveChannel();
+        if (active !== null) showChatFor(active);
+      }),
+    );
 
     // --- Subscribe to channel changes ---
     const unsubChannels = channelsStore.subscribeSelector(
@@ -1562,18 +1668,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const active = getActiveChannel();
           if (active !== null) {
-            // Voice is the only channel type that should keep the grid up;
-            // text, dm and announcement all mount a chat surface and must
-            // dismiss it, not just "text" (a dm/announcement switch used to
-            // leave the grid covering an unrelated channel's chat).
-            // The DM that owns the current call is the exception: its call
-            // panel shows the video above the chat (its own update re-seats
-            // the grid through onVideoHostChange).
-            const ownsCall =
-              active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-            if (active.type !== "voice" && !ownsCall) {
-              videoModeCtrl?.showChat();
-            }
+            showChatFor(active);
             // Close DM profile sidebar when switching channels
             if (active.type !== "dm") {
               closeDmProfile();
@@ -1668,7 +1763,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // torn-down connection cannot leave the next page's dialog pointed at a
       // dead one (a share with none registered resolves to cancelled).
       setScreenSourcePicker(null);
-      channelCtrl?.destroyChannel();
+      channelCtrl?.destroy();
       channelCtrl = null;
 
       reactionCtrl?.destroy();

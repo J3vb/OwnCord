@@ -482,7 +482,8 @@ export async function parkLiveKitSocket(page: Page): Promise<void> {
 
 /**
  * Voice join failure handler for E2E testing.
- * Simulates a server error response when attempting to join a voice channel.
+ * Simulates a server refusing a voice join: a real join code, with the
+ * request's envelope id echoed as the server does (voice_join.go).
  */
 export function voiceJoinFailureHandler(): { type: string; handler: string } {
   return {
@@ -492,7 +493,8 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
       setTimeout(function() {
         __tauriEmitEvent("ws-message", JSON.stringify({
           type: "error",
-          payload: { code: "VOICE_JOIN_FAILED", message: "Failed to join voice channel" }
+          id: parsed.id,
+          payload: { code: "VOICE_ERROR", message: "Failed to join voice channel" }
         }));
       }, 50);
     `,
@@ -786,17 +788,17 @@ export function buildTauriMockScript(opts: {
         // ---- HTTP TOFU proxy ----
         // api.ts routes all REST calls through the Rust loopback proxy:
         // baseUrl() awaits start_http_proxy and builds
-        // http://127.0.0.1:{port}/api/v1/... — if this returns null (the
-        // unhandled-command fallback), the URL gets a literal "null" port and
-        // Request construction throws before the plugin:http mock above is
-        // ever consulted, failing every login. Any numeric port works: the
+        // http://127.0.0.1:{port}/{token}/api/v1/... — if this returns null
+        // (the unhandled-command fallback), the tunnel start is refused and
+        // every login fails before the plugin:http mock above is ever
+        // consulted. Any numeric port and non-empty token work: the
         // transport is still plugin:http|fetch and route matching is
         // substring-based, so the fake origin never has to be listened on.
-        if (cmd === "start_http_proxy") return 45123;
+        if (cmd === "start_http_proxy") return { port: 45123, token: "e2e-tunnel" };
         if (cmd === "stop_http_proxy") return;
 
         // ---- LiveKit proxy ----
-        if (cmd === "start_livekit_proxy") return { port: 7880 };
+        if (cmd === "start_livekit_proxy") return { port: 7880, token: "e2e-tunnel" };
         if (cmd === "stop_livekit_proxy") return;
 
         // ---- Credentials ----

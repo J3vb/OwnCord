@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   notifyIncomingMessage,
+  notifyMention,
   openMessageTarget,
   resetNotificationCoalescing,
 } from "../../src/lib/notifications";
@@ -13,7 +14,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { muteChannel, setChannelMutesHost, unmuteChannel } from "../../src/lib/channel-mutes";
 import { setMessageJumpHandler } from "../../src/lib/message-navigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
@@ -1405,6 +1406,90 @@ describe("notifyIncomingMessage", () => {
       expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
+    const bobDm = (): void =>
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+    it("Nothing does not silence a DM; a server channel message stays silent", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      bobDm();
+
+      notifyIncomingMessage(makePayload({ content: "plain channel chatter" }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    it("Nothing: a muted DM stays silent (the mute still applies)", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      bobDm();
+      setChannelMutesHost("a.example");
+      muteChannel(55);
+
+      try {
+        notifyIncomingMessage(
+          makePayload({
+            channel_id: 55,
+            content: "hey",
+            user: { id: 2, username: "bob", avatar: null },
+          }),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendNotification).not.toHaveBeenCalled();
+      } finally {
+        unmuteChannel(55);
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("Nothing + Do Not Disturb: a DM shows no popup and plays no chime", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      testPrefs.set("userStatus", "dnd");
+      bobDm();
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
     it("Mentions only suppresses a plain message but not one that names you", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
@@ -1919,6 +2004,149 @@ describe("notifyIncomingMessage", () => {
         }
       },
     );
+  });
+
+  describe("notifyMention (WP 2B-1)", () => {
+    async function spies() {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (invoke as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      return { invoke: invoke as ReturnType<typeof vi.fn>, win };
+    }
+
+    it("Nothing silences the popup, the chime and the flash", async () => {
+      const { invoke, win } = await spies();
+      testPrefs.set("notificationLevel", "nothing");
+
+      notifyMention(1);
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("Mentions only shows the popup, titled with the channel and targeting it", async () => {
+      const { invoke } = await spies();
+      testPrefs.set("notificationLevel", "mentions");
+      setChannelMutesHost("a.example");
+
+      try {
+        notifyMention(1);
+
+        await vi.waitFor(() => {
+          expect(invoke).toHaveBeenCalledWith("notify_message", {
+            title: "You were mentioned in #general",
+            body: "",
+            host: "a.example",
+            channelId: 1,
+            messageId: undefined,
+          });
+        });
+      } finally {
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("chimes only while the window is focused on another channel", async () => {
+      const { invoke, win } = await spies();
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+
+      notifyMention(1);
+
+      await vi.waitFor(() => {
+        expect(mockOscillator.start).toHaveBeenCalled();
+      });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for the channel on screen while focused", async () => {
+      const { invoke, win } = await spies();
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+
+      notifyMention(1);
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("Do Not Disturb suppresses the popup and the chime", async () => {
+      const { invoke } = await spies();
+      testPrefs.set("userStatus", "dnd");
+
+      notifyMention(1);
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
+    it("stays silent while Suppress @everyone is on", async () => {
+      const { invoke, win } = await spies();
+      testPrefs.set("suppressEveryone", true);
+
+      try {
+        notifyMention(1);
+
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+        expect(mockOscillator.start).not.toHaveBeenCalled();
+        expect(win.requestUserAttention).not.toHaveBeenCalled();
+      } finally {
+        testPrefs.set("suppressEveryone", false);
+      }
+    });
+
+    it("passes a channel mute", async () => {
+      const { invoke } = await spies();
+      muteChannel(1);
+
+      try {
+        notifyMention(1);
+
+        await vi.waitFor(() => {
+          expect(invoke).toHaveBeenCalledWith(
+            "notify_message",
+            expect.objectContaining({ title: "You were mentioned in #general", channelId: 1 }),
+          );
+        });
+      } finally {
+        unmuteChannel(1);
+      }
+    });
+
+    it("skips a DM", async () => {
+      const { invoke } = await spies();
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+      notifyMention(55);
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
   });
 
   describe("openMessageTarget (the shared deep-link / notification guard)", () => {

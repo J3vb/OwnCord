@@ -81,6 +81,40 @@ func NewMemberAPI(svc *service.Services, hub HubBroadcaster, permInvalidator Per
 	return r
 }
 
+// mountChannelActionRoutes registers the channel actions the desktop client
+// uses: create, edit and delete, all under MANAGE_CHANNELS. They are mounted
+// twice, under /admin/api/channels for the panel and under
+// /api/v1/moderation/channels (NewChannelAPI) for the client, so both run the
+// same handlers and the same permission check. The create route sits at base
+// itself, the per-channel routes under base/{id}.
+func mountChannelActionRoutes(r chi.Router, base string, channels *service.ChannelService, hub HubBroadcaster) {
+	create := base
+	if create == "" {
+		create = "/"
+	}
+	r.Group(func(r chi.Router) {
+		r.Use(requirePerm(permissions.ManageChannels))
+		r.Post(create, handleCreateChannel(channels, hub))
+		r.Patch(base+"/{id}", handlePatchChannel(channels, hub))
+		r.Delete(base+"/{id}", handleDeleteChannel(channels, hub))
+	})
+}
+
+// NewChannelAPI serves the channel create, edit and delete actions on the main
+// /api/v1 surface (mounted by api.NewRouter at /api/v1/moderation/channels),
+// for the same reason as NewMemberAPI: a reverse proxy in front of a server may
+// answer /admin/... with a web page. Authentication is the admin perimeter's
+// (a session or API token issued by this server) and authorisation is the same
+// MANAGE_CHANNELS check. Unlike /admin it is not subject to
+// server.admin_allowed_cidrs; the token and the permission bit, not the
+// network, bound it, so nobody outside this server's own members can reach it.
+func NewChannelAPI(svc *service.Services, hub HubBroadcaster) http.Handler {
+	r := chi.NewRouter()
+	r.Use(adminAuthMiddleware(svc.Sessions))
+	mountChannelActionRoutes(r, "", svc.Channels, hub)
+	return r
+}
+
 // OwnerOnlyRoute is one (method, pattern) pair ownerOnly registered, relative
 // to NewAdminAPI's own router (the same shape doRequest's test helper takes
 // paths in — no "/admin/api" prefix).
@@ -303,12 +337,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
 		mountRetentionRoutes(r, svc.Retention)
 
+		mountChannelActionRoutes(r, "/channels", channels, hub)
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))
 			r.Get("/channels", handleListChannels(channels))
-			r.Post("/channels", handleCreateChannel(channels, hub))
-			r.Patch("/channels/{id}", handlePatchChannel(channels, hub))
-			r.Delete("/channels/{id}", handleDeleteChannel(channels, hub))
 			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(channels))
 			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(channels, hub, permInvalidator))
 			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(channels, hub, permInvalidator))
@@ -347,7 +379,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
-			r.Patch("/settings", handlePatchSettings(settings, svc.Retention))
+			r.Patch("/settings", handlePatchSettings(settings, svc.Retention, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
 		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))

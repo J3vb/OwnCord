@@ -93,13 +93,17 @@ vi.mock("@stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setPttGated: vi.fn(),
   setPttPollingLive: vi.fn(),
   isPttPollingLive: vi.fn(() => false),
+  onPttPollingLiveChange: vi.fn(() => () => {}),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
   setLocalGateSpeaking: vi.fn(),
+  restateSelfVoiceState: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
@@ -113,6 +117,7 @@ const host = vi.hoisted(() => ({
   handlers: new Set<(e: NativeVoiceEnvelope) => void>(),
   nextSession: 1,
   connectFails: false,
+  screens: { portal: true, sources: [] } as { portal: boolean; sources: Array<{ id: string }> },
 }));
 
 vi.mock("../../src/platform/desktop", () => ({
@@ -174,7 +179,7 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       screenSources: () => {
         host.commands.push(["screenSources", []]);
-        return Promise.resolve({ portal: true, sources: [] });
+        return Promise.resolve(host.screens);
       },
       startScreen: (...args: unknown[]) => {
         host.commands.push(["startScreen", args]);
@@ -279,6 +284,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.handlers.clear();
     host.nextSession = 1;
     host.connectFails = false;
+    host.screens = { portal: true, sources: [] };
     prefs.clear();
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
@@ -382,7 +388,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       event: {
         type: "trackPublished",
         identity: "user-2",
-        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     host.commands.length = 0;
@@ -391,10 +397,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([["setMicrophone", [1, false]]]);
     host.commands.length = 0;
     mockVoiceState.localMuted = true;
+    mockVoiceState.localDeafened = true;
     session.setDeafened(true);
     await flush();
-    // Deafen unsubscribes remote audio and re-asserts the mic mute, as on the web path.
+    // Deafen silences stream audio, unsubscribes remote voice audio and
+    // re-asserts the mic mute, as on the web path.
     expect(host.commands).toEqual([
+      ["setScreenshareVolume", [1, "user-2", 0]],
       ["setSubscribed", [1, "user-2", "TR_a", false]],
       ["setMicrophone", [1, false]],
     ]);
@@ -413,13 +422,14 @@ describe("LiveKitSession on the Linux native backend", () => {
       event: {
         type: "trackPublished",
         identity: "user-3",
-        track: { sid: "TR_b", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_b", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     await flush();
+    // A participant who joins while deafened starts with stream audio silent.
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 1]],
-      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 0]],
       ["setSubscribed", [1, "user-3", "TR_b", false]],
     ]);
   });
@@ -440,12 +450,26 @@ describe("LiveKitSession on the Linux native backend", () => {
     ]);
     host.commands.length = 0;
     // The volume menu, then the master output volume scaling everyone.
+    // The native mixer takes gains above 1, so 150% reaches it as 1.5.
     session.setUserVolume(4, 150);
     session.setOutputVolume(50);
     expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
-      ["setVolume", [1, "user-4", 1]],
+      ["setVolume", [1, "user-4", 1.5]],
       ["setVolume", [1, "user-3", 0.25]],
-      ["setVolume", [1, "user-4", 0.5]],
+      ["setVolume", [1, "user-4", 0.75]],
+    ]);
+  });
+
+  it("a local Mute sends 0 to the native mixer and unmute restores the saved volume", async () => {
+    prefs.set("userVolume_3", 150);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
+    host.commands.length = 0;
+    session.setUserLocalMute(3, true);
+    session.setUserLocalMute(3, false);
+    expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
+      ["setVolume", [1, "user-3", 0]],
+      ["setVolume", [1, "user-3", 1.5]],
     ]);
   });
 
@@ -454,7 +478,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     host.commands.length = 0;
     const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
-    // Per-user stream volume x master output, clamped to 0-1 (output volume caps at 100%); muted is 0.
+    // Per-user stream volume x master output, clamped to 0-1 (stream audio stays at most 100%); muted is 0.
     session.setScreenshareAudioVolume(3, 0.8);
     session.setOutputVolume(50);
     session.muteScreenshareAudio(3, true);
@@ -465,7 +489,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ["setScreenshareVolume", [1, "user-3", 0.4]],
       ["setScreenshareVolume", [1, "user-3", 0]],
       ["setScreenshareVolume", [1, "user-3", 0.4]],
-      ["setScreenshareVolume", [1, "user-3", 0.8]],
+      ["setScreenshareVolume", [1, "user-3", 1]],
     ]);
   });
 
@@ -510,6 +534,67 @@ describe("LiveKitSession on the Linux native backend", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("a share running when the connection drops (WP 1C-6)", () => {
+    const toasts = { show: vi.fn(() => () => {}) };
+    beforeEach(() => {
+      vi.useFakeTimers();
+      toasts.show.mockClear();
+      initToast(toasts as unknown as ToastContainer);
+      session.setWsClient({
+        send: vi.fn(() => "req-1"),
+        on: vi.fn(),
+        getState: () => "connected",
+      } as never);
+    });
+    afterEach(() => {
+      teardownToast();
+      vi.useRealTimers();
+    });
+
+    const picker = vi.fn();
+    async function shareThenDrop(source: string): Promise<void> {
+      picker.mockReset().mockResolvedValue({ source, quality: "medium", fps: 30 });
+      setScreenSourcePicker(picker);
+      await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+      await session.enableScreenshare();
+      mockVoiceState.localScreenshare = true;
+      host.commands.length = 0;
+      emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
+      mockVoiceState.localScreenshare = false;
+      for (let i = 0; i < 30 && !names().includes("setMicrophone"); i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await flush();
+    }
+
+    it("shares the same window again when the host still lists it", async () => {
+      host.screens = { portal: false, sources: [{ id: "window:81" }] };
+      await shareThenDrop("window:81");
+      await vi.advanceTimersByTimeAsync(0);
+      await flush();
+
+      // The dialog was shown for the first share only.
+      expect(picker).toHaveBeenCalledOnce();
+      expect(host.commands).toContainEqual([
+        "startScreen",
+        [2, "window:81", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+      ]);
+      expect(toasts.show).not.toHaveBeenCalled();
+    });
+
+    it("offers Share again on Wayland, where only the portal can pick", async () => {
+      await shareThenDrop("portal");
+
+      expect(names()).not.toContain("startScreen");
+      expect(toasts.show).toHaveBeenCalledWith(
+        "Your screen share stopped when the connection dropped",
+        "warning",
+        Infinity,
+        expect.objectContaining({ label: "Share again" }),
+      );
+    });
   });
 
   it("a superseding join tears down only its own native session", async () => {

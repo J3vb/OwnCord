@@ -51,6 +51,10 @@ type DB struct {
 	// Loaded from the durable sidecar before serving a restored database.
 	messageDeliveryFloor atomic.Int64
 
+	// closed is set by Close. A backup restore closes the handle while the
+	// lifecycle is still up; teardown steps read it through Closed.
+	closed atomic.Bool
+
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
@@ -442,6 +446,7 @@ func Migrate(database *DB) error {
 
 // Close releases the underlying database connections (both pools).
 func (d *DB) Close() error {
+	d.closed.Store(true)
 	// Run PRAGMA optimize to analyze and update query planner statistics.
 	// It may write statistics, so it runs on the writer.
 	_, _ = d.writer.Exec("PRAGMA optimize;")
@@ -457,6 +462,11 @@ func (d *DB) Close() error {
 		d.lockRelease = nil
 	}
 	return err
+}
+
+// Closed reports whether Close has been called on this handle.
+func (d *DB) Closed() bool {
+	return d.closed.Load()
 }
 
 // QueryRowContext executes a query that returns at most one row, with context.
@@ -493,9 +503,7 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 }
 
 // SQLDb returns the underlying writer *sql.DB for cases requiring direct
-// access. It is the escape hatch for statements the wrappers can't route —
-// notably PRAGMA wal_checkpoint(TRUNCATE) in the admin backup handler, which
-// must run on the writer to checkpoint the WAL it just stopped appending to.
+// access, such as the writer's pool statistics.
 func (d *DB) SQLDb() *sql.DB {
 	return d.writer
 }

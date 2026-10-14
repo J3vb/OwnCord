@@ -168,6 +168,17 @@ describe("vkName", () => {
       expect(vkName(0x0d)).toBe("Enter");
     });
 
+    it("names the single modifiers and Caps Lock", () => {
+      expect(vkName(0x10)).toBe("Shift");
+      expect(vkName(0x11)).toBe("Ctrl");
+      expect(vkName(0x12)).toBe("Alt");
+      expect(vkName(0x14)).toBe("Caps Lock");
+    });
+
+    it("returns '`' for the backtick key 0xC0", () => {
+      expect(vkName(0xc0)).toBe("`");
+    });
+
     it("returns 'Escape' for 0x1B", () => {
       expect(vkName(0x1b)).toBe("Escape");
     });
@@ -385,6 +396,23 @@ describe("initPtt", () => {
     mockInvoke.mockRejectedValue(new Error("not in Tauri"));
 
     await expect(initPtt()).resolves.toBeUndefined();
+    // A missing bridge says nothing about the key: the binding stays saved.
+    expect(testPrefs.get("pttVk")).toBe(0x20);
+  });
+
+  it("clears a saved key the backend refuses, so Settings shows it unbound", async () => {
+    testPrefs.set("pttVk", 0x41); // A, never bindable
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ptt_set_key"
+        ? Promise.reject("unsupported_ptt_key: 65")
+        : Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    await expect(initPtt()).resolves.toBeUndefined();
+
+    expect(testPrefs.get("pttVk")).toBe(0);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
+    expect(mockSetPttPollingLive).not.toHaveBeenCalledWith(true);
   });
 });
 
@@ -1278,5 +1306,77 @@ describe("ptt release delay", () => {
     mockCurrentChannelId = null;
     await vi.advanceTimersByTimeAsync(100);
     expect(gateCalls()).toEqual([false]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Input Mode (WP 1D-2) — a key bound in Voice Activity mode never gates
+// ---------------------------------------------------------------------------
+
+describe("Input Mode: Voice Activity keeps a bound key idle", () => {
+  beforeEach(async () => {
+    resetAll();
+    await stopPtt();
+    resetAll();
+  });
+
+  const commands = (): unknown[] => mockInvoke.mock.calls.map((c) => c[0]);
+
+  it("init does not start polling for a key bound in Voice Activity mode", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "vad");
+
+    await initPtt();
+
+    expect(commands()).not.toContain("ptt_start");
+    expect(mockListen).not.toHaveBeenCalled();
+    expect(mockPttPollingLive).toBe(false);
+  });
+
+  it("binding a key mid-call in Voice Activity mode saves it but does not gate the mic", async () => {
+    testPrefs.set("inputMode", "vad");
+    mockCurrentChannelId = 7;
+
+    await updatePttKey(0x41);
+
+    expect(testPrefs.get("pttVk")).toBe(0x41);
+    expect(commands()).not.toContain("ptt_start");
+    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+  });
+
+  it("binding a key in Voice Activity mode stops a poller left running", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "ptt");
+    await initPtt();
+    expect(commands()).toContain("ptt_start");
+    testPrefs.set("inputMode", "vad");
+    mockInvoke.mockClear();
+
+    await updatePttKey(0x42);
+
+    expect(commands()).toContain("ptt_stop");
+    expect(mockPttPollingLive).toBe(false);
+  });
+
+  it("re-arming the saved key after switching to Push to Talk gates the mic mid-call", async () => {
+    testPrefs.set("pttVk", 0x41);
+    testPrefs.set("inputMode", "vad");
+    mockCurrentChannelId = 7;
+    await initPtt();
+    expect(commands()).not.toContain("ptt_start");
+
+    testPrefs.set("inputMode", "ptt");
+    await updatePttKey(0x41);
+
+    expect(commands()).toContain("ptt_start");
+    expect(mockSetPttGated).toHaveBeenCalledWith(true);
+  });
+
+  it("a profile from before Input Mode with a bound key still arms (no saved mode)", async () => {
+    testPrefs.set("pttVk", 0x41);
+
+    await initPtt();
+
+    expect(commands()).toContain("ptt_start");
   });
 });

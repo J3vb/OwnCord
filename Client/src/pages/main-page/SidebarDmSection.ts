@@ -13,6 +13,7 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { isChannelMuted } from "@lib/channel-mutes";
+import { trackCurrentView } from "../../features/navigation/contentView";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
@@ -29,6 +30,12 @@ export interface SidebarDmSectionOptions {
   readonly onNewDm: () => void;
   /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
   readonly pendingRequests?: CountSource;
+  /**
+   * Open the Message Requests inbox. With it, pending requests also get their
+   * own "Message Requests (N)" row in the preview list: a first contact has no
+   * DM row yet, so without one the reader has nothing to click but the badge.
+   */
+  readonly onOpenRequests?: (opener: HTMLElement) => void;
 }
 
 export interface SidebarDmSectionResult {
@@ -127,6 +134,30 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
   // --- DM list ---
   let dmCollapsed = false;
+
+  // "Message Requests (N)" above the conversations, while any are pending.
+  let renderRequestsRow: (() => void) | undefined;
+  const onOpenRequests = opts.onOpenRequests;
+  if (pending !== undefined && onOpenRequests !== undefined) {
+    const requestsRow = createElement("button", {
+      type: "button",
+      class: "sidebar-dm-view-all dm-requests-entry",
+      "data-testid": "dm-section-requests-entry",
+    });
+    requestsRow.addEventListener("click", () => {
+      onOpenRequests(requestsRow);
+    });
+    renderRequestsRow = (): void => {
+      const count = pending.get();
+      setText(requestsRow, navigationText("requests.entry", { count }));
+      requestsRow.style.display = count > 0 && !dmCollapsed ? "" : "none";
+    };
+    renderRequestsRow();
+    unsubs.push(pending.subscribe(renderRequestsRow));
+    unsubs.push(trackCurrentView(requestsRow, "requests"));
+    dmSection.appendChild(requestsRow);
+  }
+
   const dmList = createElement("div", { class: "category-channels sidebar-dm-list" });
 
   // --- "View All" button ---
@@ -288,6 +319,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
     dmArrow.setAttribute("aria-expanded", String(!dmCollapsed));
     dmList.style.display = dmCollapsed ? "none" : "";
+    renderRequestsRow?.();
     viewAllBtn.style.display = dmCollapsed
       ? "none"
       : dmStore.getState().channels.length > 3

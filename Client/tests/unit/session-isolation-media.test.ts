@@ -146,6 +146,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setPttGated: vi.fn(),
   // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
   // startup without importing the LiveKit SDK), so the mock has to carry real
@@ -155,10 +156,13 @@ vi.mock("@stores/voice.store", () => ({
     mockPttPollingLive.value = live;
   }),
   isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+  onPttPollingLiveChange: vi.fn(() => () => {}),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
   setLocalGateSpeaking: vi.fn(),
+  restateSelfVoiceState: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
@@ -169,7 +173,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const mockInvoke = vi.hoisted(() =>
   vi.fn((cmd: string, _payload?: unknown) => {
-    if (cmd === "start_livekit_proxy") return Promise.resolve(7881);
+    if (cmd === "start_livekit_proxy") return Promise.resolve({ port: 7881, token: "tun" });
     if (cmd === "stop_livekit_proxy") return Promise.resolve();
     return Promise.resolve();
   }),

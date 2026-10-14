@@ -3,7 +3,7 @@
  * Extracted from MainPage to reduce god-object coupling and enable unit testing.
  */
 
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
   getLocalCameraStream,
@@ -13,6 +13,7 @@ import {
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { shellText } from "../../i18n/shell";
+import { buildCallPeople, type CallAvatarCache } from "./callPeople";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,16 +49,24 @@ export interface VideoModeControllerOptions {
 export interface VideoModeController {
   /** Re-evaluate whether video mode should be active based on voice store state. */
   checkVideoMode(): void;
-  /** Force switch to chat mode. */
-  showChat(): void;
+  /** Force switch to chat mode. `keepWatching` (going to a text channel)
+   *  keeps the watched stream playing in the mini-player; without it (the
+   *  grid's own Show chat control) the stream stops showing. */
+  showChat(opts?: { keepWatching?: boolean }): void;
   /** Force switch to video grid mode. */
   showVideoGrid(): void;
+  /** Open the call view: the grid with everyone in the call, which stays
+   *  open with no video on until the user leaves or goes back to chat. */
+  openCall(): void;
   /** Whether video grid is currently visible. */
   isVideoMode(): boolean;
   /** Set focus on a specific video tile (focus mode). */
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
   getFocusedTileId(): number | null;
+  /** The grid's call pop-out opened (`out`) or closed; `restore` brings the
+   *  call view back into this window. */
+  setCallPoppedOut(out: boolean, restore: boolean): void;
   /** Reset state on teardown. */
   destroy(): void;
 }
@@ -72,6 +81,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   /** Track whether we've already added the local self-view tile. */
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
+  /** The capture the self screen-share tile shows. */
+  let localShareTrackId: string | undefined;
   let focusedTileId: number | null = null;
   /** The channel currentChannelId was on the previous checkVideoMode() call.
    *  A voice channel switch (A -> B) moves currentChannelId directly from A
@@ -81,21 +92,31 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
    *  channel persist as dead MediaStreams and keep hasStreams() true
    *  forever (OC-0012). */
   let lastChannelId: number | null = null;
-  /** Set when the user explicitly dismisses the grid while local video is
-   *  still on (switching to a text channel). Without this, checkVideoMode()
-   *  re-opens the grid the moment any remote peer's camera/screenshare
-   *  toggles, since that re-invokes checkVideoMode() and localVideoOn is
-   *  still true. Cleared once local video actually goes off, or when the
-   *  grid is opened again through any other path. */
-  let userDismissedVideo = false;
   /** Where the grid slot lives in the chat column, to put it back after the
    *  DM call panel has hosted it. */
   let slotHome: { parent: Node; next: Node | null } | null = null;
   /** The panel last told that video is on, so it is told when it is off. */
   let activeHost: VideoPanelHost | null = null;
+  /** The user opened the call view: the grid stays up without video. */
+  let callOpen = false;
+  /** The call view is in its own window: this one shows the chat while the
+   *  grid stays in video mode there. */
+  let poppedOut = false;
+  /** This controller gave the grid its people (the DM call panel gives them
+   *  while it hosts the grid), so it takes them back. */
+  let peopleGiven = false;
+  const avatarCache: CallAvatarCache = new Map();
+
+  function clearPeople(): void {
+    if (peopleGiven) videoGrid.setPeople([]);
+    peopleGiven = false;
+    avatarCache.clear();
+  }
 
   /** Move the grid into the panel (or keep it there). */
   function hostInPanel(el: HTMLElement): void {
+    // The panel shows the stream itself: take it back from the mini-player.
+    videoGrid.hideMiniPlayer();
     const slot = slots.videoGridSlot;
     if (slot.parentNode !== el) {
       if (slotHome === null && slot.parentNode !== null) {
@@ -123,45 +144,63 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     host?.setActive(active);
   }
 
-  function showVideoGrid(): void {
-    userDismissedVideo = false;
-    if (videoMode) return;
-    videoMode = true;
-    slots.messagesSlot.style.display = "none";
-    slots.typingSlot.style.display = "none";
-    slots.inputSlot.style.display = "none";
-    slots.videoGridSlot.style.display = "block";
-    videoGrid.setExitVisible(true);
+  /** The chat column shows the grid or the chat. */
+  function showSlots(grid: boolean): void {
+    const chat = grid ? "none" : "";
+    slots.messagesSlot.style.display = chat;
+    slots.typingSlot.style.display = chat;
+    slots.inputSlot.style.display = chat;
+    slots.videoGridSlot.style.display = grid ? "block" : "none";
   }
 
-  /** Close the grid without recording a dismissal. Used by the paths that
-   *  close it on the user's behalf (no streams left, left the channel,
-   *  teardown) — only an explicit showChat() is a dismissal. */
+  function showVideoGrid(): void {
+    // Popped out: the call is shown in its window.
+    if (videoGrid.raiseCallPopout()) return;
+    videoGrid.hideMiniPlayer();
+    if (videoMode) return;
+    videoMode = true;
+    showSlots(true);
+    videoGrid.setExitVisible(true);
+    // Opened for a stream (Watch, back from the mini-player): everyone in
+    // the call is drawn too, before the next roster change.
+    const { currentChannelId, voiceUsers } = voiceStore.getState();
+    if (currentChannelId === null) return;
+    const users = voiceUsers.get(currentChannelId);
+    // The DM call panel draws its own call's people.
+    if (users !== undefined && opts.panelHost?.()?.ownsCall(currentChannelId) !== true) {
+      givePeople(users);
+    }
+  }
+
+  function givePeople(users: ReadonlyMap<number, VoiceUser>): void {
+    videoGrid.setPeople(buildCallPeople(users.values(), avatarCache));
+    peopleGiven = true;
+  }
+
+  /** Close the grid. Used by the paths that close it on the user's behalf
+   *  (no streams left, left the channel, teardown) and by showChat(). */
   function closeVideoGrid(): void {
     if (!videoMode) return;
     videoMode = false;
     focusedTileId = null;
     // Clear the grid's own focus state too — otherwise it stays pinned to
-    // whatever tile was focused and the next auto-open (B5-15) reopens
+    // whatever tile was focused and the next open (B5-15) reopens
     // straight into a stale focus layout.
     videoGrid.setFocusedTile(null);
     localTileAdded = false;
     localScreenshareTileAdded = false;
-    slots.messagesSlot.style.display = "";
-    slots.typingSlot.style.display = "";
-    slots.inputSlot.style.display = "";
-    slots.videoGridSlot.style.display = "none";
+    showSlots(false);
     videoGrid.setExitVisible(false);
+    clearPeople();
   }
 
-  function showChat(): void {
-    // The user asked for chat (switching to a text channel) while still
-    // broadcasting — remember it, or checkVideoMode() drags them back into
-    // the grid the next time any peer toggles a camera (v048).
-    const voice = voiceStore.getState();
-    if (voice.localCamera || voice.localScreenshare) {
-      userDismissedVideo = true;
-    }
+  function showChat(how?: { keepWatching?: boolean }): void {
+    // The chat is already here; the call stays in its own window.
+    if (poppedOut) return;
+    callOpen = false;
+    // The stream being watched keeps playing in the mini-player (Discord's),
+    // picked while the grid still knows which tile is focused.
+    if (videoMode && how?.keepWatching === true) videoGrid.showMiniPlayer();
     closeVideoGrid();
   }
 
@@ -182,16 +221,16 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     }
     const host = opts.panelHost?.() ?? null;
     if (channelId === null) {
+      callOpen = false;
       returnFromPanel();
       tellHost(host, false);
-      // Not a dismissal: leaving voice can clear currentChannelId before
-      // localCamera/localScreenshare go false, and this early return skips
-      // the reset below — showChat() here would strand userDismissedVideo
-      // set and suppress auto-open for the next session.
       closeVideoGrid();
       return;
     }
-    const channelUsers = voice.voiceUsers.get(channelId);
+    // A reconnect's resync can drop our channel from the roster for a moment;
+    // the call view stays open through it.
+    const channelUsers =
+      voice.voiceUsers.get(channelId) ?? (callOpen ? new Map<number, VoiceUser>() : undefined);
     if (!channelUsers) {
       returnFromPanel();
       tellHost(host, false);
@@ -214,12 +253,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn) {
       anyVideoOn = videoGrid.hasStreams();
     }
-    const localVideoOn = voice.localCamera || voice.localScreenshare;
     const panel = host !== null && host.ownsCall(channelId) ? host : null;
     if (panel !== null) {
       // The DM's own call: the panel shows every stream, remote ones too,
       // with the chat still in view. Collapsed, it shows none and the chat
       // is never covered.
+      callOpen = false;
+      // The panel gives the grid its own people.
+      peopleGiven = false;
       closeVideoGrid();
       tellHost(panel, anyVideoOn);
       const el = anyVideoOn ? panel.element() : null;
@@ -229,19 +270,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       returnFromPanel();
       tellHost(host, false);
     }
-    // Auto-close video grid when no streams remain
-    if (!anyVideoOn) {
+    // Auto-close video grid when no streams remain, unless it is the call view
+    if (!anyVideoOn && !callOpen) {
       closeVideoGrid();
     }
-    // BUG-105: Auto-open video grid only for LOCAL camera/screenshare.
-    // Remote streams require manual click (Discord-style behavior).
-    if (!localVideoOn) {
-      // Nothing left to dismiss — the next camera/screenshare start should
-      // auto-open the grid again.
-      userDismissedVideo = false;
-    } else if (!videoMode && !userDismissedVideo && panel === null) {
-      showVideoGrid();
-    }
+    // No video opens the grid on its own, your own camera or share included:
+    // the chat you are reading stays. The call view shows them while open.
+
+    if (videoMode) givePeople(channelUsers);
 
     // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
@@ -276,6 +312,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     // Manage local screenshare self-view tile
     const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
     if (voice.localScreenshare) {
+      // A changed source is a new capture: draw the tile again.
+      if (
+        localScreenshareTileAdded &&
+        getLocalScreenshareStream()?.getVideoTracks()[0]?.id !== localShareTrackId
+      ) {
+        videoGrid.removeStream(screenshareUserId);
+        localScreenshareTileAdded = false;
+      }
       if (!localScreenshareTileAdded) {
         const localStream = getLocalScreenshareStream();
         if (localStream !== null) {
@@ -291,6 +335,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
             },
           );
           localScreenshareTileAdded = true;
+          localShareTrackId = localStream.getVideoTracks()[0]?.id;
         }
       }
     } else {
@@ -318,14 +363,29 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     return focusedTileId;
   }
 
+  function setCallPoppedOut(out: boolean, restore: boolean): void {
+    poppedOut = out;
+    if (!videoMode) return;
+    // A popped-out call stays up without video, as an opened call view does.
+    if (out) callOpen = true;
+    if (out || restore) showSlots(!out);
+  }
+
+  function openCall(): void {
+    callOpen = true;
+    showVideoGrid();
+    checkVideoMode();
+  }
+
   function destroy(): void {
+    callOpen = false;
     returnFromPanel();
     tellHost(null, false);
     closeVideoGrid();
+    clearPeople();
     focusedTileId = null;
     localTileAdded = false;
     localScreenshareTileAdded = false;
-    userDismissedVideo = false;
     lastChannelId = null;
   }
 
@@ -333,9 +393,11 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     checkVideoMode,
     showChat,
     showVideoGrid,
+    openCall,
     isVideoMode: isVideoModeActive,
     setFocus,
     getFocusedTileId,
+    setCallPoppedOut,
     destroy,
   };
 }

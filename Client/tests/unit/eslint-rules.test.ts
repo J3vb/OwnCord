@@ -282,6 +282,12 @@ describe("eslint-rules", () => {
         function onCancel() {
           setActiveChannel(null);
         }`,
+        // A callback passed in as a parameter runs later, not in this function.
+        `import { setLoading } from "@stores/ui.store";
+        function bind(handler) {
+          setLoading(true);
+          ws.on("x", handler);
+        }`,
         // A ws.on() handler outside dispatcher.ts that only READS a store
         // (channelsStore.getState()) to drive page-local UI — this is the
         // real ChannelController.ts shape and must stay legal.
@@ -316,6 +322,30 @@ describe("eslint-rules", () => {
           code: `import { applyFrame } from "./store";
           ws.on("dm_request", (p) => applyFrame(p, true));`,
         },
+        // Native certificate listeners are not server frames; main.ts writes
+        // a transient error from them on purpose, so they stay unmatched.
+        `import { setTransientError } from "@stores/auth.store";
+        ws.onCertFirstUse(() => { setTransientError("x"); });
+        ws.onCertMismatch(() => { setTransientError("x"); });`,
+        // A receiver that is not a WebSocket client is not a ws subscription.
+        `import { setActiveChannel } from "@stores/channels.store";
+        emitter.on("x", () => { setActiveChannel(1); });
+        this.bus.on("x", () => { setActiveChannel(1); });`,
+        // A named handler nothing registers on the socket is just a function.
+        `import { setActiveChannel } from "@stores/channels.store";
+        function notAHandler() { setActiveChannel(1); }
+        ws.on("x", () => {});`,
+        // Reads through getState() inside a handler stay legal, as does a
+        // setState on something that is not an imported store.
+        `import { uiStore } from "@stores/ui.store";
+        ws.onStateChange(() => {
+          const open = uiStore.getState().settingsOpen;
+          localThing.setState(open);
+          localThing.getState().addItem(open);
+        });`,
+        // A getState() action whose name is not a mutator verb is a read.
+        `import { channelsStore } from "@stores/channels.store";
+        ws.on("x", () => { channelsStore.getState().channelById(1); });`,
       ],
       invalid: [
         {
@@ -334,6 +364,13 @@ describe("eslint-rules", () => {
               updateUser({ username: "x" });
             });
           });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // A factory's returned name resolves in the factory's own scope.
+        {
+          code: `import { setX } from "@stores/ui.store";
+          function make() { const h = () => setX(1); return h; }
+          ws.on("x", make());`,
           errors: [{ messageId: "storeWriteOutsideDispatcher" }],
         },
         // OC-0478: the B9 domain stores live under features/*/store.ts, not
@@ -384,6 +421,213 @@ describe("eslint-rules", () => {
             { messageId: "storeWriteOutsideDispatcher" },
             { messageId: "storeWriteOutsideDispatcher" },
           ],
+        },
+        // Wider receivers: the client held as `this.ws`, `deps.ws` or
+        // `wsClient`, and reached through an optional chain.
+        ...["this.ws", "deps.ws", "wsClient", "ws?"].map((receiver) => ({
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          ${receiver}.on("x", () => { setActiveChannel(1); });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        })),
+        // Wider methods: the other server-driven subscriptions on the client.
+        ...["onStateChange", "onSendFailure"].map((method) => ({
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          ws.${method}(() => { setActiveChannel(1); });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        })),
+        // A store written without a named mutator: setState on the instance.
+        {
+          code: `import { authStore } from "@stores/auth.store";
+          ws.on("x", () => { authStore.setState((prev) => ({ ...prev, token: null })); });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          filename: "src/pages/Probe.ts",
+          code: `import { safetyStore } from "../features/safety/store";
+          ws.on("mod_action", () => { safetyStore.setState({}); });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // A mutator reached through getState().
+        {
+          code: `import { messagesStore } from "@stores/messages.store";
+          ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // Named callbacks: a function declaration, a const arrow, and a local
+        // factory that returns the handler.
+        {
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          function onX() { setActiveChannel(1); }
+          ws.on("x", onX);`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          ws.on("x", onX);
+          const onX = () => { setActiveChannel(1); };`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          function makeHandler(id) { return () => { setActiveChannel(id); }; }
+          ws.on("x", makeHandler(1));`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        {
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          const makeHandler = (id) => () => setActiveChannel(id);
+          const h = makeHandler(1);
+          ws.on("x", h);`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+        // A handler wrapped in a call, as dispatcher-style `unsubs.push(ws.on(...))`.
+        {
+          code: `import { setActiveChannel } from "@stores/channels.store";
+          function onX() { setActiveChannel(1); }
+          unsubs.push(ws.on("x", onX));`,
+          errors: [{ messageId: "storeWriteOutsideDispatcher" }],
+        },
+      ],
+    });
+  });
+
+  it("invoke-needs-try-catch", () => {
+    ruleTester.run("invoke-needs-try-catch", localRules.rules["invoke-needs-try-catch"], {
+      valid: [
+        // The wrapped shape the platform modules use: the awaited command
+        // sits in a try block that has a catch.
+        `async function save() {
+          try {
+            await invoke("save_settings", { key: "k" });
+          } catch (err) {
+            log.warn("save failed", err);
+          }
+        }`,
+        // The dynamic-import form, with the import inside the same try.
+        `async function load() {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            return await invoke("get_settings");
+          } catch {
+            return null;
+          }
+        }`,
+        // The await still consumes the promise through a .then(ok) hop or a
+        // promise combinator, so the surrounding try/catch sees the rejection.
+        `async function f() {
+          try { await invoke("a").then(onOk); } catch (err) { log.warn("x", err); }
+        }`,
+        `async function f() {
+          try { await Promise.all([invoke("a"), invoke("b")]); } catch (err) { log.warn("x", err); }
+        }`,
+        `invoke("a").then(onOk, (err) => log.warn("x", err));`,
+        // A promise chain that ends in a handler.
+        `invoke("stop_livekit_proxy").catch((err) => log.warn("stop failed", err));`,
+        `invoke("stop_livekit_proxy").then(onOk, onFail);`,
+        // A wrapper that injects `invoke` and owns the error handling, as
+        // externalContent.ts's call() does: the parameter is the wrapper's.
+        `const preview = () => call((invoke) => invoke("external_preview", { url }));`,
+        `async function f() {
+          try { await tauriInvoke("ws_disconnect"); } catch (err) { log.warn("x", err); }
+        }`,
+        // Something else named like it is not the Tauri command.
+        `async function f() { await other("x"); await client.invoke("x"); }`,
+        // An inner try without a catch defers to the enclosing try's catch.
+        `async function f() {
+          try { try { await invoke("a"); } finally { cleanup(); } } catch (err) { log.warn("x", err); }
+        }`,
+      ],
+      invalid: [
+        {
+          code: `async function f() { await invoke("frontend_ready"); }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // The destructured dynamic-import shape (notifications.ts), no try.
+        {
+          code: `async function f() {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await invoke("set_unread_badge", { count });
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // Not awaited: the rejection escapes the try.
+        {
+          code: `async function f() { try { invoke("a"); } catch {} }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        {
+          code: `async function f() { try { void invoke("a"); } catch {} }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // A try that has no catch lets the rejection through.
+        {
+          code: `async function f() {
+            try { await invoke("a"); } finally { cleanup(); }
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // The catch block and the finally block are not protected by their own try.
+        {
+          code: `async function f() {
+            try { await a(); } catch { await invoke("b"); }
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        {
+          code: `async function f() {
+            try { await a(); } catch {} finally { await invoke("b"); }
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // Returned without await: the rejection leaves the try block.
+        {
+          code: `async function f() {
+            try { return invoke("a"); } catch { return null; }
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // A callback defined inside a try runs after the try has exited.
+        {
+          code: `function f() {
+            try { setTimeout(() => invoke("a"), 0); } catch {}
+          }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // A .catch / .then whose rejection callback is absent or a literal
+        // nothing (`undefined`, `null`, `void 0`) installs no handler.
+        ...[
+          `invoke("a").catch();`,
+          `invoke("a").catch(undefined);`,
+          `invoke("a").catch(null);`,
+          `invoke("a").then(onOk, undefined);`,
+          `invoke("a").then(onOk, null);`,
+          `invoke("a").then(onOk, void 0);`,
+        ].map((code) => ({ code, errors: [{ messageId: "bareInvoke" }] })),
+        // An await that does not consume the invoke promise: awaiting an array
+        // (or any value that merely contains the promise) resolves at once.
+        ...[
+          `async function f() { try { await [invoke("a")]; } catch {} }`,
+          `async function f() { try { await { p: invoke("a") }; } catch {} }`,
+          `async function f() { try { await Promise.resolve([invoke("a")]); } catch {} }`,
+        ].map((code) => ({ code, errors: [{ messageId: "bareInvoke" }] })),
+        // A .then with no rejection handler, and a voided call.
+        {
+          code: `invoke("a").then(onOk);`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        {
+          code: `void invoke("a");`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // socket.ts's alias for the resolved command function.
+        {
+          code: `async function f() { await tauriInvoke("accept_cert_fingerprint", { host }); }`,
+          errors: [{ messageId: "bareInvoke" }],
+        },
+        // The object-literal service shape (nativeVoiceService.ts).
+        {
+          code: `const service = { clearRoomKey: () => invoke("native_voice_clear_key") };`,
+          errors: [{ messageId: "bareInvoke" }],
         },
       ],
     });

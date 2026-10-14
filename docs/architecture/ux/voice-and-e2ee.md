@@ -62,13 +62,13 @@ stateDiagram-v2
     failed --> idle: auto-leave + error
 ```
 
-| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `connected`    | "Voice Connected" + elapsed timer (from `joinedAt`); "Secured" chip    | E2EE active; per-user tiles live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`). RT-9: five attempts with a 3 s-doubling backoff capped at 6 s (about 27 s) so the loop outlasts a companion LiveKit restart instead of ejecting the call; P2-T5 (D-4): then one every 15 s while the chat socket is connected or reconnecting and the channel exists, until 5 minutes after the drop, refreshing a token over 4 minutes old first. Before each attempt the loop checks the channel still exists and the voice roster still lists us; while the chat socket is not connected the roster cannot say, so attempts wait for it. Once the server has released the membership (RT-8 grace expiry, an RT-3 reap, a restart), it sends `voice_join` for the same channel as soon as the chat socket is connected and hands over to the ordinary join path (`connectAndSetup`), so others see a leave and rejoin; a self `voice_leave` is left to the loop while it owns the session (not while livekit-client retries on its own inside a connected one). A refused rejoin — the server refuses one for 60 s after any moderator kick or move — ends the call with the voice-lost toast. Also shown while livekit-client retries on its own (`RoomEvent.SignalReconnecting`/`Reconnecting` until `Reconnected`, `lib/roomEventHandlers.ts`); if neither `Reconnected` nor `Disconnected` arrives within 10 s of the first such event, the room is abandoned and the loop above takes over (`SIGNAL_RESUME_BUDGET_MS`) |
-| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `connected`    | "Voice Connected" + elapsed timer (from `joinedAt`); "Secured" chip    | E2EE active; per-user tiles live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`). RT-9: five attempts with a 3 s-doubling backoff capped at 6 s (about 27 s) so the loop outlasts a companion LiveKit restart instead of ejecting the call; P2-T5 (D-4): then one every 15 s while the chat socket is connected or reconnecting and the channel exists, until 5 minutes after the drop, refreshing a token over 4 minutes old first. Before each attempt the loop checks the channel still exists and the voice roster still lists us; while the chat socket is not connected the roster cannot say, so attempts wait for it. Once the server has released the membership (RT-8 grace expiry, an RT-3 reap, a restart), it sends `voice_join` for the same channel as soon as the chat socket is connected and hands over to the ordinary join path (`connectAndSetup`), so others see a leave and rejoin; a self `voice_leave` is left to the loop while it owns the session (not while livekit-client retries on its own inside a connected one). A refused rejoin — the server refuses an automatic one for 60 s after any moderator kick or move — ends the call with the voice-lost toast. Also shown while livekit-client retries on its own (`RoomEvent.SignalReconnecting`/`Reconnecting` until `Reconnected`, `lib/roomEventHandlers.ts`); if neither `Reconnected` nor `Disconnected` arrives within 10 s of the first such event, the room is abandoned and the loop above takes over (`SIGNAL_RESUME_BUDGET_MS`) |
+| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 **Target rules:**
 
@@ -99,9 +99,17 @@ All four are optimistic with rollback; each also emits a WS control message.
 | Control         | Local state                                                                                                                                                                                                                                                                                                                           | WS message                    | Rollback                                     |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------- |
 | **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative)                    |
-| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                                 | `voice_deafen` + `voice_mute` | implies mute                                 |
+| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote voice audio and mutes screen-share/stream audio (it stays subscribed; undeafen restores each stream's own per-tile mute)                                                                                                                                                          | `voice_deafen` + `voice_mute` | implies mute                                 |
 | **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                            | `voice_camera{enabled}`       | revert on failure + toast                    |
 | **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                                      | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
+
+Mute and deafen live in the user panel (`components/UserBar.ts`, next to
+Settings), not the voice widget. They, their keys and the tray work outside a
+call too: there they change only the local state and send nothing. The
+member's own mute and deafen are saved (`saveSelfVoiceState`, never a
+moderator's deafen) and loaded when the main page starts
+(`restoreSavedSelfVoiceState`); the next join applies them and restates them
+to the server. Deafen outside a call does not silence app sounds.
 
 `stopMicTrackOnMute` carries the SDK's own documented tradeoff: with a Bluetooth
 headset connected, stopping and re-acquiring the capture track makes the device
@@ -109,15 +117,15 @@ switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
 the OS capture rather than only mute the publication, so the profile switch is
 the accepted cost.
 
-| Control state  | Presentation                                                                                                                                                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                        |
-| deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                     |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the widget's own mute/deafen controls are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/VoiceWidget.ts` |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                 |
-| camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
-| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
-| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers)                                                                            |
+| Control state  | Presentation                                                                                                                                                                                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
+| deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/UserBar.ts`                                            |
+| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
+| camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
+| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
+| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings) |
 
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
@@ -125,29 +133,72 @@ filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
 headphone-slash badge for a muted or deafened user are on camera tiles. A
 **Show chat** control in the grid's header leaves the grid or focus view for
-the chat without leaving the call.
+the chat without leaving the call. In the guild call view the header also has
+**Show non-video participants**, **Show my camera** (hides only your own
+camera tile, here) and, in focus view, **Show participant strip**; each is a
+saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
+and none applies while the DM call panel hosts the grid. A control bar at the
+bottom of the call view, in grid and focus view, has mute, deafen, camera,
+share and disconnect; camera and share are inert until the join has connected.
+**Pop out call**, last in the header, moves the whole call view (tiles,
+toggles and control bar) into a pop-out window of its own and returns the app
+window to the chat; opening the call again from the app raises that window.
+**Bring the call back**, or closing the window, puts the call view back in the
+app window; leaving the call closes it. Show chat and the camera picker arrow
+are hidden there and the tile menu has no Profile row (each opens in the app
+window), and starting a share brings the call back first so its picker is in
+view.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
-for screen-share audio, 0–100 %; "Otto voice volume" for the mic, also 0–100 %) and
+for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
+button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
-`components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
-volumes apart and offers Mute stream and **Stop watching**. Watching is
-opt-in, Discord-style: a remote camera or screen share arrives as a tile behind
-a **Watch stream** card, and nothing of it (screen-share audio included) is
-subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
-out; Stop watching unsubscribes it and returns the card. A watch survives a
-channel switch and the app's own reconnect or rejoin, but not livekit-client's
-full reconnect, and ends when you leave voice. The room connects with
+`components/video-grid/tile-menu.ts`, loaded on first use) is the person's
+menu: Profile, Message, the two volumes kept apart, Mute stream, the local
+Mute, Focus (Back to grid when focused), Full screen, Pop out, **Stop
+watching**, and the voice roster's moderation section where the channel's
+`can_moderate_voice` allows it (none in a DM call). Profile and Message leave
+full screen first. Your own camera tile's menu has Hide my camera (the call
+view's Show my camera toggle) and Turn off camera; your own screen share has
+no menu. Cameras play on
+their own (**Automatically play cameras** in Voice & Audio settings, the
+`autoPlayCameras` preference, default on): a remote camera is subscribed as it
+is published. A screen share is opt-in, Discord-style: it arrives as a tile
+behind a **Watch stream** card, and nothing of it (screen-share audio included)
+is subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
+out; with the setting off, a camera is opt-in the same way. Stop watching
+unsubscribes either and returns the card; a stopped camera stays stopped,
+across its owner turning it off and on and across a channel switch, until you
+leave voice, and a stream that ends is forgotten rather than stopped. A
+screen share you were watching that ends says "Otto ended the stream" in its
+tile for 3 s before the tile goes; the tile's controls are dead meanwhile, and
+leaving voice or the same person sharing again replaces it at once. The watch
+lasts as long as that cover: the same person sharing again within it is still
+watched, and keeps the focus. A watch
+survives a channel switch and the app's own reconnect or rejoin, but not
+livekit-client's full reconnect, and ends when you leave voice. The setting is
+read as each camera is published (and on a reconnect's sweep), so turning it
+off leaves cameras already playing alone. The room connects with
 `autoSubscribe: false`: `handleTrackPublished` (`lib/roomEventHandlers.ts`)
-subscribes each voice unless deafened, and `RemoteTracks.watch` the streams.
-On Linux the native backend still auto-subscribes, so it unsubscribes an
-unwatched stream as it is published. Your own screen share is covered by what
-is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. In a DM call, focus view stays inside the call panel and the
+subscribes each voice unless deafened, and each stream as
+`RemoteTracks.isWatched` (`features/voice/remoteTracks.ts`) decides. On Linux
+the native backend still auto-subscribes, so it unsubscribes an unwatched
+stream as it is published. Every subscribed tile asks only for its displayed
+size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
+Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
+**Hide preview**. While you share, the voice widget shows a stream card
+(`components/voice-widget/streamCard.ts`, loaded on the first share): what is
+going out, **Change source**, **Quality** and **Stop sharing**. Change source
+opens the picker and swaps the new capture under the published track
+(`features/voice/screenshareChange.ts`), so viewers keep watching and the
+server hears no `voice_screenshare`; cancelling the picker changes nothing.
+Quality re-sizes the running capture for this share only (the Settings default
+stays). On Linux the native capture picks in its own dialog, so the card has
+Stop sharing only. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
 WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
-theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
+theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps the same call controls at hand. **Pop out**
 moves the tile's own video into a desktop window of its own (Discord-style; `window.open`
 accepted by `src-tauri/src/popout.rs`, which builds it in the main webview's process, so no
 second subscription), which can be maximised or go full screen from its own control, F or a
@@ -155,17 +206,27 @@ double-click. No capability names the pop-out label on purpose (capabilities onl
 the pop-out has none, and the main window drives its full screen by label), and the about:blank
 popup inherits the app's CSP. The stream's volume and mute go along into the window, shown over the video.
 The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
-no window opens the video stays in the grid. Full screen on a
-popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
-stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
+no window opens the video stays in the grid and an error toast says "Couldn't open the pop-out window". Full screen on a
+popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it).
+Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
+`lib/channel-navigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
+a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video
+moves in, as with Pop out). It shows the streamer's name, drags (or moves with the arrow keys) anywhere
+inside the window and keeps that spot for the session; **Return to stream** (or a double-click or
+Enter) reopens the stream view, Pop out moves it to its window, Stop watching ends the watch, and it
+closes when the stream ends. The grid's own **Show chat** control still closes the stream view
+without a mini-player, so the stream stops receiving video as before. The
+screen share you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
-stats, so it shows the resolution only.
+stats, so it shows the resolution only. A camera tile has no chip. In the grid a
+camera fills its tile, cropped at the edges; focused or full screen it shows the
+whole frame, and a screen share always does.
 Each remote tile asks only for what it shows (`setRemoteVideoView`, since
 `adaptiveStream` stays off for OC-0455): a tile no one can see (grid closed,
 app hidden or minimised, Stop watching) receives no video, a small tile gets
-the lower simulcast layer that fits it, and the stream you watch (focused,
-full screen or popped out) gets the top one.
+the lower simulcast layer that fits it, the mini-player gets the layer for its
+size, and the stream you watch (focused, full screen or popped out) gets the top one.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
@@ -188,16 +249,26 @@ has no web microphone to gate: there the same `setPttGated` flips the Rust
 session's own gate (`NativeRoom.setPttGated` → `nativeVoice.setPttGated`),
 which zeroes the open capture's processed frames, so the capture also stays
 open across presses; every enable sends the gate before the capture opens.
-Only a mute or deafen closes the capture, on both paths. **Target UX:**
+Only a mute or deafen closes the capture, on both paths.
 
-| State               | Presentation                                                                                                                                                                                                   |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate |
-| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                        |
-| release delay       | Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                            |
-| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                          |
-| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                      |
-| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                        |
+The saved Input Mode (`inputMode`, `lib/inputMode.ts`) decides whether a bound
+key gates at all. In Voice Activity mode the poller never starts and a bound key
+is only kept for later. In Push to Talk mode the poller arms the key, and the
+input-sensitivity gate steps aside only while the poller is live with a key
+bound (`effectiveVoiceSensitivity`); with no key, or on a host that cannot read
+key state, the saved sensitivity keeps gating. A profile saved before Input Mode
+existed starts in Push to Talk when it has a key bound (`migrateInputMode` in
+`main.ts`). **Target UX:**
+
+| State               | Presentation                                                                                                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| input mode          | Voice & Audio opens with an "Input Mode" choice: Voice Activity (shows Input Sensitivity) or Push to Talk (shows the key and release delay, hides Input Sensitivity); the Keybinds tab notes the key does nothing in Voice Activity mode |
+| PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate                           |
+| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                                                  |
+| release delay       | Voice & Audio (Push to Talk) and Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
+| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                                                    |
+| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                                                |
+| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                                                  |
 
 ---
 
@@ -212,7 +283,7 @@ reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 | `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already `handleVoiceLeave`, `features/voice/wsHandlers.ts`) |
 | key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                 |
 
-Per-user volume is adjustable (0–100%; saved values above 100% are read as 100%) and persisted (`userVolume_{id}` in the Rust store).
+Per-user volume is adjustable (0–200%; saved values above 200% are read as 200%) and persisted (`userVolume_{id}:{host}`). Above 100% a voice track plays through its own gain node (`lib/audioElements.ts`), since an audio element's volume stops at 1; with no running audio context it plays on the element at up to 100%. A local **Mute** per user (`userLocalMute_{id}:{host}`) silences them for this client and leaves the volume as it was; the sidebar row shows a speaker-off icon.
 
 ---
 
@@ -221,7 +292,11 @@ Per-user volume is adjustable (0–100%; saved values above 100% are read as 100
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
+"Voice connection lost — failed to reconnect" + auto-leave. A reconnect drops your camera and screen
+share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
+the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
+with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host
+still lists it. Leaving voice removes the toast. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 **A planned restart returns the call (RT-12).** The hub wipes `voice_states` on
@@ -247,7 +322,7 @@ announces are verified against the pinned identity keys (`lib/identity.ts`).
 
 | State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
+| `verified`   | Green shield; title "Same key as before · Safety number: {n} · Compare it with them to confirm it is them"                     | none needed                               |
 | `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
 | `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce    |
 | `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal  |
@@ -290,6 +365,16 @@ trust action entirely (a blind accept is refused).
   `@jitsi/rnnoise-wasm`'s sync build embeds
   (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
   cannot start, the processor runs without it.
+- **Video codec:** one setting in Settings → Voice & Audio (`videoCodec`,
+  `features/voice/videoCodec.ts`) covers camera and screen share: VP8
+  (default), H.264 or Auto. E2EE is always on, so livekit-client publishes no
+  backup codec and every viewer must decode the chosen one. Auto picks H.264
+  only when `MediaCapabilities.encodingInfo` reports it supported and
+  power-efficient at that publish's size, frame rate and bitrate and WebGL's
+  unmasked renderer names a non-Intel GPU, else VP8: livekit-client 2.22.3
+  cannot decrypt Intel Quick Sync H.264 (livekit/client-sdk-js#2140), so a
+  manual H.264 choice carries a warning. The Linux native engine always
+  publishes VP8 and the setting is hidden there.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
   (`startVadDetector`, with a setTimeout fallback of the same timing). It
   opens after about 32 ms of sustained level, so a mouse click does not open
@@ -300,6 +385,15 @@ trust action entirely (a blind accept is refused).
   the same processor over a microphone opened with the call's capture settings
   and the same detector at the same threshold: the bar is the loudest smoothed
   level it saw, on the threshold handle's axis.
+- **Automatic input sensitivity:** on by default (`autoInputSensitivity`,
+  `lib/inputMode.ts`); a profile whose slider was moved off 50 keeps manual
+  mode (`migrateAutoInputSensitivity` in `main.ts`). The detector then runs the
+  threshold 10 dB above the room's noise floor, the quietest level of the last
+  8 s (`lib/noiseFloor.ts`), clamped between -60 dBFS and the default
+  threshold, and moves it on the worklet without reopening the gate. Digital
+  silence (a mute) never becomes the floor, and an Input Volume change
+  relearns it. Settings hides the threshold handle and keeps the meter. The
+  Linux native engine gates on the manual slider and shows no switch.
 - **Push-to-talk:** the key only opens and closes the processor's second gate
   (`livekitSession.setPttGated`; `pushToTalkService.ts`). The microphone
   stays published and its capture stays open across presses, the store's
@@ -346,9 +440,11 @@ links back to the DM, and the DM list shows a phone glyph on a DM with a live ca
 
 While the open DM is the current call's DM, the panel is the call's only video
 surface: `VideoModeController` moves the shared `VideoGrid` into the panel's
-stage as soon as any camera or screen share is on (remote ones too, unlike the
-guild-channel rule that only your own video opens the grid; your own also while
-the call is still ringing or went unanswered), the chat stays visible below, and
+stage as soon as any camera or screen share is on (remote ones too, unlike a
+guild channel, where no video opens the grid on its own: turning on your camera
+or share while reading a text channel keeps the chat, and the call view shows
+it once opened; in the DM panel your own also while the call is still ringing
+or went unanswered), the chat stays visible below, and
 everyone without a camera is an avatar tile. Collapsed, the panel never reopens
 on its own; Expand shows the video. Anywhere else the grid behaves as in guild
 voice.
@@ -371,8 +467,10 @@ those sounds fall back to the system default — see
 [known limitations](../../known-limitations.md#client).
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
-leave and move; on another member joining or leaving the channel you are in; and
-on your mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+leave and move; on another member joining or leaving the channel you are in;
+on a screen share starting or ending in that channel, your own included (keyed
+off the server's roster, so a cancelled picker plays nothing); and on your
+mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
 Notifications, on by default) gates them, and DND silences them like the message
 chime. Two edges stay silent by design: push-to-talk, and the wholesale roster
 replacement (`setVoiceStates`) behind the initial `ready` and a reconnect
@@ -391,7 +489,8 @@ never silences message chimes for the rest of the session.
 
 `src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
-`src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/lib/ptt.ts`, `src/lib/inputMode.ts`, `src/lib/noiseFloor.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/components/UserBar.ts` (mute and deafen buttons),
 `src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/components/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,

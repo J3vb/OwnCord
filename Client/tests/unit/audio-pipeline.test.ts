@@ -220,6 +220,130 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("input mode", () => {
+    let pttLive = false;
+    const setPttPollingLive = (live: boolean): void => {
+      pttLive = live;
+    };
+    afterEach(() => setPttPollingLive(false));
+
+    it("a live Push to Talk key runs no sensitivity gate; Voice Activity restarts it", async () => {
+      prefs.set("voiceSensitivity", 30);
+      prefs.set("inputMode", "ptt");
+      prefs.set("pttVk", 0x41);
+      setPttPollingLive(true);
+      const pipeline = new AudioPipeline(() => pttLive);
+      const track = micTrack();
+      await pipeline.attach(track);
+      const ctx = contextOf(track);
+      expect(ctx.node("delay").delayTime.value).toBe(0);
+      expect(ctx.audioWorklet.addModule).not.toHaveBeenCalled();
+
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      prefs.set("inputMode", "vad");
+      pipeline.applyInputMode();
+      await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+      const worklet = FakeAudioWorkletNode.instances[0]!;
+      expect(worklet.port.postMessage).toHaveBeenCalledWith({
+        type: "config",
+        threshold: vadThreshold(30),
+      });
+      worklet.emit({ type: "gate", gated: true });
+      expect(outputGain(ctx).value).toBe(0);
+
+      prefs.set("inputMode", "ptt");
+      pipeline.applyInputMode();
+      expect(pipeline.isVadGated).toBe(false);
+      expect(outputGain(ctx).value).toBe(1);
+      expect(worklet.port.postMessage).toHaveBeenCalledWith({ type: "stop" });
+    });
+
+    it("keeps the sensitivity gate in Push to Talk mode until a key can gate the mic", () => {
+      prefs.set("voiceSensitivity", 70);
+      prefs.set("inputMode", "ptt");
+      const pipeline = new AudioPipeline(() => pttLive);
+      const setVoiceGate = vi.fn();
+      const room = { localParticipant: { getTrackPublication: () => undefined }, setVoiceGate };
+
+      // No key bound: nothing else gates, so the sensitivity still does.
+      setPttPollingLive(true);
+      pipeline.setRoom(room as never);
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+
+      // Key bound, but this host cannot report key state (macOS, Wayland).
+      prefs.set("pttVk", 0x41);
+      setPttPollingLive(false);
+      pipeline.applyInputMode();
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+
+      // The poller goes live: Push to Talk takes over.
+      setPttPollingLive(true);
+      pipeline.applyInputMode();
+      expect(setVoiceGate).toHaveBeenLastCalledWith(0, expect.any(Function));
+    });
+  });
+
+  describe("automatic sensitivity", () => {
+    it("runs the detector on the noise floor and seeds a restarted one from it", async () => {
+      vi.useFakeTimers({ toFake: ["performance"] });
+      try {
+        prefs.set("autoInputSensitivity", true);
+        FakeAudioContext.workletsLoad = true;
+        const pipeline = new AudioPipeline();
+        const track = micTrack();
+        await pipeline.attach(track);
+        await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+        const first = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+        expect(first.port.postMessage).toHaveBeenCalledWith({
+          type: "config",
+          threshold: vadThreshold(50),
+        });
+
+        // A second of a -60 dBFS room moves the gate 10 dB above it.
+        first.emit({ type: "rms", value: 0.001 });
+        vi.advanceTimersByTime(1100);
+        first.emit({ type: "rms", value: 0.001 });
+        const reached = 0.001 * 10 ** 0.5;
+        const moved = first.port.postMessage.mock.calls.at(-1)![0] as {
+          type: string;
+          threshold: number;
+        };
+        expect(moved.type).toBe("threshold");
+        expect(moved.threshold).toBeCloseTo(reached, 9);
+
+        // Switching modes restarts the detector: it starts where the last left off.
+        pipeline.applyInputMode();
+        await vi.waitFor(() =>
+          expect(
+            FakeAudioWorkletNode.instances.filter((w) => w.name === "vad-processor"),
+          ).toHaveLength(2),
+        );
+        const second = FakeAudioWorkletNode.instances.filter((w) => w.name === "vad-processor")[1]!;
+        await vi.waitFor(() => expect(second.port.postMessage).toHaveBeenCalled());
+        const config = second.port.postMessage.mock.calls[0]![0] as {
+          type: string;
+          threshold: number;
+        };
+        expect(config.type).toBe("config");
+        expect(config.threshold).toBeCloseTo(reached, 9);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("runs no gate while a live Push to Talk key gates, automatic or not", async () => {
+      prefs.set("autoInputSensitivity", true);
+      prefs.set("inputMode", "ptt");
+      prefs.set("pttVk", 0x41);
+      const pipeline = new AudioPipeline(() => true);
+      const track = micTrack();
+      await pipeline.attach(track);
+      const ctx = contextOf(track);
+      expect(ctx.node("delay").delayTime.value).toBe(0);
+      expect(ctx.audioWorklet.addModule).not.toHaveBeenCalled();
+    });
+  });
+
   describe("local speaking verdict", () => {
     it("reports the sensitivity gate itself, so the ring follows the slider", async () => {
       FakeAudioContext.workletsLoad = true;
@@ -477,5 +601,74 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenLastCalledWith(false);
     void detector.stop();
+  });
+
+  describe("automatic threshold (fallback path)", () => {
+    /** A detector over a constant level the test can change. */
+    async function autoDetector() {
+      vi.useFakeTimers();
+      const ctx = new FakeAudioContext();
+      const analyser = ctx.createAnalyser();
+      const state = { level: 0.003 };
+      analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) =>
+        arr.fill(state.level),
+      );
+      const onGate = vi.fn();
+      const onThreshold = vi.fn();
+      const detector = startVadDetector(ctx as never, analyser as never, "auto", {
+        onGate,
+        onThreshold,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      return { state, onGate, onThreshold, detector };
+    }
+
+    it("does not learn the floor from the start-up grace", async () => {
+      const { state, onThreshold, detector } = await autoDetector();
+      // The capture settles at a far lower level than the room.
+      state.level = 0.0001;
+      await vi.advanceTimersByTimeAsync(16 * 28);
+      state.level = 0.003;
+      await vi.advanceTimersByTimeAsync(3000);
+      for (const [threshold] of onThreshold.mock.calls) {
+        expect(threshold).toBeGreaterThan(0.003);
+      }
+      expect(onThreshold).toHaveBeenLastCalledWith(expect.closeTo(0.003 * 10 ** 0.5, 6));
+      void detector.stop();
+    });
+
+    it("steady noise closes the gate once the floor is learned", async () => {
+      // Steady noise at ~-50 dBFS, which the 0.05 manual default would also close on.
+      const { onGate, onThreshold, detector } = await autoDetector();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(onGate).toHaveBeenLastCalledWith(true);
+      expect(onThreshold).toHaveBeenLastCalledWith(expect.closeTo(0.003 * 10 ** 0.5, 6));
+      void detector.stop();
+    });
+
+    it("speech above the learned floor opens it", async () => {
+      const { state, onGate, detector } = await autoDetector();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(onGate).toHaveBeenLastCalledWith(true);
+      // -34 dBFS: under the 0.05 default, above 10 dB over the floor.
+      state.level = 0.02;
+      await vi.advanceTimersByTimeAsync(64);
+      expect(onGate).toHaveBeenLastCalledWith(false);
+      void detector.stop();
+    });
+
+    it("rising noise opens the gate, then closes it again once the floor catches up", async () => {
+      const { state, onGate, detector } = await autoDetector();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(onGate).toHaveBeenLastCalledWith(true);
+      // A fan starts at the level speech had above: it opens the gate at
+      // first, and the learned floor shuts it again within the window.
+      state.level = 0.02;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(onGate).toHaveBeenLastCalledWith(false);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(onGate).toHaveBeenLastCalledWith(true);
+      void detector.stop();
+    });
   });
 });

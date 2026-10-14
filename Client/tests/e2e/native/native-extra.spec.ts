@@ -429,7 +429,18 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
   };
   let held = false;
   try {
-    await openKeybinds();
+    // A key gates the mic only in the Push to Talk input mode (Voice & Video).
+    await openSettings(page);
+    await page
+      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Voice & Video" })
+      .click();
+    const pttMode = page.getByRole("radio", { name: "Push to Talk" });
+    await pttMode.click();
+    await expect(pttMode).toHaveAttribute("aria-checked", "true");
+    await page
+      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Keybinds" })
+      .click();
+    await expect(keybind).toBeVisible();
     await expect(keybind).toHaveText("Not set");
     await keybind.click();
     await expect(keybind).toHaveText("Press a supported key...");
@@ -442,7 +453,7 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
     const widget = page.locator(".voice-widget.visible");
     // Same budget as voice-controls.spec.ts: three connect attempts.
     await expect(widget).toContainText("Voice Connected", { timeout: 60_000 });
-    const mute = widget.getByRole("button", { name: "Mute", exact: true });
+    const mute = page.locator(".user-bar").getByRole("button", { name: "Mute", exact: true });
 
     // Each edge is a separate PowerShell start (about a second), which also
     // keeps these mute changes inside the server's two-per-second budget.

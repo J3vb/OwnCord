@@ -646,7 +646,17 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         });
         owner.addCleanup(unsubscribe);
       }
-      const origin = await owner.run(ensureHttpProxy(snapshot.host));
+      let origin: string;
+      try {
+        origin = await owner.run(ensureHttpProxy(snapshot.host));
+      } catch (proxyErr) {
+        owner.assertCurrent();
+        // start_http_proxy rejects with a bare string; type it like a failed fetch.
+        log.error(`${label} proxy start failed`, { method, path, error: String(proxyErr) });
+        throw new TransportError(proxyErr instanceof Error ? proxyErr.message : String(proxyErr), {
+          cause: proxyErr,
+        });
+      }
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
       let res: Response;
@@ -719,14 +729,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
   }
 
-  function adminRequest<T>(
+  function channelRequest<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    // i18n-exempt: log label for admin requests, never rendered
-    return doFetch<T>("Admin API", "/admin/api", method, path, body, signal);
+    return request<T>(method, `/moderation/channels${path}`, body, signal);
   }
 
   function memberRequest<T>(
@@ -1148,11 +1157,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getMessages(
       channelId: number,
-      options?: { before?: number; limit?: number },
+      options?: { before?: number; after?: number; limit?: number },
       signal?: AbortSignal,
     ): Promise<MessagesResponse> {
       const params = new URLSearchParams();
       if (options?.before !== undefined) params.set("before", String(options.before));
+      // `after` pages the other way (oldest-first) and the server rejects it
+      // combined with `before`.
+      if (options?.after !== undefined) params.set("after", String(options.after));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
       return channelContent(channelId, () =>
@@ -1347,6 +1359,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         multipart: true,
         onUploadProgress: onProgress,
       });
+    },
+
+    /** Withdraw an upload that was never sent, freeing its quota now. */
+    discardUpload(id: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/uploads/${encodeURIComponent(id)}`, undefined, signal);
     },
 
     // ── Invites ───────────────────────────────────────────
@@ -1554,6 +1571,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     // ── Admin: Channels ──────────────────────────────────────
+    // These ride /api/v1/moderation/channels, not /admin/api, for the same
+    // reason as the member calls below (admin.NewChannelAPI).
 
     adminCreateChannel(
       data: {
@@ -1565,7 +1584,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
-      return adminRequest<ChannelResponse>("POST", "/channels", data, signal);
+      return channelRequest<ChannelResponse>("POST", "", data, signal);
     },
 
     adminUpdateChannel(
@@ -1595,11 +1614,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
-      return adminRequest<ChannelResponse>("PATCH", `/channels/${id}`, data, signal);
+      return channelRequest<ChannelResponse>("PATCH", `/${id}`, data, signal);
     },
 
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
-      return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
+      return channelRequest<void>("DELETE", `/${id}`, undefined, signal);
     },
 
     // ── Members (moderation) ────────────────────────────────

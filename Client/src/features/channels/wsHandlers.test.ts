@@ -26,6 +26,7 @@ vi.mock("../../lib/read-state", async (importOriginal) => {
   return { ...actual, markChannelRead: vi.fn() };
 });
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/notifications", () => ({ notifyMention: vi.fn() }));
 let lastChannel: number | null = null;
 vi.mock("../../lib/last-channel", () => ({
   loadLastChannel: () => lastChannel,
@@ -34,6 +35,7 @@ vi.mock("../../lib/last-channel", () => ({
 }));
 import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
+import { notifyMention } from "../../lib/notifications";
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -185,6 +187,57 @@ describe("handleChannelDelete", () => {
 });
 
 describe("handleMentionCount", () => {
+  describe("notifies for a mention in another channel (WP 2B-1)", () => {
+    it("notifies once when the total rises on a channel that is not active", () => {
+      setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
+      setActiveChannel(2);
+
+      handleMentionCount({ channel_id: 3, count: 1 });
+
+      expect(notifyMention).toHaveBeenCalledTimes(1);
+      expect(notifyMention).toHaveBeenCalledWith(3);
+    });
+
+    it("does not notify when the total falls (a delete or purge)", () => {
+      setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
+      setActiveChannel(2);
+      setMentionCount(3, 1);
+
+      handleMentionCount({ channel_id: 3, count: 0 });
+
+      expect(notifyMention).not.toHaveBeenCalled();
+    });
+
+    it("does not notify when the total is unchanged", () => {
+      setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
+      setActiveChannel(2);
+      setMentionCount(3, 2);
+
+      handleMentionCount({ channel_id: 3, count: 2 });
+
+      expect(notifyMention).not.toHaveBeenCalled();
+    });
+
+    it("never notifies for the active channel, focused or away", () => {
+      setChannels([channel(2, "text", 0)]);
+      setActiveChannel(2);
+
+      handleMentionCount({ channel_id: 2, count: 1 });
+      hasFocus.mockReturnValue(false);
+      handleMentionCount({ channel_id: 2, count: 2 });
+
+      expect(notifyMention).not.toHaveBeenCalled();
+    });
+
+    it("does not notify for a DM channel id", () => {
+      setChannels([{ ...channel(7, "dm", 0), mention_count: 0 }]);
+
+      handleMentionCount({ channel_id: 7, count: 3 });
+
+      expect(notifyMention).not.toHaveBeenCalled();
+    });
+  });
+
   it("sets the badge total on a guild channel from the server's frame", () => {
     setChannels([{ ...channel(2, "text", 0), mention_count: 0, unread_count: 4 }]);
 

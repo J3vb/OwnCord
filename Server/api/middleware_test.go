@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -395,6 +396,78 @@ func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	}
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("AuthMiddleware DB error status = %d, want 503", rr.Code)
+	}
+}
+
+// blockingSessionStore is the real DB with AuthMiddleware's two background
+// writes held until their ctx ends, reporting how each one ended — a wedged
+// DB, as far as those goroutines can tell.
+type blockingSessionStore struct {
+	*db.DB
+	ended chan error
+}
+
+func (s *blockingSessionStore) DeleteSession(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	s.ended <- ctx.Err()
+	return ctx.Err()
+}
+
+func (s *blockingSessionStore) TouchAPIToken(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	s.ended <- ctx.Err()
+	return ctx.Err()
+}
+
+// The expired-session delete and the API-token touch run after the response
+// on a goroutine detached from the request. Against a wedged DB each must give
+// up at its deadline instead of parking a goroutine per request forever.
+func TestAuthMiddleware_BackgroundWritesAreBounded(t *testing.T) {
+	api.SetBackgroundWriteTimeoutForTest(t, 20*time.Millisecond)
+
+	tests := []struct {
+		name string
+		seed func(t *testing.T, database *db.DB) string
+	}{
+		{"expired session delete", func(t *testing.T, database *db.DB) string {
+			uid, _ := database.CreateUser(context.Background(), "wedge-expired", "hash", 4)
+			token, _ := auth.GenerateToken()
+			pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
+			if _, err := database.ExecContext(context.Background(),
+				`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
+				uid, auth.HashToken(token), "test", "127.0.0.1", pastTime,
+			); err != nil {
+				t.Fatalf("insert expired session: %v", err)
+			}
+			return token
+		}},
+		{"api token touch", func(t *testing.T, database *db.DB) string {
+			uid, _ := database.CreateUser(context.Background(), "wedge-bot", "hash", 4)
+			token, _ := auth.GenerateToken()
+			if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil); err != nil {
+				t.Fatalf("CreateAPIToken: %v", err)
+			}
+			return token
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := newAPITestDB(t)
+			token := tt.seed(t, database)
+			store := &blockingSessionStore{DB: database, ended: make(chan error, 1)}
+			h := api.AuthMiddleware(service.NewSessionService(store))(http.HandlerFunc(ok))
+
+			h.ServeHTTP(httptest.NewRecorder(), withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
+
+			select {
+			case err := <-store.ended:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("background write ended with %v, want context.DeadlineExceeded", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("background write never ended: its ctx has no deadline")
+			}
+		})
 	}
 }
 
@@ -1532,23 +1605,28 @@ func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
 // TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies pins the
 // runtime hint for a reverse proxy nobody declared: a loopback peer sending
 // X-Forwarded-For while trusted_proxies is empty means every client looks like
-// the proxy, so the allowlist admits them all. It warns once, not per request.
+// the proxy, so the allowlist admits them all. It warns once, not per request,
+// for either forwarding header the client-IP resolver reads.
 func TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	for _, header := range []string{"X-Forwarded-For", "X-Real-IP"} {
+		t.Run(header, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
 
-	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
-	for range 2 {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.RemoteAddr = "127.0.0.1:9999"
-		req.Header.Set("X-Forwarded-For", "198.51.100.7")
-		h.ServeHTTP(httptest.NewRecorder(), req)
-	}
+			h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+			for range 2 {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				req.RemoteAddr = "127.0.0.1:9999"
+				req.Header.Set(header, "198.51.100.7")
+				h.ServeHTTP(httptest.NewRecorder(), req)
+			}
 
-	if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
-		t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+			if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
+				t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+			}
+		})
 	}
 }
 

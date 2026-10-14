@@ -178,7 +178,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: Server/
@@ -202,7 +202,9 @@ jobs:
       # The doc gates the race leg runs with -count=1 because they read files
       # outside the module. Cheap (seconds) and pure drift checks.
       - name: Document gates (-count=1)
-        run: go test -count=1 ./cmd/dbinventory/ ./migrations/
+        run: |
+          go test -count=1 ./cmd/dbinventory/ ./migrations/
+          go test -count=1 -run TestBundledChangelog ./admin/
 
       # Same action, version and inputs as the required server leg's Lint step;
       # the point is the earlier report, not a second policy.
@@ -212,6 +214,34 @@ jobs:
           version: v2.14.0
           working-directory: Server/
           verify: false
+
+      # Lint only sees the default build, so a file behind a build tag or a
+      # GOOS suffix is never linted: a `%v` on an error in plugin/
+      # sandbox_wazero.go (`wazero`) went unseen that way. These passes re-run
+      # the two Go guardrail linters from CLAUDE.md ("AI Quality Guardrails"),
+      # nakedret and errorlint, over each tagged variant. They are limited with
+      # --enable-only because the other linters report older findings in those
+      # variants, and this pass must only fail on what the guardrails forbid.
+      # skip-save-cache: the first Lint step already owns the cache entry.
+      - name: Lint guardrails (-tags otel,wazero)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          working-directory: Server/
+          verify: false
+          skip-save-cache: true
+          args: --enable-only nakedret,errorlint --build-tags otel,wazero
+
+      - name: Lint guardrails (GOOS=windows)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOOS: windows
+        with:
+          version: v2.14.0
+          working-directory: Server/
+          verify: false
+          skip-save-cache: true
+          args: --enable-only nakedret,errorlint
 
   server-build-test:
     name: Server Build & Test (${{ matrix.os }})
@@ -493,9 +523,12 @@ jobs:
       # leg's package set cannot silently drop the gates.
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
+      #   admin            -> CHANGELOG.md (the panel's bundled release notes)
       - name: Run document gates (-count=1)
         if: env.RUN_SERVER != 'false'
-        run: go test -count=1 ./cmd/dbinventory/ ./migrations/
+        run: |
+          go test -count=1 ./cmd/dbinventory/ ./migrations/
+          go test -count=1 -run TestBundledChangelog ./admin/
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
       # only COMPILES the otel/wazero variants; the tests behind those tags
@@ -784,6 +817,16 @@ jobs:
       - name: Self-test the release gate
         run: node --test scripts/verify-gate-evidence.test.mjs
 
+      # The nightly-drills gate in release.yml, exercised on a recorded API
+      # response for the same reason as the step above.
+      - name: Self-test the nightly drills release gate
+        run: node --test scripts/verify-nightly-drills.test.mjs
+
+      # The release-status gate in release.yml, on fixtures and on the real
+      # docs/STATUS.md, for the same reason.
+      - name: Self-test the release status gate
+        run: node --test scripts/verify-release-status.test.mjs
+
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
@@ -918,7 +961,13 @@ jobs:
   # One vulnerability scan across every lockfile, plus cargo-deny for the
   # licence and source policy osv-scanner does not carry. Gated on `deps`: a
   # manifest, a lockfile, osv-scanner.toml or deny.toml. A source-only change
-  # cannot move a version, so it does not pay for this.
+  # cannot move a version, so it does not pay for this. A new advisory against
+  # an untouched lockfile is caught by weekly-supply-chain.yml, which repeats
+  # these steps on main every Monday; keep the two in sync
+  # (scripts/check-supply-chain-sync.test.mjs fails Repository Hygiene if not).
+  #
+  # Both this job and workflow-lint are required checks on dev. Skipped by the
+  # selector they count as passing; on main they always run.
   #
   # Both tools are clean at HEAD with the reviewed baselines committed at
   # osv-scanner.toml and Client/src-tauri/deny.toml; each exception names its

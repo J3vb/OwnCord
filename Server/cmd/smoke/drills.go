@@ -296,16 +296,124 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 		fmt.Println("drills:", phaseLetters(phases), "against", bin)
 	}
 
-	for _, p := range phases {
-		if err := d.runPhase(p); err != nil {
-			return err
+	// Every requested phase runs even after one fails: stopping at the first
+	// red phase hid C, D and S from 2026-10-02 on, behind a phase R
+	// failure nobody could see past. A failed phase may leave a server on the
+	// port, so the port is reclaimed before the next phase asserts it is free.
+	results := runEach(phases, func(p phase) error {
+		err := d.runPhase(p)
+		if err != nil {
+			fmt.Printf("::error::%v\n", err)
+			if !d.docker {
+				d.reclaimPort()
+			}
 		}
+		return err
+	})
+	fmt.Print(d.table(results))
+	if err := failedPhases(results); err != nil {
+		return err
 	}
 	// Printed here rather than by main, because a phase that skipped is not a
 	// pass and the run's last line is where that has to be legible: "phase D:
 	// passed" over a skip is the read the brief's gotcha forbids.
 	fmt.Println(d.summary(phases))
 	return nil
+}
+
+// phaseResult is one phase's outcome: err is nil when the phase did not fail,
+// which still covers a skip — the table says which.
+type phaseResult struct {
+	phase phase
+	err   error
+}
+
+// runEach runs every phase in order and keeps going past a failure, so one red
+// phase cannot hide the others.
+func runEach(phases []phase, run func(phase) error) []phaseResult {
+	results := make([]phaseResult, 0, len(phases))
+	for _, p := range phases {
+		results = append(results, phaseResult{phase: p, err: run(p)})
+	}
+	return results
+}
+
+// failedPhases is the run's error: nil when no phase failed, otherwise one
+// error naming every failed phase, so the exit status is non-zero whichever
+// phase it was.
+func failedPhases(results []phaseResult) error {
+	var failed []string
+	for _, r := range results {
+		if r.err != nil {
+			failed = append(failed, string(r.phase.letter))
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("failure and recovery drills failed: %d of %d phases (%s), see the summary above",
+		len(failed), len(results), strings.Join(failed, ", "))
+}
+
+// table is the per-phase summary printed after every run, red or green: one
+// row per requested phase with its result and, for anything but a clean pass,
+// why. The reason is the error's first line; the full error, with the server
+// log, was printed when the phase failed.
+func (d *drill) table(results []phaseResult) string {
+	var b strings.Builder
+	b.WriteString("drills summary:\n")
+	fmt.Fprintf(&b, "  %-6s %-8s %s\n", "phase", "result", "reason")
+	for _, r := range results {
+		result, reason := "passed", ""
+		switch {
+		case r.err != nil:
+			result = "FAILED"
+			reason, _, _ = strings.Cut(r.err.Error(), "\n")
+		case slices.Contains(d.skipped, r.phase.letter):
+			result, reason = "skipped", "no measurement was made"
+		case len(d.partial[r.phase.letter]) > 0:
+			reason = "except " + strings.Join(d.partial[r.phase.letter], "; except ")
+		}
+		fmt.Fprintf(&b, "  %-6c %-8s %s\n", r.phase.letter, result, reason)
+	}
+	return b.String()
+}
+
+// reclaimPort frees the port after a failed phase, so the next phase measures
+// its own server rather than failing on this one's leftover. The server this
+// harness spawned is killed by annotate on the way to the failure; what can
+// remain is a self-restart replacement, which is not this harness's child (see
+// awaitRestart) and may still be booting, so the port alone cannot say whether
+// one exists. It is found by its working directory, which it inherited from a
+// boot in one of this run's install directories, so nothing outside the run is
+// touched. Where that lookup is not available the next phase fails on
+// ensurePortFree, which names the cause, and the table still lists it.
+func (d *drill) reclaimPort() {
+	if d.srv != nil && !d.srv.adopted && !d.srv.exited && d.srv.cmd != nil {
+		_ = d.srv.cmd.Process.Kill()
+	}
+	d.srv = nil
+	pids := strayServers(d.dirs)
+	if len(pids) == 0 {
+		if serving(d.baseURL()) {
+			fmt.Printf("%s: something is still serving %s and no process from this run's install directories was found to stop\n", d.phase, d.baseURL())
+		}
+		return
+	}
+	for _, sig := range []func(int) error{terminate, kill} {
+		for _, pid := range pids {
+			_ = sig(pid)
+		}
+		deadline := time.Now().Add(drainBudget)
+		for time.Now().Before(deadline) {
+			if len(strayServers(d.dirs)) == 0 && !serving(d.baseURL()) {
+				fmt.Printf("%s: stopped the %d process(es) the failed phase left behind\n", d.phase, len(pids))
+				return
+			}
+			time.Sleep(pollEvery)
+		}
+	}
+	fmt.Printf("%s: %s is still served after stopping this run's leftover processes %v\n", d.phase, d.baseURL(), pids)
 }
 
 // summary is the run's last line. It exists as a function for the same reason
@@ -444,6 +552,9 @@ type drill struct {
 	// letter is the running phase's letter, so a step can record its own skip
 	// without being handed it.
 	letter byte
+	// dirs are the install directories this run booted a server in, which is
+	// how reclaimPort recognises a leftover replacement as this run's own.
+	dirs []string
 }
 
 func (d *drill) baseURL() string { return defaultBaseURL }
@@ -469,6 +580,9 @@ func (d *drill) boot(logName string, extraEnv ...string) error {
 // about the directory that is missing.
 func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	d.dir = dir
+	if !slices.Contains(d.dirs, dir) {
+		d.dirs = append(d.dirs, dir)
+	}
 	d.boots++
 	name := fmt.Sprintf("boot%d-%s", d.boots, logName)
 	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o700); err != nil {
@@ -950,7 +1064,7 @@ const (
 )
 
 // classifyFullSend sorts a chat_send reply. The distinction that matters is
-// between a refusal and a throttle: service.sendMessagePrecheck charges the
+// between a refusal and a throttle: service.sendMessageRateGate charges the
 // per-user chat rate limit BEFORE it reads the channel, so a RATE_LIMITED reply
 // never reached SQLite and proves nothing about the disk. Counting one as a
 // refusal is how a run that only ever touched the rate limiter comes to report
@@ -3206,7 +3320,7 @@ const (
 
 	// drillFullSendPause spaces the full stage's sends. MessageService's
 	// precheck allows ten chat sends per user per second
-	// (service.sendMessagePrecheck) and answers RATE_LIMITED BEFORE it reads
+	// (service.sendMessageRateGate) and answers RATE_LIMITED BEFORE it reads
 	// the channel, let alone writes to a full disk, so a loop that asked fifty
 	// times in a few milliseconds would measure the drill's own pacing and
 	// report it as the filesystem refusing. 120ms is eight a second: under the

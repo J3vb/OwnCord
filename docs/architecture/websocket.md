@@ -1,20 +1,28 @@
 # WebSocket / Real-time Engine
 
-**Verified against:** commit `a3a0a49b`, 2026-09-18
+**Verified against:** `origin/dev` at `ac6ffc4e`, 2026-10-13
 
-The `Server/ws` package (~9.5k LOC production code, the largest in the server)
-implements the real-time engine: a single `Hub` owning all client connections,
-a topic-based pub/sub, a monotonic sequence counter, a 3-tier reconnect replay
-pipeline, and a single typed (V2) command dispatch.
+This page explains how the server's real-time engine works: how a client
+connects and signs in, how missed events are replayed after a reconnect, and
+how the server protects itself from slow clients. Read it before you change
+anything in `Server/ws/`.
 
-Message-type constants are **generated**: `protocol/schema.json` is the
-single source of truth, and `Server/cmd/genprotocol` emits both
-`Server/ws/message_types.go` and
-`Client/src/lib/protocolTypes.ts` from it
-(`make protocol-generate`; CI fails on drift via `make protocol-verify`).
-The one exception is the plugin command family (`chat_command`,
-`command_reply`, `plugin_broadcast`), declared by hand in
-`Server/ws/handlers_command.go` outside the schema — see
+The `Server/ws` package is the largest in the server, at about 18,000 lines of
+production code. It contains:
+
+- a single `Hub` that owns every client connection;
+- a topic-based pub/sub;
+- a sequence counter that only goes up;
+- a 3-tier reconnect replay pipeline;
+- one typed (V2) command dispatch.
+
+Message-type constants are **generated**. `protocol/schema.json` is the single
+source of truth. `Server/cmd/genprotocol` generates both
+`Server/ws/message_types.go` and `Client/src/lib/protocolTypes.ts` from it
+(`make protocol-generate`). CI fails on drift through `make protocol-verify`.
+That includes the plugin command family (`chat_command`, `command_reply`,
+`plugin_broadcast`), which is in the schema like every other type; its handler
+is `Server/ws/handlers_command.go`. The wire formats are in
 [protocol.md](../protocol.md).
 
 ## D4a — Connect, authenticate, replay
@@ -48,20 +56,29 @@ sequenceDiagram
     end
 ```
 
-**What this shows.** Auth is deliberately in-band (the WS route mounts without
-`AuthMiddleware`). Every broadcast is assigned a monotonic `seq` under a
-dedicated mutex; the client reports its `last_seq` on reconnect and the hub
-picks the cheapest replay tier. A `visibilityChangeSeq` watermark forces a full
-re-sync whenever channel visibility changed while the client was away, so
-permission changes can never be replayed around; a message frame shed before it
-got a `seq` (topic limiter or full dispatch queue) moves the same watermark, so
-a client resuming at or behind the shed recovers it from the database. `auth_ok.replay_source`
-(`none|buffer|db`) reports which tier served the reconnect and feeds the
-`ws_reconnect_tier_total` metric. `active_channel_id` is what lets a resuming
-client re-declare its channel without a separate focus frame, and an absent
-`epoch` is read as 0, the pre-epoch client — both are attacker-controlled input
-validated before use. Neither replay tier's depth is a fixed constant: they are
-the `event_persistence.replay_ring_size` and `replay_cold_limit` config knobs.
+**What this shows.** Sign-in happens inside the socket on purpose: the WS route
+is mounted without `AuthMiddleware`, and the first frame carries the token.
+
+Every broadcast gets a `seq` number under a dedicated mutex, and `seq` only
+goes up. On reconnect the client reports its `last_seq`, and the hub picks the
+cheapest replay tier that can serve it.
+
+- **Visibility changes.** A `visibilityChangeSeq` watermark forces a full
+  re-sync whenever channel visibility changed while the client was away. So a
+  permission change can never be bypassed by replay.
+- **Shed frames.** A message frame dropped before it got a `seq` (by the topic
+  limiter or a full dispatch queue) moves the same watermark. A client resuming
+  at or behind that point recovers the message from the database.
+- **Reporting.** `auth_ok.replay_source` (`none`, `buffer` or `db`) says which
+  tier served the reconnect. It also feeds the `ws_reconnect_tier_total`
+  metric.
+- **Client input.** `active_channel_id` lets a resuming client re-declare its
+  channel without a separate focus frame. A missing `epoch` is read as 0, the
+  pre-epoch client. Both values come from the client, so the server validates
+  them before use.
+
+Neither replay tier has a fixed depth. They are set by the
+`event_persistence.replay_ring_size` and `replay_cold_limit` config keys.
 
 ## D4b — Broadcast fanout and backpressure
 
@@ -82,14 +99,26 @@ flowchart LR
     LO -.->|"low full → silently dropped"| X
 ```
 
-**What this shows.** Overflow policy is intentional: dropping a chat message
-would corrupt state, so a full normal/high queue disconnects the client and the
-replay pipeline restores consistency. Presence shares the normal queue but is
-the exception: a presence frame that finds it full is dropped and repaired by a
-full presence snapshot (`Client.sendPresenceMsg`), so a reconnect herd cannot
-kick clients. Typing, moderation and mention-badge notices are lossy by design. The
-global `broadcast` channel (1024) drops with a `broadcastDrops` counter when
-saturated.
+**What this shows.** The overflow policy is deliberate.
+
+- Dropping a chat message would leave the client with wrong state. So a full
+  normal or high-priority queue disconnects the client, and replay restores
+  consistency when it reconnects.
+- Presence shares the normal queue but is the exception. A presence frame that
+  finds the queue full is dropped and later repaired by a full presence
+  snapshot (`Client.sendPresenceMsg`). That way a burst of reconnects cannot
+  kick other clients.
+- Typing, moderation and mention-badge notices may be lost by design.
+- The global `broadcast` channel (1024) drops frames and counts them in
+  `broadcastDrops` when it is full.
+- A content frame in a channel that may be NSFW-labelled needs a database read
+  (the label and who acknowledged it) before it can be numbered. That read runs
+  off the dispatch loop, with a 1 s limit, while the frame waits in a lane for
+  its channel; later frames for the same channel wait behind it, and every
+  other frame keeps flowing. A read that fails or times out withholds the
+  frame and moves the visibility watermark, so a resuming client re-syncs
+  (`Server/ws/hub_content_gate.go`). Order within a channel is kept; a global
+  frame can overtake a channel's frame that is still waiting.
 
 ## D4c — Typed command dispatch
 
@@ -108,38 +137,44 @@ stateDiagram-v2
     BadRequest --> [*]
 ```
 
-**What this shows.** The V1→V2 strangler-fig migration is complete (audit
-A-2026-07-09, done 2026-07-20): every inbound type parses through its constructor
-into a typed `Command`, dispatches to a single V2 handler, and the handler's
-`Result` is applied by one applier. There is no second (V1) generation, no
-lenient parser, and no second registry. Handlers stay effect-light — the two
-hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
-un-throttled on channel switch and on disconnect — a completed call is first
-held for 15 s so a resuming socket inherits it, `voice_grace.go`) are triggered
-from the applier via `Result.JoinVoice` / `Result.LeaveVoice` rather than
-re-expressed as pure events.
+**What this shows.** Every inbound message type is parsed by its constructor
+into a typed `Command`. One V2 handler runs it, and one applier applies the
+handler's `Result`. The old V1 path is gone (audit A-2026-07-09, done
+2026-07-20): there is no second parser and no second registry.
 
-The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
-connection's protocol Ping every 25s refreshes activity and closes a peer that
-misses a Pong),
-revoked-session sweep (30s, plus
-per-connection revalidation every 10 messages, plus an immediate per-account
-check, `DisconnectIfSessionRevoked`, after a password or 2FA change or a
-session revoke), stale-voice-state sweep (60s),
-LiveKit membership reconciler (60s, `voice_reconcile.go`; see
-[livekit-setup.md](../livekit-setup.md)),
-panic containment on the run loop (3 panics/60s, or one Windows memory fault
-(SRE-08) → stop and exit), LiveKit client and
-optional managed subprocess, and the voice E2EE key-holder map
-([voice-e2ee.md](voice-e2ee.md)). Collaborators are supplied up front through
-the validated `ws.HubOptions` (`Server/ws/hub_options.go`) — `NewHub` runs
-`validateHubOptions` before it builds, so an incomplete hub fails construction
-rather than at first use. The event-persistence pair is still attached after
-the hub is running (`SetEventPersister` / `SetEventStore`, from
-`Server/internal/app/persistence.go`), and that post-`Run` hot-swap is the
-temporal coupling the audit note names.
+Handlers stay light on side effects. The two voice routines that touch the hub
+directly (`handleVoiceJoin` and `handleVoiceLeave`) are triggered from the
+applier through `Result.JoinVoice` and `Result.LeaveVoice`. They are also
+called without throttling on a channel switch and on disconnect. A call that
+ended is first held for 15 s so a resuming socket can take it over
+(`voice_grace.go`).
 
-**Source of truth:** `Server/ws/hub.go`, `Server/ws/serve.go`,
+### What else the Hub owns
+
+| Job                           | Schedule and detail                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stale-client sweep            | every 30 s; a client idle for 90 s is removed. Each connection's protocol Ping every 25 s refreshes activity and closes a peer that misses a Pong                                    |
+| Revoked-session sweep         | every 30 s, plus a check every 10 messages per connection, plus an immediate check for one account (`DisconnectIfSessionRevoked`) after a password or 2FA change or a session revoke |
+| Stale-voice-state sweep       | every 60 s                                                                                                                                                                           |
+| LiveKit membership reconciler | every 60 s (`voice_reconcile.go`; see [livekit-setup.md](../livekit-setup.md))                                                                                                       |
+| Removed-participant watch     | every 2 s, only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                                                               |
+| Panic containment             | on the run loop: 3 panics in 60 s, or one Windows memory fault (SRE-08), stops the hub and exits the process                                                                         |
+| LiveKit client and subprocess | the client, and the optional managed `livekit-server` process                                                                                                                        |
+| Voice E2EE key-holder map     | see [voice-e2ee.md](voice-e2ee.md)                                                                                                                                                   |
+
+Each sweep and watch tick runs with a timeout under the hub's lifecycle
+context. So `Stop` cancels it and `Done()` waits for it (`hub_sweep.go`,
+`hub_stop.go`).
+
+Collaborators are passed in up front through the validated `ws.HubOptions`
+(`Server/ws/hub_options.go`). `NewHub` runs `validateHubOptions` before it
+builds anything, so an incomplete hub fails at construction, not at first use.
+The event-persistence pair is still attached after the hub is running
+(`SetEventPersister` / `SetEventStore`, from
+`Server/internal/app/persistence.go`). That hot-swap after `Run` is the timing
+dependency the audit note names.
+
+**Source of truth:** `Server/ws/hub.go`, `Server/ws/hub_content_gate.go`, `Server/ws/serve.go`,
 `Server/ws/client.go`, `Server/ws/handlers.go`, `Server/ws/command.go`,
 `Server/ws/pubsub.go`, `Server/ws/ringbuffer.go`, `Server/ws/event_persister.go`,
 `Server/ws/message_types.go`, `Server/migrations/014_events_table.sql`.

@@ -5,10 +5,18 @@
 
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
-import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
+import {
+  voiceStore,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  isSelfMuted,
+  setMutedBeforeDeafen,
+  saveSelfVoiceState,
+} from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { noteJoinSent } from "../../features/voice/joinRequest";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
@@ -82,45 +90,56 @@ export function createVoiceWidgetCallbacks(
       // unmute, so don't spend the round-trip (keybinds reach here too, not
       // just the disabled button).
       if (state.localServerMuted === true) return;
+      // Mute and deafen apply locally whatever the chat socket is doing, in a
+      // call or not; the frame goes out only in a call on a live socket, and
+      // the reconnect or the next join restates it.
+      const live = socketLive() && state.currentChannelId !== null;
       if (isSelfMuted(state)) {
         // With the push-to-talk key up the gate inside the mic processor
         // stays closed, so lifting the mute never opens a live mic.
         voiceSessionSetMuted(false);
-        ws.send({ type: "voice_mute", payload: { muted: false } });
+        if (live) ws.send({ type: "voice_mute", payload: { muted: false } });
         // A moderator-imposed deafen is not ours to lift; the server refuses
         // the undeafen, so don't spend the round-trip (same guard as
         // onDeafenToggle's localServerMuted check below).
         if (state.localDeafened && state.localServerDeafened !== true) {
           voiceSessionSetDeafened(false);
-          ws.send({ type: "voice_deafen", payload: { deafened: false } });
+          setMutedBeforeDeafen(false);
+          if (live) ws.send({ type: "voice_deafen", payload: { deafened: false } });
         }
       } else {
         voiceSessionSetMuted(true);
-        ws.send({ type: "voice_mute", payload: { muted: true } });
+        if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
       }
+      saveSelfVoiceState();
     },
     onDeafenToggle: () => {
       if (!limiters.voice.tryConsume()) return;
       const state = voiceStore.getState();
       if (state.localServerDeafened === true) return;
+      const live = socketLive() && state.currentChannelId !== null;
       if (state.localDeafened) {
         voiceSessionSetDeafened(false);
-        ws.send({ type: "voice_deafen", payload: { deafened: false } });
+        if (live) ws.send({ type: "voice_deafen", payload: { deafened: false } });
         // A moderator-imposed mute is not ours to lift; the server refuses
         // the unmute, so don't spend the round-trip (same guard as
-        // onMuteToggle above).
-        if (state.localServerMuted !== true) {
+        // onMuteToggle above). A mute the member had before deafening is
+        // theirs to keep.
+        if (state.localServerMuted !== true && state.mutedBeforeDeafen !== true) {
           voiceSessionSetMuted(false);
-          ws.send({ type: "voice_mute", payload: { muted: false } });
+          if (live) ws.send({ type: "voice_mute", payload: { muted: false } });
         }
+        setMutedBeforeDeafen(false);
       } else {
+        setMutedBeforeDeafen(state.localMuted);
         voiceSessionSetDeafened(true);
-        ws.send({ type: "voice_deafen", payload: { deafened: true } });
+        if (live) ws.send({ type: "voice_deafen", payload: { deafened: true } });
         if (!state.localMuted) {
           voiceSessionSetMuted(true);
-          ws.send({ type: "voice_mute", payload: { muted: true } });
+          if (live) ws.send({ type: "voice_mute", payload: { muted: true } });
         }
       }
+      saveSelfVoiceState();
     },
     onCameraToggle: () => {
       if (!limiters.voiceVideo.tryConsume()) return;
@@ -206,7 +225,11 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       }
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
-      ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+      // The user's own join: the server's rejoin block after a moderator
+      // move or kick refuses only automatic rejoins (voice_rejoin_block.go).
+      noteJoinSent(
+        ws.send({ type: "voice_join", payload: { channel_id: channelId, user_initiated: true } }),
+      );
     },
     onVoiceLeave: () => {
       log.info("Leaving voice channel");

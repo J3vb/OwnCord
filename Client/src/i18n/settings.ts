@@ -2,7 +2,7 @@ import { defineCatalog } from "./format";
 
 /**
  * Settings copy (B9-3 Accessibility tab; B9-20 extends it): tab labels,
- * Appearance, Notifications, Text & Images, Voice & Audio, Keybinds,
+ * Appearance, Notifications, Text & Images, Voice & Video, Keybinds,
  * Advanced, Logs and the connection-diagnostics panel. Loads with the lazily
  * loaded settings overlay, so none of it is in the startup chunk.
  */
@@ -13,10 +13,12 @@ export const settingsText = defineCatalog("settings", {
   "tabs.notifications": "Notifications",
   "tabs.textImages": "Text & Images",
   "tabs.accessibility": "Accessibility",
-  "tabs.voice": "Voice & Audio",
+  "tabs.voice": "Voice & Video",
   "tabs.keybinds": "Keybinds",
   "tabs.advanced": "Advanced",
   "tabs.logs": "Diagnostics & logs",
+  "tabs.about": "About",
+  "tabs.aboutUpdate": "Update available",
 
   "common.unknown": "Unknown",
   "common.save": "Save",
@@ -118,7 +120,9 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.clear": "Clear",
   "keybinds.pressKey": "Press a supported key...",
   "keybinds.pttHint":
-    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
+    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, Ctrl, Shift, Alt, Caps Lock, the key left of 1, and Mouse 4/5.",
+  "keybinds.pttModeOff":
+    "Push to Talk is off, so this key does nothing. Turn it on in Voice & Video under Input Mode.",
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
   "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
@@ -126,7 +130,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
-  "keybinds.voiceHint": "Voice shortcuts apply while you are connected to a voice channel.",
+  "keybinds.voiceHint":
+    "Mute and Deafen work anywhere; the camera shortcut applies while you are connected to a voice channel.",
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
@@ -156,8 +161,6 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.key.escape": "Escape",
   "keybinds.key.altArrow": "Alt + ↑ / ↓",
   "keybinds.key.altShiftArrow": "Alt + Shift + ↑ / ↓",
-  "keybinds.key.ctrlM": "Ctrl + M",
-  "keybinds.key.ctrlD": "Ctrl + D",
   "keybinds.key.ctrlShiftV": "Ctrl + Shift + V",
   "keybinds.key.ctrlU": "Ctrl + U",
   "keybinds.key.arrowUp": "Arrow Up",
@@ -224,9 +227,13 @@ export const settingsText = defineCatalog("settings", {
   "logs.errors": { one: "{count} error", other: "{count} errors" },
   "logs.clientLogs": "Client logs",
   "logs.getHelp": "Get help",
-  "logs.version.loading": "Client version: loading...",
-  "logs.version.known": "Client version: v{version}",
-  "logs.version.unknown": "Client version: unknown",
+  "updates.label": "Updates",
+  "updates.desc": "Look for a newer OwnCord client on your server.",
+  "updates.check": "Check for updates",
+  "updates.checking": "Checking for updates…",
+  "updates.upToDate": "You're up to date.",
+  "updates.failed": "Couldn't check for updates. Try again later.",
+  "updates.noServer": "Connect to a server to check for updates.",
   "logs.filter": "Filter:",
   "logs.filterLabel": "Log filter",
   "logs.minLevel": "Min Level:",
@@ -282,7 +289,7 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.micTimeout":
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
-    "The selected microphone could not open. Check Voice & Audio settings and reconnect your device.",
+    "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":
@@ -311,6 +318,10 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.connectionRefused":
     "The server could not be reached through the normal certificate-checked connection. Check the server address and any certificate prompt, then retry.",
 
+  "voiceAudio.card.inputMode": "Input Mode",
+  "voiceAudio.inputMode": "Input Mode",
+  "voiceAudio.inputMode.vad": "Voice Activity",
+  "voiceAudio.inputMode.ptt": "Push to Talk",
   "voiceAudio.card.microphone": "Microphone",
   "voiceAudio.card.speakers": "Speakers",
   "voiceAudio.card.camera": "Camera & screen share",
@@ -318,6 +329,12 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.mic.hearing": "Hearing you",
   "voiceAudio.mic.noInput": "No input",
   "voiceAudio.mic.noAccess": "No microphone access",
+  "voiceAudio.micTest.label": "Mic Test",
+  "voiceAudio.micTest.desc":
+    "Hear yourself the way others will, through your output device. Use headphones to avoid echo.",
+  "voiceAudio.micTest.start": "Let's Check",
+  "voiceAudio.micTest.stop": "Stop Testing",
+  "voiceAudio.micTest.linux": "The mic test is not available on Linux yet.",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
   "voiceAudio.gstreamerMissing":
@@ -327,6 +344,10 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
   "voiceAudio.inputSensitivity": "Input Sensitivity",
+  "voiceAudio.autoSensitivity": "Automatically determine input sensitivity",
+  "voiceAudio.autoPlayCameras": "Automatically play cameras",
+  "voiceAudio.autoPlayCamerasDesc":
+    "Others' cameras play as soon as they turn them on. Off, each camera waits for you to click Watch stream.",
   "voiceAudio.sensitivityValue": "Sensitivity {value}%",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",
@@ -350,6 +371,14 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.fps.30": "30 FPS (default)",
   "voiceAudio.fps.60": "60 FPS",
   "voiceAudio.fps.120": "120 FPS",
+  "voiceAudio.videoCodec": "Video Codec",
+  "voiceAudio.videoCodecDesc":
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
+  "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
+  "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
+  "voiceAudio.videoCodecIntel":
+    "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
+  "voiceAudio.videoCodec.auto": "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
   "voiceAudio.videoDevice": "Video Device",
   "voiceAudio.kind.microphone": "Microphone",
   "voiceAudio.kind.speaker": "Speaker",

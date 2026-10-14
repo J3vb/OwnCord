@@ -18,6 +18,10 @@ import type {
   NativeVoiceScreenStarted,
 } from "../contracts/nativeVoice";
 
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("nativeVoiceService");
+
 export const NATIVE_VOICE_EVENT = "native-voice";
 
 export const nativeVoice: NativeVoice = {
@@ -57,6 +61,18 @@ export const nativeVoice: NativeVoice = {
   publishScreen: (session, capture, options) =>
     invoke<string>("native_voice_publish_screen", { session, capture, options }),
   stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
+  async changeScreen(session, source, capture) {
+    try {
+      return await invoke<NativeVoiceScreenStarted>("native_voice_change_screen", {
+        session,
+        source,
+        capture,
+      });
+    } catch (err) {
+      // The host rejects with its reason as a string; callers classify it.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
   listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>
@@ -69,10 +85,12 @@ export const nativeVoice: NativeVoice = {
     let unlisten: (() => void) | null = null;
     void listen<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, (e) => {
       if (active) handler(e.payload);
-    }).then((stop) => {
-      if (active) unlisten = stop;
-      else stop();
-    });
+    })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((err: unknown) => log.warn("native-voice listen failed", err));
     return () => {
       active = false;
       unlisten?.();

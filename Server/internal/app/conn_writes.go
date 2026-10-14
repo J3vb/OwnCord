@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -24,13 +25,20 @@ func (a *App) installConnWrites(services *service.Services) {
 	if a.hub != nil {
 		connected = a.hub.StoppedUserIDs
 	}
-	a.onClose("conn-writes", startConnWrites(a.bgCtx, w, services.Users, connected))
+	var dbClosed func() bool
+	if a.database != nil {
+		dbClosed = a.database.Closed
+	}
+	a.onClose("conn-writes", startConnWrites(a.bgCtx, w, services.Users, connected, dbClosed))
 }
 
 // startConnWrites runs w's flush loop and returns its close step: stop the
 // loop, queue a disconnect stamp for each user connected still reports, then
-// flush what is pending (P5-S07). A nil connected stamps no one.
-func startConnWrites(bgCtx context.Context, w *service.ConnWrites, users *service.UserService, connected func() []int64) func(context.Context) error {
+// flush what is pending (P5-S07). A nil connected stamps no one. When dbClosed
+// reports the handle already closed (a backup restore closes it before the
+// restart), the pending writes cannot land and are dropped: failing the step
+// would make the restarting process exit non-zero.
+func startConnWrites(bgCtx context.Context, w *service.ConnWrites, users *service.UserService, connected func() []int64, dbClosed func() bool) func(context.Context) error {
 	ctx, cancel := context.WithCancel(bgCtx)
 	done := make(chan struct{})
 	go func() {
@@ -45,6 +53,10 @@ func startConnWrites(bgCtx context.Context, w *service.ConnWrites, users *servic
 				// Batched, so this only queues and cannot fail.
 				_ = users.StampDisconnect(ctx, id)
 			}
+		}
+		if dbClosed != nil && dbClosed() {
+			slog.Warn("conn-writes: database already closed, dropping pending session touches and connection stamps")
+			return nil
 		}
 		return w.Flush(ctx)
 	}

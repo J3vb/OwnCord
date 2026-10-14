@@ -48,6 +48,8 @@ struct ProxyInner {
     /// The TOFU fingerprint the running listener pins. Baked into the proxy
     /// loop at spawn, so a re-pin in the cert store requires a restart.
     pinned_fingerprint: String,
+    /// The path token every request through the running proxy must carry.
+    token: String,
     /// Shutdown signal sender.
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -59,6 +61,7 @@ impl LiveKitProxyState {
                 port: None,
                 remote_host: String::new(),
                 pinned_fingerprint: String::new(),
+                token: String::new(),
                 shutdown_tx: None,
             }),
         }
@@ -75,6 +78,7 @@ impl LiveKitProxyState {
             inner.port = None;
             inner.remote_host.clear();
             inner.pinned_fingerprint.clear();
+            inner.token.clear();
             inner.shutdown_tx = None;
         }
     }
@@ -113,6 +117,32 @@ pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String 
             None
         }
     })
+}
+
+/// Give a request that is not a WebSocket upgrade `Connection: close`, so the
+/// server ends the connection after its response and every request on the
+/// loopback side comes through the tunnel's own path check. An upgrade request
+/// is returned unchanged.
+pub(crate) fn close_unless_upgrade(request: &str) -> String {
+    let head = request.strip_suffix("\r\n\r\n").unwrap_or(request);
+    let lines: Vec<&str> = head.split("\r\n").collect();
+    if lines
+        .iter()
+        .skip(1)
+        .any(|l| l.to_ascii_lowercase().starts_with("upgrade:"))
+    {
+        return request.to_string();
+    }
+    let mut out = String::with_capacity(request.len() + 20);
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 && line.to_ascii_lowercase().starts_with("connection:") {
+            continue;
+        }
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    out.push_str("Connection: close\r\n\r\n");
+    out
 }
 
 /// Move an `Authorization: Bearer` token into the `access_token` query
@@ -168,8 +198,9 @@ pub(crate) fn can_reuse_proxy(
 }
 
 use crate::proxy_common::{
-    connect_tls, read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop,
-    spawn_watched, validate_remote_host,
+    connect_tls, random_tunnel_token, read_request_headers, resolve_remote_target, rewrite_headers,
+    run_accept_loop, spawn_watched, strip_tunnel_token, validate_remote_host, TunnelEndpoint,
+    FORBIDDEN_RESPONSE,
 };
 
 // ---------------------------------------------------------------------------
@@ -187,7 +218,7 @@ pub async fn start_livekit_proxy<R: Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, LiveKitProxyState>,
     remote_host: String,
-) -> Result<u16, String> {
+) -> Result<TunnelEndpoint, String> {
     validate_remote_host(&remote_host)?;
 
     let mut inner = state.inner.lock().await;
@@ -220,7 +251,10 @@ pub async fn start_livekit_proxy<R: Runtime>(
                 "[livekit_proxy] reusing existing proxy on port {} for {}",
                 port, remote_host
             );
-            return Ok(port);
+            return Ok(TunnelEndpoint {
+                port,
+                token: inner.token.clone(),
+            });
         }
         // Different host or re-pinned cert — tear down the old proxy.
         info!(
@@ -242,9 +276,11 @@ pub async fn start_livekit_proxy<R: Runtime>(
         .map_err(|e| format!("livekit proxy local_addr: {e}"))?
         .port();
 
+    let token = random_tunnel_token()?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let conn_host = remote_host.clone();
     let conn_fp = fingerprint.clone();
+    let conn_token = token.clone();
     let dead_host = remote_host.clone();
     spawn_watched(
         "livekit_proxy",
@@ -255,8 +291,9 @@ pub async fn start_livekit_proxy<R: Runtime>(
             move |stream| {
                 let host = conn_host.clone();
                 let fp = conn_fp.clone();
+                let token = conn_token.clone();
                 async move {
-                    if let Err(e) = handle_connection(stream, &host, &fp).await {
+                    if let Err(e) = handle_connection(stream, &host, &fp, &token).await {
                         warn!("[livekit_proxy] connection to {} failed: {}", host, e);
                     }
                 }
@@ -283,8 +320,9 @@ pub async fn start_livekit_proxy<R: Runtime>(
     inner.remote_host = remote_host;
     inner.pinned_fingerprint = fingerprint;
     inner.shutdown_tx = Some(shutdown_tx);
+    inner.token = token.clone();
 
-    Ok(port)
+    Ok(TunnelEndpoint { port, token })
 }
 
 /// Stop the LiveKit TLS proxy if running.
@@ -297,6 +335,7 @@ pub async fn stop_livekit_proxy(state: tauri::State<'_, LiveKitProxyState>) -> R
     inner.port = None;
     inner.remote_host.clear();
     inner.pinned_fingerprint.clear();
+    inner.token.clear();
     Ok(())
 }
 
@@ -317,11 +356,16 @@ async fn handle_connection(
     mut local: TcpStream,
     remote_host: &str,
     pinned_fingerprint: &str,
+    token: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n) ────────────────────
     // Guarded by a 10-second timeout so a slow or stalled client cannot
     // hold the Tokio task open indefinitely (BUG-151).
-    let buf = read_request_headers(&mut local).await?;
+    let raw = read_request_headers(&mut local).await?;
+    let Some(buf) = strip_tunnel_token(&raw, token) else {
+        let _ = local.write_all(FORBIDDEN_RESPONSE).await;
+        return Ok(());
+    };
 
     // Reject CRLF in remote_host before header insertion (defense-in-depth;
     // primary validation is in start_livekit_proxy).
@@ -331,7 +375,10 @@ async fn handle_connection(
 
     // ── 2. Rewrite Host and Origin headers, and the bearer token ────────
     let request = String::from_utf8_lossy(&buf);
-    let modified = rewrite_proxy_headers(&move_bearer_to_query(&request), remote_host);
+    let modified = close_unless_upgrade(&rewrite_proxy_headers(
+        &move_bearer_to_query(&request),
+        remote_host,
+    ));
 
     // ── 3. Connect to remote over TLS ────────────────────────────────────
     let tls_config = rustls::ClientConfig::builder()
@@ -733,5 +780,113 @@ mod tests {
         );
         assert!(inner.remote_host.is_empty());
         assert!(inner.pinned_fingerprint.is_empty());
+        assert!(inner.token.is_empty());
+    }
+
+    // ── close_unless_upgrade ────────────────────────────────────────────────
+
+    #[test]
+    fn close_unless_upgrade_closes_a_plain_request() {
+        let req = "GET /livekit/rtc/validate HTTP/1.1\r\nHost: h\r\nConnection: keep-alive\r\n\r\n";
+        assert_eq!(
+            close_unless_upgrade(req),
+            "GET /livekit/rtc/validate HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn close_unless_upgrade_adds_close_when_absent() {
+        let req = "GET /x HTTP/1.1\r\nHost: h\r\n\r\n";
+        assert_eq!(
+            close_unless_upgrade(req),
+            "GET /x HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn close_unless_upgrade_leaves_an_upgrade_alone() {
+        let req = "GET /rtc HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
+        assert_eq!(close_unless_upgrade(req), req);
+    }
+
+    // ── handle_connection path token ────────────────────────────────────────
+
+    /// Sends `request` to a handler whose upstream is a loopback listener
+    /// that drops every connection it accepts. Returns the bytes the client
+    /// read back and whether the handler dialed upstream.
+    async fn answer_through_listener(request: &[u8], token: &str) -> (Vec<u8>, bool) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let upstream = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind upstream");
+        let upstream_addr = upstream.local_addr().expect("upstream addr").to_string();
+        let dialed = Arc::new(AtomicBool::new(false));
+        let seen = dialed.clone();
+        let acceptor = tokio::spawn(async move {
+            while let Ok((stream, _)) = upstream.accept().await {
+                seen.store(true, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+
+        let local = TcpListener::bind("127.0.0.1:0").await.expect("bind local");
+        let local_addr = local.local_addr().expect("local addr");
+        let token = token.to_string();
+        let server = tokio::spawn(async move {
+            let (stream, _) = local.accept().await.expect("accept");
+            let _ = handle_connection(stream, &upstream_addr, "aa:bb", &token).await;
+        });
+
+        let mut client = TcpStream::connect(local_addr).await.expect("connect");
+        client.write_all(request).await.expect("write");
+        let mut reply = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut reply))
+            .await
+            .expect("reply in time")
+            .expect("read");
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("handler finished in time")
+            .expect("handler task");
+        acceptor.abort();
+        (reply, dialed.load(Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn a_request_without_the_tunnel_token_gets_403_and_no_upstream_dial() {
+        let token = "ab".repeat(32);
+        let (reply, dialed) = answer_through_listener(
+            b"GET /livekit/rtc/v1?access_token=t HTTP/1.1\r\nUpgrade: websocket\r\n\r\n",
+            &token,
+        )
+        .await;
+        assert_eq!(reply, FORBIDDEN_RESPONSE);
+        assert!(
+            !dialed,
+            "the tunnel must not dial upstream without its token"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_with_another_token_gets_403_and_no_upstream_dial() {
+        let token = "ab".repeat(32);
+        let other = "cd".repeat(32);
+        let req = format!("GET /{other}/livekit/rtc/v1 HTTP/1.1\r\nUpgrade: websocket\r\n\r\n");
+        let (reply, dialed) = answer_through_listener(req.as_bytes(), &token).await;
+        assert_eq!(reply, FORBIDDEN_RESPONSE);
+        assert!(
+            !dialed,
+            "the tunnel must not dial upstream with another token"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_with_the_token_is_dialed_upstream() {
+        let token = "ab".repeat(32);
+        let req = format!("GET /{token}/livekit/rtc/v1 HTTP/1.1\r\nUpgrade: websocket\r\n\r\n");
+        let (reply, dialed) = answer_through_listener(req.as_bytes(), &token).await;
+        assert_ne!(reply, FORBIDDEN_RESPONSE);
+        assert!(dialed, "a request carrying the token must reach upstream");
     }
 }

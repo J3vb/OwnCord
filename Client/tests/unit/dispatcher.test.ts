@@ -53,6 +53,7 @@ import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 // Mock notifications and livekitSession to avoid side effects
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
+  notifyMention: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({
@@ -69,6 +70,7 @@ vi.mock("@lib/livekitSession", () => ({
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
+  reconcileVideoFlags: vi.fn(),
 }));
 // The handlers load the voice module lazily and fire-and-forget
 // (`void livekitSession().then(...)`). A dynamic import resolves through the
@@ -142,6 +144,12 @@ import {
   failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
+import { takeVoiceMoved } from "../../src/features/voice/moveHint";
+import {
+  noteJoinSent,
+  resetJoinRequest,
+  takeJoinRefusal,
+} from "../../src/features/voice/joinRequest";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -216,6 +224,7 @@ describe("WS Dispatcher", () => {
   let mock: ReturnType<typeof createMockWs>;
 
   beforeEach(() => {
+    resetJoinRequest();
     vi.useFakeTimers();
     // Reset all stores to initial state
     authStore.setState(() => ({
@@ -3288,6 +3297,42 @@ describe("WS Dispatcher", () => {
     expect(listCustomEmoji()).toEqual([]);
   });
 
+  it("wires upload_policy to replace the file-type lists and keep the rest of the policy", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      uploadPolicy: {
+        max_upload_bytes: 10 << 20,
+        blocked_extensions: ["bat", "html"],
+        allowed_extensions: ["png"],
+        thumbnails: true,
+      },
+    }));
+
+    mock.dispatch("upload_policy", { blocked_extensions: [], allowed_extensions: [] });
+
+    expect(authStore.getState().uploadPolicy).toEqual({
+      max_upload_bytes: 10 << 20,
+      blocked_extensions: [],
+      allowed_extensions: [],
+      thumbnails: true,
+    });
+  });
+
+  it("treats an upload_policy with missing lists as empty lists", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      uploadPolicy: { max_upload_bytes: 10 << 20, blocked_extensions: ["bat"] },
+    }));
+
+    mock.dispatch("upload_policy", {} as { blocked_extensions: []; allowed_extensions: [] });
+
+    expect(authStore.getState().uploadPolicy).toEqual({
+      max_upload_bytes: 10 << 20,
+      blocked_extensions: [],
+      allowed_extensions: [],
+    });
+  });
+
   it("wires voice_state and auto-joins if current user", () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -3758,6 +3803,10 @@ describe("WS Dispatcher", () => {
     expect(mock.ws.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_join", payload: { channel_id: 7 } }),
     );
+    // Its refusal is the one that may roll the re-join back.
+    expect(takeJoinRefusal("FORBIDDEN", "test-id")).toBe(true);
+    // The destination's connect plays the moved tone (uiSounds), not the join one.
+    expect(takeVoiceMoved(7)).toBe(true);
   });
 
   it("wires voice_disconnected to clearing the local voice session", async () => {
@@ -3995,6 +4044,7 @@ describe("WS Dispatcher", () => {
       expect(mock.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join", payload: { channel_id: 42 } }),
       );
+      expect(takeJoinRefusal("FORBIDDEN", "test-id")).toBe(true);
       expect(voiceStore.getState().currentChannelId).toBe(42);
     });
 
@@ -5459,6 +5509,33 @@ describe("WS Dispatcher", () => {
     expect(voiceLeaveSent).toBe(false);
   });
 
+  // WP 1C-8: an announce lost while the socket was down leaves the server's
+  // camera/share flag behind what this session sends; `ready` checks it.
+  it("ready hands the server's camera and share flags to the live voice session", async () => {
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected", currentChannelId: 10 }));
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "active", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+    const { reconcileVideoFlags } = await import("@lib/livekitSession");
+    vi.mocked(reconcileVideoFlags).mockClear();
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [
+        { user_id: 42, channel_id: 10, muted: false, deafened: false, screenshare: true },
+      ],
+      roles: [],
+      dm_channels: [],
+    });
+
+    await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(false, true));
+  });
+
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
@@ -5740,6 +5817,31 @@ describe("WS Dispatcher", () => {
       expect(voiceStore.getState().voiceStatus).toBe("idle");
 
       vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
+    });
+
+    // A server that echoes the join's envelope id on its refusals lets the
+    // rollback tell the join's own refusal from an error answering another
+    // command, which must leave the join in flight.
+    it("leaves a voice join in place on an unrelated error during it", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      noteJoinSent("join-1");
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "cannot edit" }, "other");
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(voiceStore.getState().currentChannelId).toBe(5);
+      expect(voiceStore.getState().voiceStatus).toBe("joining");
+    });
+
+    it("rolls a voice join back on the refusal carrying its id", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      noteJoinSent("join-1");
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "denied" }, "join-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
     });
   });
 

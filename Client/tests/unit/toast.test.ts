@@ -282,4 +282,35 @@ describe("ToastContainer", () => {
     vi.advanceTimersByTime(1500);
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
+
+  it("renders an action button that runs the action and dismisses the toast", () => {
+    const run = vi.fn();
+    toast.show("Camera stopped", "warning", Infinity, { label: "Turn on again", run });
+
+    const btn = container.querySelector<HTMLButtonElement>(".toast .toast-action");
+    expect(btn?.textContent).toBe("Turn on again");
+    expect(btn?.type).toBe("button");
+    // Sticky, so it also keeps its close button.
+    expect(container.querySelector(".toast .toast-close")).not.toBeNull();
+
+    btn!.click();
+    expect(run).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(400);
+    expect(container.querySelectorAll(".toast").length).toBe(0);
+  });
+
+  it("returns a function that removes the toast", () => {
+    const remove = toast.show("Share stopped", "warning", Infinity, {
+      label: "Share again",
+      run: vi.fn(),
+    });
+    remove();
+    vi.advanceTimersByTime(400);
+    expect(container.querySelectorAll(".toast").length).toBe(0);
+  });
+
+  it("shows no action button on a plain toast", () => {
+    toast.show("Hello");
+    expect(container.querySelector(".toast-action")).toBeNull();
+  });
 });

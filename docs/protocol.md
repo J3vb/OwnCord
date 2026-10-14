@@ -98,7 +98,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                                              |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                 |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
@@ -231,8 +231,9 @@ force (config.yaml's lists, or the owner's saved ones). Only a file name's
 final extension counts, case-insensitively, ignoring trailing dots and spaces:
 a blocked one is refused, and a non-empty `allowed_extensions` accepts only
 those. Either is omitted when empty or unknown, and clients then refuse
-nothing by name. The values are read with the server-name cache, so a change
-reaches a new connection within 30 seconds.
+nothing by name. A saved change reaches connected clients at once as an
+[`upload_policy`](#upload_policy-server---client-broadcast) event, and new
+connections from then on.
 
 `thumbnails` is `true` when the server serves
 `GET /api/v1/files/{id}/thumb`, an image's bounded preview. A client then shows
@@ -533,8 +534,8 @@ to reconstruct them:
 | Field               | Type           | Required | Constraints                                                                   |
 | ------------------- | -------------- | -------- | ----------------------------------------------------------------------------- |
 | `channel_id`        | number         | Yes      | Positive integer                                                              |
-| `content`           | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty.  |
-| `reply_to`          | number or null | No       | Message ID being replied to                                                   |
+| `content`           | string         | Yes\*    | Max 4000 runes. HTML-sanitized. \*Can be empty if `attachments` is non-empty. |
+| `reply_to`          | number or null | No       | ID of a message in the same channel that is not deleted, else `BAD_REQUEST`.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
 
@@ -559,14 +560,20 @@ The `chat_message` broadcast also echoes `client_message_id` when supplied;
 history does not carry it, so clients also reconcile by acknowledged server
 message id when history was restored before acknowledgment.
 
-Retries still pass current send permissions, DM membership/block/timeout and
-the general chat rate limit. A matching receipt does not spend slow-mode
-cooldown, reopen DMs, increment mentions, dispatch push notifications or
-broadcast another message. Changed payloads or channels with the same key
+Retries still pass the general chat rate limit. A matching receipt is
+answered before the channel, send-permission, DM membership/block/timeout and
+content checks: the message was accepted when it was sent, so a later
+permission change cannot turn its acknowledgment into a refusal. A key with no
+receipt is a new send and passes every check. A matching receipt does not
+spend slow-mode cooldown, reopen DMs, increment mentions, dispatch push
+notifications or broadcast another message. Changed payloads or channels with the same key
 return `CONFLICT`. Keys belong to their sender, so another authorized sender
 may independently use the same key without seeing the first sender's result.
-Receipts survive message deletion: a deleted original returns `FORBIDDEN`
-and is never recreated; a missing channel returns `NOT_FOUND`.
+Receipts survive message deletion: a deleted original, including one removed
+with its channel, returns `ALREADY_DELETED` and is never recreated. A key with
+no receipt for a missing channel returns `NOT_FOUND`. A malformed, expired or
+pre-restore key with no receipt returns `BAD_REQUEST` before any permission
+check.
 
 Message content, mentions, attachment ownership links and the receipt commit
 together. Receipts contain only ids, a request fingerprint, the original
@@ -1278,6 +1285,34 @@ server-wide with no channel scope, and every client may already `GET
 it changes rarely and belongs to the server, not the session, so clients load
 it once over REST and keep it fresh from this event.
 
+### upload_policy (Server -> Client, broadcast)
+
+Sent to every connected client after the owner saves either upload file-type
+list in the admin panel (`PATCH /admin/api/settings` with
+`upload_blocked_extensions` or `upload_allowed_extensions`). It carries both
+lists in force, so a composer's pre-upload check follows the save without a
+reconnect; auth_ok carries the same lists from then on.
+
+```json
+{
+  "type": "upload_policy",
+  "payload": {
+    "blocked_extensions": [],
+    "allowed_extensions": []
+  }
+}
+```
+
+Both fields are always arrays, `[]` when emptied, and replace the lists
+auth_ok gave; `max_upload_bytes` and `thumbnails` keep their auth_ok values.
+Two empty lists allow every extension, though the content blocks still refuse
+executables. Unfiltered: the lists are already in every client's auth_ok.
+
+Unsequenced and never replayed: auth_ok carries the current lists on every
+connect and resume, so a replayed older frame could only overwrite them. A
+client whose send queue is full is disconnected instead, and its next auth_ok
+carries the current lists.
+
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
@@ -1448,11 +1483,20 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 ### voice_join (Client -> Server)
 
 ```json
-{ "type": "voice_join", "payload": { "channel_id": 10 } }
+{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true } }
 ```
+
+`user_initiated` is optional: the client sets it when the user chose the join
+and omits it on automatic rejoins (voice reconnect, resume, `voice_moved`). It
+only exempts the join from a moderator's rejoin block (see `voice_mod_kick`).
 
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
+A channel with `voice_max_users` set refuses a join with `CHANNEL_FULL` once it
+holds that many users, except for a caller with `can_moderate_voice` in that
+channel (`permissions.AuthorizeVoiceModerator`): a voice moderator joins a full
+channel. Older servers apply the cap to everyone.
 
 On success, server sends:
 
@@ -1465,6 +1509,14 @@ All four keep the order above on the joiner's own socket: item 2 is
 delivered synchronously (same call, same seq mechanism as any other
 broadcast) rather than handed to the hub's asynchronous broadcast queue, so
 it is written before item 3 in the same program order as items 1 and 4.
+
+A refused join is answered with an `error` whose envelope `id` echoes the
+`voice_join`'s own `id` (omitted when the request carried none), so the client
+rolls back only the join that was refused, never on an error answering another
+command. Servers before this change sent join refusals with no `id`; the client
+still treats an id-less error as a refusal when its code is one a join can
+return (`CHANNEL_FULL`, `VOICE_ERROR`, `FORBIDDEN`, `NOT_FOUND`, `BAD_REQUEST`,
+`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`).
 
 ### voice_token (Server -> Client, direct)
 
@@ -1671,7 +1723,8 @@ the moderator did and restates it with `voice_deafen`.
 
 The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
 DM, `READ_MESSAGES` (a move must not place someone where they could not go
-themselves) and against the destination's `voice_max_users`. The server then
+themselves) and against the destination's `voice_max_users` (skipped when the
+target is a voice moderator there, as their own `voice_join` would be). The server then
 runs its voice-leave routine for the target — `voice_leave` is broadcast, the
 LiveKit participant is removed, the row deleted — and sends the target
 `voice_moved`. The target's client answers with an ordinary `voice_join` for
@@ -1704,11 +1757,13 @@ broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
 call is being held for a reconnect is still removed, but gets no
 `voice_disconnected`; on resume it sees only the replayed `voice_leave`.
 
-For 60 seconds after any moderator kick or move, the server refuses a
-`voice_join` from the removed user to the channel it was removed from with
-`FORBIDDEN` ("You were removed from this voice channel"), so a client still
-reconnecting its voice cannot rejoin the call it was removed from. Other
-channels are unaffected.
+For 60 seconds after any moderator kick or move, the server refuses an
+automatic `voice_join` from the removed user to the channel it was removed from
+with `FORBIDDEN` ("You were removed from this voice channel"), so a client
+still reconnecting its voice cannot rejoin the call it was removed from. Other
+channels are unaffected. A `voice_join` with `"user_initiated": true` (the
+user's own click) is never refused this way and clears the block; the normal
+join checks (permissions, bans, archive, capacity) still apply.
 
 ### voice_disconnected (Server -> Client, direct)
 
@@ -2221,7 +2276,7 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Channel focus                            | 5     | 1 second                                   | Silently dropped     |
+| Channel focus                            | 5     | 1 second                                   | Deferred             |
 | Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
 | Ping                                     | 2     | 1 second                                   | Silently dropped     |
 
@@ -2230,6 +2285,14 @@ rotation fires one offer per peer in a single burst, so the limit is sized to
 a whole rotation rather than to a single frame. Within that outer budget an
 inner cap of 5 per second per (sender, channel, target) stops any single
 recipient from being flooded.
+
+A `channel_focus` over its budget is deferred rather than dropped: the server
+remembers the latest refused channel and applies it (subscription and read
+state) as soon as the window frees, so a burst of channel switches ends on the
+channel the user landed on. A newer `channel_focus` supersedes a pending one,
+whether it succeeds or fails. If the user can no longer read the deferred
+channel when it is applied, the reply is a `FORBIDDEN` error carrying that
+frame's `id`.
 
 ---
 
@@ -2251,7 +2314,7 @@ tables below add per-type behavioral notes.
 | `reaction_add`        | 5/sec                                |                                                                 |
 | `reaction_remove`     | 5/sec                                |                                                                 |
 | `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
-| `channel_focus`       | 5/sec (silently dropped)             | Updates read state                                              |
+| `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
 | `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus                         |
 | `presence_update`     | 1/10sec                              |                                                                 |
 | `voice_join`          | 5/sec                                |                                                                 |
@@ -2304,6 +2367,7 @@ tables below add per-type behavioral notes.
 | `member_ban`          | Yes      | All clients                                                             |
 | `roles_update`        | Yes      | All clients (full role list)                                            |
 | `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
+| `upload_policy`       | No       | All clients (both upload file-type lists)                               |
 | `dm_channel_open`     | No       | Direct to participant                                                   |
 | `dm_channel_close`    | No       | Direct to participant                                                   |
 | `dm_request`          | No       | Direct to recipient (B5-6)                                              |

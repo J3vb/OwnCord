@@ -24,6 +24,7 @@ import {
   handleConnectionError,
   handleRestartDrop,
   handleServerRestart,
+  handleUploadPolicy,
   rejoinVoiceAfterRestart,
 } from "../features/connection/wsHandlers";
 import {
@@ -279,6 +280,8 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.EMOJI_UPDATE, handleEmojiUpdate));
 
+  unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
+
   unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
 
   // ── Voice ─────────────────────────────────────────────
@@ -340,7 +343,7 @@ export function wireDispatcher(
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
       if (handleMessagingError(payload, id)) return;
-      handleVoiceJoinRollback();
+      handleVoiceJoinRollback(payload, id);
       if (handleVoiceError(payload, id)) return;
       // Every remaining code has no dedicated handler above (not a pending
       // send/reaction rollback, not a capacity refusal) — this is the one

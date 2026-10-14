@@ -20,7 +20,8 @@
 
 /* The always-present way out of video/focus mode. Pinned top-left so it stays
    reachable when the focus layout has scrolled the focused tile's own nav off. */
-.video-grid__exit {
+.video-grid__exit,
+.video-grid__view {
   position: absolute;
   top: 8px;
   left: 8px;
@@ -38,11 +39,38 @@
   cursor: pointer;
 }
 
-.video-grid__exit:hover {
+.video-grid__exit:hover,
+.video-grid__view:hover {
   background: var(--scrim-hover);
 }
 
-.video-grid__exit[hidden] {
+.video-grid__exit[hidden],
+.video-grid__view[hidden] {
+  display: none;
+}
+
+/* The call view's view toggles, beside the exit control. */
+.video-grid__views {
+  position: absolute;
+  top: 8px;
+  left: 44px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
+.video-grid__view {
+  position: static;
+}
+.video-grid__view[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+/* Room below the tiles (and the focus strip) for the call view's control bar. */
+.video-grid--call {
+  padding-bottom: 64px;
+}
+.video-grid .video-cell[hidden],
+.video-focus-strip[hidden] {
   display: none;
 }
 
@@ -66,6 +94,18 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+/* A camera fills its grid tile, cropped at the edges as Discord does. Focused
+   or full screen it shows the whole frame again. Screen shares always do. */
+.video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
+  video {
+  object-fit: cover;
+}
+
+/* Your own camera is mirrored, as every call app shows it; others see it
+   unmirrored. A screen share never carries this class. */
+.video-cell--self video {
+  transform: scaleX(-1);
 }
 
 .video-cell.track-muted video {
@@ -211,6 +251,13 @@
   justify-content: center;
   pointer-events: none;
 }
+/* The stream ended: who ended it, for a moment before the tile goes. */
+.video-ended {
+  z-index: 6;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-weight: 600;
+}
 .video-watch-btn {
   pointer-events: auto;
   padding: 8px 16px;
@@ -269,6 +316,67 @@
   bottom: 12px;
   left: 12px;
   opacity: 1;
+}
+/* The mini-player: the watched stream floating over a text channel. Placed
+   by script (left/top), kept inside the window. Above the chat, below the
+   composer pickers (90) and the overlays. */
+.stream-mini {
+  position: fixed;
+  z-index: 80;
+  width: min(320px, calc(100vw - 32px));
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000; /* intentional: letterbox bars, as on a tile */
+  box-shadow: var(--shadow-lg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.stream-mini--dragging {
+  cursor: grabbing;
+}
+.stream-mini video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.stream-mini video.track-muted {
+  visibility: hidden;
+}
+.stream-mini .stream-mini__name {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stream-mini__controls {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.stream-mini:hover .stream-mini__controls,
+.stream-mini:focus-within .stream-mini__controls {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-mini__controls {
+    transition: none;
+  }
 }
 /* Your own screen share: what is going out, never a hall of mirrors. */
 .video-self-cover {
@@ -365,6 +473,11 @@
 .video-fs-btn[aria-pressed="true"] {
   background: var(--danger-fill);
 }
+.video-fs-btn[data-call-control="camera"][aria-pressed="true"],
+.video-fs-btn[data-call-control="share"][aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
 .video-fs-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -376,6 +489,10 @@
 }
 .video-fs-btn--leave:hover {
   background: var(--danger-fill-hover);
+}
+.video-fs-btn--device {
+  width: 24px;
+  margin-left: -6px;
 }
 /* The quality chip shows on the stream you are watching. */
 .video-quality {

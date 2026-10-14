@@ -79,7 +79,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/admin.go":                     {Disposition: "boundary", Note: "holds the handle for the admin mux; no calls"},
 	"admin/api.go":                       {Disposition: "boundary", Note: "passes the handle to the handlers and services it builds; no calls of its own", Hands: calls{"service.NewDiagnosticsService": 1, "service.NewSessionService": 1, "service.NewSetupService": 1, "service.NewTokenService": 1, "service.NewUserService": 1}},
 	"admin/backup_maintenance.go":        {Disposition: "boundary", Note: "scheduled backup mechanics on the maintenance tick; settings via the service", Calls: calls{"BackupToSafe": 1}},
-	"admin/handlers_backup.go":           {Disposition: "boundary", Note: "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap", Calls: calls{"BackupToSafe": 2, "Close": 1, "LogAudit": 1, "SQLDb": 1}},
+	"admin/handlers_backup.go":           {Disposition: "boundary", Note: "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap", Calls: calls{"BackupToSafe": 2, "CheckpointForRestore": 1, "Close": 1, "LogAudit": 1, "WaitConnsClosed": 1}},
 	"admin/handlers_archive.go":          {Disposition: "boundary", Note: "full-archive download: VACUUM INTO snapshot, then zip the data dir and config", Calls: calls{"BackupToSafe": 1}},
 	"admin/archive_link.go":              {Disposition: "boundary", Note: "issues and redeems the single-use archive and backup download links; the handle re-resolves the link's credential, audits a backup download with WriteAudit, and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
 	"admin/handlers_channel_perms.go":    {Disposition: "adapter", Note: "override response shapes; the service owns the policy and the calls"},
@@ -144,17 +144,19 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/handlers_chat.go":   {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
 	"ws/hub.go":             {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
 	// B6-14: no import of its own — the replay purge reaches Hub.db directly,
-	// and deliberately. PurgeUserFromReplay and PurgeMessagesFromReplay run
-	// awaitDispatch, then persister.Flush, then take seqMu and do tombstone,
-	// watermark, ring drop and the persisted-row delete as ONE critical
-	// section, so no broadcast is sequenced in between (HP-4 decision 1).
+	// and deliberately. Since WP 2A-7 (ARCH-007) purgeReplay installs the
+	// tombstones and drops the ring's copies under seqMu, releases it, flushes
+	// the persister and only then deletes the persisted rows, all under the
+	// purge lock that cold-tier reads wait on, so no frame naming the purged
+	// ids is sequenced after the tombstones (HP-4 decision 1) and the delete
+	// no longer holds up live delivery.
 	// Routing the delete through the EventStore seam would not be a pure
 	// refactor: h.eventStore is set only when event persistence is enabled,
 	// while h.db is set whenever a database exists, so a purge gated on the
 	// seam would skip rows a previous enabled boot persisted — an erasure
 	// regression. The two calls stay direct and are pinned here instead, so
 	// moving one is a visible edit to this row rather than a side effect.
-	"ws/hub_events.go":                {Disposition: "boundary", Note: "replay purge: ring drop and persisted-row delete are one seqMu critical section (HP-4 decision 1), so the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
+	"ws/hub_events.go":                {Disposition: "boundary", Note: "replay purge: tombstones and ring drop under seqMu, persisted-row delete after it under the purge lock (2A-7); the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
 	"ws/hub_options.go":               {Disposition: "boundary", Note: "construction validates and stores the handle, and gives it to the permission checker; no calls of its own", Hands: calls{"permissions.NewChecker": 1}},
 	"ws/hub_broadcast.go":             {Disposition: "adapter", Note: "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
 	"ws/hub_presence.go":              {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},

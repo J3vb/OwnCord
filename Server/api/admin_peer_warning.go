@@ -44,6 +44,7 @@ func warnOnAdminPeerAddress(cfg *config.Config) {
 		"which the allowlist admits",
 		"tls_mode", cfg.TLS.Mode,
 		"container", container,
+		"effect", "every client the relay carries passes the /admin check and shares one rate-limit bucket",
 		"fix", "set server.trusted_proxies to the proxy hop(s), or narrow server.admin_allowed_cidrs to "+
 			"addresses only the owner uses. Ignore this if clients reach the server directly on a LAN")
 }

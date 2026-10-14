@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 
 // --- Mocks must be declared before imports ---
 
@@ -30,6 +30,9 @@ const mockVoiceState = vi.hoisted(() => ({
 
 /** A roster in which the server still holds every membership. */
 const membershipHeld = { get: () => ({ has: () => true }) };
+
+/** Listeners livekitSession registers with the mocked voice.store at import. */
+const pttPollingListeners = vi.hoisted((): Array<() => void> => []);
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
  *  hoisted mock factory can mutate it after hoisting. */
@@ -83,7 +86,7 @@ vi.mock("livekit-client", () => ({
     ParticipantPermissionsChanged: "participantPermissionsChanged",
   },
   Track: {
-    sourceToProto: (source: string) => (source === "microphone" ? 2 : 0),
+    sourceToProto: (source: string) => ({ camera: 1, microphone: 2, screenShare: 3 })[source] ?? 0,
     Source: {
       Microphone: "microphone",
       Camera: "camera",
@@ -132,6 +135,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
   setPttGated: vi.fn(),
   // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
   // startup without importing the LiveKit SDK), so the mock has to carry real
@@ -141,10 +145,16 @@ vi.mock("@stores/voice.store", () => ({
     mockPttPollingLive.value = live;
   }),
   isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+  onPttPollingLiveChange: vi.fn((listener: () => void) => {
+    pttPollingListeners.push(listener);
+    return () => {};
+  }),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setShareDenied: vi.fn(),
   setLocalGateSpeaking: vi.fn(),
+  restateSelfVoiceState: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
@@ -155,7 +165,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const mockInvoke = vi.hoisted(() =>
   vi.fn((cmd: string, _payload?: unknown) => {
-    if (cmd === "start_livekit_proxy") return Promise.resolve(7881);
+    if (cmd === "start_livekit_proxy") return Promise.resolve({ port: 7881, token: "tun" });
     if (cmd === "stop_livekit_proxy") return Promise.resolve();
     return Promise.resolve();
   }),
@@ -182,6 +192,12 @@ vi.mock("@lib/logger", () => ({
     warn: vi.fn(),
     error: vi.fn(),
   }),
+}));
+
+const mockShowActionToast = vi.hoisted(() => vi.fn());
+vi.mock("@lib/toast", () => ({
+  showToast: vi.fn(),
+  showActionToast: mockShowActionToast,
 }));
 
 vi.mock("@lib/noise-suppression", () => ({
@@ -256,6 +272,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
+import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
@@ -664,6 +681,72 @@ describe("LiveKitSession", () => {
     });
   });
 
+  // WP 1C-8: a permission removed mid-call narrows the SFU grant; the camera or
+  // share it no longer allows is turned off here and the server is told.
+  describe("media the grant no longer allows", () => {
+    let permissions: { canPublish: boolean; canPublishSources: number[] };
+    let onPermissions: (previous: unknown, participant: unknown) => void;
+    let ws: { send: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      permissions = { canPublish: true, canPublishSources: [] };
+      (mockRoom.localParticipant as any).permissions = permissions;
+      ws = { send: vi.fn() };
+      session.setWsClient(ws as any);
+      await (session as any).createRoom();
+      onPermissions =
+        mockRoom.on.mock.calls.find(([event]) => event === "participantPermissionsChanged")?.[1] ??
+        (() => {});
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+      mockVoiceState.localCamera = true;
+      mockVoiceState.localScreenshare = true;
+    });
+
+    afterEach(() => {
+      delete (mockRoom.localParticipant as any).permissions;
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+    });
+
+    it("turns the camera off when the grant drops it, and leaves the share", async () => {
+      permissions.canPublishSources = [2, 3, 4];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
+      expect(ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_screenshare" }),
+      );
+    });
+
+    it("stops the share when the grant drops it", async () => {
+      permissions.canPublishSources = [1, 2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).toHaveBeenCalledWith({
+        type: "voice_screenshare",
+        payload: { enabled: false },
+      });
+      expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_camera" }));
+    });
+
+    it("leaves media alone while the grant still allows it, or when it is already off", async () => {
+      onPermissions(undefined, mockRoom.localParticipant);
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      permissions.canPublishSources = [2];
+      onPermissions(undefined, mockRoom.localParticipant);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+  });
+
   describe("setters and getters", () => {
     it("setWsClient stores the client used by leaveVoice", () => {
       const mockWs = { send: vi.fn() } as any;
@@ -829,12 +912,12 @@ describe("LiveKitSession", () => {
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
-    it("clamps volume to 0-100 range", () => {
+    it("clamps volume to 0-200 range", () => {
       session.setUserVolume(42, -10);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 0);
 
       session.setUserVolume(42, 300);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 100);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 200);
     });
   });
 
@@ -947,9 +1030,13 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token", {
-        autoSubscribe: false,
-      });
+      expect(mockRoom.connect).toHaveBeenCalledWith(
+        "ws://127.0.0.1:7881/tun/livekit",
+        "test-token",
+        {
+          autoSubscribe: false,
+        },
+      );
     });
 
     it("handles mic permission denied gracefully", async () => {
@@ -1246,6 +1333,38 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
+    it("re-runs the sensitivity gate whenever the PTT poller goes live or stops", () => {
+      expect(pttPollingListeners).toHaveLength(1);
+      const listener = pttPollingListeners[0]!;
+      // The listener drives the app's session, not this test's instance.
+      const applySpy = vi.spyOn(
+        Object.getPrototypeOf((session as any)._audioPipeline),
+        "applyInputMode",
+      );
+
+      listener();
+
+      expect(applySpy).toHaveBeenCalledTimes(1);
+      applySpy.mockRestore();
+    });
+
+    it("does not close the gate at join for a key bound in Voice Activity mode", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "pttVk" ? 0x41 : key === "inputMode" ? "vad" : defaultVal,
+      );
+      setPttPollingLive(true);
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(gateSpy).toHaveBeenCalledWith(false);
+      expect(gateSpy).not.toHaveBeenCalledWith(true);
+      expect(setPttGated).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
     it("does not mute at join when the poller is live but no PTT key is bound", async () => {
       setPttPollingLive(true); // pttVk defaults to 0 (disabled) via mockLoadPref
       session.setServerHost("localhost:7880");
@@ -1482,6 +1601,14 @@ describe("LiveKitSession", () => {
     });
   });
 
+  it("a camera's Stop watching survives a channel switch and ends on leave (WP 1B-3)", () => {
+    session.setRemoteVideoWatched(7, "camera", false);
+    session.leaveVoice(false, true);
+    expect((session as any)._remoteTracks.isWatched(7, "camera")).toBe(false);
+    session.leaveVoice(false);
+    expect((session as any)._remoteTracks.isWatched(7, "camera")).toBe(true);
+  });
+
   describe("auto reconnect", () => {
     it("preserves local mute state on reconnect", async () => {
       mockVoiceState.localMuted = true;
@@ -1589,6 +1716,13 @@ describe("LiveKitSession", () => {
     });
 
     it("sweeps the existing participants' publications into the new room on reconnect", async () => {
+      // Cameras opt-in, as before WP 1B-3.
+      onTestFinished(() => {
+        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      });
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "autoPlayCameras" ? false : defaultVal,
+      );
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
       (session as any)._state = {
@@ -1633,6 +1767,53 @@ describe("LiveKitSession", () => {
       expect(setSubscribed).toHaveBeenCalledWith(true);
       expect(setCameraSubscribed).toHaveBeenCalledWith(false);
       expect(onRemoteVideo).toHaveBeenCalledWith(7, null, false);
+    });
+
+    it("sweeps an auto-played camera into the new room subscribed, with no Watch card (WP 1B-3)", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 9,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const setSubscribed = vi.fn();
+      const publication = { kind: "audio", source: "microphone", setSubscribed };
+      const setCameraSubscribed = vi.fn();
+      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
+      const onRemoteVideo = vi.fn();
+      session.setOnRemoteVideo(onRemoteVideo);
+      mockRoom.remoteParticipants = new Map([
+        [
+          "user-7:tok",
+          {
+            identity: "user-7:tok",
+            audioTrackPublications: new Map(),
+            trackPublications: new Map<string, unknown>([
+              ["TR_a", publication],
+              ["TR_v", camera],
+            ]),
+          },
+        ],
+      ]);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        9,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setSubscribed).toHaveBeenCalledWith(true);
+      expect(setCameraSubscribed).toHaveBeenCalledWith(true);
+      expect(onRemoteVideo).not.toHaveBeenCalledWith(7, null, false);
     });
 
     // Pre-refactor parity: the reconnect success path re-installed both
@@ -1837,6 +2018,197 @@ describe("LiveKitSession", () => {
       // Without a generation bump in teardownForReconnect, the stale enable
       // would publish onto the room being torn down for auto-reconnect.
       expect(mockRoom.localParticipant.publishTrack).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("camera/screen share restored after a reconnect (WP 1A-4, 1C-6)", () => {
+    let wsState: string;
+    let secondDrop: ((reason?: number) => void) | undefined;
+
+    beforeEach(() => {
+      wsState = "connected";
+      mockShowActionToast.mockClear();
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, { id: 1, type: "voice" } as any]]),
+      }));
+    });
+
+    afterEach(() => {
+      resetChannelsStore();
+    });
+
+    async function dropWhile(media: { camera: boolean; screenshare: boolean }): Promise<void> {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn(), getState: () => wsState } as any);
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      mockVoiceState.localCamera = media.camera;
+      mockVoiceState.localScreenshare = media.screenshare;
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      secondDrop = disconnectedHandler;
+    }
+
+    it("turns the camera back on by itself once a camera-on call reconnects, with no toast", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: false });
+      mockVoiceState.localCamera = false; // teardownForReconnect turned it off
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledOnce();
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("offers Share again for a web share, which needs the OS picker", async () => {
+      const enableScreenshare = vi.spyOn(session, "enableScreenshare").mockResolvedValue();
+      await dropWhile({ camera: false, screenshare: true });
+      mockVoiceState.localScreenshare = false;
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableScreenshare).not.toHaveBeenCalled();
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      const [message, type, action] = mockShowActionToast.mock.calls[0]!;
+      expect(message).toBe("Your screen share stopped when the connection dropped");
+      expect(type).toBe("warning");
+      expect(action.label).toBe("Share again");
+      action.run();
+      expect(enableScreenshare).toHaveBeenCalledOnce();
+    });
+
+    it("restores the camera and names only the share when both were on", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect(enableCamera).toHaveBeenCalledOnce();
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your screen share stopped when the connection dropped",
+      );
+    });
+
+    it("leaves a camera the user already turned back on alone", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: false });
+      // Still on: the user pressed Camera again before the restore ran.
+      mockVoiceState.localCamera = true;
+
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect(enableCamera).not.toHaveBeenCalled();
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("shows no share toast when the user leaves while the camera is coming back", async () => {
+      let finishCamera!: () => void;
+      vi.spyOn(session, "enableCamera").mockImplementation(
+        () => new Promise<void>((resolve) => (finishCamera = resolve)),
+      );
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+
+      session.leaveVoice(false);
+      finishCamera();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("a second drop while the camera is coming back still restores both after it", async () => {
+      let finishCamera!: () => void;
+      const enableCamera = vi
+        .spyOn(session, "enableCamera")
+        .mockImplementationOnce(() => new Promise<void>((resolve) => (finishCamera = resolve)))
+        .mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: true });
+      mockVoiceState.localCamera = false;
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(enableCamera).toHaveBeenCalledOnce();
+
+      // Both are still off in the store when the second drop lands.
+      secondDrop!(/* SERVER_SHUTDOWN */ 1);
+      finishCamera();
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledTimes(2);
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your screen share stopped when the connection dropped",
+      );
+    });
+
+    it("leaving voice removes the Share again toast", async () => {
+      const dismiss = vi.fn();
+      mockShowActionToast.mockReturnValueOnce(dismiss);
+      await dropWhile({ camera: false, screenshare: true });
+      mockVoiceState.localScreenshare = false;
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+
+      session.leaveVoice(true);
+
+      expect(dismiss).toHaveBeenCalledOnce();
+    });
+
+    it("keeps what the first drop stopped when a second drop lands before the notice", async () => {
+      await dropWhile({ camera: false, screenshare: true });
+      // The reconnect lands, then the new room drops again before its tail
+      // reaches the notice: the camera is already off by then.
+      const reconnecting = (session as any)._state;
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: reconnecting.latestToken,
+        lastUrl: reconnecting.lastUrl,
+        lastDirectUrl: reconnecting.lastDirectUrl,
+      };
+      reconnecting.ac.abort();
+      mockVoiceState.localScreenshare = false;
+      secondDrop!(/* SERVER_SHUTDOWN */ 1);
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(mockShowActionToast).toHaveBeenCalledOnce();
+      expect(mockShowActionToast.mock.calls[0]![0]).toBe(
+        "Your screen share stopped when the connection dropped",
+      );
+    });
+
+    it("shows no toast after a reconnect when neither was on", async () => {
+      await dropWhile({ camera: false, screenshare: false });
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+    });
+
+    it("shows no toast when the reconnect gives up", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      await dropWhile({ camera: true, screenshare: true });
+      // The chat socket closed for good: the loop gives up instead of resuming.
+      wsState = "disconnected";
+      await vi.advanceTimersByTimeAsync(3100);
+
+      expect((session as any)._state.type).toBe("idle");
+      expect(mockShowActionToast).not.toHaveBeenCalled();
+      expect(enableCamera).not.toHaveBeenCalled();
     });
   });
 
@@ -2816,7 +3188,7 @@ describe("LiveKitSession", () => {
       // Detected as local, but CSP host-sources cannot name an IPv6 literal,
       // so connect-src has no ws://[::1] entry: the direct URL would be
       // refused, and it goes through the loopback tunnel instead.
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("tunnels an IPv6 loopback directUrl when serverHost is bracketed [::1]:7880", async () => {
@@ -2824,7 +3196,7 @@ describe("LiveKitSession", () => {
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
       // Bracketed IPv6 — host extracted as "::1", detected as local, and
       // tunnelled for the same connect-src reason as the bare form.
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {
@@ -2833,7 +3205,7 @@ describe("LiveKitSession", () => {
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
       });
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("passes through proxyPath that does not start with / for remote host", async () => {
@@ -2849,14 +3221,14 @@ describe("LiveKitSession", () => {
         "/livekit",
         "ws://example.com:7880/livekit",
       );
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
     it("does not return directUrl for localhost when directUrl is undefined", async () => {
       session.setServerHost("localhost:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit");
       // No directUrl provided, isLocal but directUrl falsy -> falls to proxy
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
   });
 
@@ -3859,13 +4231,13 @@ describe("LiveKitSession", () => {
   // call instead of ejecting the user after about 27 s.
   describe("attemptAutoReconnect slow phase (D-4)", () => {
     let wsState: string;
-    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => void>>;
+    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => string | undefined>>;
     let errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
     let ac: AbortController;
 
     beforeEach(() => {
       wsState = "connected";
-      sendSpy = vi.fn<(msg: { type: string }) => void>();
+      sendSpy = vi.fn<(msg: { type: string }) => string | undefined>();
       errorCb = vi.fn<(message: string) => void>();
       ac = new AbortController();
       session.setServerHost("localhost:7880");
@@ -4001,6 +4373,7 @@ describe("LiveKitSession", () => {
     });
 
     it("rejoins with voice_join when the server released the membership during a long drop", async () => {
+      sendSpy.mockImplementation((msg) => (msg.type === "voice_join" ? "rejoin-1" : undefined));
       // The media path is back before the chat socket, and the stale roster
       // still lists us: nothing can tell yet whether the server kept the
       // membership, so the loop must not connect on the old token.
@@ -4023,6 +4396,8 @@ describe("LiveKitSession", () => {
       expect(mockRoom.connect).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
       expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_leave")).toBe(false);
+      // The rejoin's own refusal is the one that may end it.
+      expect(takeJoinRefusal("FORBIDDEN", "rejoin-1")).toBe(true);
       expect(errorCb).not.toHaveBeenCalled();
       expect(leaveVoiceChannel).not.toHaveBeenCalled();
       expect(setVoiceStatus).toHaveBeenLastCalledWith("joining");
@@ -4038,6 +4413,29 @@ describe("LiveKitSession", () => {
       // is not reported as a lost call.
       session.failPendingRejoin();
       expect(errorCb).not.toHaveBeenCalled();
+    });
+
+    it("turns the camera back on once a rejoin after a long drop connects", async () => {
+      const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
+      mockVoiceState.localCamera = false;
+      (session as any)._lostOnReconnect = { camera: true, screenshare: false };
+      mockRoom.connect.mockResolvedValue(undefined);
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(90_000);
+      wsState = "connected";
+      mockVoiceState.voiceUsers = new Map();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+      expect(enableCamera).not.toHaveBeenCalled();
+
+      mockVoiceState.currentChannelId = 5;
+      await session.handleVoiceToken("rejoin-token", "/livekit", 5, "ws://localhost:7880", true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect(enableCamera).toHaveBeenCalledOnce();
     });
 
     it("ends the call without retrying when the server refuses the rejoin after a kick", async () => {

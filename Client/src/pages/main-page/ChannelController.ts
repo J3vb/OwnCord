@@ -10,7 +10,7 @@ import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
-import type { ApiClient } from "@lib/api";
+import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
@@ -101,6 +101,9 @@ export interface ChannelController {
   mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void;
   /** Destroy current channel components and reset state. */
   destroyChannel(): void;
+  /** destroyChannel(), then drop every stashed draft and cancel the uploads
+   *  still running in them. For page teardown. */
+  destroy(): void;
   /** Currently mounted channel ID, or null. */
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
@@ -150,7 +153,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let composerGatingUnsubs: (() => void)[] = [];
 
   // UX-1: unsent composer state per channel, so switching away and back keeps
-  // the text, the reply target and the staged upload ids. Controller-scoped
+  // the text, the reply target, the staged upload ids and any upload still in
+  // flight (it keeps running in the draft until restored). Controller-scoped
   // (not per-mount) because the whole point is to outlive a channel switch.
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
@@ -331,7 +335,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // typed leaves no entry behind.
       if (currentChannelId !== null) {
         const draft = messageInput.getDraft();
-        if (draft.content !== "" || draft.replyTo !== null || draft.attachments.length > 0) {
+        if (
+          draft.content !== "" ||
+          draft.replyTo !== null ||
+          draft.attachments.length > 0 ||
+          (draft.uploads?.length ?? 0) > 0
+        ) {
           draftByChannel.set(currentChannelId, draft);
         } else {
           draftByChannel.delete(currentChannelId);
@@ -615,9 +624,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         showToast(messagingText("toast.retryUnsupported"), "error");
         return;
       }
+      // A refused reply may point at a message deleted outside the loaded
+      // window. Nothing was stored, so it goes again as a plain message under
+      // a fresh id.
+      const refusedReply =
+        draft.replyTo !== null &&
+        getChannelMessages(channelId).find((m) => m.correlationId === correlationId)?.errorCode ===
+          "BAD_REQUEST";
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
       removeOptimistic(correlationId);
+      if (refusedReply) {
+        performSend(draft.content, null, draft.attachments);
+        return;
+      }
       performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
     }
 
@@ -863,6 +883,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
         return undefined;
       },
+      onScrollBottom: () => {
+        if (channelAbort !== null) {
+          return msgCtrl.loadNewerMessages(channelId, channelAbort.signal);
+        }
+        return undefined;
+      },
       onRetryLoad: () => {
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
@@ -965,7 +991,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelName,
       gifApi: api,
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        performSend(content, replyTo, attachments);
+        // A reply whose target was deleted while composing sends as a plain
+        // message.
+        const target =
+          replyTo === null
+            ? undefined
+            : getChannelMessages(channelId).find((m) => m.id === replyTo);
+        performSend(content, target?.deleted === true ? null : replyTo, attachments);
       },
       onUploadFile: async (
         file: File,
@@ -981,6 +1013,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // failure is reported once, inline, by the composer from this
           // rejection, so it is not toasted here too.
           if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
+          throw err;
+        }
+      },
+      onDiscardUpload: async (id: string) => {
+        try {
+          await api.discardUpload(id);
+        } catch (err) {
+          // The server sweeps an unsent upload on its own; this only frees
+          // the quota sooner, so a failure is logged and not shown. A 404 is
+          // a copy already gone (withdrawn before, or an older server).
+          if (!(err instanceof ApiClientError && err.status === 404)) {
+            log.warn("Discarding an unsent upload failed", { error: String(err) });
+          }
           throw err;
         }
       },
@@ -1312,9 +1357,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
   }
 
+  function destroy(): void {
+    destroyChannel();
+    for (const draft of draftByChannel.values()) {
+      for (const upload of draft.uploads ?? []) upload.owner.destroy();
+    }
+    draftByChannel.clear();
+  }
+
   return {
     mountChannel,
     destroyChannel,
+    destroy,
     openFilePicker: () => messageInput?.openFilePicker(),
     get currentChannelId() {
       return currentChannelId;

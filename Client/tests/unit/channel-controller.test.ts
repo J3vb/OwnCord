@@ -34,6 +34,8 @@ const {
       user?: { id: number; username: string };
       deleted?: boolean;
       status?: string;
+      correlationId?: string;
+      errorCode?: string | null;
     }> => [],
   ),
   mockSetReplyTo: vi.fn(),
@@ -47,6 +49,7 @@ const {
       content: string;
       replyTo: { messageId: number; username: string } | null;
       attachments: { id: string; filename: string }[];
+      uploads?: { filename: string; owner: { destroy(): void } }[];
     }
   >(() => ({ content: "", replyTo: null, attachments: [] })),
   mockRestoreDraft: vi.fn(),
@@ -305,6 +308,7 @@ import {
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { loadLastChannel } from "@lib/last-channel";
+import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -346,6 +350,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
     msgCtrl: {
       loadMessages: vi.fn(),
       loadOlderMessages: vi.fn(),
+      loadNewerMessages: vi.fn(),
     } as unknown as ChannelControllerOptions["msgCtrl"],
     reactionCtrl: {
       handleReaction: vi.fn(),
@@ -569,6 +574,46 @@ describe("createChannelController", () => {
         replyTo: null,
         attachments: [{ id: "srv-2", filename: "b.pdf" }],
       });
+    });
+
+    it("keeps a draft that holds only an upload still in flight", () => {
+      const opts = makeOpts();
+      const owner = new Disposable();
+      const upload = { filename: "big.zip", owner };
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      mockGetDraft.mockReturnValue({
+        content: "",
+        replyTo: null,
+        attachments: [],
+        uploads: [upload],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith(expect.objectContaining({ uploads: [upload] }));
+      expect(owner.signal.aborted).toBe(false);
+    });
+
+    it("cancels uploads left in stashed drafts when the controller is destroyed", () => {
+      const opts = makeOpts();
+      const owner = new Disposable();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetDraft.mockReturnValue({
+        content: "",
+        replyTo: null,
+        attachments: [],
+        uploads: [{ filename: "big.zip", owner }],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+
+      ctrl.destroy();
+
+      expect(owner.signal.aborted).toBe(true);
     });
 
     it("does not restore a draft into a channel with none", () => {
@@ -1116,6 +1161,38 @@ describe("createChannelController", () => {
       });
     });
 
+    it("onSend drops the reply when its target was deleted", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "", deleted: true }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", 7, []);
+
+      expect(opts.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: null }),
+        }),
+      );
+    });
+
+    it("onSend keeps the reply when its target is live", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "original", deleted: false }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", 7, []);
+
+      expect(opts.ws.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: 7 }),
+        }),
+      );
+    });
+
     it("onSend from a detached window reattaches to present before sending", () => {
       // After a jump into history the composer stays enabled; sending must
       // land the optimistic row in the live tail, not mid-history.
@@ -1289,6 +1366,50 @@ describe("createChannelController", () => {
       );
     });
 
+    it("onRetry re-sends a refused reply as a plain message", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hello", 7, []);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "BAD_REQUEST" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ content: "hello", reply_to: null }),
+        }),
+      );
+    });
+
+    it("onRetry keeps the reply when the send failed for another reason", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hello", 7, []);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ content: "hello", reply_to: 7 }),
+        }),
+      );
+    });
+
     it("onDeleteDraft discards the failed row without re-sending", () => {
       const opts = makeOpts();
       let n = 0;
@@ -1448,6 +1569,16 @@ describe("createChannelController", () => {
       capturedMessageListOpts!.onScrollTop();
 
       expect(opts.msgCtrl.loadOlderMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+    });
+
+    it("onScrollBottom delegates to msgCtrl.loadNewerMessages", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onScrollBottom!();
+
+      expect(opts.msgCtrl.loadNewerMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
     });
 
     it("onReplyClick sets reply with username", () => {

@@ -30,10 +30,15 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setPttGated,
+  setLocalScreenshare,
   resetVoiceStore,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { startVoiceUiSounds } from "../../src/features/voice/uiSounds";
+import { noteVoiceMoved } from "../../src/features/voice/moveHint";
 import type { ReadyVoiceState, VoiceStatePayload } from "@lib/types";
 
 function voiceState(channelId: number, userId: number): VoiceStatePayload {
@@ -89,6 +94,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stop();
+  vi.useRealTimers();
 });
 
 describe("voice UI sounds", () => {
@@ -195,6 +201,93 @@ describe("voice UI sounds", () => {
     expect(playVoiceSound).not.toHaveBeenCalled();
   });
 
+  describe("stream start and end (WP 1C-4)", () => {
+    const member = { ...SELF, userId: 2, username: "peer" };
+    beforeEach(() => {
+      authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceUsers: new Map([
+          [
+            10,
+            new Map([
+              [1, SELF],
+              [2, member],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+    });
+
+    it("plays the stream sounds when a member in your channel starts and stops sharing", () => {
+      updateVoiceState({ ...voiceState(10, 2), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 2), screenshare: false });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["streamStart"], ["streamEnd"]]);
+    });
+
+    it("plays only the join for a member who joins already sharing, and only the leave for one who leaves sharing", () => {
+      updateVoiceState({ ...voiceState(10, 3), screenshare: true });
+      voiceStore.flush();
+      removeVoiceUser({ channel_id: 10, user_id: 3 });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["join"], ["leave"]]);
+    });
+
+    it("plays nothing for a share in another channel, or a camera", () => {
+      updateVoiceState({ ...voiceState(20, 4), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 2), camera: true });
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing when a reconnect replays a member already sharing", () => {
+      setVoiceStates([
+        { channel_id: 10, user_id: 1, muted: false, deafened: false },
+        { channel_id: 10, user_id: 2, muted: false, deafened: false, screenshare: true },
+      ]);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays the stream sounds when the server has your own share start and stop", () => {
+      updateVoiceState({ ...voiceState(10, 1), screenshare: true });
+      voiceStore.flush();
+      updateVoiceState({ ...voiceState(10, 1), screenshare: false });
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["streamStart"], ["streamEnd"]]);
+    });
+
+    it("plays nothing for a share the server never had (picker cancelled)", () => {
+      setLocalScreenshare(true);
+      voiceStore.flush();
+      setLocalScreenshare(false);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing for a share while deafened", () => {
+      setLocalDeafened(true);
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+      updateVoiceState({ ...voiceState(10, 2), screenshare: true });
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+
   it("plays the mute and unmute sounds on the local mute edge", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
     voiceStore.flush();
@@ -276,5 +369,131 @@ describe("voice UI sounds", () => {
     voiceStore.flush();
 
     expect(playVoiceSound).not.toHaveBeenCalled();
+  });
+
+  describe("your own join, leave and move", () => {
+    function connectTo(channelId: number): void {
+      joinVoiceChannel(channelId);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+    }
+
+    it("plays the join sound when the session connects, not on the click", () => {
+      joinVoiceChannel(10);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+    });
+
+    it("plays nothing for a join that fails before it connects", () => {
+      joinVoiceChannel(10);
+      voiceStore.flush();
+      setVoiceStatus("securing");
+      voiceStore.flush();
+      leaveVoiceChannel();
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays the leave sound when a connected session ends", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      // Held briefly, in case a moderator move is right behind it.
+      expect(playVoiceSound).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(250);
+
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+      vi.useRealTimers();
+    });
+
+    it("plays nothing for a reconnect inside the same channel", () => {
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      setVoiceStatus("reconnecting");
+      voiceStore.flush();
+      setVoiceStatus("idle");
+      setVoiceStatus("joining");
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays only the join, once the new channel connects, on a switch", () => {
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+    });
+
+    it("plays the moved tone, not the join one, when a moderator moves you", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+
+      // The server's order: voice_leave (its own frame, so the store flushes
+      // before the next), then voice_moved, whose handler notes the move and
+      // joins the destination.
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["moved"]]);
+
+      // The note is spent: your own next switch is an ordinary join.
+      playVoiceSound.mockClear();
+      joinVoiceChannel(30);
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+      vi.useRealTimers();
+    });
+
+    it("spends the move note when the destination join fails", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      joinVoiceChannel(20);
+      voiceStore.flush();
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+      playVoiceSound.mockClear();
+
+      // Joining that channel yourself later is an ordinary join.
+      connectTo(20);
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+      vi.useRealTimers();
+    });
   });
 });

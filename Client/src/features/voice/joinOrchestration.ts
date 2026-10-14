@@ -22,6 +22,7 @@ import {
   advanceJoinStage,
   beginJoinAttempt,
   classifyJoinUrl,
+  redactTunnelUrl,
   countJoinRetry,
   failJoinAttempt,
   finishJoinAttempt,
@@ -50,6 +51,8 @@ export interface JoinHost {
   resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string>;
   restoreLocalVoiceState(mode: "join"): Promise<void>;
   reapplyMuteGain(): void;
+  /** Tell the server our own mute/deafen: a fresh join writes its row clean. */
+  restateSelfVoiceState(): void;
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
   leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
@@ -357,7 +360,7 @@ export class JoinOrchestration {
             log.warn("LiveKit connect failed, retrying", {
               attempt,
               maxRetries: MAX_RETRIES,
-              url: resolvedUrl,
+              url: redactTunnelUrl(resolvedUrl),
               error: connectErr,
             });
             // oxlint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
@@ -394,7 +397,7 @@ export class JoinOrchestration {
         // SRE-M2: the room connected; the remaining work (device switches,
         // local voice state, pipeline) is the "activate" phase.
         advanceJoinStage(traceId, "activate");
-        log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
+        log.info("Connected to LiveKit room", { channelId, url: redactTunnelUrl(resolvedUrl) });
         logIceConnectionInfo(localRoom);
         // Atomic transition to "connected" — all connection fields set together.
         this.setState({
@@ -472,6 +475,11 @@ export class JoinOrchestration {
 
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
+        // A join the user already switched away from leaves the restate to
+        // the switch's own join.
+        if (voiceStore.getState().currentChannelId === channelId) {
+          this.host.restateSelfVoiceState();
+        }
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
         finishJoinAttempt(traceId);
@@ -481,7 +489,7 @@ export class JoinOrchestration {
       }
       return false;
     } catch (err) {
-      log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
+      log.error("Failed to connect to LiveKit", { url: redactTunnelUrl(resolvedUrl), error: err });
       // SRE-M2: a thrown connect/setup failure is placed at the stage the
       // attempt last reached (resolve / connect / activate) — but only while
       // this attempt still owns the session (connecting with its generation,

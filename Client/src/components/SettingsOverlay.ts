@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Video, Keybinds, Advanced, Logs, About.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -8,6 +8,7 @@ import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
@@ -30,6 +31,9 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
+import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
+
+const log = createLogger("SettingsOverlay");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,10 +104,11 @@ export type TabName =
   | "Notifications"
   | "Text & Images"
   | "Accessibility"
-  | "Voice & Audio"
+  | "Voice & Video"
   | "Keybinds"
   | "Advanced"
-  | "Logs";
+  | "Logs"
+  | "About";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
@@ -112,16 +117,19 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Notifications: "bell",
   "Text & Images": "image",
   Accessibility: "eye",
-  "Voice & Audio": "mic",
+  "Voice & Video": "mic",
   Keybinds: "keyboard",
   Advanced: "settings",
   Logs: "scroll-text",
+  About: "file-text",
 };
 
 // i18n-exempt: TabName key; its label is settingsText("tabs.safety")
 const SAFETY = "Safety" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.account")
 const ACCOUNT = "Account" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.about")
+const ABOUT = "About" satisfies TabName;
 
 /** What each tab is called on screen (B9-20 moved every label onto the seam). */
 const TAB_LABEL_KEYS = {
@@ -131,10 +139,11 @@ const TAB_LABEL_KEYS = {
   Notifications: "tabs.notifications",
   "Text & Images": "tabs.textImages",
   Accessibility: "tabs.accessibility",
-  "Voice & Audio": "tabs.voice",
+  "Voice & Video": "tabs.voice",
   Keybinds: "tabs.keybinds",
   Advanced: "tabs.advanced",
   Logs: "tabs.logs",
+  About: "tabs.about",
 } as const satisfies Record<TabName, string>;
 
 function tabLabel(name: TabName): string {
@@ -168,6 +177,7 @@ export function createSettingsOverlay(
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
+  let unsubUpdate: (() => void) | null = null;
   /**
    * Scopes the *current* tab build's element listeners. `renderActiveTab()`
    * aborts the previous one before building the next, so a discarded pane's
@@ -225,10 +235,23 @@ export function createSettingsOverlay(
     Notifications: (signal) => buildNotificationsTab(signal),
     "Text & Images": (signal) => buildTextImagesTab(signal),
     Accessibility: (signal) => buildAccessibilityTab(signal),
-    "Voice & Audio": (signal) => voiceTab.build(signal),
+    "Voice & Video": (signal) => voiceTab.build(signal),
     Keybinds: (signal) => buildKeybindsTab(signal),
     Advanced: (signal) => buildAdvancedTab(signal),
     Logs: (signal) => logsTab.build(signal),
+    // Loaded on first open: the release notes renderer stays out of this chunk.
+    About: (signal) => {
+      const host = createElement("div", { class: "settings-pane active" });
+      void import("./settings/AboutTab").then(
+        ({ buildAboutTab }) => {
+          if (!signal.aborted) host.replaceWith(buildAboutTab(signal));
+        },
+        (err: unknown) => {
+          log.warn("About tab failed to load", { error: String(err) });
+        },
+      );
+      return host;
+    },
   };
 
   // ---- Core methods ---------------------------------------------------------
@@ -251,7 +274,7 @@ export function createSettingsOverlay(
 
   /** Release resources held by the tab currently on screen. */
   function cleanupActiveTab(): void {
-    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    if (activeTab === "Voice & Video") voiceTab.cleanup();
     // The Logs tab keeps a live log listener pointed at its (now discarded)
     // list element — drop it so it isn't re-rendering a detached tree.
     if (activeTab === "Logs") logsTab.cleanup();
@@ -467,6 +490,17 @@ export function createSettingsOverlay(
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
       btn.appendChild(document.createTextNode(tabLabel(name)));
+      if (name === ABOUT) {
+        // A dot while the update check has a newer version on offer.
+        const dot = createElement("span", { class: "settings-nav-dot" });
+        dot.appendChild(
+          createElement("span", { class: "sr-only" }, settingsText("tabs.aboutUpdate")),
+        );
+        unsubUpdate = subscribeAvailableUpdate((update) => {
+          if (update === null) dot.remove();
+          else btn.appendChild(dot);
+        });
+      }
       btn.addEventListener("click", () => setActiveTab(name), { signal: disposable.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
@@ -576,6 +610,8 @@ export function createSettingsOverlay(
       unsubUi();
       unsubUi = null;
     }
+    unsubUpdate?.();
+    unsubUpdate = null;
     if (unsubAuth !== null) {
       unsubAuth();
       unsubAuth = null;

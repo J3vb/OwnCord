@@ -30,6 +30,7 @@ import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import { isChannelAway, markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
+import { notifyMention } from "../../lib/notifications";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
@@ -200,6 +201,9 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  * away, its own chat_message keeps counting live mentions. Ignored for a
  * DM-channel id too: a DM's badge lives in dmStore and its mention bump rides
  * the DM's own chat_message.
+ *
+ * For any other channel a raised total also fires notifyMention: nothing else
+ * tells the reader, since chat_message only reaches the focused channel.
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
   const ch = channelsStore.getState().channels.get(payload.channel_id);
@@ -209,7 +213,13 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
     setMentionCount(payload.channel_id, Math.min(ch.mentionCount, payload.count));
     return;
   }
+  const previous = ch.mentionCount;
   setMentionCount(payload.channel_id, payload.count);
+  // A raised total on a channel the reader is not viewing is a new mention that
+  // no chat_message announced, so alert for it (WP 2B-1, interim). A lowered or
+  // unchanged total (delete, purge, repeat frame) is not a new mention. The
+  // active channel never alerts here: its own chat_message already does.
+  if (payload.count > previous) notifyMention(payload.channel_id);
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {

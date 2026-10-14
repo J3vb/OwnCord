@@ -40,14 +40,19 @@ function selectorText(selector: Selector): string {
         case "combinator":
           return COMBINATORS[c.value] ?? ` ${c.value} `;
         case "pseudo-class":
-          // :has(...) carries a nested selector list; render it so a test can
+          // :has(...) and :not(...) carry a nested selector list; render it so a test can
           // pin the whole selector rather than just the pseudo-class name.
-          if (c.kind === "has") {
-            return `:has(${c.selectors.map(selectorText).join(", ")})`;
+          if (c.kind === "has" || c.kind === "not") {
+            return `:${c.kind}(${c.selectors.map(selectorText).join(", ")})`;
           }
           return `:${c.kind}`;
         case "pseudo-element":
           return `::${c.kind}`;
+        case "attribute":
+          // Presence and exact match only; other operators fall to the default.
+          if (!c.operation) return `[${c.name}]`;
+          if (c.operation.operator === "equal") return `[${c.name}="${c.operation.value}"]`;
+          return `<${c.type}>`;
         default:
           // Not needed by any test; never equal to a real selector string.
           return `<${c.type}>`;

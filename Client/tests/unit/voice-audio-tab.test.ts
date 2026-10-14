@@ -2,17 +2,32 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const mockSwitchInputDevice = vi.fn().mockResolvedValue(undefined);
 const mockSwitchOutputDevice = vi.fn().mockResolvedValue(undefined);
+const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
 const mockGetLocalMicSettings = vi.fn((): MediaTrackSettings | null => null);
+const mockApplyInputMode = vi.fn();
+const mockPttStop = vi.fn(async () => {});
+const mockPttUpdateKey = vi.fn(async (_vk: number) => {});
+
+vi.mock("../../src/platform/desktop/pushToTalk", () => ({
+  pushToTalk: {
+    supported: async () => true,
+    captureKeyPress: async () => 0,
+    stop: () => mockPttStop(),
+    updateKey: (vk: number) => mockPttUpdateKey(vk),
+  },
+}));
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
   switchOutputDevice: (...args: unknown[]) => mockSwitchOutputDevice(...args),
+  switchVideoDevice: (...args: unknown[]) => mockSwitchVideoDevice(...args),
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
+  applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
@@ -23,6 +38,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
 import { vadThreshold } from "@lib/audioPipeline";
+import { GATE_LOOKAHEAD_S } from "@lib/micProcessor";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,
@@ -34,6 +50,9 @@ import {
   FakeAudioWorkletNode,
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
+
+/** The volume sliders, not the Push to Talk release delay in the input mode card. */
+const VOLUME_SLIDERS = 'input[type="range"]:not([data-testid="ptt-release-delay"])';
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -263,8 +282,8 @@ describe("VoiceAudioTab UI structure", () => {
 
     const selects = el.querySelectorAll("select");
     // Input, output, camera quality, screen share quality, screen share fps,
-    // video = 6 selects
-    expect(selects.length).toBe(6);
+    // video codec, video = 7 selects
+    expect(selects.length).toBe(7);
     ac.abort();
   });
 
@@ -275,8 +294,10 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]');
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
+    // ...plus the Push to Talk release delay, under the input mode.
+    expect(el.querySelectorAll('input[type="range"]').length).toBe(3);
     ac.abort();
   });
 
@@ -287,7 +308,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const inputSlider = sliders[0]!;
     inputSlider.value = "75";
     inputSlider.dispatchEvent(new Event("input"));
@@ -303,7 +324,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const outputSlider = sliders[1]!;
     outputSlider.value = "80";
     outputSlider.dispatchEvent(new Event("input"));
@@ -320,7 +341,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[0]!.value).toBe("75");
     ac.abort();
   });
@@ -333,7 +354,7 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
+    const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[1]!.value).toBe("60");
     ac.abort();
   });
@@ -679,6 +700,53 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("video codec select offers VP8, H.264 and Auto, defaults to VP8 and saves the choice", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+    expect([...codecSelect.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
+    expect(codecSelect.value).toBe("vp8");
+    codecSelect.value = "auto";
+    codecSelect.dispatchEvent(new Event("change"));
+
+    expect(localStorage.getItem("owncord:settings:videoCodec")).toBe('"auto"');
+    ac.abort();
+  });
+
+  it("warns under the video codec choice that H.264 does not work from Intel graphics yet", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+
+    const warning = codecSelect.nextElementSibling;
+    expect(warning?.classList.contains("setting-desc")).toBe(true);
+    expect(warning?.textContent).toBe(
+      "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
+    );
+    ac.abort();
+  });
+
+  it("video codec select shows the saved choice, and VP8 for an unknown one", () => {
+    stubNavigator();
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const ac = new AbortController();
+    let el = createVoiceAudioTab(ac.signal).build();
+    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+      "h264",
+    );
+
+    localStorage.setItem("owncord:settings:videoCodec", '"av1"');
+    el = createVoiceAudioTab(ac.signal).build();
+    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+      "vp8",
+    );
+    ac.abort();
+  });
+
   describe("device and processing cards", () => {
     function build(): { el: HTMLDivElement; ac: AbortController } {
       stubNavigator();
@@ -692,10 +760,11 @@ describe("VoiceAudioTab UI structure", () => {
         (c) => c.querySelector(".settings-card-head h3")!.textContent === title,
       )!;
 
-    it("groups the tab into Microphone, Speakers, Camera & screen share and Voice processing", () => {
+    it("groups the tab into Input Mode, Microphone, Speakers, Camera & screen share and Voice processing", () => {
       const { el, ac } = build();
       const titles = [...el.querySelectorAll(".settings-card-head h3")].map((h) => h.textContent);
       expect(titles).toEqual([
+        "Input Mode",
         "Microphone",
         "Speakers",
         "Camera & screen share",
@@ -714,6 +783,7 @@ describe("VoiceAudioTab UI structure", () => {
         "Camera Quality",
         "Screen Share Quality",
         "Screen Share FPS",
+        "Video Codec",
       ]) {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
@@ -750,6 +820,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     it("states the input sensitivity beside the meter, and follows the handle", () => {
       localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+      localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
       const { el, ac } = build();
       const value = el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
       expect(value.textContent).toBe("50%");
@@ -758,6 +829,92 @@ describe("VoiceAudioTab UI structure", () => {
       );
       expect(value.textContent).toBe("45%");
       ac.abort();
+    });
+
+    describe("automatic sensitivity", () => {
+      const autoToggle = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>("[data-testid='auto-sensitivity'] .toggle")!;
+      const handleOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>(".mic-meter-threshold")!;
+      const valueOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
+
+      it("is on for a fresh profile: the meter stays, the handle and value hide", () => {
+        const { el, ac } = build();
+        expect(autoToggle(el).getAttribute("aria-checked")).toBe("true");
+        expect(el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden).toBe(false);
+        expect(handleOf(el).hidden).toBe(true);
+        expect(valueOf(el).hidden).toBe(true);
+        ac.abort();
+      });
+
+      it("keeps a tuned slider manual, with its handle at the saved value", () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "30");
+        const { el, ac } = build();
+        expect(autoToggle(el).getAttribute("aria-checked")).toBe("false");
+        expect(handleOf(el).hidden).toBe(false);
+        expect(valueOf(el).textContent).toBe("30%");
+        ac.abort();
+      });
+
+      it("turning it off shows the slider at the saved value and re-runs the call's gate", () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        mockApplyInputMode.mockClear();
+
+        autoToggle(el).click();
+
+        expect(localStorage.getItem("owncord:settings:autoInputSensitivity")).toBe("false");
+        expect(handleOf(el).hidden).toBe(false);
+        expect(valueOf(el).hidden).toBe(false);
+        expect(handleOf(el).style.left).toBe("50%");
+        expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+        ac.abort();
+      });
+
+      it("a click on the meter does not move a threshold it does not show", () => {
+        const { el, ac } = build();
+        el.querySelector(".mic-meter-bar")!.dispatchEvent(new MouseEvent("click", { clientX: 0 }));
+        expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+        ac.abort();
+      });
+
+      it("runs the meter's detector on the automatic threshold, and back on the slider's", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        await vi.waitFor(() =>
+          expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+        );
+        const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+        // Before the first estimate, auto gates at the default threshold.
+        expect(worklet.port.postMessage).toHaveBeenCalledWith({
+          type: "config",
+          threshold: vadThreshold(50),
+        });
+        vi.useFakeTimers({ toFake: ["performance"] });
+        try {
+          // A quiet room (-60 dBFS) for over a second: the gate moves to
+          // 10 dB above it, without resetting the gate.
+          worklet.emit({ type: "rms", value: 0.001 });
+          vi.advanceTimersByTime(1100);
+          worklet.emit({ type: "rms", value: 0.001 });
+          const moved = worklet.port.postMessage.mock.calls.at(-1)![0] as {
+            type: string;
+            threshold: number;
+          };
+          expect(moved.type).toBe("threshold");
+          expect(moved.threshold).toBeCloseTo(0.001 * 10 ** 0.5, 6);
+        } finally {
+          vi.useRealTimers();
+        }
+
+        autoToggle(el).click();
+        expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
+          type: "config",
+          threshold: vadThreshold(50),
+        });
+        ac.abort();
+      });
     });
 
     it("shows the microphone's state as a pill: no input while the meter hears nothing", async () => {
@@ -867,6 +1024,7 @@ describe("VoiceAudioTab UI structure", () => {
 
       it("draws the level on the threshold handle's own axis", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
         const { el, worklet, ac } = await meter();
         const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
         expect(handle.style.left).toBe("50%");
@@ -882,6 +1040,7 @@ describe("VoiceAudioTab UI structure", () => {
 
       it("moves the detector's threshold as the handle is dragged, without reopening the mic", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
         const { el, worklet, ac } = await meter();
         const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
 
@@ -918,9 +1077,25 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    const settingRows = el.querySelectorAll(".setting-row");
+    const settingRows = el.querySelectorAll(
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras'])",
+    );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
+    ac.abort();
+  });
+
+  it("Automatically play cameras is on by default and saves its choice (WP 1B-3)", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const toggle = el.querySelector<HTMLElement>("[data-testid='auto-play-cameras'] .toggle")!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Automatically play cameras");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:autoPlayCameras")).toBe("false");
     ac.abort();
   });
 
@@ -932,7 +1107,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     // Toggles are divs with class "toggle" (not buttons)
-    const toggleDiv = el.querySelector(".setting-row .toggle") as HTMLElement;
+    const toggleDiv = el.querySelector(
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']) .toggle",
+    ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();
 
@@ -1156,6 +1333,8 @@ describe("VoiceAudioTab UI structure", () => {
     const videoSelect = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
     videoSelect.value = "cam-1";
     videoSelect.dispatchEvent(new Event("change"));
+    // A live camera in a call moves to the picked device too.
+    expect(mockSwitchVideoDevice).toHaveBeenCalledWith("cam-1");
 
     await vi.waitFor(() => {
       const preview = el.querySelector("video") as HTMLVideoElement;
@@ -1247,6 +1426,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("keyboard moves the threshold handle the way the key points", () => {
     localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1279,6 +1459,7 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("clicking the meter bar calls setVoiceSensitivity", () => {
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1545,7 +1726,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("does not register a new permanent abort listener on every rebuild (OC-0125)", () => {
     // Simulates the settings overlay staying open for a session while the
-    // user re-opens the Voice & Audio tab (e.g. hide()/show() cycles):
+    // user re-opens the Voice & Video tab (e.g. hide()/show() cycles):
     // SettingsOverlay's single AbortController lives for the whole session,
     // and build() is called again each time the tab is (re)rendered.
     stubNavigator();
@@ -1607,6 +1788,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
         },
+        pushToTalk: { supported: async () => true },
       },
     }));
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
@@ -1660,6 +1842,17 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return select!;
   }
 
+  it("hides the video codec choice: the native engine always publishes VP8", async () => {
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const tab = await mount();
+    expect(tab.element.querySelector('select[aria-label="Video Codec"]')).toBeNull();
+    const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
+      (h) => h.textContent,
+    );
+    expect(headings).not.toContain("Video Codec");
+    expect(headings).toContain("Screen Share FPS");
+  });
+
   it("hides the input volume control and explains why", async () => {
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
@@ -1700,11 +1893,24 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       (h) => h.textContent,
     );
     expect(headings).toContain("Input Sensitivity");
+    // The engine gates on the saved slider alone: no automatic toggle.
+    expect(tab.element.querySelector("[data-testid='auto-sensitivity']")).toBeNull();
     const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    expect(handle.hidden).toBe(false);
     handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
     expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("45");
     expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
+  });
+
+  it("offers no mic test: the engine's capture never reaches the webview", async () => {
+    const tab = await mount();
+    const row = tab.element.querySelector<HTMLElement>('[data-testid="mic-test"]')!;
+    expect(row.textContent).toContain("not available on Linux yet");
+    const button = row.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!;
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(button.textContent).toBe("Let's Check");
   });
 
   it("tells the user the processing toggles apply on the next join", async () => {
@@ -1900,5 +2106,303 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(startCameraPreview).toHaveBeenCalledTimes(1);
     expect(stopCameraPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe("VoiceAudioTab input mode (WP 1D-2)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    installFakeAudio({ worklets: true });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    mockApplyInputMode.mockClear();
+    mockPttStop.mockClear();
+    mockPttUpdateKey.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mount(): { el: HTMLElement; ac: AbortController } {
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    return { el, ac };
+  }
+  const option = (el: HTMLElement, mode: string): HTMLButtonElement =>
+    el.querySelector<HTMLButtonElement>(`[data-testid="input-mode-${mode}"]`)!;
+  const pttBox = (el: HTMLElement): HTMLElement =>
+    el.querySelector<HTMLElement>('[data-testid="ptt-controls"]')!;
+  const sensitivityShown = (el: HTMLElement): boolean =>
+    !el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden;
+
+  it("opens on Voice Activity with the sensitivity row and no key controls", () => {
+    const { el, ac } = mount();
+    expect(option(el, "vad").getAttribute("aria-checked")).toBe("true");
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("false");
+    expect(pttBox(el).hidden).toBe(true);
+    expect(sensitivityShown(el)).toBe(true);
+    ac.abort();
+  });
+
+  it("Push to Talk shows the key and release delay and hides the sensitivity row", () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    const { el, ac } = mount();
+
+    option(el, "ptt").click();
+
+    expect(localStorage.getItem("owncord:settings:inputMode")).toBe('"ptt"');
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
+    expect(pttBox(el).hidden).toBe(false);
+    expect(pttBox(el).querySelector('[data-testid="ptt-release-delay"]')).not.toBeNull();
+    expect(sensitivityShown(el)).toBe(false);
+    expect(el.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!.hidden).toBe(true);
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(mockPttUpdateKey).toHaveBeenCalledWith(65);
+    ac.abort();
+  });
+
+  it("repaints the key as Not set when arming Push to Talk clears a refused key", async () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    mockPttUpdateKey.mockImplementationOnce(async () => {
+      localStorage.setItem("owncord:settings:pttVk", "0");
+    });
+    const { el, ac } = mount();
+    const keyButton = (): HTMLElement =>
+      pttBox(el).querySelector<HTMLElement>('button[aria-label^="Push to Talk keybind"]')!;
+    expect(keyButton().textContent).toBe("A");
+
+    option(el, "ptt").click();
+    await vi.waitFor(() => expect(keyButton().textContent).toBe("Not set"));
+    ac.abort();
+  });
+
+  it("switching back to Voice Activity stops push to talk and restores the sensitivity row", () => {
+    localStorage.setItem("owncord:settings:inputMode", '"ptt"');
+    const { el, ac } = mount();
+    expect(sensitivityShown(el)).toBe(false);
+
+    option(el, "vad").click();
+
+    expect(localStorage.getItem("owncord:settings:inputMode")).toBe('"vad"');
+    expect(pttBox(el).hidden).toBe(true);
+    expect(sensitivityShown(el)).toBe(true);
+    expect(mockPttStop).toHaveBeenCalledTimes(1);
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    ac.abort();
+  });
+
+  it("does not arm push to talk with no key bound, and ignores a click on the current mode", () => {
+    const { el, ac } = mount();
+    option(el, "vad").click();
+    expect(mockApplyInputMode).not.toHaveBeenCalled();
+
+    option(el, "ptt").click();
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(mockPttUpdateKey).not.toHaveBeenCalled();
+    ac.abort();
+  });
+
+  it("shows Push to Talk for a profile from before Input Mode with a bound key", () => {
+    localStorage.setItem("owncord:settings:pttVk", "65");
+    const { el, ac } = mount();
+    expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
+    expect(pttBox(el).hidden).toBe(false);
+    ac.abort();
+  });
+});
+
+describe("VoiceAudioTab mic test (WP 1D-4)", () => {
+  /** The audio elements the tab started playing, newest last. */
+  let played: HTMLMediaElement[] = [];
+  const pause = vi.fn();
+  const setSinkId = vi.fn(async (_id: string) => {});
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    installFakeAudio({ worklets: true });
+    played = [];
+    pause.mockClear();
+    setSinkId.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
+      this: HTMLMediaElement,
+    ) {
+      played.push(this);
+      return Promise.resolve();
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(pause);
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+      value: setSinkId,
+      configurable: true,
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+          getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+        }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (HTMLMediaElement.prototype as Partial<{ setSinkId: unknown }>).setSinkId;
+    vi.unstubAllGlobals();
+  });
+
+  async function mount(): Promise<{
+    el: HTMLElement;
+    ac: AbortController;
+    tab: ReturnType<typeof createVoiceAudioTab>;
+  }> {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+    );
+    return { el, ac, tab };
+  }
+  const button = (el: HTMLElement): HTMLButtonElement =>
+    el.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!;
+  const tracksOf = (audio: HTMLMediaElement): MediaStreamTrack[] =>
+    (audio.srcObject as MediaStream).getTracks();
+  /** The meter processor's voice gate: the GainNode after the lookahead delay. */
+  const gateOf = (ctx: FakeAudioContext) =>
+    ctx.node("delay").outputs[0] as unknown as {
+      gain: { value: number };
+    };
+
+  it("plays the meter's processed output on Let's Check, and stops on Stop Testing", async () => {
+    localStorage.setItem("owncord:settings:audioOutputDevice", '"spk-1"');
+    localStorage.setItem("owncord:settings:outputVolume", "60");
+    const { el, ac } = await mount();
+    expect(button(el).textContent).toBe("Let's Check");
+    expect(played).toHaveLength(0);
+
+    button(el).click();
+
+    expect(button(el).textContent).toBe("Stop Testing");
+    expect(button(el).getAttribute("aria-pressed")).toBe("true");
+    expect(played).toHaveLength(1);
+    const audio = played[0]!;
+    expect(tracksOf(audio)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
+    expect(setSinkId).toHaveBeenCalledWith("spk-1");
+    expect(audio.volume).toBeCloseTo(0.6);
+
+    button(el).click();
+
+    expect(button(el).textContent).toBe("Let's Check");
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(audio.srcObject).toBeNull();
+    ac.abort();
+  });
+
+  type Teardown = (tab: ReturnType<typeof createVoiceAudioTab>, ac: AbortController) => void;
+  it.each<[string, Teardown]>([
+    ["switching tabs or closing settings (cleanup)", (tab) => tab.cleanup()],
+    ["the overlay being destroyed (abort)", (_tab, ac) => ac.abort()],
+  ])("stops on %s", async (_label, teardown) => {
+    const { el, ac, tab } = await mount();
+    button(el).click();
+    const audio = played[0]!;
+
+    teardown(tab, ac);
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(audio.srcObject).toBeNull();
+    ac.abort();
+  });
+
+  it("keeps playing when a processing toggle reopens the meter's microphone", async () => {
+    const { el, ac } = await mount();
+    button(el).click();
+    const first = played[0]!;
+    const contexts = FakeAudioContext.instances.length;
+
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+
+    await vi.waitFor(() => expect(played).toHaveLength(2));
+    expect(first.srcObject).toBeNull();
+    expect(FakeAudioContext.instances.length).toBe(contexts + 1);
+    expect(tracksOf(played[1]!)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
+    expect(button(el).textContent).toBe("Stop Testing");
+    ac.abort();
+  });
+
+  it("gates the playback on the detector in Voice Activity, and not in Push to Talk", async () => {
+    localStorage.setItem("owncord:settings:inputMode", '"vad"');
+    const { el, ac } = await mount();
+    const ctx = FakeAudioContext.instances.at(-1)!;
+    const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+    button(el).click();
+    expect(ctx.node("delay").delayTime.value).toBe(GATE_LOOKAHEAD_S);
+
+    worklet.emit({ type: "gate", gated: true });
+    expect(gateOf(ctx).gain.value).toBe(0);
+    worklet.emit({ type: "gate", gated: false });
+    expect(gateOf(ctx).gain.value).toBe(1);
+
+    worklet.emit({ type: "gate", gated: true });
+    el.querySelector<HTMLButtonElement>('[data-testid="input-mode-ptt"]')!.click();
+    expect(gateOf(ctx).gain.value).toBe(1);
+    expect(ctx.node("delay").delayTime.value).toBe(0);
+    ac.abort();
+  });
+
+  it.each([
+    ["a corrupt", '"loud"', 1],
+    ["a negative", "-20", 0],
+    ["a boosted (150%)", "150", 1],
+  ])("plays with %s saved output volume instead of failing", async (_label, saved, volume) => {
+    localStorage.setItem("owncord:settings:outputVolume", saved);
+    const { el, ac } = await mount();
+    button(el).click();
+    expect(played).toHaveLength(1);
+    expect(played[0]!.volume).toBe(volume);
+    ac.abort();
+  });
+
+  it("lets Output Volume go to 200% and shows a saved 150% as 150% (WP 1D-5)", async () => {
+    localStorage.setItem("owncord:settings:outputVolume", "150");
+    const { el, ac } = await mount();
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    expect(volume.max).toBe("200");
+    expect(volume.value).toBe("150");
+    expect(volume.parentElement?.querySelector(".slider-val")?.textContent).toBe("150%");
+    ac.abort();
+  });
+
+  it("follows the output device and volume chosen while testing", async () => {
+    const { el, ac } = await mount();
+    button(el).click();
+    const audio = played[0]!;
+    setSinkId.mockClear();
+
+    const output = el.querySelector<HTMLSelectElement>('select[aria-label="Output Device"]')!;
+    output.appendChild(Object.assign(document.createElement("option"), { value: "spk-2" }));
+    output.value = "spk-2";
+    output.dispatchEvent(new Event("change"));
+    expect(setSinkId).toHaveBeenCalledWith("spk-2");
+
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    volume.value = "25";
+    volume.dispatchEvent(new Event("input"));
+    expect(audio.volume).toBeCloseTo(0.25);
+    ac.abort();
   });
 });

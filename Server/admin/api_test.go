@@ -1393,8 +1393,6 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"server_name",
 		"server_icon",
 		"motd",
-		"max_upload_bytes",
-		"voice_quality",
 		"require_2fa",
 		"registration_mode",
 		"backup_schedule",
@@ -1404,8 +1402,6 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 	// Boolean-typed settings require valid boolean values; others accept any
 	// string, except the enumerated/validated keys which need a valid value.
 	validValues := map[string]string{
-		"max_upload_bytes":  "104857600",
-		"voice_quality":     "high",
 		"require_2fa":       "0",
 		"registration_mode": "closed",
 		"backup_schedule":   "daily",
@@ -1695,6 +1691,8 @@ type mockHub struct {
 	// onVoiceCleanup lets a test observe DB state at cleanup time (ordering
 	// vs. the channel-delete cascade).
 	onVoiceCleanup func(channelID int64)
+	// uploadPolicyBroadcasts counts BroadcastUploadPolicy calls.
+	uploadPolicyBroadcasts int
 }
 
 type memberUpdateCall struct {
@@ -1748,6 +1746,10 @@ func (m *mockHub) RefreshAllChannelVisibility() {
 
 func (m *mockHub) BroadcastRolesUpdate(roles []*db.Role) {
 	m.rolesUpdates = append(m.rolesUpdates, roles)
+}
+
+func (m *mockHub) BroadcastUploadPolicy() {
+	m.uploadPolicyBroadcasts++
 }
 
 func (m *mockHub) ClientCount() int {

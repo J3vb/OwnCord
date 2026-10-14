@@ -19,6 +19,12 @@ func TestSettingsPatch_ValueLimits(t *testing.T) {
 		"server_name":      strings.Repeat("n", MaxServerNameLen+1),
 		"motd":             strings.Repeat("m", MaxMotdLen+1),
 	}
+	for _, key := range []string{"max_upload_bytes", "voice_quality"} {
+		_, err := svc.Patch(ctx, 1, map[string]string{key: "low"})
+		if !errors.Is(err, ErrBadRequest) || err.Error() != key+" is set in config.yaml, not here" {
+			t.Errorf("%s: inert key err = %v", key, err)
+		}
+	}
 	for key, value := range bad {
 		_, err := svc.Patch(ctx, 1, map[string]string{key: value})
 		if !errors.Is(err, ErrBadRequest) {
@@ -33,15 +39,13 @@ func TestSettingsPatch_ValueLimits(t *testing.T) {
 		}
 	}
 	all, err := svc.Patch(ctx, 1, map[string]string{
-		"max_upload_bytes": " 104857600 ",
-		"voice_quality":    "Low",
-		"server_name":      "  Home  ",
-		"motd":             strings.Repeat("m", MaxMotdLen),
+		"server_name": "  Home  ",
+		"motd":        strings.Repeat("m", MaxMotdLen),
 	})
 	if err != nil {
 		t.Fatalf("valid patch: %v", err)
 	}
-	for key, want := range map[string]string{"max_upload_bytes": "104857600", "voice_quality": "low", "server_name": "Home"} {
+	for key, want := range map[string]string{"server_name": "Home"} {
 		if all[key] != want {
 			t.Errorf("%s = %q, want %q", key, all[key], want)
 		}

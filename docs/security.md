@@ -1,213 +1,293 @@
 # Security Policy
 
-Security guidelines and vulnerability reporting for OwnCord.
+This page is for server operators and contributors. It explains how to report
+a security problem, what stays private, and how OwnCord protects accounts,
+data and the desktop client.
 
 ## Reporting Vulnerabilities
 
-Report privately via GitHub Security Advisories:
+Report privately through GitHub Security Advisories:
 [github.com/J3vb/OwnCord/security/advisories/new](https://github.com/J3vb/OwnCord/security/advisories/new).
 
 **Do NOT open public issues for security bugs.**
 
-The repository-root [SECURITY.md](../SECURITY.md) is the canonical reporting
-policy — what to include and the response timeline (initial response within
-7 days) live there, so the two files cannot disagree.
+The repository-root [SECURITY.md](../SECURITY.md) is the main reporting
+policy. It says what to include and gives the response time (a first reply
+within 7 days). Those details live only there, so the two files cannot
+disagree.
 
 ## What stays private, and for how long
 
-This applies to weaknesses in the repository's own automation and settings —
-workflow authorization, credential scope, release gating — as much as to bugs in
-the server or client. Planning documents cite this section as the rule; it is
-written here so the citation points at something.
+These rules apply to weaknesses in the repository's own automation and
+settings (workflow permissions, credential scope, release gating) just as much
+as to bugs in the server or client. Planning documents point to this section
+as the rule.
 
-- Public artifacts — commits, issues, pull request descriptions, changelogs —
-  carry an **opaque identifier, the affected property, safe acceptance criteria,
-  and a status**. Nothing more.
-- Reproduction steps, source-to-sink traces, exploit conditions, and the state a
-  fix replaced stay in the private advisory. A commit that fixes a weakness
-  describes the control it adds, not the gap it closes.
-- Every private finding has exactly one public owner, so nothing is tracked only
-  in private and nothing is silently dropped.
-- Release notes may describe repaired impact after coordinated remediation,
-  without the detail needed to reproduce it.
+- **Public records carry only four things.** Commits, issues, pull request
+  descriptions and changelogs carry an **opaque identifier, the affected
+  property, safe acceptance criteria, and a status**. Nothing more.
+- **Details stay in the private advisory.** That means reproduction steps,
+  source-to-sink traces, the conditions needed to exploit it, and the state a
+  fix replaced. A commit that fixes a weakness describes the control it adds,
+  not the gap it closes.
+- **Every private finding has exactly one public owner.** So nothing is
+  tracked only in private, and nothing is silently dropped.
+- **Release notes may describe the repaired impact** once the fix is
+  coordinated, but without the detail needed to reproduce it.
 
-This repository is public. A commit message is a disclosure channel.
+This repository is public. A commit message can reveal a weakness.
 
 ## Trust model
 
-What the server operator can and cannot read, what is end-to-end encrypted,
-how transport and at-rest data are protected, and what beta does not claim are
-stated in one place: [trust-model.md](trust-model.md). Every claim there cites
-the code line or test that makes it true.
+[trust-model.md](trust-model.md) is the one place that says:
 
-Configuration secrets set from the admin panel (`gif.api_key`, `github.token`
-and the LiveKit key and secret) are write-only and stored in
+- what the server operator can and cannot read;
+- what is end-to-end encrypted;
+- how data is protected in transit and at rest;
+- what the beta does not claim.
+
+Every claim there cites the code line or test that makes it true.
+
+**Secrets set from the admin panel are write-only.** These are `gif.api_key`,
+`github.token`, and the LiveKit key and secret. They are stored in
 `<data_dir>/config-overrides.json` (mode `0600`). The panel is told only
-whether a value is configured; the server never returns, logs or audits one.
-Treat that file like `config.yaml` in backups. See
+whether a value is set. The server never returns, logs or audits the value.
+Treat that file like `config.yaml` in your backups. See
 [server-configuration.md](server-configuration.md#changing-settings-from-the-admin-panel).
 
 ## Two-Factor Authentication
 
-OwnCord supports TOTP-based 2FA:
+OwnCord supports two-factor authentication (2FA) with TOTP codes from an
+authenticator app.
 
-- Users enroll via Settings > Account (QR code + backup codes)
-- Emergency recovery codes (BPR-046): ten `XXXXX-XXXXX` codes are issued once at
-  enrolment and on every `POST /api/v1/users/me/totp/recovery-codes`
-  (password-confirmed). Each is accepted once in place of a TOTP code at
-  `verify-totp`, which then reports `recovery_codes_remaining`; the server
-  stores bcrypt hashes only, and disabling 2FA or deleting the account removes
-  the set. Security questions do not exist and will not.
-- Second-factor state is durable (migration 032): the login challenge, a
-  pending enrolment (encrypted under the TOTP key) and the 90-second replay
-  window survive a restart, stored as digests and ciphertext — never a token
-  or code in the clear. A store fault fails closed: no challenge is issued and
-  no code is accepted on trust.
-- The TOTP encryption key (`data/totp.key`, or `OWNCORD_TOTP_KEY`) is generated
-  only when confirmed absent; any other read error refuses to start rather than
-  replace the key (which would orphan every stored secret), and the write is
-  atomic. Back the key file up beside the database — a backup does not contain
-  it.
-- The erasure marker key (`data/erasure.key`, or `OWNCORD_ERASURE_KEY`) follows
-  the same rule (B4-10): generated only when confirmed absent, any other read
-  error refuses to start, atomic write. Deletion markers in
-  `data/erasure/markers.sqlite` name erased accounts only as an HMAC under
-  it; back up both beside the database — a restore with them missing cannot
-  recognise, and erase again, an account the backup resurrects.
-- Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
-- `require_2fa` requires all users to have 2FA enabled and `registration_mode` to be `closed`; while it is on, the mode cannot be reopened
-- A session expires 30 days after its last use: an authenticated REST request, the WebSocket handshake and the WebSocket heartbeat each slide `expires_at`, at most once a minute per session; the slide is written in a batch up to a minute later ([schema.md](schema.md#sessions) owns the bound and its edge). It never outlives 365 days from sign-in, and a touch never revives a session that has already expired or been revoked
-- Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
-- Auth challenges are rate-limited to 10 req/min per IP
-- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); login, registration, first-run setup and recovery-code checks over it wait in a bounded FIFO queue (up to 10 s), and an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and counts as no failed attempt
-- TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
+**Enrolling and recovery codes**
+
+- Users enrol in Settings > Account, with a QR code and backup codes.
+- Emergency recovery codes: ten `XXXXX-XXXXX` codes are issued once at
+  enrolment, and again on every `POST /api/v1/users/me/totp/recovery-codes`
+  (which needs the password).
+- Each code works once, in place of a TOTP code, at `verify-totp`. The reply
+  then reports `recovery_codes_remaining`.
+- The server stores only bcrypt hashes of the codes. Turning off 2FA or
+  deleting the account removes the set.
+- Security questions do not exist, and will not be added.
+
+**Durable state and keys**
+
+- Second-factor state survives a restart (migration 032). This covers the
+  login challenge, a pending enrolment (encrypted under the TOTP key) and the
+  90-second replay window. They are stored as digests and ciphertext, never as
+  a token or code in the clear.
+- If that store fails, the server fails closed. It issues no challenge and
+  accepts no code on trust.
+- **TOTP encryption key** (`data/totp.key`, or `OWNCORD_TOTP_KEY`):
+  - It is generated only when the server confirms it is absent.
+  - Any other read error stops the server from starting. Replacing the key
+    would orphan every stored secret.
+  - The key is written atomically.
+  - Back it up next to the database. A backup does not contain it.
+- **Erasure marker key** (`data/erasure.key`, or `OWNCORD_ERASURE_KEY`)
+  follows the same rules: generated only when confirmed absent, any other read
+  error stops the start-up, atomic write.
+  - Deletion markers in `data/erasure/markers.sqlite` name erased accounts
+    only as an HMAC under this key.
+  - Back up both next to the database. If a restore is missing them, the
+    server cannot recognise an account the backup brings back, and so cannot
+    erase it again.
+
+**Server-wide rules and limits**
+
+- Admins can require 2FA for everyone with the `require_2fa` setting in the
+  admin panel.
+- `require_2fa` needs every user to have 2FA turned on, and needs
+  `registration_mode` to be `closed`. While it is on, registration cannot be
+  reopened.
+- **Session expiry:**
+  - A session expires 30 days after it was last used.
+  - An authenticated REST request, the WebSocket handshake and the WebSocket
+    heartbeat each extend `expires_at`. This happens at most once a minute per
+    session, and the write is batched up to a minute later.
+    [schema.md](schema.md#sessions) owns the exact bound and its edge case.
+  - A session never lives more than 365 days from sign-in.
+  - Use never revives a session that has already expired or been revoked.
+- The login flow returns `requires_2fa: true` with a `partial_token`. That
+  token lasts 10 minutes and allows 5 attempts.
+- Auth challenges are rate-limited to 10 requests per minute per IP address.
+- **Password-hashing budget:**
+  - Every bcrypt computation on an authentication route goes through one
+    process-wide limit (`security.expensive_auth_concurrency`, default twice
+    the CPU core count). This covers password checks and hashes, and
+    recovery-code matching.
+  - Login, registration, first-run setup and recovery-code checks over that
+    limit wait in a bounded first-in, first-out queue for up to 10 seconds.
+  - A refused attempt gets `429 AUTH_BUSY`. That happens when the queue is
+    full, the wait runs out, or a password confirmation is over the limit. A
+    refused attempt runs no bcrypt and does not count as a failed attempt.
+- TOTP codes are compared in constant time (`subtle.ConstantTimeCompare`). This
+  prevents timing side-channel attacks.
 
 ## Account Recovery
 
-The recovery kit (B4-5) is a secret the account holder keeps offline; the
-server stores only an argon2id verifier of it. The setup wizard offers to
-generate the owner's kit at first run — shown once on the finish step, with
-only its verifier stored — and any account can enrol or rotate one from the
-desktop client while signed in. Redeeming the kit replaces the
-password, revokes every session and API token, spends the kit and writes a content-free
-audit row in one transaction, then signs the holder in without the second
-factor — it exists for the case where the devices are gone. A spent or lost
-kit cannot be recovered by the server; the holder issues a new one while
-signed in. Five failed attempts lock recovery for 15 minutes. See
-[docs/trust-model.md](trust-model.md).
+**The recovery kit** is a secret the account holder keeps offline. The server
+stores only an argon2id verifier of it.
 
-Owner-assisted recovery (B4-6): only the server owner can issue a recovery
-credential for an account, after verifying the person out of band — recorded
-as one of four fixed wordings (`in_person`, `voice_call`, `video_call`,
-`trusted_contact`); no free text is accepted. The credential is single-use,
-expires in 15 minutes, is stored only as an argon2id verifier, and redeems
-through the same route with the same consequences (new password, every
-session and API token revoked, no second factor). No administrator below the owner can
-reset anyone's credentials. Issuance and use are audited
-(`recovery_assist_issued`, `recovery_assist_used`).
+- The setup wizard offers to create the owner's kit at first run. It is shown
+  once, on the finish step, and only its verifier is stored.
+- Any account can enrol or replace a kit from the desktop client while signed
+  in.
+- Redeeming the kit, in one transaction:
+  - replaces the password;
+  - revokes every session and API token;
+  - uses up the kit;
+  - writes an audit row with no content;
+  - then signs the holder in without the second factor. The kit exists for
+    when the holder's devices are gone.
+- A used or lost kit cannot be recovered by the server. The holder issues a new
+  one while signed in.
+- Five failed attempts lock recovery for 15 minutes.
+
+See [docs/trust-model.md](trust-model.md).
+
+**Owner-assisted recovery.** Only the server owner can issue a recovery
+credential for an account.
+
+- The owner first checks the person's identity outside OwnCord, and records
+  how, as one of four fixed values: `in_person`, `voice_call`, `video_call`
+  or `trusted_contact`. No free text is accepted.
+- The credential works once, expires in 15 minutes, and is stored only as an
+  argon2id verifier.
+- It redeems through the same route, with the same results: a new password,
+  every session and API token revoked, and no second factor.
+- No administrator below the owner can reset anyone's credentials.
+- Issuing and using it are audited (`recovery_assist_issued`,
+  `recovery_assist_used`).
 
 ## Account Deletion
 
-Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
+Users can delete their own account with `DELETE /api/v1/auth/account`, which
+needs their password. The last admin account cannot be deleted. After 3 failed
+password attempts, the endpoint locks for 15 minutes.
 
 ## First-run setup
 
-While setup is open the server prints a one-time **setup token** in its
-start-up output, beside the banner, and `POST /admin/api/setup` refuses any
-request that does not carry it. The admin IP allowlist compares the connecting
-address, so behind a same-host reverse proxy or a container port relay with
-`server.trusted_proxies` empty every request looks local; the token keeps
-creating the Owner account tied to access to the server's own console. It is
-written to stderr only, never to the log stream, and is regenerated at every
-start.
+**The setup token.** While setup is open, the server prints a one-time
+**setup token** in its start-up output, next to the banner.
+`POST /admin/api/setup` refuses any request that does not carry it.
 
-The full-archive download uses the same single-use pattern as the log stream:
-the owner asks for a link (`POST /admin/api/archive/link`) with normal
-authentication, and the browser opens the returned URL as a plain download so
-a large archive is never buffered in the page. The link token is 32 random
-bytes, bound to the owning principal, consumable once, valid for about a
-minute, and never written to a log or audit row. Like the log-stream ticket it
-stores the hash of the credential that asked for it and re-resolves it on
-redemption, so a revoked session, a ban or a lost Owner role voids an
-outstanding link; redeeming an unknown, expired, spent or voided token is a
-uniform `403`. Downloading a single backup from the panel uses the same
-pattern (`POST /admin/api/backups/{name}/link`), with the token additionally
-bound to that one file and kept in a separate store, so an archive token opens
-no backup and a backup token opens neither the archive nor another backup.
+- Why it is needed: the admin IP allowlist checks the connecting address.
+  Behind a reverse proxy on the same host, or a container port relay, with
+  `server.trusted_proxies` empty, every request looks local. The token makes
+  sure that creating the Owner account still needs access to the server's own
+  console.
+- The token is written to stderr only, never to the log stream.
+- A new token is created at every start.
 
-`POST /admin/api/setup` is unauthenticated: it is how the first Owner account
-comes to exist, and until B4-10 the only thing standing in front of it was
-"no users exist". Account erasure can now empty that table — the
-administrator erases the last account, or a deletion marker is replayed
-against a restored backup whose only user is the erased owner (the replay
-does not apply the last-admin guard) — so the count is no longer the gate.
-The `setup_completed` setting is (migration 043): it is written in the same
-transaction as the first Owner and never cleared by the server, so an emptied
-users table leaves setup closed rather than open to the first caller on an
-allowed network. An installation upgrading into that migration is judged the
-same way: a live user closes setup, and so do the traces an erasure leaves
-behind — its `erasure_jobs` row, or a `server_setup`, `account_deleted` or
-`account_erasure_replayed` audit row — so a server whose users table was
-already emptied before the upgrade closes on those rather than reading as
-fresh. The audit evidence is deliberately those three actions and not any
-row: a server that has never been set up still writes `backup_create` from
-the scheduled-backup loop, and closing setup on that would deny it its own
+**Single-use download links.** The full-archive download uses the same
+single-use pattern as the log stream.
+
+- The owner asks for a link (`POST /admin/api/archive/link`) with normal
+  authentication. The browser then opens the returned URL as a plain download,
+  so a large archive is never held in the page.
+- The link token is 32 random bytes. It is bound to the owner who asked for
+  it, works once, lasts about a minute, and is never written to a log or audit
+  row.
+- Like the log-stream ticket, it stores the hash of the credential that asked
+  for it, and checks it again when used. So a revoked session, a ban or a lost
+  Owner role cancels an unused link.
+- An unknown, expired, used or cancelled token always gets the same `403`.
+- Downloading a single backup from the panel works the same way
+  (`POST /admin/api/backups/{name}/link`). That token is also bound to the one
+  file and kept in a separate store. So an archive token opens no backup, and
+  a backup token opens neither the archive nor another backup.
+
+**The `setup_completed` flag.** `POST /admin/api/setup` needs no login,
+because it is how the first Owner account is created. Until account erasure
+existed, the only thing guarding it was "no users exist". Erasure can now
+empty the users table:
+
+- the administrator erases the last account; or
+- a deletion marker is replayed against a restored backup whose only user is
+  the erased owner (the replay does not apply the last-admin guard).
+
+So the user count is no longer the gate. The `setup_completed` setting is
+(migration 043). It is written in the same transaction as the first Owner and
+the server never clears it. An emptied users table therefore leaves setup
+closed, rather than open to the first caller on an allowed network.
+
+A server upgrading into migration 043 is judged the same way. Setup closes if
+any of these exist:
+
+- a live user;
+- an `erasure_jobs` row;
+- a `server_setup`, `account_deleted` or `account_erasure_replayed` audit row.
+
+So a server whose users table was already emptied before the upgrade closes
+too, instead of looking fresh. Only those three audit actions count, not any
+audit row. A server that was never set up still writes `backup_create` from
+the scheduled-backup loop, and closing setup on that would block its own
 first run.
 
-A server with no accounts and the flag set is therefore locked, deliberately.
-Re-opening it is an operator action with filesystem access to the database,
-not a network one:
+**Reopening a locked server.** A server with no accounts and the flag set is
+locked on purpose. Reopening it is an operator action that needs filesystem
+access to the database, not a network action:
 
 ```sql
 UPDATE settings SET value = '0' WHERE key = 'setup_completed';
 ```
 
-The server prints the setup token only at start-up while setup is open, so
-**restart the server after this change**: it prints a fresh one-time token
-beside the banner, and the next `POST /admin/api/setup` that carries it
-creates a new Owner and sets the flag again. A running process does not
-print a token when setup is reopened, so restart it rather than reuse the
-one from an earlier start.
+The server prints the setup token only at start-up, and only while setup is
+open. So **restart the server after this change**. It then prints a fresh
+one-time token next to the banner. The next `POST /admin/api/setup` that
+carries it creates a new Owner and sets the flag again. A running server does
+not print a token when setup is reopened, so restart it rather than reuse a
+token from an earlier start.
 
-`0` is the only _value_ that opens setup: the gate stands in front of an
-unauthenticated endpoint, so a flag holding anything else — corrupted,
-hand-edited to something the server does not recognise — is treated as
-closed. A missing row is the one case that is not: it is what every database
-from before migration 043 looks like, so the user count decides there, and a
-server that has genuinely never been set up can still run its wizard. The
-migration writes the row on every upgrade, so after it the row is absent only
-if something removed it, and removing it needs the same write access to the
-database file that setting it to `0` needs anyway.
+**Which values open setup.** `0` is the only _value_ that opens setup. The gate
+guards an endpoint with no login, so any other value (corrupted, or
+hand-edited to something the server does not know) counts as closed.
 
-The flag lives in the database, so a restore rolls it back with everything
-else — including a backup taken before the server was ever set up, which the
-scheduled-backup loop will happily have made. The deletion markers close that
-hole: they live outside the database, and an account marker proves an account
-existed here and was erased, so the start-up replay sets the flag closed
-whenever the marker file holds one, whatever the restored database says. A
-marker file with only retention markers leaves a genuinely fresh server
-alone. The key is deliberately not in the settings PATCH
-allowlist, so no authenticated route can write it — only the operator, with
-access to the database file.
+A missing row is the one exception. Every database from before migration 043
+looks like that, so there the user count decides, and a server that was truly
+never set up can still run its wizard. The migration writes the row on every
+upgrade. After that, the row is missing only if something removed it, and
+removing it needs the same write access to the database file as setting it to
+`0`.
+
+**Restores.** The flag lives in the database, so a restore rolls it back with
+everything else. That includes a backup taken before the server was ever set
+up, which the scheduled-backup loop may well have made.
+
+The deletion markers close that gap. They live outside the database. An
+account marker proves an account existed here and was erased. So at start-up,
+the replay closes the flag whenever the marker file holds an account marker,
+whatever the restored database says. A marker file with only retention markers
+leaves a truly fresh server alone.
+
+The `setup_completed` key is deliberately not in the settings PATCH allowlist.
+No logged-in route can write it. Only the operator can, with access to the
+database file.
 
 ### Erasure marker sequence floors
 
-A deletion marker names its subject by a one-way token, and the id behind it
-must never be handed out again: a new account holding it would hash to the
-old marker and be erased on the next start-up. `sequence_floors` in the
-marker file keeps the id counters that prevents, and every marker written
-records its own. A marker file from before those floors existed records
-none, so the first start-up after the upgrade recovers them by hashing
-candidate ids against the markers' tokens until every marker is accounted
-for, then records the recovery in `floor_probes` so later start-ups skip it.
+A deletion marker names its subject by a one-way token. The id behind that
+token must never be handed out again. If a new account got that id, it would
+hash to the old marker and be erased at the next start-up.
 
-If a marker names an id beyond the probe's reach (`SequenceFloorProbeCeiling`,
-16,777,216 — past any real id space), no floor can be proven safe and the
-server refuses to start rather than serve with one that only looks safe. The
-log names the two statements that resolve it. Only the operator can, because
-only they know the highest id their installation ever handed out; run both
-against the **marker file** (`data/erasure/markers.sqlite`), not the main
-database:
+`sequence_floors` in the marker file holds the id counters that prevent this,
+and every new marker records its own. A marker file from before those floors
+existed records none. So the first start-up after the upgrade recovers them: it
+hashes candidate ids against the markers' tokens until every marker is matched.
+It then records the recovery in `floor_probes`, so later start-ups skip it.
+
+**When the server refuses to start.** A marker may name an id beyond the
+probe's reach (`SequenceFloorProbeCeiling`, 16,777,216, which is past any real
+id space). Then no floor can be proven safe. The server refuses to start rather
+than run with a floor that only looks safe. The log names the two statements
+that fix it.
+
+Only the operator can fix it, because only they know the highest id their
+server ever handed out. Run both statements against the **marker file**
+(`data/erasure/markers.sqlite`), not the main database:
 
 ```sql
 INSERT INTO sequence_floors (name, seq) VALUES ('users', <highest id ever handed out>)
@@ -215,38 +295,43 @@ INSERT INTO sequence_floors (name, seq) VALUES ('users', <highest id ever handed
 INSERT OR IGNORE INTO floor_probes (name) VALUES ('users');
 ```
 
-The second statement is the acknowledgement: it records that the floor is
-settled, so the next start-up honours it instead of probing again. Use
+The second statement is the acknowledgement. It records that the floor is
+settled, so the next start-up uses it instead of probing again. Use
 `'channels'` in place of `'users'` when the refusal names that table.
 
 ### Erasure marker key
 
-A marker names its subject by HMAC of the id under `data/erasure.key`, so the
-markers are only meaningful under the key they were written with. Opened under
-another key — one regenerated after the file was lost, or an
-`OWNCORD_ERASURE_KEY` pointed somewhere else — every token would miss: the
-start-up replay would erase nothing, report success, and leave a restored
-backup's erased accounts serving. So the file records `marker_meta`'s
-`erasure-key-fingerprint` (HMAC of a fixed label under the key; the key itself
-is never in the file) and the server refuses to start on a key that does not
-match it. Two refusals, both the operator's to resolve, and the log names the
+A marker names its subject by an HMAC of the id under `data/erasure.key`. So
+the markers only make sense under the key they were written with.
+
+Under a different key, every token would miss. That happens with a key
+regenerated after the file was lost, or with `OWNCORD_ERASURE_KEY` pointing
+somewhere else. The start-up replay would then erase nothing, report success,
+and leave a restored backup's erased accounts in service.
+
+To prevent this, the marker file records an `erasure-key-fingerprint` in
+`marker_meta`. It is an HMAC of a fixed label under the key. The key itself is
+never in the file. The server refuses to start on a key that does not match.
+
+There are two refusals, and both are the operator's to fix. The log names the
 statement for each. Run them against the **marker file**
 (`data/erasure/markers.sqlite`), not the main database:
 
-- **The file records a different key.** Put the original `erasure.key` back —
-  the log prints the first 12 hex of both fingerprints so you can tell which
-  backup holds it. Only if that key is gone for good, and you accept that the
-  markers become unmatchable, repoint the file at the running key:
+- **The file records a different key.** Put the original `erasure.key` back.
+  The log prints the first 12 hex characters of both fingerprints, so you can
+  tell which backup holds it. Only if that key is gone for good, and you accept
+  that the markers can no longer match, point the file at the running key:
 
   ```sql
   UPDATE marker_meta SET value = '<running key fingerprint from the log>'
     WHERE name = 'erasure-key-fingerprint';
   ```
 
-- **The file holds markers and no fingerprint** — it was written before the
-  key was bound to the file. The server will not adopt a key it cannot prove,
-  because adopting the wrong one is the silent failure above. Confirm the
-  running key is the one those markers were written under, then bless the file:
+- **The file holds markers but no fingerprint.** It was written before the key
+  was bound to the file. The server will not adopt a key it cannot prove,
+  because adopting the wrong one is the silent failure described above. Check
+  that the running key is the one those markers were written under, then
+  approve the file:
 
   ```sql
   INSERT INTO marker_meta (name, value)
@@ -254,28 +339,40 @@ statement for each. Run them against the **marker file**
   ```
 
 Deleting or moving `markers.sqlite` is not a way past either refusal. The file
-also carries `sequence_floors` — without them an erased account's id is handed
-out again and its innocent new holder is erased by the old marker on a later
-start-up — and the account markers that keep the first-run setup gate closed
-against a restore of a pre-owner backup.
+also holds:
+
+- `sequence_floors`. Without them, an erased account's id is handed out again,
+  and its innocent new holder is erased by the old marker at a later start-up.
+- the account markers that keep the first-run setup gate closed against a
+  restore of a backup from before the owner existed.
 
 ## Diagnostics and Telemetry
 
-OwnCord sends no automatic product or usage telemetry (BPR-055). Every
-diagnostic surface — the health probe, connectivity diagnostics, metrics,
-logs, the audit log, backups — stays on the machine, and every outbound
-network path the server has is an action an admin or user took, a feature
-an operator switched on by configuration, or a connection to this machine
-itself. The inventory, the `egress-sites` invariant that enforces it, the
-runtime capture that proves the compiled defaults open nothing beyond
-loopback, and the data contract the support bundle follows are in
-[docs/architecture/diagnostics.md](architecture/diagnostics.md). How an
-administrator makes one — and what it holds — is the Deployment Guide's
-[Support bundle](deployment.md#support-bundle) section.
+OwnCord sends no automatic product or usage telemetry.
+
+Every diagnostic feature stays on the machine: the health probe, connectivity
+diagnostics, metrics, logs, the audit log and backups. Every outbound network
+connection the server makes is one of these:
+
+- an action an admin or user took;
+- a feature an operator turned on in the configuration;
+- a connection to this machine itself.
+
+[docs/architecture/diagnostics.md](architecture/diagnostics.md) has the details:
+
+- the list of outbound connections;
+- the `egress-sites` invariant that enforces it;
+- the runtime capture proving the built-in defaults open nothing beyond
+  loopback;
+- the data rules the support bundle follows.
+
+How an administrator makes a support bundle, and what it holds, is in the
+Deployment Guide's [Support bundle](deployment.md#support-bundle) section.
 
 ## Audit Logging
 
-Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
+Security-relevant actions are recorded in the `audit_log` table, with actor,
+action, target and detail:
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`, `account_erasure_replayed`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
@@ -287,116 +384,246 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
   `update_failed`, `server_restart_requested`, `ws_connect`
 
-Rows about an erased account are unlinked by the erasure (B4-10): they keep
-action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
-and the deletion marker's token — HMAC-SHA256 of the user id under
-`data/erasure.key` — takes the id's place: `subject_token` where the subject
-was the target, `actor_token` where they acted — and the same token in the
-report, report-note, report-event, moderation-action and appeal rows that name them
-(`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so a row naming two
-erased subjects keeps both, the rows about one subject remain linkable to
-each other by anyone who may read them, any `VIEW_AUDIT_LOG` holder
-included, and the trail re-identifies a subject only to whoever holds
-`erasure.key` (the erasure-key holder, not the voice key holder of the
-E2EE section) — with two residues the token does not cover: the
-`erasure_jobs` row names the subject by bare user id and is never pruned
-(owner decision B6-15/3), so whoever may read it holds the identity without
-the key, and free text the erased account authored while moderating others
-(`report_notes.body`, `moderation_actions.reason`, `appeals.decision_note`)
-is unlinked but not cleared. The erasure's own `account_deleted` row is written
-that way from the start, and `account_erasure_replayed` records a start-up
-that erased a restored backup's copy of the account again.
+**Audit rows about an erased account.** Erasure unlinks them
+(`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`):
 
-Note: `backup_restore` is written synchronously to the live database _before_
-the pre-restore safety copy is taken, so the row survives inside the
-`pre_restore_*.db` backup. The restored database itself will not contain it —
-the restore replaces the database file wholesale.
+- Each row keeps its action, time and order.
+- `actor_id` and `target_id` become 0, and `detail` is cleared.
+- The deletion marker's token takes the id's place. The token is an
+  HMAC-SHA256 of the user id under `data/erasure.key`. It goes in
+  `subject_token` where the erased user was the target, and in `actor_token`
+  where they acted.
+- The same token replaces the id in the report, report-note, report-event,
+  moderation-action and appeal rows that name them.
+
+What this means:
+
+- A row that names two erased users keeps both tokens.
+- Rows about one user stay linkable to each other for anyone allowed to read
+  them, any `VIEW_AUDIT_LOG` holder included.
+- The trail identifies the person again only for whoever holds `erasure.key`.
+  (That is the erasure-key holder, not the voice key holder from the E2EE
+  section.)
+
+Two things the token does not cover:
+
+- The `erasure_jobs` row names the user by their plain user id and is never
+  pruned (an owner decision). Whoever may read it knows the identity without
+  the key.
+- Free text the erased account wrote while moderating others
+  (`report_notes.body`, `moderation_actions.reason`, `appeals.decision_note`)
+  is unlinked but not cleared.
+
+The erasure's own `account_deleted` row is written in the unlinked form from
+the start. `account_erasure_replayed` records a start-up that erased a restored
+backup's copy of the account again.
+
+Note: `backup_restore` is written to the live database _before_ the
+pre-restore safety copy is taken. So the row survives inside the
+`pre_restore_*.db` backup. The restored database itself will not contain it,
+because the restore replaces the database file completely.
 
 ## Client Security Hardening
 
-The Tauri desktop client implements the following security measures:
+The Tauri desktop client uses the following security measures.
 
 ### Credential Storage
 
-- Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
-- Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript. The field is `#[serde(skip)]` on `CredentialData` and the claim is test-locked (`credential_data_never_serializes_the_password`). A remembered password is shown in the login form as a placeholder and submitted by the `login_with_saved_password` command, which reads the password in Rust and logs in through the same pinned loopback proxy a normal request uses
-- Auto-login uses stored tokens for reconnection, not passwords
-- Credential and identity commands are scoped to the active session host held in Rust state. The host is set only when the proxy relays the server's `auth_ok` over the pinned socket (not by a renderer command) and is cleared when that connection ends or on `ws_disconnect`. The relayed `auth_ok` also records every host a login was verified for during this app run; that set survives the disconnect and a credential removal. While no session is active, the connect-page credential prefill, stored-token resume and saved-password login are admitted only for a host in the set, never for another saved host. Before any login has been verified this app run the set is empty and the first-run behaviour stands, so a restart can still auto-login from a saved credential.
+- **Where credentials are kept.** Credentials are stored in the OS keyring
+  (Windows Credential Manager, macOS Keychain or Secret Service) through the
+  `keyring` crate. Every write is read back and checked. If no keyring is
+  available, they fall back to an encrypted file: Windows DPAPI with
+  `CRYPTPROTECT_UI_FORBIDDEN`, or ChaCha20-Poly1305 elsewhere. See
+  [credential-storage.md](credential-storage.md).
+- **Passwords never reach the frontend.** Plaintext passwords are **never**
+  returned to the frontend over IPC. Only tokens are visible to JavaScript.
+  The field is `#[serde(skip)]` on `CredentialData`, and a test locks this in
+  (`credential_data_never_serializes_the_password`). A remembered password is
+  shown in the login form as a placeholder. The `login_with_saved_password`
+  command reads the password in Rust and logs in through the same pinned
+  loopback proxy a normal request uses.
+- **Auto-login uses tokens.** It uses stored tokens to reconnect, not
+  passwords.
+- **Commands are scoped to the active host.** Credential and identity commands
+  only act on the active session host, which Rust holds in its state.
+  - That host is set only when the proxy relays the server's `auth_ok` over the
+    pinned socket, never by a renderer command. It is cleared when that
+    connection ends, or on `ws_disconnect`.
+  - The relayed `auth_ok` also records every host a login was verified for
+    during this app run. That set survives a disconnect and a credential
+    removal.
+  - While no session is active, the connect-page credential prefill, stored
+    token resume and saved-password login work only for a host in that set,
+    never for another saved host.
+  - Before any login has been verified in this app run, the set is empty and
+    the first-run behaviour applies. So a restart can still auto-login from a
+    saved credential.
 
 ### Tauri Capabilities (Least Privilege)
 
-- Filesystem access is scoped to `$APPLOG` only. The renderer reads and writes its own logs there; every other frontend save goes through the native save dialog, whose chosen path the dialog plugin grants dynamically. `$APPDATA` is deliberately out of scope: it holds `credential_fallback.json`/`.key`, `certs.json` and `identity_pins.json`, so a renderer compromise would otherwise read the fallback credential store or the TLS/identity pins. `fs:default` (whose recursive read covers `$APPDATA`) and the old `$APPDATA/**` write scope were removed for this reason.
-- DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
-- HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
-- `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
-- The `https://*` wildcard was removed in B7-16: link previews, external images, GIFs and external avatars are fetched by the native external-content broker (`src-tauri/src/external_content.rs`), and the CSP `img-src` no longer allows `https:`. The broker's policy is in [trust-model.md](trust-model.md) §"Desktop preview destination policy (C-09)"
-- CSP `connect-src` allows only `'self'`, IPC and loopback `http:`/`ws:` (`localhost`, `127.0.0.1`) — no `https:` or `wss:` source, so a compromised renderer's own `fetch` or `WebSocket` cannot reach a remote host. REST and the chat socket go through IPC, and LiveKit through the loopback TOFU tunnel; a local server's LiveKit `direct_url` is used as-is only when it is loopback `ws:`/`http:` — the same rule on every platform, Linux native voice included — and anything else (LiveKit Cloud, a TLS LiveKit elsewhere, or a compose-internal name like `ws://livekit:7880` that does not resolve on the host) is tunnelled like a remote server's (`src/platform/desktop/nativeProxies.ts`)
-- Regression-guarded by `tests/unit/capabilities-scope.test.ts` and `tests/unit/tauri-conf-csp.test.ts`; the original rationale is in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
+- **Filesystem access is limited to `$APPLOG`.** The renderer reads and writes
+  its own logs there. Every other save from the frontend goes through the
+  native save dialog, and the dialog plugin grants the chosen path on the fly.
+  `$APPDATA` is deliberately out of scope. It holds `credential_fallback.json`
+  and `.key`, `certs.json` and `identity_pins.json`, so a renderer compromise
+  could otherwise read the fallback credential store or the TLS and identity
+  pins. `fs:default` (whose recursive read covers `$APPDATA`) and the old
+  `$APPDATA/**` write scope were removed for this reason.
+- **DevTools are off in release builds.** The DevTools command is behind the
+  `devtools` feature flag, which release builds leave out.
+- **HTTP fetch reaches only loopback.** It is restricted to
+  `http://127.0.0.1:*`, the Rust TOFU proxies' loopback tunnels. No `https://`
+  destination is allowed at all. As a second layer of defence, it still
+  **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]`, in case a
+  wildcard ever comes back.
+- **Only `http:allow-fetch` carries a URL scope.** `tauri-plugin-http` checks
+  the URL once, in the `fetch` command. `fetch_send` and `fetch_read_body` work
+  on an already-checked `ResourceId` and never look at a scope. So `allow` and
+  `deny` blocks on those identifiers would do nothing. They were removed
+  rather than left in place looking like a control that does not exist.
+- **No `https://*` wildcard.** Link previews, external images, GIFs and
+  external avatars are fetched by the native external-content broker
+  (`src-tauri/src/external_content.rs`), and the CSP `img-src` no longer
+  allows `https:`. The broker's policy is in [trust-model.md](trust-model.md),
+  section "Desktop preview destination policy (C-09)".
+- **CSP `connect-src` allows only local targets.** It allows `'self'`, IPC and
+  loopback `http:` and `ws:` (`localhost`, `127.0.0.1`). There is no `https:`
+  or `wss:` source, so a compromised renderer's own `fetch` or `WebSocket`
+  cannot reach a remote host.
+  - REST and the chat socket go through IPC. LiveKit goes through the loopback
+    TOFU tunnel.
+  - A local server's LiveKit `direct_url` is used as-is only when it is a
+    loopback `ws:` or `http:` address. This rule is the same on every platform,
+    Linux native voice included.
+  - Anything else is tunnelled like a remote server's
+    (`src/platform/desktop/nativeProxies.ts`). That covers LiveKit Cloud, a TLS
+    LiveKit elsewhere, or a compose-internal name like `ws://livekit:7880` that
+    does not resolve on the host.
+- **Regression tests guard all of this:** `tests/unit/capabilities-scope.test.ts`
+  and `tests/unit/tauri-conf-csp.test.ts`. The original reasoning is in
+  [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md).
 
 ### TLS and Certificate Pinning (TOFU)
 
-- Self-signed certificates are supported via Trust-On-First-Use (TOFU) pinning
-- The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
-- The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
-- The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
-- All three native tunnels share one TOFU module and pin store; the WebSocket and HTTP tunnels pin on first use, the LiveKit tunnel only verifies an existing pin — see [trust-model.md](trust-model.md)
-- Certificate mismatch triggers a modal requiring user acknowledgment. Saving a pin that changes what is trusted is additionally gated by a native OS confirmation dialog in `accept_cert_fingerprint` — the only user-confirmed writer of a pin — naming the host and fingerprint, so a renderer compromise cannot silently pin a host. The artifact smoke seeds the pin in the profile instead of answering the dialog; test-only builds use the `e2e-auto-confirm` feature, which no shipped build enables
-- **First-contact defence is comparison out of band.** The fingerprint is what
-  the trust decision rests on, so read it from the server's start-up banner
-  (also on the admin Dashboard and the setup wizard's finish step) and compare
-  it against the prompt, character for character, over a channel the server is
-  not part of. The client cannot tell a wrong fingerprint from an interception
-  attempt, so accepting a mismatch is indistinguishable from accepting one.
-  The same rule applies when a certificate changes and every client shows the
-  mismatch prompt again (a routine public-CA renewal is re-pinned without
-  one) — see
-  [trust-model.md](trust-model.md) and
-  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate)
-- Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
+- Self-signed certificates are supported through Trust-On-First-Use (TOFU)
+  pinning: the client remembers the certificate the first time it connects.
+- The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on
+  first connection.
+- The HTTP proxy (`http_proxy`), which carries REST traffic, pins against the
+  same store.
+- The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the
+  WebSocket proxy.
+- All three native tunnels share one TOFU module and one pin store. The
+  WebSocket and HTTP tunnels pin on first use. The LiveKit tunnel only checks
+  an existing pin. See [trust-model.md](trust-model.md).
+- **A certificate mismatch opens a modal** that the user must acknowledge.
+  Saving a pin that changes what is trusted also needs a native OS
+  confirmation dialog, in `accept_cert_fingerprint`. That command is the only
+  user-confirmed writer of a pin, and its dialog names the host and
+  fingerprint. So a renderer compromise cannot silently pin a host. The
+  artifact smoke test seeds the pin in the profile instead of answering the
+  dialog. Test-only builds use the `e2e-auto-confirm` feature, which no shipped
+  build turns on.
+- **On first contact, compare the fingerprint over another channel.** The
+  trust decision rests on the fingerprint. Read it from the server's start-up
+  banner (it is also on the admin Dashboard and the setup wizard's finish
+  step). Compare it with the prompt, character for character, over a channel
+  the server is not part of. The client cannot tell a wrong fingerprint from
+  an interception attempt, so accepting a mismatch is the same as accepting an
+  interception. The same rule applies when a certificate changes and every
+  client shows the mismatch prompt again. (A routine public-CA renewal is
+  re-pinned without a prompt.) See [trust-model.md](trust-model.md) and
+  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+- Update downloads check that `server_url` uses `https://`, and reject URLs
+  that contain a username or password (userinfo).
 
 ### Input Validation
 
-- IPC commands validate host format, string lengths, and character allowlists
-- PTT virtual key codes are validated to the Win32 range (1–254)
-- LiveKit proxy `remote_host` is validated against CRLF injection
-- API client validates host format before constructing URLs
-- File uploads accept any type the server's file-type policy allows; the composer pre-checks the size and the policy, and the server sniffs the type, refuses executables by content and refuses blocked final extensions by name — by default Windows scripts, installers and disk images, owner-configurable in config.yaml and the admin panel (see [SECURITY.md](../SECURITY.md))
-- Error messages from server responses are capped at 200 characters
-- Notification titles are sanitized (control chars stripped, length capped)
+- IPC commands check host format, string lengths and allowed characters.
+- Push-to-talk virtual key codes are checked against the Win32 range (1–254).
+- The LiveKit proxy's `remote_host` is checked for CRLF injection.
+- The API client checks the host format before building URLs.
+- **File uploads** accept any type the server's file-type policy allows.
+  - The composer checks the size and the policy before sending.
+  - The server detects the real type from the content, refuses executables by
+    content, and refuses blocked final extensions by name.
+  - By default the blocked extensions are Windows scripts, installers and disk
+    images. The owner can change the list in `config.yaml` and the admin panel
+    (see [SECURITY.md](../SECURITY.md)).
+- Error messages from server responses are capped at 200 characters.
+- Notification titles are cleaned: control characters are stripped and the
+  length is capped.
 
 ### XSS Prevention
 
-- All user-generated content is rendered via `textContent`/`setText` — never `innerHTML`
-- The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
-- URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
-- YouTube embeds use `sandbox` attribute on iframes
-- `image/svg+xml` is excluded from the safe MIME types a fetched server image or clip may carry as its Blob type
-- GIF media URLs are validated against the trusted Klipy CDN origins
-- Linkified URLs strip trailing punctuation to prevent misleading destinations
+- All user-generated content is rendered with `textContent` or `setText`,
+  never `innerHTML`.
+- The single `innerHTML` use (SVG icons) works on compile-time constants, with
+  a runtime guard.
+- URLs are checked with `isSafeUrl`, which rejects `javascript:`, `data:` and
+  `vbscript:`.
+- YouTube embeds use the `sandbox` attribute on iframes.
+- `image/svg+xml` is not one of the safe MIME types a fetched server image or
+  clip may carry as its Blob type.
+- GIF media URLs are checked against the trusted Klipy CDN origins.
+- Linkified URLs drop trailing punctuation, so the destination is not
+  misleading.
 
 ### Search and Rate Limiting
 
-- Client-side search requests are rate-limited (500ms minimum interval + 300ms debounce)
+- Client-side search requests are rate-limited: at least 500 ms between
+  requests, plus a 300 ms debounce.
 
 ## Known Limitations
 
-The operator-facing list of what the beta does not do — certificate lifecycle
-and pin-break prompts, first-run defaults, owner lockout, restore and health
-limits, unsigned Windows installers — is [known-limitations.md](known-limitations.md).
-This section carries the security-relevant rows only.
+[known-limitations.md](known-limitations.md) is the operator-facing list of
+what the beta does not do: certificate lifecycle and pin-break prompts,
+first-run defaults, owner lockout, restore and health limits, and unsigned
+Windows installers. This section lists only the security-relevant items.
 
-- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
+- Server auto-updates depend on a dedicated, pinned minisign/Ed25519 server
+  release key in
+  [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt).
+  They also depend on a signed release manifest that ties the shipped binary's
+  hash to the release version. Windows Authenticode and SmartScreen code
+  signing is separate work that is not done yet.
 
 ## Security Hardening Checklist for Operators
 
-- [ ] Enable TLS (self-signed is the default; custom certs recommended for production)
-- [ ] Capture stdout (journald, Docker log driver, NSSM `AppStdout`) so crashes leave something to send — see [deployment.md — Logs](deployment.md#logs)
-- [ ] Back up the set, not just the database — see [deployment.md — Backup Strategy](deployment.md#backup-strategy)
-- [ ] Keep registration invite-only (the default) or closed; `approval` holds new accounts until you approve them in the admin panel, `open` admits anyone
-- [ ] Set a strong admin password
-- [ ] Configure rate limits (defaults are sensible but review for your use case)
-- [ ] Run regular backups via the admin panel
-- [ ] Keep the server updated (admin panel shows available updates)
-- [ ] Firewall: only expose port 8443 (HTTPS); for voice/video also 7881/TCP and the media UDP port(s) — `50000-60000` by default, or a single `voice.udp_port` (LiveKit TCP fallback + media — see [deployment.md](deployment.md)); port 80 only when using ACME. Do not expose 7880 (LiveKit's own API); own clients tunnel signalling through `/livekit` on 8443.
-- [ ] Enable server-wide 2FA requirement once all users have enrolled
-- [ ] Set `admin_allowed_cidrs` to restrict admin panel access to trusted networks (member moderation at `/api/v1/moderation/members` is not covered by it: it needs a session or token issued by this server and the permission and rank checks)
+- [ ] Turn on TLS. Self-signed is the default; your own certificates are
+      recommended for production.
+- [ ] Capture stdout (journald, the Docker log driver, or NSSM `AppStdout`), so
+      a crash leaves something to send. See
+      [deployment.md — Logs](deployment.md#logs).
+- [ ] Back up the whole set of files, not just the database. See
+      [deployment.md — Backup Strategy](deployment.md#backup-strategy).
+- [ ] Keep registration invite-only (the default) or closed. `approval` holds
+      new accounts until you approve them in the admin panel. `open` lets
+      anyone in.
+- [ ] Set a strong admin password.
+- [ ] Review the rate limits. The defaults are sensible, but check them for
+      your use.
+- [ ] Run regular backups from the admin panel.
+- [ ] Keep the server updated. The admin panel shows available updates.
+- [ ] Firewall:
+  - expose port 8443 (HTTPS);
+  - for voice and video, also expose 7881/TCP (LiveKit's TCP fallback) and the
+    media UDP ports: `50000-60000` by default, or a single `voice.udp_port`.
+    See [deployment.md](deployment.md);
+  - expose port 80 only when you use ACME;
+  - do not expose 7880 (LiveKit's own API). OwnCord clients tunnel signalling
+    through `/livekit` on 8443.
+- [ ] Require 2FA server-wide once all users have enrolled.
+- [ ] Set `admin_allowed_cidrs` to limit admin panel access to trusted
+      networks. Two areas are not covered by it, because they need a session
+      or token issued by this server:
+  - member moderation at `/api/v1/moderation/members`, which also needs the
+    permission and rank checks;
+  - channel create, edit and delete at `/api/v1/moderation/channels`, which
+    also needs `MANAGE_CHANNELS`.
+
+Background: the emergency recovery codes trace to requirement BPR-046, and
+the no-telemetry rule to BPR-055. The recovery kit,
+owner-assisted recovery, account erasure and the removal of the `https://*`
+wildcard were delivered as work packages B4-5, B4-6, B4-10 and B7-16. The
+`erasure_jobs` retention is owner decision B6-15/3.

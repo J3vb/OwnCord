@@ -7,7 +7,13 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createMenuItem, enableMenuKeyboard, clampMenuToViewport } from "@lib/context-menu";
-import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { createIcon } from "@lib/icons";
+import {
+  setUserVolume,
+  getUserVolume,
+  setUserLocalMute,
+  getUserLocalMute,
+} from "@lib/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 /** No-op default until the keyboard model installs the real restorer. */
@@ -27,6 +33,9 @@ export interface VoiceModMenuOptions {
   readonly onServerDeafen: (deafened: boolean) => void;
   readonly onMove: (toChannelId: number) => void;
   readonly onDisconnect: () => void;
+  /** Set while the actions cannot reach the server (socket not connected): the
+   *  rows stay visible but greyed and inert, with this as the reason. */
+  readonly disabledReason?: string;
 }
 
 /**
@@ -51,7 +60,12 @@ export function showUserVolumeMenu(
     el.remove();
   });
 
-  const menu = createElement("div", { class: "context-menu user-vol-menu" });
+  // Discord-width: a long notice (moderation unavailable) wraps instead of
+  // stretching the menu.
+  const menu = createElement("div", {
+    class: "context-menu user-vol-menu",
+    style: "max-width:240px",
+  });
   // One owner for the menu's whole life, so the keyboard model and the
   // outside-click dismissal are torn down together (B9 A11Y-01).
   const dismiss = new Disposable();
@@ -98,7 +112,7 @@ export function showUserVolumeMenu(
     type: "range",
     class: "settings-slider",
     min: "0",
-    max: "100",
+    max: "200",
     value: String(currentVol),
     style: "flex:1",
   });
@@ -116,37 +130,31 @@ export function showUserVolumeMenu(
     setText(valLabel, `${val}%`);
     setText(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
+    // Raising the level unmutes, as the tile slider does.
+    if (val > 0 && getUserLocalMute(userId)) setUserLocalMute(userId, false);
+    mute.sync();
   });
 
   appendChildren(sliderRow, slider, valLabel);
   menu.appendChild(sliderRow);
 
-  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
-  resetBtn.addEventListener("click", () => {
-    setUserVolume(userId, 100);
+  const showFullVolume = (): void => {
     slider.value = "100";
     setText(valLabel, "100%");
     setText(volLabel, t("volume.resetFull"));
+  };
+  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
+  resetBtn.addEventListener("click", () => {
+    setUserVolume(userId, 100);
+    showFullVolume();
+    mute.sync();
   });
   menu.appendChild(resetBtn);
 
-  if (typeof mod === "string") {
-    menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-    menu.appendChild(
-      createElement(
-        "div",
-        {
-          class: "context-menu-item",
-          "aria-disabled": "true",
-          "data-action": "voice-mod-unavailable",
-          style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
-        },
-        mod,
-      ),
-    );
-  } else if (mod !== undefined) {
-    appendModerationSection(menu, mod, closeMenu);
-  }
+  const mute = createLocalMuteItem(userId, showFullVolume);
+  menu.appendChild(mute.item);
+
+  if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu);
 
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -188,6 +196,76 @@ export function showUserVolumeMenu(
   );
 }
 
+/**
+ * Local Mute, as a checkbox row: silences this user for you only and keeps
+ * their level, so unchecking it brings that level back. A level of 0 reads as
+ * muted too, and unchecking it restores 100% (then `onRestoreFull` runs, so
+ * the caller can redraw its slider). The menu stays open. `sync` redraws the
+ * check after the caller changes the level.
+ */
+export function createLocalMuteItem(
+  userId: number,
+  onRestoreFull: () => void,
+): { readonly item: HTMLElement; readonly sync: () => void } {
+  const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
+  const item = createMenuItem(t("volume.mute"), "context-menu-item");
+  item.setAttribute("role", "menuitemcheckbox");
+  item.setAttribute("data-action", "local-mute");
+  item.style.display = "flex";
+  item.style.alignItems = "center";
+  const check = createElement("span", {
+    "aria-hidden": "true",
+    style: "margin-left:auto;display:inline-flex",
+  });
+  check.appendChild(createIcon("check", 14));
+  item.appendChild(check);
+  const sync = (): void => {
+    const muted = isSilenced();
+    item.setAttribute("aria-checked", String(muted));
+    check.style.visibility = muted ? "visible" : "hidden";
+  };
+  sync();
+  item.addEventListener("click", () => {
+    if (!isSilenced()) {
+      setUserLocalMute(userId, true);
+    } else {
+      setUserLocalMute(userId, false);
+      if (getUserVolume(userId) === 0) {
+        setUserVolume(userId, 100);
+        onRestoreFull();
+      }
+    }
+    sync();
+  });
+  return { item, sync };
+}
+
+/** The moderation section, or why it is unavailable (a string, shown as
+ *  disabled text). Shared with the video tile menu. */
+export function appendVoiceModeration(
+  menu: HTMLElement,
+  mod: VoiceModMenuOptions | string,
+  close: () => void,
+): void {
+  if (typeof mod !== "string") {
+    appendModerationSection(menu, mod, close);
+    return;
+  }
+  menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  menu.appendChild(
+    createElement(
+      "div",
+      {
+        class: "context-menu-item",
+        "aria-disabled": "true",
+        "data-action": "voice-mod-unavailable",
+        style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+      },
+      mod,
+    ),
+  );
+}
+
 /** Builds the moderation rows. close() runs after any action so the menu does
  *  not linger showing stale labels while the server round-trip is in flight. */
 function appendModerationSection(
@@ -196,65 +274,94 @@ function appendModerationSection(
   close: () => void,
 ): void {
   menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  const disabled = mod.disabledReason !== undefined;
 
-  const muteItem = createMenuItem(
-    mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
-    "context-menu-item",
-  );
-  muteItem.setAttribute("data-action", "server-mute");
-  muteItem.addEventListener("click", () => {
-    mod.onServerMute(!mod.serverMuted);
-    close();
-  });
-  menu.appendChild(muteItem);
+  /** One moderation row; inert and greyed while `disabled`. */
+  const modItem = (label: string, action: string, run: () => void, danger = false): HTMLElement => {
+    const cls = ["context-menu-item", danger ? "danger" : "", disabled ? "disabled" : ""]
+      .filter((c) => c !== "")
+      .join(" ");
+    const item = createMenuItem(label, cls);
+    item.setAttribute("data-action", action);
+    if (disabled) {
+      (item as HTMLButtonElement).disabled = true;
+      item.title = mod.disabledReason ?? "";
+      return item;
+    }
+    item.addEventListener("click", () => {
+      run();
+      close();
+    });
+    return item;
+  };
 
-  const deafenItem = createMenuItem(
-    mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
-    "context-menu-item",
+  if (mod.disabledReason !== undefined) {
+    menu.appendChild(
+      createElement(
+        "div",
+        {
+          class: "context-menu-item",
+          "aria-disabled": "true",
+          "data-action": "voice-mod-offline",
+          style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+        },
+        mod.disabledReason,
+      ),
+    );
+  }
+
+  menu.appendChild(
+    modItem(
+      mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
+      "server-mute",
+      () => mod.onServerMute(!mod.serverMuted),
+    ),
   );
-  deafenItem.setAttribute("data-action", "server-deafen");
-  deafenItem.addEventListener("click", () => {
-    mod.onServerDeafen(!mod.serverDeafened);
-    close();
-  });
-  menu.appendChild(deafenItem);
+  menu.appendChild(
+    modItem(
+      mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
+      "server-deafen",
+      () => mod.onServerDeafen(!mod.serverDeafened),
+    ),
+  );
 
   if (mod.moveTargets.length > 0) {
     // Hover-revealed flyout, same shape as the AdminActions role submenu. The
     // trigger is a role=menuitem so ArrowRight/Enter opens it from the keyboard.
     const moveWrap = createMenuItem(
       t("volume.moveTo"),
-      "context-menu-item context-menu-item--submenu",
+      disabled
+        ? "context-menu-item context-menu-item--submenu disabled"
+        : "context-menu-item context-menu-item--submenu",
       { submenu: true },
     );
     moveWrap.setAttribute("data-action", "move-to");
-    const sub = createElement("div", { class: "context-menu__submenu" });
-    sub.style.display = "none";
-    moveWrap.addEventListener("mouseenter", () => {
-      sub.style.display = "";
-    });
-    moveWrap.addEventListener("mouseleave", () => {
+    if (disabled) {
+      moveWrap.setAttribute("aria-disabled", "true");
+      moveWrap.title = mod.disabledReason ?? "";
+    } else {
+      const sub = createElement("div", { class: "context-menu__submenu" });
       sub.style.display = "none";
-    });
-    for (const ch of mod.moveTargets) {
-      const item = createMenuItem(ch.name, "context-menu-item");
-      item.setAttribute("data-move-channel", String(ch.id));
-      item.addEventListener("click", (e) => {
-        e.stopPropagation();
-        mod.onMove(ch.id);
-        close();
+      moveWrap.addEventListener("mouseenter", () => {
+        sub.style.display = "";
       });
-      sub.appendChild(item);
+      moveWrap.addEventListener("mouseleave", () => {
+        sub.style.display = "none";
+      });
+      for (const ch of mod.moveTargets) {
+        const item = createMenuItem(ch.name, "context-menu-item");
+        item.setAttribute("data-move-channel", String(ch.id));
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          mod.onMove(ch.id);
+          close();
+        });
+        sub.appendChild(item);
+      }
+      moveWrap.appendChild(sub);
     }
-    moveWrap.appendChild(sub);
     menu.appendChild(moveWrap);
   }
 
-  const kickItem = createMenuItem(t("volume.disconnect"), "context-menu-item danger");
-  kickItem.setAttribute("data-action", "voice-disconnect");
-  kickItem.addEventListener("click", () => {
-    mod.onDisconnect();
-    close();
-  });
-  menu.appendChild(kickItem);
+  menu.appendChild(modItem(t("volume.disconnect"), "voice-disconnect", mod.onDisconnect, true));
 }

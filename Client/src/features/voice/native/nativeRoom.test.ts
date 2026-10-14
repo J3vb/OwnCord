@@ -17,6 +17,7 @@ vi.mock("livekit-client", () => ({
     TrackUnsubscribed: "trackUnsubscribed",
     TrackPublished: "trackPublished",
     TrackUnpublished: "trackUnpublished",
+    TrackMuted: "trackMuted",
   },
   Track: {
     Kind: { Audio: "audio", Video: "video" },
@@ -26,6 +27,8 @@ vi.mock("livekit-client", () => ({
       ScreenShare: "screen_share",
       ScreenShareAudio: "screen_share_audio",
     },
+    sourceToProto: (source: string) =>
+      ({ camera: 1, microphone: 2, screen_share: 3, screen_share_audio: 4 })[source],
   },
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
 }));
@@ -61,6 +64,9 @@ const host = vi.hoisted(() => ({
       maxFramerate: 5,
     }),
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
+  changeScreen: (): Promise<unknown> => Promise.resolve({ capture: 6, width: 800, height: 600 }),
+  pickChange: (): Promise<string | null> => Promise.resolve("window:9"),
+  noted: [] as string[],
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
 }));
@@ -87,7 +93,11 @@ vi.mock("./videoRenderer", () => ({
     }
   },
 }));
-vi.mock("./screenPicker", () => ({ pickScreenSource: () => host.pick() }));
+vi.mock("./screenPicker", () => ({
+  pickScreenSource: () => host.pick(),
+  pickChangeSource: () => host.pickChange(),
+  noteChangedSource: (source: string) => host.noted.push(source),
+}));
 vi.mock("../../../platform/desktop", () => ({
   desktop: {
     nativeVoice: {
@@ -159,6 +169,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["stopScreen", args]);
         return Promise.resolve();
       },
+      changeScreen: (...args: unknown[]) => {
+        host.calls.push(["changeScreen", args]);
+        return host.changeScreen();
+      },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
         return () => {
@@ -189,6 +203,7 @@ const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
   kind: "audio" as const,
   source,
   muted: false,
+  encrypted: true,
 });
 
 beforeEach(() => {
@@ -212,6 +227,9 @@ beforeEach(() => {
       simulcast: false,
     });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
+  host.changeScreen = () => Promise.resolve({ capture: 6, width: 800, height: 600 });
+  host.pickChange = () => Promise.resolve("window:9");
+  host.noted = [];
   nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
   nativeCounters.openRooms = 0;
@@ -245,7 +263,9 @@ describe("NativeRoom connect/disconnect", () => {
         participants: [
           {
             identity: "user-2",
-            tracks: [{ sid: "TR_a", kind: "audio", source: "microphone", muted: false }],
+            tracks: [
+              { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
+            ],
           },
         ],
       },
@@ -254,6 +274,21 @@ describe("NativeRoom connect/disconnect", () => {
     await connecting;
     expect([...room.remoteParticipants.keys()]).toEqual(["user-2"]);
     expect(room.remoteParticipants.get("user-2")?.audioTrackPublications.size).toBe(1);
+  });
+
+  it("keeps the join grant sent before the snapshot while connect is pending", async () => {
+    const room = createNativeRoom(audio);
+    const changed = vi.fn();
+    room.on("participantPermissionsChanged", changed);
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({ session: 3, event: { type: "permission", canPublish: true, canPublishSources: [2] } });
+    emit({ session: 3, event: { type: "connected", participants: [] } });
+    resolveConnect({ session: 3, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [2] });
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 
   it("raises no TrackPublished for the snapshot replayed during connect, only for a later one", async () => {
@@ -515,7 +550,7 @@ describe("NativeRoom room surface", () => {
       event: {
         type: "trackPublished",
         identity: "user-2",
-        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false },
+        track: { sid: "TR_a", kind: "audio", source: "microphone", muted: false, encrypted: true },
       },
     });
     const pub = room.remoteParticipants.get("user-2")!.audioTrackPublications.get("TR_a")!;
@@ -607,25 +642,31 @@ describe("NativeRoom room surface", () => {
     expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
   });
 
-  it("tracks the microphone grant and announces a restored one after the unmute", async () => {
+  it("tracks the server's grant for every source and announces each change", async () => {
     const room = createNativeRoom(audio);
     const changed = vi.fn();
     room.on("participantPermissionsChanged", changed);
     await room.connect("u", "t");
     expect(room.localParticipant.permissions).toBeUndefined();
-    // A moderator mute withdraws the grant; the unmute reaches the webview
-    // over the OwnCord socket before the SFU's restored grant arrives.
-    emit({ session: 1, event: { type: "microphonePermission", allowed: false } });
+    // The connect-time grant: microphone (2) and camera (1), no screen share.
+    emit({
+      session: 1,
+      event: { type: "permission", canPublish: true, canPublishSources: [2, 1] },
+    });
     expect(room.localParticipant.permissions).toEqual({
-      canPublish: false,
-      canPublishSources: [],
+      canPublish: true,
+      canPublishSources: [2, 1],
     });
     expect(changed).toHaveBeenLastCalledWith(undefined, room.localParticipant);
     changed.mockClear();
-    emit({ session: 1, event: { type: "microphonePermission", allowed: true } });
-    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
+    // A moderator mute withdraws publishing altogether.
+    emit({ session: 1, event: { type: "permission", canPublish: false, canPublishSources: [] } });
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(changed).toHaveBeenCalledWith(undefined, room.localParticipant);
+    expect(room.localParticipant.permissions).toEqual({ canPublish: false, canPublishSources: [] });
+    // An open grant: an empty source list means every source.
+    emit({ session: 1, event: { type: "permission", canPublish: true, canPublishSources: [] } });
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
   });
 
   it("maps native events onto livekit RoomEvents", async () => {
@@ -655,6 +696,35 @@ describe("NativeRoom room surface", () => {
     room.removeAllListeners();
     emit({ session: 1, event: { type: "disconnected", reason: "ClientInitiated" } });
     expect(disconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises TrackMuted when a remote microphone mutes, so its speaking ring clears at once", async () => {
+    const room = createNativeRoom(audio);
+    const muted = vi.fn();
+    room.on("trackMuted", muted);
+    await room.connect("u", "t");
+    const mic = {
+      sid: "TR_mic",
+      kind: "audio" as const,
+      source: "microphone" as const,
+      muted: false,
+      encrypted: true,
+    };
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: mic } });
+
+    emit({
+      session: 1,
+      event: { type: "trackMuted", identity: "user-2", sid: "TR_mic", muted: true },
+    });
+
+    const p = room.remoteParticipants.get("user-2");
+    expect(muted).toHaveBeenCalledWith(p?.trackPublications.get("TR_mic"), p);
+    expect(p?.getTrackPublication("microphone")?.isMuted).toBe(true);
+    emit({
+      session: 1,
+      event: { type: "trackMuted", identity: "user-2", sid: "TR_mic", muted: false },
+    });
+    expect(muted).toHaveBeenCalledTimes(1);
   });
 
   it("OC-0473: re-reports a remote decrypt failure the way the web worker does until it clears", async () => {
@@ -757,6 +827,7 @@ const video = (sid: string, source: "camera" | "screen_share" = "camera") => ({
   kind: "video" as const,
   source,
   muted: false,
+  encrypted: true,
 });
 
 const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
@@ -1005,6 +1076,78 @@ describe("NativeRoom remote video", () => {
     vi.unstubAllGlobals();
   });
 
+  it("auto-played cameras (WP 1B-3): the backend's subscription is kept, and Stop watching drops it", async () => {
+    const room = createNativeRoom(audio);
+    // RemoteTracks' rule with auto-play on: a camera is watched unless stopped.
+    const stopped = new Set<number>();
+    const onRemoteVideo = vi.fn();
+    const handlers = createRoomEventHandlers({
+      isWatched: (uid: number, screen: boolean) => !screen && !stopped.has(uid),
+      getOnRemoteVideoCallback: () => onRemoteVideo,
+    } as unknown as RoomEventDeps);
+    room.on("trackPublished", (pub, p) => handlers.handleTrackPublished(pub as never, p as never));
+    room.on("trackSubscribed", (t, pub, p) =>
+      handlers.handleTrackSubscribed(t as never, pub as never, p as never),
+    );
+    await room.connect("u", "t");
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[]) {}
+      },
+    );
+
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(host.calls).not.toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    expect(host.renderers).toHaveLength(1);
+    expect(onRemoteVideo).toHaveBeenCalledTimes(1);
+    expect(onRemoteVideo.mock.calls[0]![1]).not.toBeNull();
+
+    stopped.add(2);
+    room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.setSubscribed(false);
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    vi.unstubAllGlobals();
+  });
+
+  it("carries the backend's encryption report, so the shared handler unsubscribes an unencrypted track", async () => {
+    const room = createNativeRoom(audio);
+    const onRemoteVideo = vi.fn();
+    const handlers = createRoomEventHandlers({
+      isWatched: () => true,
+      getOnRemoteVideoCallback: () => onRemoteVideo,
+    } as unknown as RoomEventDeps);
+    room.on("trackPublished", (pub, p) => handlers.handleTrackPublished(pub as never, p as never));
+    await room.connect("u", "t");
+
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    const encrypted = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    expect((encrypted as unknown as { trackInfo: unknown }).trackInfo).toEqual({ encryption: 1 });
+    expect(host.calls).not.toContainEqual(["setSubscribed", [1, "user-2", "TR_v", false]]);
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
+
+    emit({
+      session: 1,
+      event: {
+        type: "trackPublished",
+        identity: "user-3",
+        track: { ...video("TR_plain"), encrypted: false },
+      },
+    });
+    expect(host.calls).toContainEqual(["setSubscribed", [1, "user-3", "TR_plain", false]]);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    setEncryptionDegraded(false);
+  });
+
   it("disposes every renderer on disconnect", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
@@ -1184,6 +1327,61 @@ const share = async (room: ReturnType<typeof createNativeRoom>) => {
 };
 
 describe("NativeRoom screen share", () => {
+  it("changes the live share's source in the host, keeping the track and its preview", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await screen.changeSource();
+    // The share keeps the capture settings it was started with.
+    expect(host.calls.at(-1)).toEqual([
+      "changeScreen",
+      [1, "window:9", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+    ]);
+    expect(screen).toMatchObject({ capture: 6, width: 800, height: 600 });
+    expect(host.noted).toEqual(["window:9"]);
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(screen);
+    expect(host.renderers).toHaveLength(1);
+    expect(host.renderers[0]!.disposed).toBe(false);
+    // The new capture ending on its own ends the share; Stop stops it by id.
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
+    emit({ session: 1, event: { type: "screenCaptureEnded", capture: 6 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toContain("ended");
+    screen.stop();
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 6]]);
+  });
+
+  it("a cancelled or refused change leaves the live capture as it was", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    host.pickChange = () => Promise.resolve(null);
+    await expect(screen.changeSource()).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(host.calls.map(([n]) => n)).not.toContain("changeScreen");
+    host.pickChange = () => Promise.resolve("portal");
+    host.changeScreen = () => Promise.reject(new Error("screen capture portal did not start"));
+    await expect(screen.changeSource()).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(screen.capture).toBe(4);
+    expect(host.noted).toEqual([]);
+  });
+
+  it("a Stop that reached the host after the swap still stops the new capture", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    let resolve!: (v: unknown) => void;
+    host.changeScreen = () => new Promise((r) => (resolve = r));
+    const changing = screen.changeSource();
+    await vi.waitFor(() => expect(host.calls.map(([n]) => n)).toContain("changeScreen"));
+    screen.stop();
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 4]]);
+    resolve({ capture: 6, width: 800, height: 600 });
+    await changing;
+    expect(screen.capture).toBe(4);
+    expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 6]]);
+  });
+
   it("captures the picked source natively and previews it on the frame socket", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");

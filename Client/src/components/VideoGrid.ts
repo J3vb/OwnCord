@@ -9,24 +9,47 @@ import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
+  getUserLocalMute,
   getUserVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
+  setUserLocalMute,
   setUserVolume,
 } from "@lib/livekitSession";
+import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
+import { loadPref, savePref } from "@lib/preferences";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
-import { openPopout, type Popout } from "../features/voice/popout";
+import {
+  openPopout,
+  openPopoutWindow,
+  type Popout,
+  type PopoutWindow,
+} from "../features/voice/popout";
+import type { MiniPlayer } from "../features/voice/miniPlayer";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;
 /** How long tile sizes settle (a window drag) before their views are sent. */
 const VIEW_RESIZE_MS = 150;
+/** The call view's control bar sits in this much room below the tiles
+ *  (`.video-grid--call`'s extra bottom padding). */
+const CALL_BAR_SPACE = 56;
+
+/** The call view's saved view toggles: pref key and default. */
+const VIEW_PREFS = {
+  nonVideo: "callShowNonVideo",
+  selfCamera: "callShowSelfCamera",
+  strip: "callShowStrip",
+} as const;
+type ViewToggle = keyof typeof VIEW_PREFS;
 
 const log = createLogger("VideoGrid");
 
@@ -53,11 +76,17 @@ export interface VideoGridCallbacks {
    *  the window itself goes full screen too. With a label, a stream pop-out
    *  window's state in step with its page's. */
   readonly setWindowFullscreen?: (on: boolean, label?: string) => Promise<void>;
-  /** The call controls a full-screen tile keeps at hand. */
+  /** The call controls: the call view's control bar, and a full-screen
+   *  tile's. Camera and share are offered when given. */
   readonly callControls?: {
     readonly onMuteToggle: () => void;
     readonly onDeafenToggle: () => void;
     readonly onLeave: () => void;
+    readonly onCameraToggle?: () => void;
+    /** Pick the camera from a menu at `anchor`, closed with the grid
+     *  (`signal`): the arrow beside Camera. */
+    readonly onCameraDevice?: (anchor: HTMLElement, signal: AbortSignal) => void;
+    readonly onScreenshareToggle?: () => void;
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
   readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
@@ -68,9 +97,31 @@ export interface VideoGridCallbacks {
   /** Opt-in watching: the viewer watches a remote stream, or stops. Nothing
    *  is received until they do. */
   readonly setStreamWatched?: (tileId: number, watched: boolean) => void;
+  /** The stream ended: drop its watch, which is not the viewer's Stop
+   *  watching (a stopped camera stays stopped). */
+  readonly forgetStreamWatch?: (tileId: number) => void;
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
+  /** The whole call moved into its own window (`out`), or came back:
+   *  `restore` when the main window should show it again (Bring back, or the
+   *  user closed the window), not when the call view ended. */
+  readonly onCallPopout?: (out: boolean, restore: boolean) => void;
+  /** A tile left later than the removeStream call that ended it. */
+  readonly onStreamRemoved?: () => void;
+  /** Back to the full stream view of `tileId`, from its mini-player. */
+  readonly onReturnToStream?: (tileId: number) => void;
+  /** Focus a control on the main page, for focus that was in a mini-player
+   *  that has just closed. */
+  readonly focusFallback?: () => void;
+  /** The person's rows in a remote tile's menu; each is left out without it. */
+  readonly tileMenu?: {
+    readonly onProfile?: (userId: number, x: number, y: number) => void;
+    readonly onMessage?: (userId: number) => void;
+    /** The voice roster's moderation section for this person, read when the
+     *  menu opens: the options, why it is unavailable, or undefined to hide it. */
+    readonly moderation?: (userId: number) => VoiceModMenuOptions | string | undefined;
+  };
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -79,6 +130,27 @@ export interface GridPerson {
   readonly userId: number;
   readonly label: string;
   readonly content: HTMLElement;
+  /** The host draws this person's speaking and mute state itself (the DM
+   *  call panel's avatars), so the tile adds no ring or badge. */
+  readonly marksOwnState?: true;
+}
+
+export interface CallState {
+  readonly muted: boolean;
+  readonly deafened: boolean;
+  /** Joined without a microphone: the mute control reads mic-off, inert. */
+  readonly listenOnly: boolean;
+  readonly camera?: boolean;
+  readonly screenshare?: boolean;
+  /** The join has not reached the room yet: camera and share are inert. */
+  readonly connecting?: boolean;
+  /** A moderator muted or deafened you: that control is inert. */
+  readonly serverMuted?: boolean;
+  readonly serverDeafened?: boolean;
+  /** The chat socket is down: camera and share are inert until it is back. */
+  readonly offline?: "reconnecting" | "disconnected";
+  /** Why share is inert (no permission, video limit), when it is. */
+  readonly shareBlock?: string;
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -107,21 +179,27 @@ export interface VideoGridComponent extends MountableComponent {
   /** The people to draw as avatar tiles, after the streams. A person's tile
    *  steps aside while their camera tile is up. Not counted by hasStreams. */
   setPeople(people: readonly GridPerson[]): void;
-  /** Ring the camera tiles of the users speaking now. */
+  /** Ring the camera and avatar tiles of the users speaking now. */
   setSpeaking(userIds: ReadonlySet<number>): void;
-  /** Mute/deafen state by userId, shown as a badge on the camera tile
-   *  (the UX spec's roster parity for tiles; not drawn on screen-share tiles). */
+  /** Mute/deafen state by userId, shown as a badge on the camera and avatar
+   *  tiles (the UX spec's roster parity for tiles; not on screen-share tiles). */
   setUserAudioState(state: ReadonlyMap<number, { muted: boolean; deafened: boolean }>): void;
   setCallbacks(callbacks: VideoGridCallbacks): void;
-  /** Your mute and deafen state, for a full-screen tile's call controls. */
-  setCallState(state: {
-    readonly muted: boolean;
-    readonly deafened: boolean;
-    /** Joined without a microphone: the mute control reads mic-off, inert. */
-    readonly listenOnly: boolean;
-  }): void;
-  /** Show or hide the grid header's exit control (video mode only). */
+  /** Your call state, for the call controls. */
+  setCallState(state: CallState): void;
+  /** The call view on the main page (video mode): shows the header's exit
+   *  control and view toggles and the control bar, and applies the saved
+   *  view toggles. Off where another host (the DM call panel) shows the grid. */
   setExitVisible(visible: boolean): void;
+  /** Keep the watched remote stream (the focused one, else the first playing
+   *  in the grid) playing in the mini-player while the grid is closed. A
+   *  no-op when nothing is being watched here. */
+  showMiniPlayer(): void;
+  /** Put the mini-player's stream back in its tile. */
+  hideMiniPlayer(): void;
+  /** Bring the call's pop-out window to the front: false when the call is
+   *  not popped out. */
+  raiseCallPopout(): boolean;
 }
 
 /** Create a fresh volume icon element. */
@@ -254,6 +332,8 @@ interface CellEntry {
   video: HTMLVideoElement;
   /** The pop-out window the video is in, if any. */
   popout?: Popout;
+  /** The mini-player the video is in, if any. */
+  mini?: MiniPlayer;
   config?: TileConfig;
   trackCleanup?: () => void;
   /** Owns the tile's menu listeners and its open menu; goes with the tile. */
@@ -268,25 +348,45 @@ interface CellEntry {
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
   view?: string;
+  /** Playing until the stream stopped arriving without the viewer's Stop
+   *  watching: an unpublish unsubscribes first, then removes the tile. */
+  lost?: boolean;
+  /** The stream ended: the tile shows who ended it until this timer drops it. */
+  ending?: ReturnType<typeof setTimeout>;
 }
 
-/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
- *  of a remote tile: mute, a slider named for whose it is, and its value. */
+/** How long a watched stream's tile says it ended before it goes. */
+const ENDED_COVER_MS = 3000;
+
+/** A remote stream playing in its tile (watched, not in a pop-out window). */
+function isPlayingHere(e: CellEntry | undefined): boolean {
+  return (
+    e?.config !== undefined &&
+    !e.config.isSelf &&
+    e.popout === undefined &&
+    e.video.srcObject != null &&
+    !e.el.classList.contains("video-cell--stopped")
+  );
+}
+
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+ *  of a remote tile: mute, a slider named for whose it is, and its value. A
+ *  voice tile's mute is the user's local Mute, shared with the sidebar menu. */
 function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;
   apply: (volume: number, muted: boolean) => void;
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Both sliders
-  // are 0-100 (HTMLAudioElement.volume caps at 1.0).
+  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Stream audio
+  // plays on an element (volume caps at 1.0); voice has a gain node.
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
     : getUserVolume(config.audioUserId);
   let currentVolume = savedVolume;
   let muted = config.isScreenshare
     ? getScreenshareAudioMuted(config.audioUserId)
-    : savedVolume === 0;
+    : getUserLocalMute(config.audioUserId) || savedVolume === 0;
   /** What the slider shows: the stored level on open (even if muted), 0
    *  once muted from here, the level again on unmute. */
   let shown = currentVolume;
@@ -295,7 +395,7 @@ function buildVolumeControls(config: TileConfig): {
   const volumeSlider = createElement("input", {
     type: "range",
     min: "0",
-    max: "100",
+    max: config.isScreenshare ? "100" : "200",
     value: String(currentVolume),
     class: "tile-volume-slider",
     // Lets a tile rebuild or removal put focus back on the same control
@@ -330,7 +430,12 @@ function buildVolumeControls(config: TileConfig): {
       muteScreenshareAudio(config.audioUserId, muted);
       if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
     } else {
-      setUserVolume(config.audioUserId, muted ? 0 : currentVolume);
+      // The saved level stays as it is under the Mute; a level of 0 (from an
+      // older build's mute) comes back at 100.
+      if (!muted && getUserVolume(config.audioUserId) !== currentVolume) {
+        setUserVolume(config.audioUserId, currentVolume);
+      }
+      setUserLocalMute(config.audioUserId, muted);
     }
   }
 
@@ -344,6 +449,9 @@ function buildVolumeControls(config: TileConfig): {
       setScreenshareAudioVolume(config.audioUserId, value / 100);
     } else {
       setUserVolume(config.audioUserId, value);
+      if (value > 0 && getUserLocalMute(config.audioUserId)) {
+        setUserLocalMute(config.audioUserId, false);
+      }
     }
     render();
   });
@@ -379,6 +487,12 @@ function isFullscreenKey(e: KeyboardEvent): boolean {
   return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
 }
 
+/** Your own camera tile, which shows mirrored like a mirror does. Never a
+ *  screen share: that must read the way viewers see it. */
+function isSelfCamera(config: TileConfig | undefined): boolean {
+  return config?.isSelf === true && !config.isScreenshare;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<number, CellEntry>();
@@ -387,14 +501,21 @@ export function createVideoGrid(): VideoGridComponent {
   const personCells = new Map<number, HTMLDivElement>();
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
+  /** The window `resizeRafId` was requested on. */
+  let rafWindow: Window = window;
   let callbacks: VideoGridCallbacks = {};
   let speaking: ReadonlySet<number> = new Set();
   let userAudioState: ReadonlyMap<number, { muted: boolean; deafened: boolean }> = new Map();
   /** The tile in HTML full screen, or in the theatre fallback. */
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
-  let callState = { muted: false, deafened: false, listenOnly: false };
+  let callState: CallState = { muted: false, deafened: false, listenOnly: false };
   let exitBtn: HTMLButtonElement | null = null;
+  /** The call view (setExitVisible): header toggles, control bar, filters. */
+  let callView = false;
+  let viewBar: HTMLElement | null = null;
+  let callBar: HTMLElement | null = null;
+  const viewOn: Record<ViewToggle, boolean> = { nonVideo: true, selfCamera: true, strip: true };
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
   let viewResizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -402,16 +523,29 @@ export function createVideoGrid(): VideoGridComponent {
   const pendingWatch = new Set<number>();
   /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
+  /** The whole call in a window of its own (the call view's Pop out), and
+   *  where the grid goes back to. */
+  let callPop: PopoutWindow | null = null;
+  let callHome: Element | null = null;
+  let popBtn: HTMLButtonElement | null = null;
+  /** The pop-out closes for Bring back (true) or because the call view ended. */
+  let popRestore = true;
+
+  /** The document the grid is in: the call's pop-out window's, or the app's. */
+  function doc(): Document {
+    return root?.ownerDocument ?? document;
+  }
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
-    const tiles = allTiles();
+    const tiles = shownTiles();
     if (root === null || focusedTileId !== null || tiles.length === 0) return;
 
     const { width: cw, height: ch } = root.getBoundingClientRect();
     if (cw === 0 || ch === 0) return;
 
-    const layout = computeGridLayout(cw, ch, tiles.length);
+    const barSpace = callBar !== null ? CALL_BAR_SPACE : 0;
+    const layout = computeGridLayout(cw, ch - barSpace, tiles.length);
 
     for (const el of tiles) {
       el.style.width = `${layout.tileW}px`;
@@ -448,6 +582,29 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** A tile the call view's toggles hide: avatar tiles without "Show
+   *  non-video participants", your own camera without "Show my camera". */
+  function hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean {
+    if (!callView) return false;
+    if (el.classList.contains("video-cell--avatar")) return !viewOn.nonVideo;
+    return !viewOn.selfCamera && isSelfCamera(config);
+  }
+
+  /** Mark each tile hidden or shown by the view toggles. A focused tile that
+   *  is now hidden gives the focus up. */
+  function applyViewFilters(): void {
+    for (const [id, entry] of cells) {
+      entry.el.hidden = hiddenByView(entry.el, entry.config);
+      if (entry.el.hidden && id === focusedTileId) focusedTileId = null;
+    }
+    for (const cell of personCells.values()) cell.hidden = hiddenByView(cell, undefined);
+  }
+
+  /** The tiles on screen, for sizing. */
+  function shownTiles(): HTMLDivElement[] {
+    return allTiles().filter((el) => !el.hidden);
+  }
+
   /** Every tile in layout order: streams, then the avatar tiles. */
   function allTiles(): HTMLDivElement[] {
     const tiles = [...cells.values()].map((e) => e.el);
@@ -461,14 +618,19 @@ export function createVideoGrid(): VideoGridComponent {
   /** Re-seat the tiles after a change: people follow the streams. */
   function relayout(): void {
     syncPeople();
+    // A focused tile the view toggles hide drops focus: back to the grid.
+    const wasFocused = focusedTileId !== null;
+    applyViewFilters();
+    applySpeaking();
+    applyUserAudioState();
     if (root === null) return;
-    if (focusedTileId !== null) {
+    if (wasFocused) {
       rebuildFocusLayout();
       return;
     }
     for (const el of allTiles()) {
       if (el.classList.contains("video-cell--avatar") || el.parentElement !== root) {
-        root.appendChild(el);
+        beforeChrome(el);
       }
     }
     applyGridSizes();
@@ -524,8 +686,11 @@ export function createVideoGrid(): VideoGridComponent {
 
   /** Schedule a layout recalculation on the next animation frame. */
   function scheduleResize(): void {
-    if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
-    resizeRafId = requestAnimationFrame(() => {
+    // The grid's own window: the app window can be minimised under a pop-out.
+    const view = doc().defaultView ?? window;
+    if (resizeRafId !== 0) rafWindow.cancelAnimationFrame(resizeRafId);
+    rafWindow = view;
+    resizeRafId = view.requestAnimationFrame(() => {
       resizeRafId = 0;
       applyGridSizes();
     });
@@ -539,7 +704,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  `data-tile-control` role, not node identity. */
   function captureFocusedControl(): { userId: number; control: string } | null {
     if (root === null) return null;
-    const active = document.activeElement;
+    const active = doc().activeElement;
     if (active === null || !root.contains(active)) return null;
     const cell = active.closest(".video-cell");
     const control = (active as HTMLElement).dataset["tileControl"];
@@ -582,14 +747,15 @@ export function createVideoGrid(): VideoGridComponent {
     syncTileNav();
 
     if (focusedTileId === null || cells.size === 0) {
-      // No focus — use regular flex-wrap layout
-      while (root.firstChild) root.removeChild(root.firstChild);
+      // No focus — use regular flex-wrap layout. The grid's own controls stay
+      // put, so a control the user is on keeps focus.
+      for (const child of Array.from(root.childNodes)) if (!isChrome(child)) child.remove();
       root.classList.remove("focus-mode");
       for (const el of allTiles()) {
         el.classList.remove("focused", "thumb");
-        root.appendChild(el);
+        beforeChrome(el);
       }
-      if (exitBtn !== null) root.appendChild(exitBtn);
+      appendChrome();
       applyGridSizes();
       restoreFocusedControl(savedFocus);
       return;
@@ -607,7 +773,9 @@ export function createVideoGrid(): VideoGridComponent {
     const mainArea =
       root.querySelector<HTMLDivElement>(":scope > .video-focus-main") ??
       createElement("div", { class: "video-focus-main" });
-    for (const child of Array.from(root.childNodes)) if (child !== mainArea) child.remove();
+    for (const child of Array.from(root.childNodes)) {
+      if (child !== mainArea && !isChrome(child)) child.remove();
+    }
     // Strip area
     const stripArea = createElement("div", { class: "video-focus-strip" });
 
@@ -632,16 +800,45 @@ export function createVideoGrid(): VideoGridComponent {
       stripArea.appendChild(el);
     }
 
-    if (mainArea.parentNode !== root) root.appendChild(mainArea);
-    // Only show strip if there are thumbnails
-    if (stripArea.childElementCount > 0) {
-      root.appendChild(stripArea);
+    if (mainArea.parentNode !== root) beforeChrome(mainArea);
+    // Only show strip if there are thumbnails. The call view's toggle hides
+    // it rather than detaching it: a detached video pauses.
+    const shownThumbs = [...stripArea.children].some((el) => !(el as HTMLElement).hidden);
+    if (shownThumbs) {
+      stripArea.hidden = callView && !viewOn.strip;
+      beforeChrome(stripArea);
     }
     // Keep the exit control in the DOM (it was stripped with the other
     // children above) and on top, so focus mode is never a dead end.
-    if (exitBtn !== null) root.appendChild(exitBtn);
+    appendChrome();
 
     restoreFocusedControl(savedFocus);
+  }
+
+  /** The grid's own controls, after the tiles: the exit control, the view
+   *  toggles and the call view's control bar. */
+  function appendChrome(): void {
+    if (root === null) return;
+    for (const el of [exitBtn, viewBar, callBar]) {
+      if (el !== null && el.parentNode !== root) root.appendChild(el);
+    }
+    syncViewBar();
+  }
+
+  function isChrome(node: Node): boolean {
+    return node === exitBtn || node === viewBar || node === callBar;
+  }
+
+  /** Seat a tile (or layout area) after the tiles and before the grid's own
+   *  controls, which stay last in tab order. */
+  function beforeChrome(el: HTMLElement): void {
+    if (root === null) return;
+    // The trailing run of controls (mount puts the exit control first).
+    let anchor: Element | null = null;
+    for (let c = root.lastElementChild; c !== null && isChrome(c); c = c.previousElementSibling) {
+      anchor = c;
+    }
+    root.insertBefore(el, anchor);
   }
 
   function setFocusedTile(tileId: number | null): void {
@@ -685,8 +882,9 @@ export function createVideoGrid(): VideoGridComponent {
       leaveTheatre();
       return;
     }
-    if (document.fullscreenElement !== null && document.fullscreenElement !== undefined) {
-      void document.exitFullscreen().catch((err: unknown) => {
+    const d = doc();
+    if (d.fullscreenElement !== null && d.fullscreenElement !== undefined) {
+      void d.exitFullscreen().catch((err: unknown) => {
         log.debug("Exit full screen failed", { err });
       });
     }
@@ -698,7 +896,7 @@ export function createVideoGrid(): VideoGridComponent {
     theatreTile = tileId;
     entry.el.classList.add("video-cell--theatre");
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(true).catch(() => {});
+    windowFullscreen(true);
   }
 
   function leaveTheatre(): void {
@@ -706,7 +904,7 @@ export function createVideoGrid(): VideoGridComponent {
     entry?.el.classList.remove("video-cell--theatre");
     theatreTile = null;
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(false).catch(() => {});
+    windowFullscreen(false);
   }
 
   /** Escape or F leaves the theatre fallback wherever focus is: a click on the
@@ -721,14 +919,14 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function onFullscreenChange(): void {
-    const el = document.fullscreenElement ?? null;
+    const el = doc().fullscreenElement ?? null;
     let next: number | null = null;
     for (const [id, entry] of cells) if (entry.el === el) next = id;
     const was = fullscreenTile;
     fullscreenTile = next;
     if (was === next) return;
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(next !== null).catch(() => {});
+    windowFullscreen(next !== null);
   }
 
   /** Label the full-screen buttons and give a full-screen tile the call
@@ -765,6 +963,39 @@ export function createVideoGrid(): VideoGridComponent {
       bar,
       callButton(voiceText("widget.control.mute"), "mic", "mute", cc.onMuteToggle),
       callButton(voiceText("widget.control.deafen"), "headphones", "deafen", cc.onDeafenToggle),
+    );
+    if (cc.onCameraToggle !== undefined) {
+      const onCamera = cc.onCameraToggle;
+      bar.appendChild(
+        callButton(voiceText("widget.control.cameraOn"), "camera", "camera", onCamera),
+      );
+      const onDevice = cc.onCameraDevice;
+      if (onDevice !== undefined) {
+        const pick: HTMLButtonElement = callButton(
+          voiceText("call.chooseCamera"),
+          "chevron-up",
+          "camera-device",
+          () => onDevice(pick, gridListeners.signal),
+          " video-fs-btn--device",
+        );
+        pick.setAttribute("aria-haspopup", "menu");
+        bar.appendChild(pick);
+      }
+    }
+    if (cc.onScreenshareToggle !== undefined) {
+      const toggle = cc.onScreenshareToggle;
+      // Starting a share opens its picker in the app window: the call comes
+      // back there first, so the picker is in view.
+      const onShare = (): void => {
+        if (callPop !== null && callState.screenshare !== true) closeCallPopout(true);
+        toggle();
+      };
+      bar.appendChild(
+        callButton(voiceText("widget.control.shareStart"), "monitor", "share", onShare),
+      );
+    }
+    appendChildren(
+      bar,
       callButton(
         voiceText("tile.leaveCall"),
         "phone-off",
@@ -779,31 +1010,274 @@ export function createVideoGrid(): VideoGridComponent {
 
   function drawCallState(bar: Element): void {
     const mute = bar.querySelector<HTMLButtonElement>("[data-call-control='mute']");
-    const deafen = bar.querySelector<HTMLElement>("[data-call-control='deafen']");
+    const deafen = bar.querySelector<HTMLButtonElement>("[data-call-control='deafen']");
     if (mute !== null) {
       mute.setAttribute("aria-pressed", String(callState.muted));
       mute.querySelector("svg")?.remove();
       mute.appendChild(createIcon(callState.muted || callState.listenOnly ? "mic-off" : "mic", 18));
-      mute.disabled = callState.listenOnly;
+      mute.disabled = callState.listenOnly || callState.serverMuted === true;
       mute.title = voiceText(
-        callState.listenOnly ? "widget.control.listenOnly" : "widget.control.mute",
+        callState.serverMuted === true
+          ? "widget.mutedByModerator"
+          : callState.listenOnly
+            ? "widget.control.listenOnly"
+            : "widget.control.mute",
       );
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(callState.deafened));
       deafen.querySelector("svg")?.remove();
       deafen.appendChild(createIcon(callState.deafened ? "headphones-off" : "headphones", 18));
+      deafen.disabled = callState.serverDeafened === true;
+      deafen.title = voiceText(
+        callState.serverDeafened === true ? "widget.deafenedByModerator" : "widget.control.deafen",
+      );
     }
+    const camera = bar.querySelector<HTMLButtonElement>("[data-call-control='camera']");
+    if (camera !== null) {
+      const on = callState.camera === true;
+      drawMediaButton(camera, on, on ? "camera-off" : "camera");
+      const label = voiceText(on ? "widget.control.cameraOff" : "widget.control.cameraOn");
+      camera.setAttribute("aria-label", label);
+      camera.title = mediaLockReason() ?? label;
+    }
+    const pick = bar.querySelector<HTMLButtonElement>("[data-call-control='camera-device']");
+    if (pick !== null) {
+      pick.disabled = mediaLockReason() !== null;
+      // Its menu opens in the app window.
+      pick.style.display = callPop === null ? "" : "none";
+    }
+    const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
+    if (share !== null) {
+      const on = callState.screenshare === true;
+      drawMediaButton(share, on, on ? "monitor-off" : "monitor");
+      const label = voiceText(on ? "widget.control.shareStop" : "widget.control.shareStart");
+      share.setAttribute("aria-label", label);
+      share.title = mediaLockReason() ?? callState.shareBlock ?? label;
+      if (callState.shareBlock !== undefined) share.disabled = true;
+    }
+  }
+
+  /** Why camera and share are inert now, or null: the chat socket is down,
+   *  or the join has not reached the room yet. */
+  function mediaLockReason(): string | null {
+    if (callState.offline === "reconnecting") return voiceText("status.reconnectingShort");
+    if (callState.offline === "disconnected") return voiceText("status.notConnected");
+    if (callState.connecting === true) return voiceText("status.joining");
+    return null;
+  }
+
+  /** Camera or share: pressed while on, inert while locked. */
+  function drawMediaButton(btn: HTMLButtonElement, on: boolean, icon: IconName): void {
+    btn.setAttribute("aria-pressed", String(on));
+    btn.querySelector("svg")?.remove();
+    btn.appendChild(createIcon(icon, 18));
+    btn.disabled = mediaLockReason() !== null;
+  }
+
+  // --- Call view: view toggles and control bar --------------------------------
+
+  const VIEW_TOGGLES: readonly [ViewToggle, string, IconName][] = [
+    ["nonVideo", voiceText("grid.showNonVideo"), "user"],
+    ["selfCamera", voiceText("grid.showMyCamera"), "camera"],
+    ["strip", voiceText("grid.showStrip"), "layout-grid"],
+  ];
+
+  function buildViewBar(): HTMLElement {
+    const bar = createElement("div", {
+      class: "video-grid__views",
+      role: "toolbar",
+      "aria-label": voiceText("grid.viewOptions"),
+    });
+    for (const [key, label, icon] of VIEW_TOGGLES) {
+      const btn = createElement("button", {
+        type: "button",
+        class: "video-grid__view",
+        "aria-label": label,
+        title: label,
+        "data-view-toggle": key,
+      });
+      btn.appendChild(createIcon(icon, 18));
+      btn.addEventListener("click", () => setView(key, !viewOn[key]));
+      bar.appendChild(btn);
+    }
+    popBtn = createElement("button", {
+      type: "button",
+      class: "video-grid__view",
+      "data-grid-control": "popout",
+    });
+    popBtn.appendChild(createIcon("external-link", 18));
+    popBtn.addEventListener("click", () => {
+      if (callPop === null) popOutCall();
+      else closeCallPopout(true);
+    });
+    bar.appendChild(popBtn);
+    syncPopButton();
+    return bar;
+  }
+
+  // --- Pop out the whole call ----------------------------------------------------
+
+  function syncPopButton(): void {
+    if (exitBtn !== null) exitBtn.hidden = !callView || callPop !== null;
+    for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
+    if (popBtn === null) return;
+    const label = voiceText(callPop === null ? "grid.popOutCall" : "grid.popInCall");
+    popBtn.setAttribute("aria-label", label);
+    popBtn.title = label;
+    popBtn.setAttribute("aria-pressed", String(callPop !== null));
+  }
+
+  /** Watch the grid's sizes with its own window's observer: the pop-out's
+   *  layout runs there. */
+  function observeGrid(): void {
+    resizeObserver?.disconnect();
+    if (root === null) return;
+    const Observer = doc().defaultView?.ResizeObserver ?? ResizeObserver;
+    resizeObserver = new Observer(() => {
+      scheduleResize();
+      scheduleViewSync();
+    });
+    resizeObserver.observe(root);
+    for (const entry of cells.values()) {
+      if (entry.config !== undefined && !entry.config.isSelf) resizeObserver.observe(entry.el);
+    }
+  }
+
+  /** The full-screen state of the window the grid is in. */
+  function windowFullscreen(on: boolean): void {
+    const args: [boolean, string?] = callPop === null ? [on] : [on, callPop.label];
+    void callbacks.setWindowFullscreen?.(...args).catch(() => {});
+  }
+
+  /** Full screen ends where the grid leaves its window. */
+  function dropFullscreen(): void {
+    if (theatreTile !== null) leaveTheatre();
+    if (fullscreenTile === null) return;
+    leaveFullscreen();
+    fullscreenTile = null;
+    syncFullscreenUi();
+    windowFullscreen(false);
+  }
+
+  /** Move the grid, with its toggles and control bar, into a window of its
+   *  own; the app window goes back to the chat. */
+  function popOutCall(): void {
+    const grid = root;
+    if (grid === null || callPop !== null) return;
+    dropFullscreen();
+    callHome = grid.parentElement;
+    const frame = createElement("div", { style: "position:fixed;inset:0" });
+    callPop = openPopoutWindow({
+      title: voiceText("grid.popoutTitle"),
+      content: frame,
+      onDraw: (d, signal) => {
+        frame.appendChild(grid);
+        d.addEventListener("fullscreenchange", onFullscreenChange, { signal });
+        d.addEventListener("keydown", onTheatreKey, { signal });
+        d.addEventListener("visibilitychange", syncViews, { signal });
+        observeGrid();
+        for (const entry of cells.values()) entry.video.play()?.catch(() => {});
+      },
+      onClosed: (byUser) => bringCallBack(byUser),
+    });
+    if (callPop === null) {
+      log.warn("Call pop out window refused");
+      showToast(voiceText("tile.popoutFailed"), "error");
+      return;
+    }
+    syncPopButton();
+    callbacks.onCallPopout?.(true, false);
+    relayout();
+    syncViews();
+  }
+
+  function closeCallPopout(restore: boolean): void {
+    if (callPop === null) return;
+    popRestore = restore;
+    callPop.close();
+  }
+
+  /** The call's window closed: the grid goes back to the app window. */
+  function bringCallBack(byUser: boolean): void {
+    const restore = byUser || popRestore;
+    popRestore = true;
+    dropFullscreen();
+    callPop = null;
+    if (root !== null) callHome?.appendChild(root);
+    callHome = null;
+    observeGrid();
+    syncPopButton();
+    callbacks.onCallPopout?.(false, restore);
+    for (const entry of cells.values()) entry.video.play()?.catch(() => {});
+    if (restore) popBtn?.focus();
+    relayout();
+    syncViews();
+  }
+
+  /** Turn a view toggle on or off, and remember it. */
+  function setView(key: ViewToggle, on: boolean): void {
+    viewOn[key] = on;
+    savePref(VIEW_PREFS[key], on);
+    relayout();
+    syncViewBar();
+    syncStatsPolling();
+    syncViews();
+  }
+
+  /** Each toggle's pressed state; the strip toggle only in focus mode. */
+  function syncViewBar(): void {
+    if (viewBar === null) return;
+    for (const btn of viewBar.querySelectorAll<HTMLButtonElement>("[data-view-toggle]")) {
+      const key = btn.dataset["viewToggle"] as ViewToggle;
+      btn.setAttribute("aria-pressed", String(viewOn[key]));
+      if (key === "strip") btn.hidden = focusedTileId === null;
+    }
+  }
+
+  function loadViewPrefs(): void {
+    for (const key of Object.keys(VIEW_PREFS) as ViewToggle[]) {
+      viewOn[key] = loadPref(VIEW_PREFS[key], true);
+    }
+  }
+
+  /** Show or take down the call view's header toggles and control bar. */
+  function setCallView(on: boolean): void {
+    if (!on) closeCallPopout(false);
+    callView = on;
+    if (exitBtn !== null) exitBtn.hidden = !on || callPop !== null;
+    if (root === null) return;
+    if (on && viewBar === null) viewBar = buildViewBar();
+    if (!on && viewBar !== null) {
+      viewBar.remove();
+      viewBar = null;
+      popBtn = null;
+    }
+    const cc = callbacks.callControls;
+    if (on && callBar === null && cc !== undefined) {
+      callBar = buildCallControls(cc);
+      callBar.classList.add("video-grid__controls");
+    }
+    if (!on && callBar !== null) {
+      callBar.remove();
+      callBar = null;
+    }
+    root.classList.toggle("video-grid--call", callBar !== null);
+    appendChrome();
+    relayout();
   }
 
   // --- Stream info -------------------------------------------------------------
 
-  /** Poll the stream you are watching (focused or full screen), and only it. */
+  /** Poll the screen share you are watching (focused or full screen), and
+   *  only it: a camera tile has no quality chip. */
   function syncStatsPolling(): void {
     const target = fullscreenTile ?? theatreTile ?? focusedTileId;
     const entry = target === null ? undefined : cells.get(target);
     const wanted =
-      entry !== undefined && entry.config !== undefined && !entry.config.isSelf ? target : null;
+      entry?.config?.isScreenshare === true && !entry.config.isSelf && entry.ending === undefined
+        ? target
+        : null;
     if (wanted === statsTile) return;
     if (statsTimer !== null) {
       clearInterval(statsTimer);
@@ -894,8 +1368,19 @@ export function createVideoGrid(): VideoGridComponent {
     if (entry.popout !== undefined) {
       return { enabled: true };
     }
+    if (entry.mini !== undefined) {
+      if (document.hidden) return { enabled: false };
+      const box = entry.mini.element.getBoundingClientRect();
+      return {
+        enabled: true,
+        size: {
+          width: Math.round(box.width * devicePixelRatio),
+          height: Math.round(box.height * devicePixelRatio),
+        },
+      };
+    }
     const { width, height } = entry.el.getBoundingClientRect();
-    if (document.hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
+    if (doc().hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
       return { enabled: false };
     }
     if (id === focusedTileId || isFullscreen(id)) return { enabled: true };
@@ -944,6 +1429,7 @@ export function createVideoGrid(): VideoGridComponent {
       return;
     }
     if (isFullscreen(tileId)) leaveFullscreen();
+    entry.mini?.close();
     // Popping out a stopped tile means watching it: its video is hidden.
     if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
@@ -958,6 +1444,7 @@ export function createVideoGrid(): VideoGridComponent {
     });
     if (popout === null) {
       log.warn("Pop out window refused", { tileId });
+      showToast(voiceText("tile.popoutFailed"), "error");
       return;
     }
     entry.popout = popout;
@@ -986,8 +1473,9 @@ export function createVideoGrid(): VideoGridComponent {
     const cover = entry.el.querySelector(".video-popped");
     // Keep a keyboard user on the tile: Bring back goes with its cover, and a
     // window the user closed leaves focus nowhere (Pop out was inert).
-    const active = document.activeElement;
-    const lost = active === null || active === document.body;
+    const d = doc();
+    const active = d.activeElement;
+    const lost = active === null || active === d.body;
     const hadFocus = cover?.contains(active) === true || (byUser && lost);
     cover?.remove();
     for (const child of entry.el.children) child.removeAttribute("inert");
@@ -1000,8 +1488,72 @@ export function createVideoGrid(): VideoGridComponent {
     syncViews();
   }
 
+  // --- Mini-player -----------------------------------------------------------
+
+  /** The remote stream being watched in the grid: the focused tile, else the
+   *  first playing one. Not one in a pop-out window (it plays there). */
+  function watchedTile(): number | null {
+    if (focusedTileId !== null && isPlayingHere(cells.get(focusedTileId))) return focusedTileId;
+    for (const [id, e] of cells) if (isPlayingHere(e)) return id;
+    return null;
+  }
+
+  /** Bumped by every show and hide, so a mini-player still loading opens
+   *  only if nothing has changed the request since. */
+  let miniRequest = 0;
+
+  function showMiniPlayer(): void {
+    if ([...cells.values()].some((e) => e.mini !== undefined)) return;
+    // Picked now: the grid drops its focus as it closes.
+    const tileId = watchedTile();
+    if (tileId === null) return;
+    const request = ++miniRequest;
+    if (isFullscreen(tileId)) leaveFullscreen();
+    // Loaded on first use: only leaving a watched stream needs it.
+    void import("../features/voice/miniPlayer").then(({ openMiniPlayer }) => {
+      const entry = cells.get(tileId);
+      if (request !== miniRequest || root === null || entry === undefined) return;
+      if (entry.mini !== undefined || !isPlayingHere(entry)) return;
+      entry.mini = openMiniPlayer({
+        name: entry.name,
+        video: entry.video,
+        onReturn: () => {
+          callbacks.onReturnToStream?.(tileId);
+          if (root !== null && !root.contains(document.activeElement)) {
+            restoreFocusedControl({ userId: tileId, control: "grid" });
+          }
+        },
+        onPopout: () => togglePopout(tileId),
+        onStopWatching: () => {
+          callbacks.setStreamWatched?.(tileId, false);
+          // The grid is closed: no focus to move into it.
+          setStopped(tileId, true, false);
+        },
+        onClosed: (hadFocus) => {
+          entry.mini = undefined;
+          if (hadFocus) callbacks.focusFallback?.();
+          entry.el.insertBefore(entry.video, entry.el.firstChild);
+          entry.video.play()?.catch(() => {});
+          syncViews();
+        },
+      });
+      syncViews();
+    });
+  }
+
+  function hideMiniPlayer(): void {
+    miniRequest++;
+    for (const entry of cells.values()) entry.mini?.close();
+  }
+
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
+  }
+
+  /** A stream ended or its pending watch was dropped: not Stop watching. */
+  function forgetWatch(tileId: number): void {
+    if (callbacks.forgetStreamWatch !== undefined) callbacks.forgetStreamWatch(tileId);
+    else callbacks.setStreamWatched?.(tileId, false);
   }
 
   /** Watch a remote stream or stop (opt-in watching): it is subscribed only
@@ -1017,7 +1569,11 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(tileId);
     if (entry === undefined) return;
     const cell = entry.el;
-    if (stopped) entry.popout?.close();
+    if (stopped) {
+      entry.popout?.close();
+      entry.mini?.close();
+    }
+    if (!stopped) entry.lost = false;
     cell.classList.toggle("video-cell--stopped", stopped);
     syncViews();
     entry.video.hidden = stopped;
@@ -1063,8 +1619,7 @@ export function createVideoGrid(): VideoGridComponent {
     signal: AbortSignal,
   ): HTMLDivElement {
     const track = stream.getVideoTracks()[0];
-    const settings = track?.getSettings?.() ?? {};
-    const surface = (settings as { displaySurface?: string }).displaySurface;
+    const surface = track?.getSettings?.()?.displaySurface;
     const title =
       surface === "window"
         ? voiceText("tile.sharingWindow")
@@ -1076,9 +1631,11 @@ export function createVideoGrid(): VideoGridComponent {
     // short of it (a 60 Hz monitor, a busy encoder).
     const renderDetail = (fps: number | null): void => {
       const parts: string[] = [];
-      if (settings.height !== undefined) {
+      // Read each time: the share's quality can change while it runs.
+      const shown = track?.getSettings?.().height;
+      if (shown !== undefined) {
         // Plain strings: the catalog would group 1080 as "1,080".
-        const height = String(settings.height);
+        const height = String(shown);
         parts.push(
           fps === null
             ? voiceText("tile.qualityHeight", { height })
@@ -1140,6 +1697,11 @@ export function createVideoGrid(): VideoGridComponent {
   ): void {
     if (root === null) return;
 
+    // The same person shared again while their tile said it ended (a new
+    // source, a quick re-share): a new tile, still watched and in focus.
+    const reshared = cells.get(userId)?.ending !== undefined;
+    const refocus = reshared && focusedTileId === userId;
+    if (reshared) dropTile(userId, true);
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
     if (existing !== undefined && stream === null) {
@@ -1148,11 +1710,15 @@ export function createVideoGrid(): VideoGridComponent {
       existing.trackCleanup = undefined;
       existing.video.srcObject = null;
       setTrackMuted(existing, false);
-      if (!existing.el.classList.contains("video-cell--stopped")) setStopped(userId, true, false);
+      if (!existing.el.classList.contains("video-cell--stopped")) {
+        existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
+        setStopped(userId, true, false);
+      }
       applyNames(existing, username, config?.name ?? username);
       return;
     }
     if (existing !== undefined && stream !== null) {
+      existing.lost = false;
       // Received only while watched: a stream on a tile showing Watch plays.
       if (
         existing.config?.isSelf !== true &&
@@ -1181,6 +1747,7 @@ export function createVideoGrid(): VideoGridComponent {
       applyNames(existing, username, config?.name ?? username);
       // Sync stream type attribute in case it changed
       existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
+      existing.el.classList.toggle("video-cell--self", isSelfCamera(config));
       return;
     }
 
@@ -1198,7 +1765,7 @@ export function createVideoGrid(): VideoGridComponent {
 
     const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
-      class: "video-cell",
+      class: isSelfCamera(config) ? "video-cell video-cell--self" : "video-cell",
       "data-user-id": String(userId),
       "data-stream-type": streamType,
     });
@@ -1217,8 +1784,8 @@ export function createVideoGrid(): VideoGridComponent {
     if (config?.isScreenshare === true) {
       label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
-    if (config !== undefined && !config.isSelf) {
-      // Filled by the stats poll while you watch this stream.
+    if (config !== undefined && !config.isSelf && config.isScreenshare) {
+      // Filled by the stats poll while you watch this screen share.
       const chip = createElement("button", {
         type: "button",
         class: "video-quality",
@@ -1292,21 +1859,16 @@ export function createVideoGrid(): VideoGridComponent {
         ),
         back,
       );
-      // Loaded on first use: the menu opens only on a right-click or
-      // Shift+F10, so it stays out of the eager bundle.
+      resizeObserver?.observe(cell);
+    }
+    // Loaded on first use: the menu opens only on a right-click or Shift+F10,
+    // so it stays out of the eager bundle. Your own screen share has none.
+    if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
       const openMenu = (x: number, y: number): void =>
-        void import("./video-grid/tile-menu").then(({ showTileMenu }) => {
+        void import("./video-grid/tile-menu").then((menus) => {
           if (entry.listeners.signal.aborted || root?.contains(cell) !== true) return;
-          showTileMenu({
-            x,
-            y,
-            name: entry.name,
-            config,
-            signal: entry.listeners.signal,
-            onVolumeChange: (isScreenshare, level, muted) =>
-              applyVolume(config.audioUserId, isScreenshare, level, muted),
-            onStopWatching: () => setWatching(userId, false),
-          });
+          if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
+          else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));
         });
       cell.addEventListener(
         "contextmenu",
@@ -1317,7 +1879,6 @@ export function createVideoGrid(): VideoGridComponent {
         { signal: entry.listeners.signal },
       );
       openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
-      resizeObserver?.observe(cell);
     }
 
     // Your own screen share: say what is going out instead of showing a
@@ -1338,6 +1899,73 @@ export function createVideoGrid(): VideoGridComponent {
     syncTileNav();
     relayout();
     syncViews();
+    if (refocus) setFocusedTile(userId);
+  }
+
+  /** A remote tile's menu, with the tile's view state as it is now. */
+  function tileMenuOptions(
+    x: number,
+    y: number,
+    tileId: number,
+    entry: CellEntry,
+    config: TileConfig,
+  ) {
+    const personId = config.audioUserId;
+    const actions = callbacks.tileMenu;
+    // Profile and Message leave the tile, which a full-screen tile would hide.
+    const leaving = (run: () => void) => (): void => {
+      if (isFullscreen(tileId)) leaveFullscreen();
+      run();
+    };
+    // The profile card opens in the app window, out of sight of a pop-out.
+    const onProfile = callPop === null ? actions?.onProfile : undefined;
+    const onMessage = actions?.onMessage;
+    const moderation = actions?.moderation?.(personId);
+    return {
+      x,
+      y,
+      name: entry.name,
+      config,
+      doc: doc(),
+      signal: entry.listeners.signal,
+      onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
+        applyVolume(personId, isScreenshare, level, muted),
+      onStopWatching: () => setWatching(tileId, false),
+      view: {
+        focused: focusedTileId === tileId,
+        fullscreen: isFullscreen(tileId),
+        poppedOut: entry.popout !== undefined,
+        onFocus: () => setFocusedTile(focusedTileId === tileId ? null : tileId),
+        onFullscreen: () => toggleFullscreen(tileId),
+        onPopout: () => togglePopout(tileId),
+      },
+      person: {
+        ...(onProfile === undefined ? {} : { onProfile: leaving(() => onProfile(personId, x, y)) }),
+        ...(onMessage === undefined ? {} : { onMessage: leaving(() => onMessage(personId)) }),
+        ...(moderation === undefined ? {} : { moderation }),
+      },
+    };
+  }
+
+  /** Your own camera tile's menu: Hide my camera where the call view's toggle
+   *  applies, Turn off camera where the host offers the camera control. */
+  function selfMenuOptions(x: number, y: number, tileId: number, entry: CellEntry) {
+    const onCamera = callbacks.callControls?.onCameraToggle;
+    // A hidden full-screen tile would leave a blank screen; focus goes to
+    // the toggle that brings the tile back.
+    const hide = (): void => {
+      if (isFullscreen(tileId)) leaveFullscreen();
+      setView("selfCamera", false);
+      viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']")?.focus();
+    };
+    return {
+      x,
+      y,
+      doc: doc(),
+      signal: entry.listeners.signal,
+      ...(callView ? { onHide: hide } : {}),
+      ...(onCamera === undefined ? {} : { onCameraOff: onCamera, cameraLocked: mediaLockReason() }),
+    };
   }
 
   /** The tile's label, and the person's name on its controls and menu. */
@@ -1373,6 +2001,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** The sidebar menu (or another tile) changed a user's local Mute. */
+  function onUserLocalMute(e: Event): void {
+    const userId = (e as CustomEvent<{ userId: number }>).detail.userId;
+    const volume = getUserVolume(userId);
+    applyVolume(userId, false, volume, getUserLocalMute(userId) || volume === 0);
+  }
+
   /** Update an already-open tile's label in place. No-op if the tile isn't
    *  open — used to keep a remote tile's name in sync with a mid-call
    *  rename without re-creating the tile (addStream is only called once per
@@ -1383,19 +2018,54 @@ export function createVideoGrid(): VideoGridComponent {
     applyNames(entry, username, name ?? username);
   }
 
+  /** A watched remote screen share that ends says so for a few seconds
+   *  before its tile goes, instead of vanishing. */
   function removeStream(userId: number): void {
     pendingWatch.delete(userId);
     const entry = cells.get(userId);
+    if (entry === undefined || entry.ending !== undefined) return;
+    const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
+    if (entry.config?.isScreenshare !== true || !watched) {
+      dropTile(userId);
+      return;
+    }
+    // The stream is gone; only the tile and its watch linger, so the same
+    // person sharing again within the cover keeps being watched (dropTile
+    // forgets the watch once it goes).
+    entry.listeners.destroy();
+    entry.trackCleanup?.();
+    entry.trackCleanup = undefined;
+    entry.video.srcObject = null;
+    // Its controls are dead now: nothing under the cover can be reached.
+    for (const child of entry.el.children) child.toggleAttribute("inert", true);
+    const cover = createElement(
+      "div",
+      { class: "video-stopped video-ended", role: "status" },
+      voiceText("tile.streamEnded", { name: entry.name }),
+    );
+    entry.el.appendChild(cover);
+    entry.ending = setTimeout(() => {
+      dropTile(userId);
+      callbacks.onStreamRemoved?.();
+    }, ENDED_COVER_MS);
+    syncStatsPolling();
+  }
+
+  /** `keepWatch`: the same stream is coming back on a new tile. */
+  function dropTile(userId: number, keepWatch = false): void {
+    const entry = cells.get(userId);
     if (entry === undefined) return;
+    clearTimeout(entry.ending);
 
     // Capture the focused tile control before detaching, so a user tabbing
     // through the overlay keeps a focus target when this tile leaves (Q1).
     const savedFocus = captureFocusedControl();
 
     entry.popout?.close();
-    // The stream is gone: so is the watch (a new one starts unwatched).
-    if (entry.config !== undefined && !entry.config.isSelf) {
-      callbacks.setStreamWatched?.(userId, false);
+    entry.mini?.close();
+    // The stream is gone: so is the watch (a new one starts from the default).
+    if (!keepWatch && entry.config !== undefined && !entry.config.isSelf) {
+      forgetWatch(userId);
     }
     if (entry.trackCleanup) {
       entry.trackCleanup();
@@ -1414,8 +2084,8 @@ export function createVideoGrid(): VideoGridComponent {
     // If focused tile was removed, focus the first remaining tile or clear
     const wasFocusMode = focusedTileId !== null;
     if (focusedTileId === userId) {
-      const firstKey = cells.keys().next().value;
-      focusedTileId = firstKey ?? null;
+      // Never onto a tile the view toggles hide.
+      focusedTileId = [...cells].find(([, e]) => !e.el.hidden)?.[0] ?? null;
     }
 
     syncPeople();
@@ -1428,14 +2098,14 @@ export function createVideoGrid(): VideoGridComponent {
     restoreFocusedControl(savedFocus);
   }
 
-  /** Remove every tile (trackCleanup + srcObject=null via removeStream).
+  /** Remove every tile at once (trackCleanup + srcObject=null via dropTile).
    *  Deleting the current key mid-iteration is well-defined for Map — no
    *  entries are skipped — so this needs no snapshot copy of the keys. */
   function clearStreams(): void {
-    for (const id of pendingWatch) callbacks.setStreamWatched?.(id, false);
+    for (const id of pendingWatch) forgetWatch(id);
     pendingWatch.clear();
     for (const userId of cells.keys()) {
-      removeStream(userId);
+      dropTile(userId);
     }
   }
 
@@ -1448,11 +2118,26 @@ export function createVideoGrid(): VideoGridComponent {
     relayout();
   }
 
-  function applySpeaking(): void {
+  /** Every camera and avatar tile with whose state it marks, or null for a
+   *  tile that marks none (a screen share, or a host-drawn avatar). */
+  function stateTiles(): [HTMLDivElement, number | null][] {
+    const tiles: [HTMLDivElement, number | null][] = [];
     for (const [id, entry] of cells) {
       const cfg = entry.config;
-      const on = cfg?.isScreenshare !== true && speaking.has(cfg?.audioUserId ?? id);
-      entry.el.classList.toggle("video-cell--speaking", on);
+      tiles.push([entry.el, cfg?.isScreenshare === true ? null : (cfg?.audioUserId ?? id)]);
+    }
+    for (const person of people) {
+      const cell = personCells.get(person.userId);
+      if (cell !== undefined) {
+        tiles.push([cell, person.marksOwnState === true ? null : person.userId]);
+      }
+    }
+    return tiles;
+  }
+
+  function applySpeaking(): void {
+    for (const [el, userId] of stateTiles()) {
+      el.classList.toggle("video-cell--speaking", userId !== null && speaking.has(userId));
     }
   }
 
@@ -1461,13 +2146,12 @@ export function createVideoGrid(): VideoGridComponent {
     applySpeaking();
   }
 
-  /** Draw each camera tile's mute/deafen badge from the roster state. */
+  /** Draw each camera and avatar tile's mute/deafen badge from the roster
+   *  state. */
   function applyUserAudioState(): void {
-    for (const [id, entry] of cells) {
-      const cfg = entry.config;
-      if (cfg?.isScreenshare === true) continue;
-      const state = userAudioState.get(cfg?.audioUserId ?? id);
-      let badge = entry.el.querySelector<HTMLElement>("[data-testid='tile-audio-state']");
+    for (const [el, userId] of stateTiles()) {
+      const state = userId === null ? undefined : userAudioState.get(userId);
+      let badge = el.querySelector<HTMLElement>("[data-testid='tile-audio-state']");
       if (state === undefined || (!state.muted && !state.deafened)) {
         badge?.remove();
         continue;
@@ -1478,7 +2162,7 @@ export function createVideoGrid(): VideoGridComponent {
           "data-testid": "tile-audio-state",
           "aria-hidden": "true",
         });
-        entry.el.appendChild(badge);
+        el.appendChild(badge);
       }
       badge.classList.toggle("video-cell__audio--muted", !state.deafened);
       badge.classList.toggle("video-cell__audio--deafened", state.deafened);
@@ -1495,6 +2179,7 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function mount(container: Element): void {
+    loadViewPrefs();
     root = createElement("div", {
       class: "video-grid",
       "data-testid": "video-grid",
@@ -1524,22 +2209,23 @@ export function createVideoGrid(): VideoGridComponent {
     root.appendChild(exitBtn);
 
     container.appendChild(root);
+    if (callView) setCallView(true);
     document.addEventListener("fullscreenchange", onFullscreenChange, {
       signal: gridListeners.signal,
     });
     document.addEventListener("keydown", onTheatreKey, { signal: gridListeners.signal });
     document.addEventListener("visibilitychange", syncViews, { signal: gridListeners.signal });
+    window.addEventListener(USER_LOCAL_MUTE_CHANGED, onUserLocalMute, {
+      signal: gridListeners.signal,
+    });
 
     // Observe container size changes to recalculate tile layout, and the
     // remote tiles' sizes (0 once the grid is closed) for their video views.
-    resizeObserver = new ResizeObserver(() => {
-      scheduleResize();
-      scheduleViewSync();
-    });
-    resizeObserver.observe(root);
+    observeGrid();
   }
 
   function destroy(): void {
+    closeCallPopout(false);
     if (theatreTile !== null) leaveTheatre();
     if (fullscreenTile !== null) {
       fullscreenTile = null;
@@ -1552,7 +2238,7 @@ export function createVideoGrid(): VideoGridComponent {
       statsTimer = null;
     }
     statsTile = null;
-    if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
+    if (resizeRafId !== 0) rafWindow.cancelAnimationFrame(resizeRafId);
     resizeRafId = 0;
     if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
     viewResizeTimer = null;
@@ -1562,8 +2248,12 @@ export function createVideoGrid(): VideoGridComponent {
       resizeObserver = null;
     }
 
-    for (const [, entry] of cells) {
+    for (const [tileId, entry] of cells) {
+      // An ended tile still holds its stream's watch for a re-share.
+      if (entry.ending !== undefined) forgetWatch(tileId);
+      clearTimeout(entry.ending);
       entry.popout?.close();
+      entry.mini?.close();
       if (entry.trackCleanup) {
         entry.trackCleanup();
         entry.trackCleanup = undefined;
@@ -1575,6 +2265,10 @@ export function createVideoGrid(): VideoGridComponent {
     focusedTileId = null;
     people = [];
     personCells.clear();
+    callView = false;
+    viewBar = null;
+    popBtn = null;
+    callBar = null;
 
     if (root !== null) {
       root.remove();
@@ -1598,17 +2292,23 @@ export function createVideoGrid(): VideoGridComponent {
     setUserAudioState,
     setCallbacks(next: VideoGridCallbacks): void {
       callbacks = next;
+      if (callView) {
+        // The control bar is built from the callbacks: rebuild it.
+        callBar?.remove();
+        callBar = null;
+        setCallView(true);
+      }
     },
-    setCallState(next: {
-      readonly muted: boolean;
-      readonly deafened: boolean;
-      readonly listenOnly: boolean;
-    }): void {
-      callState = { muted: next.muted, deafened: next.deafened, listenOnly: next.listenOnly };
+    setCallState(next: CallState): void {
+      callState = { ...next };
       for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
     },
-    setExitVisible(visible: boolean): void {
-      if (exitBtn !== null) exitBtn.hidden = !visible;
+    setExitVisible: setCallView,
+    showMiniPlayer,
+    hideMiniPlayer,
+    raiseCallPopout(): boolean {
+      callPop?.focus();
+      return callPop !== null;
     },
   };
 }

@@ -7,6 +7,7 @@ import * as attachments from "@components/message-list/attachments";
 import * as formatting from "@lib/formatting";
 import * as media from "@components/message-list/media";
 import * as channelMutes from "@lib/channel-mutes";
+import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
@@ -125,6 +126,18 @@ describe("SettingsOverlay", () => {
     container.remove();
   });
 
+  it("marks the About tab while a newer version is on offer", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    const about = container.querySelector("#settings-tab-about")!;
+    expect(about.querySelector(".settings-nav-dot")).toBeNull();
+    setAvailableUpdate({ version: "9.9.9", body: "", serverUrl: "https://s.example" });
+    expect(about.querySelector(".settings-nav-dot")?.textContent).toBe("Update available");
+    setAvailableUpdate(null);
+    expect(about.querySelector(".settings-nav-dot")).toBeNull();
+    overlay.destroy?.();
+  });
+
   it("mounts with all tabs", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
@@ -137,10 +150,11 @@ describe("SettingsOverlay", () => {
       "Notifications",
       "Text & Images",
       "Accessibility",
-      "Voice & Audio",
+      "Voice & Video",
       "Keybinds",
       "Advanced",
       "Diagnostics & logs",
+      "About",
     ]);
 
     overlay.destroy?.();
@@ -375,25 +389,26 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  // --- Voice & Audio tab tests ---
+  // --- Voice & Video tab tests ---
 
-  it("renders Voice & Audio tab with device selectors", () => {
+  it("renders Voice & Video tab with device selectors", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
     getTab(container, 5).click();
 
     const selects = container.querySelectorAll("select.form-input");
     // input device, output device, camera quality, screen share quality,
-    // screen share fps, video device = 6
-    expect(selects.length).toBe(6);
+    // screen share fps, video codec, video device = 7
+    expect(selects.length).toBe(7);
 
     const sliders = container.querySelectorAll(".settings-slider");
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    // 4 toggles: echo cancellation, noise suppression, auto gain control,
-    // enhanced noise suppression (RNNoise)
-    expect(toggles.length).toBe(4);
+    // 6 toggles: automatic input sensitivity, automatically play cameras,
+    // echo cancellation, noise suppression, auto gain control, enhanced noise
+    // suppression (RNNoise)
+    expect(toggles.length).toBe(6);
 
     overlay.destroy?.();
   });
@@ -431,8 +446,9 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
     getTab(container, 5).click();
 
-    const toggles = container.querySelectorAll(".toggle");
-    const echoToggle = toggles[0] as HTMLElement;
+    const echoToggle = container.querySelector(
+      ".toggle[aria-label='Echo Cancellation']",
+    ) as HTMLElement;
 
     // Default is on
     expect(echoToggle.classList.contains("on")).toBe(true);

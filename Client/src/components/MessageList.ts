@@ -72,6 +72,14 @@ export interface MessageListOptions {
   /** May return a promise (e.g. the underlying fetch); MessageList clears its
    *  loadingOlder latch once it settles, success or failure. */
   readonly onScrollTop: () => void | Promise<void>;
+  /**
+   * Load the page of messages below a window detached from the live tail
+   * (after a jump to an old message). Fired near the bottom of a detached
+   * window only; may return a promise, which clears the in-flight latch once
+   * it settles. The page that reaches the newest message reattaches the
+   * window through the store. No paging below the window without it.
+   */
+  readonly onScrollBottom?: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
   readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
@@ -104,9 +112,15 @@ const SCROLL_TOP_THRESHOLD = 50;
 /** Older history starts loading this many viewport heights before the top
  *  (DP-46), so the next page is usually in before the reader gets there. */
 const SCROLL_TOP_VIEWPORTS = 2;
+/** Newer history (below a detached window) starts loading this many viewport
+ *  heights before the bottom, mirroring SCROLL_TOP_VIEWPORTS. */
+const SCROLL_BOTTOM_VIEWPORTS = 2;
 /** After a failed older-page fetch, scrolling inside the trigger zone waits
  *  this long before retrying, unless the reader leaves the zone first. */
 const OLDER_RETRY_COOLDOWN_MS = 5000;
+/** How long a send waits for a detached window's tail reload before it stops
+ *  pulling the reader to the bottom. */
+const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
 
@@ -349,7 +363,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *
    * Suppressed while the window is detached (jumped to an old message): the
    * loaded slice is then not the tail, so "the last N messages" would put the
-   * line somewhere arbitrary.
+   * line somewhere arbitrary. The count is still kept for the whole visit —
+   * a jump into another channel mounts this list before its around-window
+   * lands, so detachment is re-read at every placement
+   * (resolveNewDividerIndex), and returning to the tail restores the line.
    *
    * A count at UNREAD_COUNT_CAP is only a lower bound, so it reads as "every
    * loaded message is unread": the divider stays at the top of the loaded
@@ -392,6 +409,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
       return messages.findIndex((m) => m.id === newDividerAnchorId);
+    }
+    // An around-window centred on a jumped-to message is not the tail: counting
+    // back from its end would mark an arbitrary row. Detachment is read here,
+    // not at mount, because a cross-channel jump detaches after the mount.
+    if (isWindowDetached(options.channelId)) {
+      newDividerDeferred = false;
+      // No divider will exist to open at, and a pending open left armed would
+      // scroll the reader up to the line once the tail returns.
+      openAtDividerPending = false;
+      return -1;
     }
     // A revisit renders the cached window while its tail is refetched (DP-10).
     // Those rows predate what arrived while away, so counting back from their
@@ -494,10 +521,28 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Scroll helpers
   // ---------------------------------------------------------------------------
 
-  function isNearBottom(): boolean {
+  // Set by the reader's own send; held while the window is detached, until
+  // the live tail lands and the next render scrolls to it. It lapses if the
+  // tail never lands, so a later reattach cannot pull the reader down.
+  let followOwnSendUntil = 0;
+  const ownSends = (list: readonly Message[]): number =>
+    list.filter(
+      (m) =>
+        m.id === 0 &&
+        m.user.id === options.currentUserId &&
+        (m.status === "pending" || m.status === "failed") &&
+        !(m.correlationId?.startsWith("recovered:") ?? false),
+    ).length;
+  const followOwnSend = (): boolean =>
+    performance.now() < followOwnSendUntil && !isWindowDetached(options.channelId);
+  // Once attached, a newer page in flight can no longer land, so it does not
+  // veto the reader's own send.
+  const keepBottom = (): boolean => (isNearBottom() && !loadingNewer) || followOwnSend();
+
+  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD): boolean {
     if (root === null) return true;
     const { scrollTop, scrollHeight, clientHeight } = root;
-    return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
+    return scrollHeight - scrollTop - clientHeight < threshold;
   }
 
   /** The true bottom (1 px tolerates fractional scrollTop on HiDPI), unlike the 100 px isNearBottom. */
@@ -557,7 +602,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function updateUnreadBar(): void {
     if (unreadBar === null || unreadBarLabel === null) return;
     let text = "";
-    if (!unreadBarDismissed && unreadOnOpen > 0) {
+    // A detached window draws no NEW line, so the bar (which counts toward it)
+    // stays hidden until the tail returns.
+    if (!unreadBarDismissed && unreadOnOpen > 0 && !isWindowDetached(options.channelId)) {
       const shown = formatBadgeCount(openedUnread);
       if (unreadOnOpen === Infinity) {
         text = messagingText("unreadBar.capped", { shown });
@@ -1028,7 +1075,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
-    const atBottom = isNearBottom();
+    // A newer history page landing below the reader is not a live arrival:
+    // the reader keeps their place instead of being carried to the new bottom.
+    const atBottom = keepBottom();
     // Record the rendered rows' heights under their current keys before the
     // items change, and the topmost visible message row that stays as the
     // anchor: a divider is no anchor, since the NEW line can move.
@@ -1171,7 +1220,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAllRunning = true;
     try {
       log.debug("renderAll START", { count: renderAllCount });
-      wasAtBottom = isNearBottom();
+      wasAtBottom = keepBottom();
 
       // When scrolled away from the bottom, remember which message is
       // topmost in the viewport *before* rebuildItems() swaps virtualItems
@@ -1269,6 +1318,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let loadingOlder = false;
   let olderRetryAt = 0;
+  // In-flight latch for the page below a detached window: rapid scrolling
+  // fires one fetch, not one per scroll event. Also marks the store change
+  // that lands while it is set as a history page, not a live arrival.
+  let loadingNewer = false;
+  let newerRetryAt = 0;
   /** Spinner row at the top of the history while an older page is in flight.
    *  Absolutely positioned in the scroller, so showing or hiding it never
    *  moves the rows (and never fires a scroll that could refetch). */
@@ -1298,6 +1352,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     },
   );
+
+  /** The newest delivered row's id (optimistic rows carry id 0). */
+  function lastSentId(): number {
+    return getChannelMessages(options.channelId).findLast((m) => m.id > 0)?.id ?? 0;
+  }
 
   let scrollRafId = 0;
   let resizeRafId = 0;
@@ -1331,6 +1390,30 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
           olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
         }
+      });
+    }
+
+    // A detached window pages DOWN toward the present as the reader nears its
+    // bottom; the page that reaches the newest message reattaches it.
+    const nearBottomZone = isNearBottom(
+      Math.max(SCROLL_BOTTOM_THRESHOLD, root.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+    );
+    if (!nearBottomZone) newerRetryAt = 0;
+    if (
+      nearBottomZone &&
+      options.onScrollBottom !== undefined &&
+      !loadingNewer &&
+      performance.now() >= newerRetryAt &&
+      isWindowDetached(options.channelId)
+    ) {
+      loadingNewer = true;
+      const newestAtFire = lastSentId();
+      void Promise.resolve(options.onScrollBottom()).finally(() => {
+        loadingNewer = false;
+        // Nothing landed (failed, or the window was replaced): hold off so
+        // continued scrolling does not send one failing request after another.
+        if (lastSentId() === newestAtFire)
+          newerRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
       });
     }
 
@@ -1574,22 +1657,29 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           // The loaded-and-empty welcome state was on screen, so a first row
           // is a live arrival and not the first page landing.
           const firstLive = prevLast === 0 && loadedEmptyShown;
-          const wasBottom = isNearBottom();
+          if (ownSends(getChannelMessages(options.channelId)) > ownSends(allMessages)) {
+            followOwnSendUntil = performance.now() + FOLLOW_OWN_SEND_MS;
+          }
+          const wasBottom = isNearBottom() || followOwnSend();
           if (!patchRows()) {
             renderAll();
           }
+          if (followOwnSend()) followOwnSendUntil = 0;
           // Only an append counts: a window swap drops the previous last row.
           const appended =
             firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
-          if (!wasBottom && appended) {
+          if (!wasBottom && appended && !loadingNewer) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
             }
           }
+          // The page kept the reader in place: the live-tail flag now describes
+          // that spot, not the one before the page landed.
+          if (loadingNewer) setLiveTailInView(options.channelId, isNearBottom());
           updateScrollToBottomBtn();
           settleUnreadNav();
-          if (wasBottom && appended && allMessages.some((m) => m.id > prevLast)) {
+          if (wasBottom && appended && !loadingNewer && allMessages.some((m) => m.id > prevLast)) {
             markLiveArrivalSeen();
           }
         },
@@ -1618,6 +1708,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (s) => s.detachedChannels.has(options.channelId),
         () => {
           updateJumpToPresentPill();
+          updateUnreadBar();
+          // A tail reload that changed no rows reattaches without a messages
+          // update, so the reader's pending own send follows here instead.
+          if (followOwnSend()) {
+            followOwnSendUntil = 0;
+            scrollToBottom();
+            updateScrollToBottomBtn();
+          }
         },
       ),
     );

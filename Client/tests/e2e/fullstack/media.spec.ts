@@ -1,5 +1,8 @@
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { LIVEKIT_KEY_ID, LIVEKIT_API_SECRET } from "../support/server";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -46,16 +49,38 @@ function captureFrames(transport: {
   return frames;
 }
 
+/** Share from the voice widget: the quality step, then Go Live opens the
+ *  browser's picker (auto-accepted by the fake-UI launch flag). */
+async function startShare(page: Page): Promise<void> {
+  await page.locator(".voice-widget button[aria-label='Screenshare']").click();
+  await page.getByTestId("screen-share-go-live").click();
+}
+
+/** Open the call view: a second click on the joined voice channel. Your own
+ *  camera or share never opens it on its own (WP 1B-4). */
+async function openCall(page: Page, name = "voice-one"): Promise<void> {
+  await page.locator(".channel-item.voice", { hasText: name }).click();
+  await expect(page.locator("[data-testid='video-grid-slot']")).toBeVisible({ timeout: 10_000 });
+}
+
+/** Turn "Automatically play cameras" off, so a remote camera waits behind
+ *  Watch stream like a screen share (WP 1B-3). Read when a camera publishes. */
+async function optOutOfCameraAutoPlay(page: Page): Promise<void> {
+  await page.evaluate(() => localStorage.setItem("owncord:settings:autoPlayCameras", "false"));
+}
+
 test("a real remote camera produces a labelled tile while the local self tile has no audio controls", async ({
   alice,
   bob,
 }) => {
+  await optOutOfCameraAutoPlay(alice);
   await joinVoice(alice);
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
-  // The local camera is the only path that auto-opens the grid; the self tile
-  // is deliberately control-free (you cannot mute yourself).
+  // In the open call view the self tile is deliberately control-free (you
+  // cannot mute yourself).
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   const gridSlot = alice.locator("[data-testid='video-grid-slot']");
   await expect(gridSlot).toBeVisible({ timeout: 10_000 });
@@ -65,9 +90,9 @@ test("a real remote camera produces a labelled tile while the local self tile ha
   await expect(selfTile).toHaveAttribute("data-stream-type", "camera");
   await expect(selfTile.locator(".video-tile-overlay")).toHaveCount(0);
 
-  // A real remote camera arrives as its own tile with audio controls, offered
-  // with Watch stream: nothing of it is received until alice clicks it
-  // (opt-in watching), and then its media actually decodes on this client.
+  // With auto-play off, a real remote camera arrives as its own tile with
+  // audio controls, offered with Watch stream: nothing of it is received until
+  // alice clicks it, and then its media actually decodes on this client.
   const bobTile = alice.locator(".video-cell[data-user-id='2']");
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(bobTile).toBeVisible({ timeout: 10_000 });
@@ -92,6 +117,7 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   await expectDecodedMedia(alice);
 
   // Two tiles on alice: her own camera plus bob's remote camera.
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expect(alice.locator(".video-cell[data-user-id='1']")).toBeVisible({ timeout: 10_000 });
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
@@ -136,6 +162,41 @@ async function videoBytesOver(page: Page, ms: number): Promise<number> {
   return (await mediaStats(page)).videoBytes - before;
 }
 
+test("a remote camera plays with no click, and Stop watching holds across a camera restart", async ({
+  alice,
+  bob,
+}) => {
+  await joinVoice(alice);
+  await joinVoice(bob);
+  await expectDecodedMedia(alice);
+
+  // Auto-play (the default): bob's camera is a playing tile, no Watch card.
+  await bob.locator(".voice-widget button[aria-label='Camera']").click();
+  const bobTile = alice.locator(".video-cell[data-user-id='2']");
+  await expect(bobTile).toBeAttached({ timeout: 10_000 });
+  await expect(bobTile.locator("[data-tile-control='watch']")).toHaveCount(0);
+  await watchCamera(alice, 2);
+  await expectDecodedMedia(alice, true);
+
+  // Stop watching: back to Watch stream, and nothing more arrives.
+  await bobTile.hover();
+  await bobTile.locator("[data-tile-control='stop']").click();
+  await expect(bobTile.locator("[data-tile-control='watch']")).toBeVisible();
+  await alice.waitForTimeout(1_500);
+  expect(await videoBytesOver(alice, 2_000)).toBe(0);
+
+  // Bob turns his camera off and on: the stop holds until alice leaves.
+  const bobCamera = bob.locator(".voice-widget button[aria-label='Camera']");
+  await bobCamera.click();
+  await expect(bobTile).toHaveCount(0, { timeout: 10_000 });
+  await bobCamera.click();
+  await expect(bobTile.locator("[data-tile-control='watch']")).toBeAttached({
+    timeout: 10_000,
+  });
+  await alice.waitForTimeout(1_500);
+  expect(await videoBytesOver(alice, 2_000)).toBe(0);
+});
+
 test("a remote camera sends no video while the grid is closed, and resumes when it is shown", async ({
   alice,
   bob,
@@ -144,8 +205,8 @@ test("a remote camera sends no video while the grid is closed, and resumes when 
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
-  // Bob's camera becomes a tile in alice's grid, which stays closed: only a
-  // local camera opens it (BUG-105).
+  // Bob's camera becomes a tile in alice's grid, which stays closed: no video
+  // opens it on its own (BUG-105, WP 1B-4).
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   const gridSlot = alice.locator("[data-testid='video-grid-slot']");
   const bobTile = alice.locator(".video-cell[data-user-id='2']");
@@ -174,10 +235,12 @@ test("a tile's mute button and volume slider change the peer's real playback vol
   alice,
   bob,
 }) => {
+  await optOutOfCameraAutoPlay(alice);
   await joinVoice(alice);
   await joinVoice(bob);
   await expectDecodedMedia(alice);
 
+  await openCall(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await bob.locator(".voice-widget button[aria-label='Camera']").click();
   const tile = alice.locator(".video-cell[data-user-id='2']");
@@ -228,19 +291,24 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   const outbound = captureFrames(aliceTransport);
 
   const shareBtn = alice.locator(".voice-widget button[aria-label='Screenshare']");
-  await shareBtn.click();
+  await startShare(alice);
 
   // Local UI: the control reports sharing and a self screen tile (offset id)
-  // is published under the grid, which auto-opens for local video.
+  // is published under the grid. The grid stays closed, so the chat stays in
+  // view (WP 1B-4); opening the call view shows the tile.
   // The active state lives on the button itself (aria-pressed + the
   // active-control tint); the redesign removed the "Sharing" text label.
   await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
   await expect(shareBtn).toHaveClass(/active-ctrl/);
   const selfScreen = alice.locator(`.video-cell[data-user-id='${1 + SCREENSHARE_TILE_ID_OFFSET}']`);
+  await expect(selfScreen).toBeAttached({ timeout: 10_000 });
+  await expect(alice.locator("[data-testid='video-grid-slot']")).toBeHidden();
+  await openCall(alice);
   await expect(selfScreen).toBeVisible({ timeout: 10_000 });
   await expect(selfScreen).toHaveAttribute("data-stream-type", "screenshare");
   await expect(selfScreen.locator(".video-username")).toHaveText("alice (Screen)");
-  await expect(alice.locator("[data-testid='video-grid-slot']")).toBeVisible();
+  // Back to the chat before stopping, so the stop below closes nothing itself.
+  await alice.locator("[data-tile-control='exit-grid']").click();
   expect(
     outbound.some((f) => f.type === "voice_screenshare" && f.payload?.enabled === true),
     "starting a share must announce voice_screenshare(enabled: true)",
@@ -318,7 +386,7 @@ for (const [ending, end] of shareEndings) {
     await joinVoice(alice);
     await joinVoice(bob);
     const shareBtn = alice.locator(".voice-widget button[aria-label='Screenshare']");
-    await shareBtn.click();
+    await startShare(alice);
     await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
 
     const aliceRow = bob.locator(".voice-user-item[data-voice-uid='1']");
@@ -400,7 +468,7 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   // removes the SFU participant, which ends the client's LiveKit room. P2-T5:
   // the voice reconnect loop then sees the released membership once the chat
   // socket is back and rejoins on its own — a fresh authorized join and key
-  // exchange, with the camera off as after any join.
+  // exchange. WP 1C-6: the camera that was on comes back by itself.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   await alice.waitForTimeout(16_000); // outlast the 15 s server grace window
@@ -410,7 +478,10 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
     timeout: 45_000,
   });
   await expectDecodedMedia(alice);
-  await alice.locator(".voice-widget button[aria-label='Camera']").click();
+  await expect(alice.locator(".voice-widget button[aria-label='Camera']")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await watchCamera(bob, 1);
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
@@ -535,3 +606,69 @@ for (const fault of ["missing", "wrong"] as const) {
     await expectDecodedMedia(bob, true);
   });
 }
+
+/** A LiveKit access token signed with the test SFU's own key pair. */
+function liveKitToken(grants: Record<string, unknown>): string {
+  const now = Math.floor(Date.now() / 1000);
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ iss: LIVEKIT_KEY_ID, nbf: now - 10, exp: now + 600, ...grants })}`;
+  const signature = createHmac("sha256", LIVEKIT_API_SECRET).update(unsigned).digest("base64url");
+  return `${unsigned}.${signature}`;
+}
+
+test("media published without end-to-end encryption is never played", async ({
+  alice,
+  server,
+  browser,
+  baseURL,
+}) => {
+  await joinVoice(alice);
+  await expect(alice.getByTestId("vw-secured")).not.toHaveClass(/vw-secured--degraded/);
+  const livekit = `127.0.0.1:${server.livekitPort}`;
+  const listed = (await (
+    await fetch(`http://${livekit}/twirp/livekit.RoomService/ListRooms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${liveKitToken({ video: { roomList: true } })}`,
+      },
+      body: "{}",
+    })
+  ).json()) as { rooms: Array<{ name: string }> };
+  const room = listed.rooms[0]?.name;
+  expect(room).toBeTruthy();
+
+  // A plain LiveKit client with no room key and no E2EE, under the identity
+  // of a user who is not in the call.
+  const context = await browser.newContext({ baseURL, permissions: ["microphone"] });
+  try {
+    const publisher = await context.newPage();
+    await publisher.goto("/");
+    await publisher.addScriptTag({
+      content: readFileSync("node_modules/livekit-client/dist/livekit-client.umd.js", "utf8"),
+    });
+    const token = liveKitToken({
+      sub: "user-2:plain",
+      video: { room, roomJoin: true, canPublish: true, canSubscribe: false },
+    });
+    await publisher.evaluate(
+      async ({ url, token }) => {
+        const { Room } = (window as unknown as { LivekitClient: typeof import("livekit-client") })
+          .LivekitClient;
+        const plain = new Room();
+        await plain.connect(url, token);
+        await plain.localParticipant.setMicrophoneEnabled(true);
+      },
+      { url: `ws://${livekit}`, token },
+    );
+
+    await expect(alice.getByTestId("vw-secured")).toHaveClass(/vw-secured--degraded/);
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      expect((await mediaStats(alice)).audioEnergy).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } finally {
+    await context.close();
+  }
+});

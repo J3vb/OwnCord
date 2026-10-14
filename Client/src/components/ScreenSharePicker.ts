@@ -14,6 +14,10 @@
  * Linux native capture is video-only, so the Audio option says so instead of
  * offering a switch that would do nothing.
  *
+ * On the web path (Windows) the OS picker owns the source and the audio
+ * switch, so `osPicker: true` shows only the Quality step and resolves
+ * `"os"`; the caller opens the OS picker after it.
+ *
  * Built on `createModal`, so it carries the shared dialog contract (role,
  * modal, focus trap, Escape, focus restore). All copy lives in the `voice`
  * catalog.
@@ -31,7 +35,7 @@ import { voiceText as t } from "../i18n/voice";
 import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
 
 export interface ScreenSharePick {
-  /** The host source id, or "portal" on Wayland. */
+  /** The host source id, "portal" on Wayland, or "os" on the web path. */
   source: string;
   quality: StreamQuality;
   fps: number;
@@ -42,6 +46,12 @@ export interface ScreenSharePickerOptions {
   readonly sources: readonly NativeVoiceScreenSource[];
   /** True on Wayland: the portal owns the source choice and the consent. */
   readonly portal: boolean;
+  /** True on the web path: the OS picker that opens next owns the source
+   *  and the audio choice. */
+  readonly osPicker?: boolean;
+  /** True for Change source on a live share: its quality and audio stay as
+   *  they are, so only the source is picked. */
+  readonly sourceOnly?: boolean;
   readonly defaultQuality: StreamQuality;
   readonly defaultFps: number;
 }
@@ -96,7 +106,17 @@ export function showScreenSharePicker(
     // ---- Source list (X11) or portal note (Wayland) ------------------------
     const body = createElement("div", { class: "modal-body" });
 
-    if (opts.portal) {
+    if (opts.osPicker === true) {
+      const windows = /\bWindows\b/.test(navigator.userAgent);
+      body.appendChild(
+        createElement(
+          "p",
+          { class: "ssp-portal" },
+          t(windows ? "picker.windowsNote" : "picker.browserNote"),
+        ),
+      );
+      selectedSource = "os";
+    } else if (opts.portal) {
       body.appendChild(createElement("p", { class: "ssp-portal" }, t("picker.portalNote")));
       // The portal's dialog is the source choice, so a source id is fixed.
       selectedSource = "portal";
@@ -265,10 +285,12 @@ export function showScreenSharePicker(
     }
 
     // ---- Options: audio note + quality -------------------------------------
-    const options = createElement("div", { class: "ssp-options" });
-    options.appendChild(buildAudioOption());
-    options.appendChild(buildQualityOption());
-    body.appendChild(options);
+    if (opts.sourceOnly !== true) {
+      const options = createElement("div", { class: "ssp-options" });
+      if (opts.osPicker !== true) options.appendChild(buildAudioOption());
+      options.appendChild(buildQualityOption());
+      body.appendChild(options);
+    }
     content.appendChild(body);
 
     function buildQualityOption(): HTMLElement {

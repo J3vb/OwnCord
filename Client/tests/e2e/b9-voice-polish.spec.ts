@@ -91,7 +91,8 @@ test.describe("B9-24 voice widget interaction and feedback", () => {
       },
     });
     await expect(status).toHaveText("You were muted by a moderator");
-    const mute = widget(page).getByRole("button", { name: "Mute", exact: true });
+    // Mute lives in the user panel (WP 1D-1).
+    const mute = page.locator(".user-bar").getByRole("button", { name: "Mute", exact: true });
     await expect(mute).toBeDisabled();
 
     // The restriction is lifted: the announcement clears.
@@ -129,8 +130,15 @@ test.describe("B9-24 voice widget interaction and feedback", () => {
         localStorage.setItem("owncord:settings:largeFont", "true");
       });
       await bootJoined(page);
-      for (const name of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
-        const btn = widget(page).getByRole("button", { name, exact: true });
+      const userBar = page.locator(".user-bar");
+      for (const [host, name] of [
+        [userBar, "Mute"],
+        [userBar, "Deafen"],
+        [widget(page), "Camera"],
+        [widget(page), "Screenshare"],
+        [widget(page), "Disconnect"],
+      ] as const) {
+        const btn = host.getByRole("button", { name, exact: true });
         await btn.scrollIntoViewIfNeeded();
         await expect(btn).toBeVisible();
       }

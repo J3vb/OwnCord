@@ -27,6 +27,7 @@ import {
   setLocalSessionFingerprint,
   setPttPollingLive,
   isPttPollingLive,
+  onPttPollingLiveChange,
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
@@ -275,6 +276,7 @@ describe("voice store", () => {
       // mute. The server's voice_state always ships speaking:false, so writing
       // it verbatim cleared the speaking ring mid-speech (OC clobber).
       updateVoiceState({ ...FULL_VOICE_PAYLOAD, speaking: false });
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
       setSpeakers({ channel_id: 10, speakers: [5] });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(5)?.speaking).toBe(true);
 
@@ -626,6 +628,24 @@ describe("voice store", () => {
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)).toBe(before);
     });
+
+    // No LiveKit update reaches a channel this client has left, so a ring lit
+    // at that moment stayed lit in the sidebar for good.
+    it("clears the rings of the channel you leave", () => {
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+
+      leaveVoiceChannel();
+
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
+
+    it("clears the rings of the channel you switch away from", () => {
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+
+      joinVoiceChannel(20);
+
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
   });
 
   describe("setLocalGateSpeaking", () => {
@@ -659,6 +679,13 @@ describe("voice store", () => {
       expect(localSpeaking()).toBe(true);
       setLocalGateSpeaking(false);
       expect(localSpeaking()).toBe(false);
+    });
+
+    it("ignores speakers for a channel the client is not in", () => {
+      setSpeakers({ channel_id: 10, speakers: [2] });
+      joinVoiceChannel(99);
+      setSpeakers({ channel_id: 10, speakers: [2] });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
     });
 
     it("keeps the ring dark for speech below the gate even when LiveKit reports it", () => {
@@ -992,6 +1019,19 @@ describe("voice store", () => {
     it("setPttPollingLive(true) flips isPttPollingLive() to true", () => {
       setPttPollingLive(true);
       expect(isPttPollingLive()).toBe(true);
+    });
+
+    it("tells listeners when the poller goes live or stops, once per change", () => {
+      const listener = vi.fn();
+      const off = onPttPollingLiveChange(listener);
+      setPttPollingLive(true);
+      setPttPollingLive(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      setPttPollingLive(false);
+      expect(listener).toHaveBeenCalledTimes(2);
+      off();
+      setPttPollingLive(true);
+      expect(listener).toHaveBeenCalledTimes(2);
     });
 
     it("resetVoiceStore() does not clear it — process-wide platform capability, not per-session voice state", () => {

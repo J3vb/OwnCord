@@ -90,7 +90,7 @@
 .sidebar-content-inner .channel-sidebar-header {
   display: none;
 }
-/* Mark All as Read, Invite, Audit Log and Moderation: one row of quiet icon buttons on the
+/* Mark Server as Read, Invite, Audit Log and Moderation: one row of quiet icon buttons on the
    header's trailing edge, beside the name or, when both do not fit, on a row
    of their own under it. The row never splits. */
 .sidebar-header-actions {
@@ -184,6 +184,14 @@
   color: var(--text-faint);
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+/* Collapsed category hiding a (muted) unread row: a small neutral dot. */
+.category-unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+  flex-shrink: 0;
 }
 .category-arrow {
   background: transparent;
@@ -296,6 +304,30 @@
     0 -2px 0 var(--accent) inset;
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-sm);
+}
+.voice-user-moving {
+  user-select: none;
+  cursor: grabbing !important;
+}
+.voice-user-moving * {
+  cursor: grabbing !important;
+}
+.voice-user-item.dragging {
+  opacity: 0.3;
+}
+.voice-drop-target {
+  box-shadow: 0 0 0 2px var(--accent) inset;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: var(--radius-sm);
+}
+.voice-user-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.85;
+  background: var(--bg-active);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
 }
 .channel-item .ch-icon {
   opacity: 0.6;
@@ -431,24 +463,11 @@
   flex-shrink: 0;
   overflow: hidden;
 }
+/* A steady ring, not a pulse: it already flickers with speech itself. */
 .voice-user-item.speaking .vu-avatar {
   box-shadow:
     0 0 0 2px var(--green),
     0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
-  animation: speak-pulse 1.5s ease-in-out infinite;
-}
-@keyframes speak-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 2px var(--green),
-      0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
-  }
-  50% {
-    box-shadow:
-      0 0 0 2px var(--green),
-      0 0 14px color-mix(in srgb, var(--green) 50%, transparent);
-  }
 }
 .voice-user-item .vu-status,
 .voice-user-item .vu-muted {
@@ -460,8 +479,9 @@
 .voice-user-item .vu-status {
   color: var(--text-muted);
 }
+/* A self-mute is grey; a moderator's mute stays red (.vu-server-muted). */
 .voice-user-item .vu-muted {
-  color: var(--red);
+  color: var(--text-muted);
 }
 .voice-user-item .vu-name + .vu-status,
 .voice-user-item .vu-name + .vu-muted {

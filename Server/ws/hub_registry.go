@@ -42,6 +42,8 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
+// The handshake callers hold h.voiceLock(c.userID); the test-only Register
+// event path on the hub goroutine does not.
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
@@ -353,7 +355,7 @@ type clientEvent struct {
 func (h *Hub) DisconnectUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
-		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user", "user_id", userID)
@@ -375,9 +377,24 @@ func (h *Hub) DisconnectUser(userID int64) {
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
-		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
 	h.kickClientTerminal(c)
+}
+
+// onClientEvent applies a queued Register or Unregister on the dispatch
+// goroutine.
+func (h *Hub) onClientEvent(ev clientEvent) {
+	if !ev.add {
+		h.unregisterNow(ev.c)
+		return
+	}
+	// No handshake permission set on this path (and no DB call on the hub
+	// goroutine, ARCH-019) — nil denies the inherited voice-channel
+	// subscription. A wake refusal cannot occur here: the handshake paths
+	// refuse before queueing a Register event, and the event path never
+	// carries wakeReconnect.
+	h.registerNow(ev.c, nil)
 }

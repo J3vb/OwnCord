@@ -105,6 +105,9 @@ pub struct TrackInfo {
     pub kind: &'static str,
     pub source: &'static str,
     pub muted: bool,
+    /// Whether the server reports the track end-to-end encrypted. The webview
+    /// never subscribes one that is not, and neither does `forward_events`.
+    pub encrypted: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,11 +155,17 @@ pub enum Event {
     ActiveSpeakers {
         identities: Vec<String>,
     },
-    /// The server's grant for the local participant changed: whether it still
-    /// lets this client publish the microphone. The webview defers an unmute
-    /// that arrives while it is false and republishes when it turns true.
-    MicrophonePermission {
-        allowed: bool,
+    /// The server's grant for the local participant, once right after
+    /// connect and again on every change: livekit-client's
+    /// `ParticipantPermission` publish fields, with `can_publish_sources` as
+    /// the protocol's `TrackSource` numbers (empty means every source). The
+    /// webview gates the microphone, camera and screen share on it, as the
+    /// web path does with `localParticipant.permissions`.
+    Permission {
+        #[serde(rename = "canPublish")]
+        can_publish: bool,
+        #[serde(rename = "canPublishSources")]
+        can_publish_sources: Vec<i32>,
     },
     /// The input-sensitivity gate opened (speech) or closed (silence). It
     /// lights the local speaking ring, as the web path's detector does.
@@ -189,7 +198,13 @@ pub enum Event {
 
 pub type EventSink = Arc<dyn Fn(Event) + Send + Sync>;
 
-fn track_info(sid: String, kind: TrackKind, source: TrackSource, muted: bool) -> TrackInfo {
+fn track_info(
+    sid: String,
+    kind: TrackKind,
+    source: TrackSource,
+    muted: bool,
+    encryption: EncryptionType,
+) -> TrackInfo {
     TrackInfo {
         sid,
         kind: match kind {
@@ -204,11 +219,24 @@ fn track_info(sid: String, kind: TrackKind, source: TrackSource, muted: bool) ->
             TrackSource::Unknown => "unknown",
         },
         muted,
+        encrypted: is_encrypted(encryption),
     }
 }
 
+/// Whether a publication is end-to-end encrypted, by the same test the SDK
+/// uses to attach its frame cryptor.
+fn is_encrypted(encryption: EncryptionType) -> bool {
+    encryption != EncryptionType::None
+}
+
 fn remote_pub_info(p: &RemoteTrackPublication) -> TrackInfo {
-    track_info(p.sid().to_string(), p.kind(), p.source(), p.is_muted())
+    track_info(
+        p.sid().to_string(),
+        p.kind(),
+        p.source(),
+        p.is_muted(),
+        p.encryption_type(),
+    )
 }
 
 fn participant_info(p: &RemoteParticipant, tracks: &[RemoteTrackPublication]) -> ParticipantInfo {
@@ -284,9 +312,7 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
         RoomEvent::ParticipantPermissionChanged {
             participant: Participant::Local(_),
             permission: Some(permission),
-        } => Event::MicrophonePermission {
-            allowed: mic_allowed(&permission),
-        },
+        } => permission_event(&permission),
         RoomEvent::ActiveSpeakersChanged { speakers } => Event::ActiveSpeakers {
             identities: speakers.iter().map(|s| s.identity().to_string()).collect(),
         },
@@ -501,9 +527,11 @@ pub fn process_threads() -> usize {
 /// A published camera or screen share. `issued` is the sid the webview was
 /// handed and must name to unpublish; `live` follows the SDK's republish
 /// after a full reconnect, which re-issues the sid of the same track.
+/// `capture` is the capture it carries, the id the webview names to stop it.
 struct VideoPublication {
     issued: String,
     live: TrackSid,
+    capture: Option<u64>,
 }
 
 impl VideoPublication {
@@ -511,6 +539,14 @@ impl VideoPublication {
         Self {
             issued: sid.to_string(),
             live: sid,
+            capture: None,
+        }
+    }
+
+    fn of_capture(sid: TrackSid, capture: Option<u64>) -> Self {
+        Self {
+            capture,
+            ..Self::new(sid)
         }
     }
 
@@ -559,6 +595,10 @@ pub struct NativeSession {
     /// self-view preview reads it back over the frame socket's `camera` route.
     camera_capture: Option<CameraShare>,
     screen: Option<ScreenShare>,
+    /// A capture started to replace the published share's source; it takes
+    /// over the publication once its first frame arrives
+    /// (`finish_screen_change`), until then the live share is untouched.
+    screen_change: Option<ScreenShare>,
     screen_publication: VideoSlot,
     next_capture: u64,
     next_camera: u64,
@@ -606,6 +646,11 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
+        // The join's grant raises no change event, so the webview hears it
+        // here, before any event the forwarder sends.
+        if let Some(permission) = room.local_participant().permission() {
+            on_event(permission_event(&permission));
+        }
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
         let playout = Playout::default();
@@ -628,6 +673,7 @@ impl NativeSession {
             camera,
             camera_capture: None,
             screen: None,
+            screen_change: None,
             screen_publication,
             next_capture: 0,
             next_camera: 0,
@@ -637,6 +683,17 @@ impl NativeSession {
             capture: Capture::default(),
             forwarder,
         })
+    }
+
+    /// Keep a publication only if the server accepted it as end-to-end
+    /// encrypted, the one case the SDK attaches the frame cryptor in. Any
+    /// other is stopped and unpublished at once, and the publish fails.
+    async fn require_encrypted(&self, publication: &LocalTrackPublication) -> Result<(), String> {
+        if is_encrypted(publication.encryption_type()) {
+            return Ok(());
+        }
+        withdraw_unencrypted(&self.room.local_participant(), publication).await;
+        Err("the media server did not accept end-to-end encryption for this track".into())
     }
 
     /// Rotate the room key in place (index 0), the way OwnCord rotates on
@@ -772,7 +829,8 @@ impl NativeSession {
         bitrate: Option<u64>,
     ) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
-        self.room
+        let publication = self
+            .room
             .local_participant()
             .publish_track(
                 LocalTrack::Audio(track.clone()),
@@ -780,6 +838,7 @@ impl NativeSession {
             )
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         self.mic = Some(track);
         Ok(())
     }
@@ -839,11 +898,13 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         let sid = publication.sid();
         if let Some(camera) = &self.camera_capture {
             camera.capture.set_source(Some(source));
         }
-        *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        let capture = self.camera_capture.as_ref().map(|c| c.id);
+        *self.camera.lock().unwrap() = Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
     }
 
@@ -954,18 +1015,88 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
         let sid = publication.sid();
         if let Some(screen) = &self.screen {
             screen.capture.set_source(Some(source));
         }
-        *self.screen_publication.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        let capture = self.screen.as_ref().map(|s| s.id);
+        *self.screen_publication.lock().unwrap() =
+            Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
+    }
+
+    /// Start capturing `target` to replace the published share's source,
+    /// leaving the live capture and its publication running. Returns the
+    /// new capture's id and its first-frame receiver, as `start_screen`;
+    /// the caller awaits it without holding the session, then calls
+    /// `finish_screen_change` (or `stop_screen` to give up).
+    pub fn start_screen_change(
+        &mut self,
+        target: Target,
+        options: CaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        if !self.screen_published() {
+            return Err("no published screen share to change".into());
+        }
+        self.screen_change.take();
+        self.next_capture += 1;
+        let id = self.next_capture;
+        let on_event = self.on_event.clone();
+        let (capture, started) = ScreenCapture::start(target, options, move || {
+            on_event(Event::ScreenCaptureEnded { capture: id })
+        })?;
+        self.screen_change = Some(ScreenShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Move the published share onto capture `capture` (started by
+    /// `start_screen_change`): same publication and sid, same preview socket,
+    /// and the old capture is released. Fails, changing nothing, when a stop,
+    /// a new share or another change came first.
+    pub fn finish_screen_change(&mut self, capture: u64) -> Result<(), String> {
+        let next = self
+            .screen_change
+            .take_if(|c| c.id == capture)
+            .ok_or("the screen source change was superseded")?;
+        if !self.screen_published() {
+            return Err("the screen share stopped during the source change".into());
+        }
+        let Some(live) = self.screen.as_mut() else {
+            return Err("the screen share stopped during the source change".into());
+        };
+        // The source keeps the size it was published at: the encoder follows
+        // each frame's own size, but the layer sizes the server was told stay
+        // (as on the web path's replaceTrack).
+        next.capture.take_over(&live.capture);
+        if let Some(publication) = self.screen_publication.lock().unwrap().as_mut() {
+            publication.capture = Some(next.id);
+        }
+        // Dropping the old share joins its capture thread (and, on Wayland,
+        // closes its portal session); the preview lives on in `next`.
+        drop(std::mem::replace(live, next));
+        Ok(())
+    }
+
+    /// Whether the running capture is the one published as the screen share.
+    fn screen_published(&self) -> bool {
+        let live = self.screen.as_ref().map(|s| s.id);
+        live.is_some()
+            && self
+                .screen_publication
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| p.capture == live)
     }
 
     /// Stop capture `capture` if it is still the running one (a stale id is
     /// a no-op): unpublish it, and release the capturer and, on Wayland, the
-    /// portal session.
+    /// portal session. A pending source change's capture is only dropped.
     pub async fn stop_screen(&mut self, capture: u64) {
+        if self.screen_change.as_ref().is_some_and(|s| s.id == capture) {
+            self.screen_change.take();
+        }
         if self.screen.as_ref().is_some_and(|s| s.id == capture) {
             self.release_screen().await;
         }
@@ -989,6 +1120,7 @@ impl NativeSession {
     }
 
     async fn release_screen(&mut self) {
+        self.screen_change.take();
         self.unpublish_screen().await;
         self.frames.set_screen(None);
         // Dropping joins the capture thread.
@@ -1130,6 +1262,60 @@ async fn forward_events(
                 });
             }
         }
+        if let RoomEvent::LocalTrackRepublished {
+            publication,
+            participant,
+            ..
+        } = &ev
+        {
+            if !is_encrypted(publication.encryption_type()) {
+                withdraw_unencrypted(participant, publication).await;
+                // Clear what the session holds for the withdrawn track, so the
+                // next enable publishes a fresh one: the microphone republishes
+                // on its next unmute, and a camera or screen share is ended
+                // the way a capture that stops on its own is.
+                let sid = publication.sid();
+                let ended = match publication.source() {
+                    TrackSource::Microphone => {
+                        mic_withdrawn.set();
+                        None
+                    }
+                    TrackSource::Camera => release_slot(&mut published[0].lock().unwrap(), &sid)
+                        .map(|capture| Event::CameraCaptureEnded { capture }),
+                    TrackSource::Screenshare => {
+                        release_slot(&mut published[1].lock().unwrap(), &sid)
+                            .map(|capture| Event::ScreenCaptureEnded { capture })
+                    }
+                    _ => None,
+                };
+                if let Some(ended) = ended {
+                    on_event(ended);
+                }
+                on_event(Event::EncryptionStatus {
+                    identity: participant.identity().to_string(),
+                    encrypted: false,
+                });
+                continue;
+            }
+        }
+        if let RoomEvent::TrackSubscribed {
+            publication,
+            participant,
+            ..
+        } = &ev
+        {
+            // Only end-to-end encrypted tracks reach playout, the frame
+            // socket and the webview.
+            if !is_encrypted(publication.encryption_type()) {
+                publication.set_subscribed(false);
+                let identity = participant.identity().to_string();
+                log::warn!(
+                    "[native_voice] refusing a track from {} published without end-to-end encryption",
+                    identity.split(':').next().unwrap_or_default()
+                );
+                continue;
+            }
+        }
         if let RoomEvent::ParticipantPermissionChanged {
             participant: Participant::Local(_),
             permission: Some(permission),
@@ -1146,6 +1332,33 @@ async fn forward_events(
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// Stop and unpublish a local publication that is not end-to-end encrypted.
+async fn withdraw_unencrypted(participant: &LocalParticipant, publication: &LocalTrackPublication) {
+    if let Some(track) = publication.track() {
+        track.disable();
+    }
+    if let Err(e) = participant.unpublish_track(&publication.sid()).await {
+        log::warn!("[native_voice] unencrypted publication unpublish: {e}");
+    }
+    log::error!("[native_voice] the media server did not accept end-to-end encryption for a track");
+}
+
+/// Empty a video slot whose live publication is `sid`, returning the capture
+/// it carried. A slot holding any other publication is left alone.
+fn release_slot(slot: &mut Option<VideoPublication>, sid: &TrackSid) -> Option<u64> {
+    if slot.as_ref().is_some_and(|p| p.live == *sid) {
+        return slot.take().and_then(|p| p.capture);
+    }
+    None
+}
+
+fn permission_event(permission: &livekit_protocol::ParticipantPermission) -> Event {
+    Event::Permission {
+        can_publish: permission.can_publish,
+        can_publish_sources: permission.can_publish_sources.clone(),
     }
 }
 
@@ -1301,9 +1514,25 @@ mod tests {
     }
 
     #[test]
-    fn microphone_permission_event_serializes_for_the_webview() {
-        let json = serde_json::to_string(&Event::MicrophonePermission { allowed: false }).unwrap();
-        assert_eq!(json, r#"{"type":"microphonePermission","allowed":false}"#);
+    fn permission_event_serializes_for_the_webview() {
+        let json = serde_json::to_string(&permission_event(&permission(
+            true,
+            &[proto::TrackSource::Microphone, proto::TrackSource::Camera],
+        )))
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"permission","canPublish":true,"canPublishSources":[2,1]}"#
+        );
+    }
+
+    #[test]
+    fn permission_event_carries_a_full_denial() {
+        let json = serde_json::to_string(&permission_event(&permission(false, &[]))).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"permission","canPublish":false,"canPublishSources":[]}"#
+        );
     }
 
     #[test]
@@ -1313,6 +1542,34 @@ mod tests {
             &[proto::TrackSource::Camera]
         )));
         assert!(!mic_allowed(&permission(false, &[])));
+    }
+
+    #[test]
+    fn only_a_gcm_or_custom_track_counts_as_encrypted() {
+        assert!(!is_encrypted(EncryptionType::None));
+        assert!(is_encrypted(EncryptionType::Gcm));
+        assert!(is_encrypted(EncryptionType::Custom));
+        let info = track_info(
+            "TR_a".into(),
+            TrackKind::Audio,
+            TrackSource::Microphone,
+            false,
+            EncryptionType::None,
+        );
+        assert!(!info.encrypted);
+    }
+
+    #[test]
+    fn releasing_a_withdrawn_video_empties_only_its_own_slot() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(7)));
+        assert_eq!(release_slot(&mut slot, &sid("TR_b")), None);
+        assert!(slot.is_some());
+        assert_eq!(release_slot(&mut slot, &sid("TR_a")), Some(7));
+        assert!(slot.is_none());
+        let mut uncaptured = Some(VideoPublication::new(sid("TR_c")));
+        assert_eq!(release_slot(&mut uncaptured, &sid("TR_c")), None);
+        assert!(uncaptured.is_none());
     }
 
     #[test]

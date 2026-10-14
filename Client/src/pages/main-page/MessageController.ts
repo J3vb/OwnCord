@@ -10,6 +10,9 @@ import { shellText } from "../../i18n/shell";
 import {
   setMessages,
   prependMessages,
+  appendNewerMessages,
+  mergeTailMessages,
+  invalidateChannelMessageWindow,
   isChannelLoaded,
   getChannelMessages,
   isWindowDetached,
@@ -24,6 +27,12 @@ const MAX_PAGE_SIZE = 100;
 /** Revisit paging bound: five pages span the 500-row per-channel window. */
 const MAX_REVISIT_PAGES = 5;
 
+/** Newest delivered row of the window (optimistic rows carry id 0): the cursor
+ *  an `after` page continues from. */
+function newestSentId(channelId: number): number {
+  return getChannelMessages(channelId).findLast((m) => m.id > 0)?.id ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // Message Controller
 // ---------------------------------------------------------------------------
@@ -36,6 +45,8 @@ export interface MessageControllerOptions {
 export interface MessageController {
   loadMessages(channelId: number, signal: AbortSignal): Promise<void>;
   loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void>;
+  /** Load the next page below a detached window; reaching the newest message reattaches it. */
+  loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void>;
 }
 
 export function createMessageController(opts: MessageControllerOptions): MessageController {
@@ -182,5 +193,62 @@ export function createMessageController(opts: MessageControllerOptions): Message
     }
   }
 
-  return { loadMessages, loadOlderMessages };
+  // The window was detached while the final page was in flight, so a live
+  // message committed after the server's read was refused and is in neither
+  // that page nor the list. One tail fetch after the re-attach fills the hole.
+  // Runs detached from the page load (its own catch: nothing rejects). If it
+  // fails or is aborted the hole would persist on an attached, "loaded"
+  // window, so the window is invalidated and the next visit refetches the tail.
+  async function recoverRefusedTail(
+    channelId: number,
+    after: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const tail = await api.getMessages(channelId, { after, limit: PAGE_SIZE }, signal);
+      if (!signal.aborted) {
+        if (tail.has_more) {
+          // Too much arrived to patch: reload the live tail instead.
+          invalidateChannelMessageWindow(channelId);
+          await loadMessages(channelId, signal);
+        } else {
+          mergeTailMessages(channelId, tail.messages);
+        }
+        return;
+      }
+    } catch (err) {
+      log.error("Failed to recover the tail after a newer page", { channelId, error: String(err) });
+    }
+    invalidateChannelMessageWindow(channelId);
+  }
+
+  async function loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    if (!isWindowDetached(channelId)) return;
+    const newest = newestSentId(channelId);
+    if (newest === 0) return;
+    try {
+      const resp = await api.getMessages(channelId, { after: newest, limit: PAGE_SIZE }, signal);
+      // The window can be replaced while this fetch is in flight (a new jump
+      // installs another around-window, a jump to present reloads the tail):
+      // nothing aborts this fetch's controller then. Splicing a page fetched
+      // for the old window onto the new one would misorder rows, so apply it
+      // only while the window is still detached and ends at the same row.
+      if (!signal.aborted && isWindowDetached(channelId) && newestSentId(channelId) === newest) {
+        appendNewerMessages(channelId, resp.messages, resp.has_more);
+        if (!resp.has_more) {
+          void recoverRefusedTail(channelId, resp.messages.at(-1)?.id ?? newest, signal);
+        }
+      }
+    } catch (err) {
+      if (!signal.aborted) {
+        log.error("Failed to load newer messages", {
+          channelId,
+          error: String(err),
+        });
+        showError(shellText("messages.loadNewerFailed"));
+      }
+    }
+  }
+
+  return { loadMessages, loadOlderMessages, loadNewerMessages };
 }

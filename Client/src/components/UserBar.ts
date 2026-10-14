@@ -4,12 +4,12 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
-import { voiceStore, type VoiceState } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
@@ -30,6 +30,7 @@ import {
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence";
 import { shellText } from "../i18n/shell";
+import { voiceText } from "../i18n/voice";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -44,6 +45,10 @@ export interface UserBarOptions {
    * (OC-0210). Required, alongside `ws`, for the picker to be enabled.
    */
   readonly presenceSender?: PresenceSender | null;
+  /** The mic and headphone buttons. They work in a call or not: outside one
+   *  they only change the saved state the next join starts with. */
+  readonly onMuteToggle?: () => void;
+  readonly onDeafenToggle?: () => void;
 }
 
 /**
@@ -67,6 +72,60 @@ const STATUS_TEXT = {
   invisible: "status.invisible",
   offline: "status.offline",
 } as const satisfies Readonly<Record<UserStatus, string>>;
+
+function swapIcon(btn: HTMLButtonElement, name: IconName): void {
+  btn.querySelector("svg")?.remove();
+  btn.appendChild(createIcon(name, 18));
+}
+
+/** Paint the mic and headphone buttons from the voice store. A moderator's
+ *  mute or deafen is not ours to lift (the server refuses it), so its button
+ *  is disabled and says why. In a call joined listen-only there is no mic to
+ *  mute, and an idle push-to-talk key reads as its own state, not a mute. */
+function renderVoiceControls(muteBtn: HTMLButtonElement, deafenBtn: HTMLButtonElement): void {
+  const voice = voiceStore.getState();
+  const inCall = voice.currentChannelId !== null;
+  const userMuted = isSelfMuted(voice);
+  const serverMuted = voice.localServerMuted === true;
+  const serverDeafened = voice.localServerDeafened === true;
+  const listenOnly = inCall && voice.listenOnly && !serverMuted;
+  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly;
+
+  muteBtn.classList.toggle("active-ctrl", userMuted);
+  muteBtn.classList.toggle("ptt-gated", pttGated);
+  muteBtn.classList.toggle("ub-listen-only", listenOnly);
+  swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
+  muteBtn.setAttribute("aria-pressed", String(userMuted));
+  muteBtn.disabled = serverMuted || listenOnly;
+  muteBtn.title = serverMuted
+    ? voiceText("widget.mutedByModerator")
+    : listenOnly
+      ? voiceText("widget.control.listenOnly")
+      : pttGated
+        ? voiceText("widget.control.pttGated")
+        : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
+
+  deafenBtn.classList.toggle("active-ctrl", voice.localDeafened);
+  swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
+  deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened));
+  deafenBtn.disabled = serverDeafened;
+  deafenBtn.title = serverDeafened
+    ? voiceText("widget.deafenedByModerator")
+    : voiceText(voice.localDeafened ? "widget.control.undeafen" : "widget.control.deafen");
+}
+
+/** Everything renderVoiceControls reads, as one comparable key. */
+function voiceControlsKey(s: VoiceState): string {
+  return [
+    s.currentChannelId !== null,
+    s.localMuted,
+    s.localDeafened,
+    s.localServerMuted === true,
+    s.localServerDeafened === true,
+    s.listenOnly,
+    s.pttGated === true,
+  ].join("|");
+}
 
 /** The same speaking ring as the user's own voice-channel row, while their
  *  mic is live: never through a mute, a deafen or a released push-to-talk. */
@@ -271,6 +330,26 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     avatarEl.appendChild(statusPickerWrap);
 
     const buttons = createElement("div", { class: "ub-controls" });
+
+    const onMuteToggle = options?.onMuteToggle;
+    const onDeafenToggle = options?.onDeafenToggle;
+    if (onMuteToggle !== undefined && onDeafenToggle !== undefined) {
+      const muteBtn = createElement("button", {
+        "aria-label": voiceText("widget.control.mute"),
+        "data-testid": "ub-mute",
+      });
+      const deafenBtn = createElement("button", {
+        "aria-label": voiceText("widget.control.deafen"),
+        "data-testid": "ub-deafen",
+      });
+      disposable.onEvent(muteBtn, "click", () => onMuteToggle());
+      disposable.onEvent(deafenBtn, "click", () => onDeafenToggle());
+      renderVoiceControls(muteBtn, deafenBtn);
+      disposable.onStoreChange(voiceStore, voiceControlsKey, () =>
+        renderVoiceControls(muteBtn, deafenBtn),
+      );
+      appendChildren(buttons, muteBtn, deafenBtn);
+    }
 
     const settingsBtn = createElement("button", {
       title: shellText("common.settings"),

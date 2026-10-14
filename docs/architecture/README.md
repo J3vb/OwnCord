@@ -1,67 +1,84 @@
 # OwnCord Architecture Blueprints
 
-**Verified against:** commit `5630aa1`, 2026-08-04
-**Companion audits:** [docs/audit-2026-08-04-docs-and-coverage.md](../audit-2026-08-04-docs-and-coverage.md) (docs & coverage),
-[docs/audit-2026-08-04.md](../audit-2026-08-04.md) (security),
-[docs/audit-2026-07-19.md](../audit-2026-07-19.md) (architecture)
+**Index checked against:** `origin/dev` at `ac6ffc4e`, 2026-10-13. Each page
+carries its own "Verified against" line.
 
-This directory is the curated architectural map of OwnCord — the "blueprints" for
-the whole system. Every diagram is a Mermaid fenced block (GitHub renders these
-natively) followed by a prose explanation and a **Source of truth** file list.
+This folder is the map of how OwnCord is built. Start here if you need to
+find the right architecture page for a question. Most pages pair a Mermaid
+diagram (GitHub draws these) with a short explanation and a **Source of
+truth** list of the files it describes.
 
 ## Index
 
-| Doc                                                    | Diagrams                                         | Covers                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [system-overview.md](system-overview.md)               | D1 System context, D8 Deployment topology        | All processes, trust boundaries, ports, single-instance constraints                                                                                                                                                                                                                                                                                    |
-| [server.md](server.md)                                 | D2 Server package map, D3 REST request lifecycle | Go package structure, DB-access styles, middleware chain                                                                                                                                                                                                                                                                                               |
-| [websocket.md](websocket.md)                           | D4 WS connect / replay / dispatch                | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, typed dispatch                                                                                                                                                                                                                                                                |
-| [data-model.md](data-model.md)                         | D5 Entity-relationship overview                  | All 26 tables from migrations 001–028, grouped by domain                                                                                                                                                                                                                                                                                               |
-| [voice-e2ee.md](voice-e2ee.md)                         | D6 Voice + E2EE flow                             | LiveKit token flow, loopback TLS tunnel, ECDH key-holder relay                                                                                                                                                                                                                                                                                         |
-| [client.md](client.md)                                 | D7 Client module map                             | Tauri client: bootstrap, dispatcher, stores, Rust sidecars (structure, as-built)                                                                                                                                                                                                                                                                       |
-| [ux/](ux/README.md)                                    | UX flow + state diagrams                         | Client **behavior** spec (target state): what every view does and how it reacts to events, permissions, and failure                                                                                                                                                                                                                                    |
-| [platform-contracts.md](platform-contracts.md)         | —                                                | Desktop/browser **seam** (target state): where native dependencies will be isolated, and the three that have no browser equivalent                                                                                                                                                                                                                     |
-| [server-boundaries.md](server-boundaries.md)           | —                                                | B3-0 inventory: every file above the domain layer that imports `db`, with a disposition and target family; hub setters, locks and the start/stop defer stack; the auth slice's before-graph. Generated table, enforced by `db-import-boundary`                                                                                                         |
-| [data-lifecycle.md](data-lifecycle.md)                 | —                                                | B4-0: the destructive operations (account deletion, message deletion, the orphan sweep, backup/restore, replay retention, session sweeps, the TOTP key, recovery-secret rotation) with a failure model each on five axes; every user-attributable data class with today's deletion behaviour and its B4 target; the alpha-snapshot drill protocol      |
-| [diagnostics.md](diagnostics.md)                       | —                                                | B4-8: every diagnostic surface and that none leaves the machine; the egress inventory the `egress-sites` invariant enforces (every outbound path is manual, configuration-gated or loopback); the runtime no-automatic-telemetry capture; the support-bundle data contract BG-15's B6/B9 implementation must satisfy                                   |
-| [community-services.md](community-services.md)         | —                                                | B5-0: the seven community, content and moderation services B5 adds or changes, each with an abuse-case table (HP-5's twelve topics), a data-ownership table and a lifecycle table against B4-9 erasure, B4-10 markers and B4-11 sweeps; what B5 does not defend against; the `-count=1` document gate in `Server/migrations`                           |
-| [rich-content-inventory.md](rich-content-inventory.md) | —                                                | B5-5: every rich-content fetch path (link previews, YouTube oEmbed, inline images, GIF search and render, attachments, avatars, custom emoji, the plugin `http` capability, operator binary downloads), which side fetches it, and today's address/redirect/byte/time/type/concurrency/cache bounds, with the remaining gaps assigned to B7, B8 and B9 |
-| [b9-ui-contract.md](b9-ui-contract.md)                 | —                                                | B9-2: the shared UI contract every B9 feature PR follows: qualified colour tokens and the Q8 custom-accent fallback, focus, keyboard, polite versus assertive announcements, motion, teardown ownership, and the reusable Playwright checks                                                                                                            |
-| [plugins.md](plugins.md)                               | —                                                | Experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, post-beta candidates, core that never moves                                                                                                                                                                                                                 |
+### How the system is built today
 
-### Structure vs. behavior
+| Doc                                                    | Diagrams                                         | Covers                                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| [system-overview.md](system-overview.md)               | D1 System context, D8 Deployment topology        | All processes, trust boundaries, ports, single-instance limits                                                                 |
+| [server.md](server.md)                                 | D2 Server package map, D3 REST request lifecycle | Go package structure, database-access styles, the middleware chain                                                             |
+| [websocket.md](websocket.md)                           | D4 WS connect / replay / dispatch                | The real-time engine: sign-in over the socket, 3-tier reconnect replay, backpressure, typed dispatch                           |
+| [data-model.md](data-model.md)                         | D5 Entity-relationship overview                  | All 50 application tables from migrations 001–059, grouped by domain                                                           |
+| [voice-e2ee.md](voice-e2ee.md)                         | D6 Voice + E2EE flow                             | LiveKit token flow, the loopback TLS tunnel, the ECDH key-holder relay, and native voice on Linux                              |
+| [client.md](client.md)                                 | D7 Client module map                             | The Tauri client as built: start-up, dispatcher, stores, Rust commands                                                         |
+| [plugins.md](plugins.md)                               | —                                                | The experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, what may and may never move     |
+| [diagnostics.md](diagnostics.md)                       | —                                                | Every diagnostic surface, the list of everything the server sends off the machine, and what a support bundle contains          |
+| [data-lifecycle.md](data-lifecycle.md)                 | —                                                | Destructive operations (account erasure, deletion, sweeps, backup and restore) with a failure model each, and every data class |
+| [rich-content-inventory.md](rich-content-inventory.md) | —                                                | Every path that fetches content the operator did not choose, and the bounds on each                                            |
 
-[client.md](client.md) maps the client _as-built_ (modules, stores, wiring). The
-[ux/](ux/README.md) set is the complementary _behavior_ spec — prescriptive
-(to-be) flows for every view, with per-view state matrices and event→reaction
-maps. Where today's code diverges from the target, the UX docs carry dated
-**⚠ Current gap** callouts, so the set doubles as a UX improvement backlog.
+### Contracts and inventories read by tests
 
-[platform-contracts.md](platform-contracts.md) is a third kind again: a _target
-seam_ map. It records where the desktop/browser boundary will be drawn and what
-crosses it, measured against today's code. B7 built the desktop side
+These pages are checked by tests or generated in part. Change their structure
+only together with the test that reads them.
+
+| Doc                                            | Covers                                                                                                                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [platform-contracts.md](platform-contracts.md) | The desktop/browser seam: where native dependencies are isolated, and the three that have no browser equivalent                                      |
+| [server-boundaries.md](server-boundaries.md)   | B3-0 inventory: every file above the domain layer that imports `db`, with a disposition. Generated table, enforced by `db-import-boundary`           |
+| [community-services.md](community-services.md) | B5-0: the community, content and moderation services, each with abuse cases, data ownership and lifecycle                                            |
+| [b9-ui-contract.md](b9-ui-contract.md)         | B9-2: the shared UI rules every feature follows: colour tokens, focus, keyboard, announcements, motion, teardown, and the reusable Playwright checks |
+
+### Target behaviour (not shipped behaviour)
+
+| Doc                 | Covers                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [ux/](ux/README.md) | The client **behaviour** spec: what every view should do and how it reacts to events, permissions and failure |
+
+## Structure, behaviour and seams
+
+[client.md](client.md) maps the client _as built_: modules, stores and wiring.
+The [ux/](ux/README.md) set describes _target_ behaviour for every view, with
+state tables and event-to-reaction maps. Where today's code differs from the
+target, the UX docs carry dated **Current gap** notes. So the UX set also works
+as a list of UX improvements still to make. Never cite the UX docs as shipped
+behaviour.
+
+[platform-contracts.md](platform-contracts.md) is a third kind of page: a map
+of the desktop/browser seam. B7 built the desktop side
 (`Client/src/platform/contracts/` and `Client/src/platform/desktop/`). The
-browser side is deferred with B8, so that half of the document is still a
-decision record, not structure.
+browser side is deferred to B8, so that half of the page is still a decision
+record, not a description of code.
 
 ## Maintenance rule
 
-These documents are **curated, not generated**. The rule that keeps them honest:
+These documents are written by hand, not generated (except the marked table in
+server-boundaries.md). One rule keeps them honest:
 
-> If a PR changes the _structure_ of anything listed in a diagram's
-> **Source of truth** list (new package, new table, new message type, changed
-> flow), that PR updates the corresponding diagram in the same change.
+> If a pull request changes the _structure_ of anything in a diagram's
+> **Source of truth** list (a new package, table, message type or flow), that
+> pull request also updates the diagram.
 
-Diagrams reference stable identifiers (package names, table names, message-type
-strings) rather than line numbers wherever possible. Line-number evidence lives
-in the dated audit reports, which are point-in-time snapshots by design.
+Diagrams name stable identifiers (package names, table names, message types)
+rather than line numbers where they can. Line-number evidence lives in the
+dated audit reports, which are snapshots by design.
 
 ## Relationship to other docs
 
-- `docs/api.md`, `docs/protocol.md`, `docs/schema.md` are the _reference specs_
-  (request/response shapes, wire formats, DDL). These blueprints describe
-  _structure and flow_, not payload shapes. Known drift between the specs and
-  the code is catalogued in the dated audit reports (latest:
-  [audit-2026-08-04-docs-and-coverage.md](../audit-2026-08-04-docs-and-coverage.md)).
-- `docs/client-architecture.md` is a redirect stub kept for old links;
+- `docs/api.md`, `docs/protocol.md` and `docs/schema.md` are the _reference
+  specs_: request and response shapes, wire formats and table definitions.
+  These blueprints describe _structure and flow_, not payload shapes. Older
+  drift between the specs and the code is listed in the dated audit reports,
+  for example
+  [audit-2026-08-04-docs-and-coverage.md](../audit-2026-08-04-docs-and-coverage.md).
+- [trust-model.md](../trust-model.md) says who can read what, and why.
+- `docs/client-architecture.md` is a redirect page kept for old links.
   [client.md](client.md) is the client architecture document.

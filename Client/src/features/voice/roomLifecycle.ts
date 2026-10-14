@@ -33,6 +33,7 @@ import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
+import { syncShareGrant } from "./mediaControl";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -63,6 +64,7 @@ export interface RoomLifecycleHost {
   ): { audioPreset: { maxBitrate: number } } | undefined;
   microphonePublishingAllowed(room: Room): boolean;
   applyMicMuteState(muted: boolean): Promise<void>;
+  dropDeniedVideo(room: Room): void;
 }
 
 export class RoomLifecycle {
@@ -291,11 +293,21 @@ export class RoomLifecycle {
     );
     onRoom(
       newRoom,
+      RoomEvent.ParticipantDisconnected,
+      this._eventHandlers.handleParticipantDisconnected,
+    );
+    onRoom(newRoom, RoomEvent.TrackMuted, this._eventHandlers.handleTrackMuted);
+    onRoom(
+      newRoom,
       RoomEvent.AudioPlaybackStatusChanged,
       this._eventHandlers.handleAudioPlaybackChanged,
     );
     onRoom(newRoom, RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
     onRoom(newRoom, RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+      if (participant === newRoom.localParticipant && this._room === newRoom) {
+        syncShareGrant(newRoom);
+        this.host.dropDeniedVideo(newRoom);
+      }
       if (
         participant !== newRoom.localParticipant ||
         this._room !== newRoom ||

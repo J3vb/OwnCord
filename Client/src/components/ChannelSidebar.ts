@@ -1,7 +1,7 @@
 /**
  * ChannelSidebar component — channel list sidebar with categories,
  * unread indicators, and collapse/expand behavior.
- * Voice channels show connected users and join/leave on click.
+ * Voice channels show connected users; a click joins, or opens the call once joined.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -21,20 +21,23 @@ import { safetyStore } from "../features/safety/store";
 import { formatUntil, safetyText } from "../i18n/safety";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
-import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
+import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
+import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -64,7 +67,9 @@ export function canModerateVoice(): boolean {
 
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
-  readonly onVoiceLeave: () => void;
+  /** Called when the user clicks the voice channel they are already in. Leaving
+   *  is the voice widget's Disconnect, never a channel click. */
+  readonly onOpenCall: () => void;
   /** Voice moderation wiring; the moderation menu section is hidden without it. */
   readonly onVoiceModerate?: VoiceModerationCallbacks;
   /** Called when the user clicks the "+" on a category header. */
@@ -79,16 +84,6 @@ export interface ChannelSidebarOptions {
   readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
-}
-
-const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
-
-function pickAvatarColor(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = (hash * 31 + username.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
 /**
@@ -205,7 +200,7 @@ function renderTextChannelItem(
  *  menu opens, so a role or override change since the last render counts. Move
  *  targets are the other voice channels; the server re-checks rank, timeouts
  *  and that the TARGET may connect to the one picked. */
-function buildVoiceModOptions(
+export function buildVoiceModOptions(
   channelId: number,
   user: VoiceUser,
   cb?: VoiceModerationCallbacks,
@@ -219,7 +214,17 @@ function buildVoiceModOptions(
   const moveTargets = Array.from(channelsStore.getState().channels.values())
     .filter((ch) => ch.type === "voice" && ch.id !== channelId)
     .map((ch) => ({ id: ch.id, name: ch.name }));
+  // Greyed with a reason rather than hidden while the socket is down: the
+  // actions are server commands, and a click would be dropped silently.
+  const connectionStatus = uiStore.getState().connectionStatus;
+  const disabledReason =
+    connectionStatus === "connected"
+      ? undefined
+      : voiceText(
+          connectionStatus === "reconnecting" ? "volume.modReconnecting" : "volume.modNotConnected",
+        );
   return {
+    ...(disabledReason !== undefined ? { disabledReason } : {}),
     serverMuted: user.serverMuted === true,
     serverDeafened: user.serverDeafened === true,
     moveTargets,
@@ -230,12 +235,64 @@ function buildVoiceModOptions(
   };
 }
 
+/**
+ * Whether a text-style row draws its unread state. The same condition
+ * `renderTextChannelItem` uses for the "unread" class; voice rows never do.
+ */
+function rowIsUnread(channel: Channel): boolean {
+  return channel.type !== "voice" && channel.unreadCount > 0;
+}
+
+/**
+ * Whether a channel row still shows under a collapsed category: the channel
+ * you are viewing, any mention (muted or not, a mention always shows), an
+ * unread row that is not muted, and voice channels you are in or that have
+ * people in them (Discord parity, so a live call stays visible).
+ */
+function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | null): boolean {
+  if (channel.id === activeChannelId) return true;
+  if (channel.mentionCount > 0) return true;
+  if (channel.type === "voice") {
+    const voice = voiceStore.getState();
+    return (
+      voice.currentChannelId === channel.id || (voice.voiceUsers.get(channel.id)?.size ?? 0) > 0
+    );
+  }
+  return rowIsUnread(channel) && !isChannelMuted(channel.id);
+}
+
+/** Whether a collapsed category hides at least one unread row (a muted one). */
+function hidesUnreadRow(channels: readonly Channel[], activeChannelId: number | null): boolean {
+  return channels.some((ch) => rowIsUnread(ch) && !rowVisibleWhenCollapsed(ch, activeChannelId));
+}
+
+/** Show or clear the header's "unread channels hidden" dot. */
+function syncHiddenUnreadDot(header: Element, show: boolean): void {
+  const existing = header.querySelector(".category-unread-dot");
+  if (!show) {
+    existing?.remove();
+    return;
+  }
+  if (existing !== null) return;
+  const dot = createElement("span", {
+    class: "category-unread-dot",
+    role: "img",
+    "aria-label": shellText("channel.unreadHidden"),
+    title: shellText("channel.unreadHidden"),
+    "data-testid": "category-unread-dot",
+  });
+  const label = header.querySelector(".category-name");
+  if (label !== null) label.after(dot);
+  else header.appendChild(dot);
+}
+
 function renderVoiceChannelItem(
   channel: Channel,
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
-  onVoiceLeave: () => void,
+  onOpenCall: () => void,
+  openProfile: (userId: number, anchor: HTMLElement) => void,
   onWatchStream?: (userId: number) => void,
   onVoiceModerate?: VoiceModerationCallbacks,
 ): HTMLDivElement {
@@ -257,6 +314,7 @@ function renderVoiceChannelItem(
   if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
 
   const wrapper = createElement("div", {});
+  if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
 
   const classes = ["channel-item", "voice", isJoined ? "active" : "", frozen ? "disabled" : ""]
     .filter(Boolean)
@@ -313,7 +371,7 @@ function renderVoiceChannelItem(
         // widget's Disconnect still ends a join in progress.
         const status = voiceStore.getState().voiceStatus;
         if (status === "joining" || status === "securing") return;
-        onVoiceLeave();
+        onOpenCall();
       } else {
         onVoiceJoin(channel.id);
       }
@@ -341,11 +399,11 @@ function renderVoiceChannelItem(
         class: rowClasses,
         "data-voice-uid": String(user.userId),
       });
-      // A remote participant's row opens the per-user volume/moderation menu
-      // (A11Y-01): make it a focusable row so the menu is reachable
-      // from the keyboard too. The local user's own row has no menu.
-      const ownRow = getCurrentUser()?.id === user.userId;
-      if (!ownRow) row.tabIndex = 0;
+      // Every row is focusable (A11Y-01): Enter/Space does what a click does
+      // (watch or profile, below), and on a remote participant's row
+      // Shift+F10 opens the per-user volume/moderation menu.
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
 
       // Render the same identity a rename shows everywhere else (member list,
       // message rows, DM sidebar) — memberDisplayName prefers the nickname,
@@ -355,12 +413,13 @@ function renderVoiceChannelItem(
       const member = membersStore.getState().members.get(user.userId);
       const resolved = member !== undefined ? memberDisplayName(member) : user.username;
 
-      row.appendChild(
-        createAvatarElement(
-          { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
-          { className: "vu-avatar", background: pickAvatarColor(resolved) },
-        ),
+      const avatar = createAvatarElement(
+        { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
+        { className: "vu-avatar", background: pickAvatarColor(resolved) },
       );
+      // The name follows, so the avatar's initial would only repeat it.
+      avatar.setAttribute("aria-hidden", "true");
+      row.appendChild(avatar);
 
       const label = resolved || shellText("common.unknown");
       const nameEl = createElement("span", { class: "vu-name" }, label);
@@ -414,12 +473,24 @@ function renderVoiceChannelItem(
         row.appendChild(muteIcon);
       }
 
+      // Muted for this client only (the volume menu's Mute, a tile mute, or
+      // an older build's volume of 0).
+      const currentUser = getCurrentUser();
+      const isSelf = currentUser !== null && currentUser.id === user.userId;
+      if (!isSelf && (getUserLocalMute(user.userId) || getUserVolume(user.userId) === 0)) {
+        const localMuteIcon = createElement("span", {
+          class: "vu-muted vu-local-muted",
+          title: shellText("channel.locallyMuted"),
+        });
+        localMuteIcon.appendChild(createIcon("volume-x", 14));
+        row.appendChild(localMuteIcon);
+      }
+
       // The local user's own session fingerprint (OC-0003): what a peer who
       // sees us as unverified compares against, so show it where it can be
       // read out. The local user is never in peerVerifications.
-      const currentUser = getCurrentUser();
       const ownFingerprint = voiceStore.select((st) => st.localSessionFingerprint ?? null);
-      if (currentUser !== null && currentUser.id === user.userId && ownFingerprint !== null) {
+      if (isSelf && ownFingerprint !== null) {
         const own = createElement("span", { class: "vu-verify vu-session-fp" });
         own.style.color = "var(--text-muted, #949ba4)";
         own.title = shellText("channel.ownSessionFingerprint", { fingerprint: ownFingerprint });
@@ -490,33 +561,56 @@ function renderVoiceChannelItem(
         // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused
         // participant row opens the same menu.
         openMenuOnKeyboard(row, openVolumeMenu, signal);
+        // Drag onto another voice channel to move them; the menu's "Move to"
+        // is the keyboard path to the same command.
+        if (onVoiceModerate !== undefined) {
+          attachVoiceUserDrag(
+            row,
+            channel.id,
+            user.userId,
+            onVoiceModerate.onMove,
+            signal,
+            lifetimeSignal,
+          );
+        }
       }
 
-      // Click to watch stream (if user has camera or screenshare)
-      if (onWatchStream !== undefined && (user.camera || user.screenshare)) {
-        row.addEventListener(
-          "click",
-          (e) => {
-            // Don't trigger if the right-click menu is open
-            if (e.button !== 0) return;
-            e.stopPropagation();
-            // Watching a stream needs a live LiveKit room -- join first.
-            if (voiceStore.getState().currentChannelId !== channel.id) {
-              // Read before the join: it refuses inside the wait, and an accepted switch arms one.
-              const refused = joinRetryInMs() > 0;
-              onVoiceJoin(channel.id);
-              if (refused) return;
-            }
-            if (voiceStore.getState().currentChannelId !== channel.id) return;
-            const tileId = user.screenshare
-              ? user.userId + SCREENSHARE_TILE_ID_OFFSET
-              : user.userId;
-            onWatchStream(tileId);
-          },
-          { signal },
-        );
-        row.style.cursor = "pointer";
-      }
+      // A click watches their camera or stream; with nothing to watch it opens
+      // their profile, as in the member list.
+      const watchable = onWatchStream !== undefined && (user.camera || user.screenshare);
+      row.addEventListener(
+        "click",
+        (e) => {
+          // Don't trigger if the right-click menu is open
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          if (!watchable) {
+            openProfile(user.userId, row);
+            return;
+          }
+          // Watching a stream needs a live LiveKit room -- join first.
+          if (voiceStore.getState().currentChannelId !== channel.id) {
+            // Read before the join: it refuses inside the wait, and an accepted switch arms one.
+            const refused = joinRetryInMs() > 0;
+            onVoiceJoin(channel.id);
+            if (refused) return;
+          }
+          if (voiceStore.getState().currentChannelId !== channel.id) return;
+          const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
+          onWatchStream(tileId);
+        },
+        { signal },
+      );
+      row.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          row.click();
+        },
+        { signal },
+      );
+      row.style.cursor = "pointer";
 
       usersContainer.appendChild(row);
     }
@@ -532,7 +626,8 @@ function renderChannelItem(
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
-  onVoiceLeave: () => void,
+  onOpenCall: () => void,
+  openProfile: (userId: number, anchor: HTMLElement) => void,
   onEditChannel?: (channel: Channel) => void,
   onDeleteChannel?: (channel: Channel) => void,
   containerEl?: HTMLElement,
@@ -541,6 +636,7 @@ function renderChannelItem(
   onWatchStream?: (userId: number) => void,
   onVoiceModerate?: VoiceModerationCallbacks,
   onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
+  menuChannels: readonly Channel[] | undefined = channels,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
@@ -549,7 +645,8 @@ function renderChannelItem(
       signal,
       lifetimeSignal,
       onVoiceJoin,
-      onVoiceLeave,
+      onOpenCall,
+      openProfile,
       onWatchStream,
       onVoiceModerate,
     );
@@ -564,7 +661,7 @@ function renderChannelItem(
     onEditChannel,
     onDeleteChannel,
     onPurgeChannel,
-    channels,
+    menuChannels,
     onReorderChannel,
   );
   if (containerEl !== undefined && channels !== undefined) {
@@ -628,7 +725,7 @@ interface GroupRender {
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
   const {
     onVoiceJoin,
-    onVoiceLeave,
+    onOpenCall,
     onCreateChannel,
     onEditChannel,
     onDeleteChannel,
@@ -650,6 +747,22 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
+  /** Closes the profile popup a voice user row opened; destroy() calls it. */
+  let closeProfilePopup: (() => void) | null = null;
+
+  /** Open a voice user's profile beside their row. The popup lives on
+   *  document.body, so it takes the sidebar-lifetime signal: a voice re-render
+   *  while it loads must not drop it. */
+  function openProfile(userId: number, anchor: HTMLElement): void {
+    const rect = anchor.getBoundingClientRect();
+    closeProfilePopup = openUserProfilePopup({
+      userId,
+      anchorX: rect.right,
+      anchorY: rect.top,
+      signal: disposable.signal,
+      fallbackFocus: () => voiceRowByUserId.get(userId) ?? null,
+    });
+  }
 
   const unsubscribers: Array<() => void> = [];
 
@@ -683,6 +796,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    * single per-render controller did.
    */
   const ownerByEl = new WeakMap<Element, Disposable>();
+  /** Each group's displayed rows, one array per group kept across renders and
+   *  refilled in place, so Move Up/Down on a row built earlier swaps with the
+   *  row shown next to it, not a channel a collapsed category hides. */
+  const shownRowsByGroup = new Map<string, Channel[]>();
 
   /** Abort a group's or row's owner and those of the rows inside it. */
   function disposeOwned(el: Element): void {
@@ -755,9 +872,35 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       groups.push({ name: category, channels, orderIds: channels.map((c) => c.id).join(",") });
     }
 
-    /** One group's rows, keyed and reused (B9-21). */
+    /** One group's rows, keyed and reused (B9-21). A collapsed category
+     *  keeps only the rows `rowVisibleWhenCollapsed` allows, and its header
+     *  shows a dot while it hides an unread row. */
     function reconcileRows(container: HTMLElement, g: GroupRender): void {
-      reconcileChildren(container, g.channels, {
+      const collapsed = g.name !== null && isCategoryCollapsed(g.name);
+      const rows = collapsed
+        ? g.channels.filter((ch) => rowVisibleWhenCollapsed(ch, activeChannelId))
+        : g.channels;
+      const header = container.parentElement?.querySelector(".category") ?? null;
+      if (header !== null) {
+        syncHiddenUnreadDot(header, collapsed && hidesUnreadRow(g.channels, activeChannelId));
+      }
+      const groupKey = g.name ?? "\u0000uncategorized";
+      let shown = shownRowsByGroup.get(groupKey);
+      if (shown === undefined) {
+        shown = [];
+        shownRowsByGroup.set(groupKey, shown);
+      }
+      shown.splice(0, shown.length, ...rows);
+      // A focused row a collapsed category stops showing (read, muted, emptied)
+      // hands focus to the category's arrow instead of dropping it to the page.
+      const focused = document.activeElement;
+      const focusedRow =
+        focused instanceof HTMLElement && container.contains(focused)
+          ? focused.closest<HTMLElement>(".channel-item")
+          : null;
+      const losesFocus =
+        focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
+      reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
         signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
         create: (ch) => {
@@ -772,7 +915,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // re-render (OC-0281, OC-0282).
             disposable.signal,
             onVoiceJoin,
-            onVoiceLeave,
+            onOpenCall,
+            openProfile,
             onEditChannel,
             onDeleteChannel,
             container,
@@ -781,12 +925,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             onWatchStream,
             onVoiceModerate,
             onPurgeChannel,
+            shown,
           );
           ownerByEl.set(el, owner);
           return el;
         },
         dispose: disposeOwned,
       });
+      if (losesFocus) {
+        header?.querySelector<HTMLElement>(".category-arrow")?.focus();
+      }
     }
 
     reconcileChildren(channelList, groups, {
@@ -814,7 +962,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     rebuildVoiceRowCache();
   }
 
-  /** Build the header (and, when expanded, the rows) for one category group. */
+  /** Build the header and rows for one category group. */
   function buildCategoryGroup(
     g: GroupRender,
     reconcileRows: (container: HTMLElement, g: GroupRender) => void,
@@ -887,13 +1035,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       group.appendChild(header);
     }
 
-    if (g.name === null || !isCategoryCollapsed(g.name)) {
-      const container = createElement("div", { class: "category-channels-container" });
-      // Populate through the reconciler so every row gets its key metadata; a
-      // later in-place update can then recognise and reuse them.
-      reconcileRows(container, g);
-      group.appendChild(container);
-    }
+    // Built even when collapsed: the joined voice channel stays visible there,
+    // and a later join or leave reconciles this container in place.
+    const container = createElement("div", { class: "category-channels-container" });
+    // Populate through the reconciler so every row gets its key metadata; a
+    // later in-place update can then recognise and reuse them.
+    group.appendChild(container);
+    reconcileRows(container, g);
 
     return group;
   }
@@ -903,11 +1051,19 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     renderChannels();
   }
 
+  /** A voice user's local Mute changed: rebuild the voice rows that show it. */
+  function handleUserLocalMuteChanged(): void {
+    renderChannels(true);
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
     // The event is dispatched on window by the mute store, so every writer
     // (context menu, Settings unmute) redraws the rows (F16).
     window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
+    window.addEventListener(USER_LOCAL_MUTE_CHANGED, handleUserLocalMuteChanged, {
+      signal: disposable.signal,
+    });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
@@ -1052,6 +1208,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // disposable.destroy() also releases this sidebar's hold on the shared document-level
     // drag listeners (drag-reorder.ts tracks owners by signal).
     disposable.destroy();
+    closeProfilePopup?.();
+    closeProfilePopup = null;
     for (const unsub of unsubscribers) {
       unsub();
     }

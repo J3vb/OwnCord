@@ -33,7 +33,9 @@ export interface ContextMenuOptions {
 }
 
 /** Actionable menu rows, in any menu. Disabled rows are not navigable. */
-const MENU_ITEM_SELECTOR = '[role="menuitem"]:not([aria-disabled="true"]):not([disabled])';
+const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox"]
+  .map((role) => `[role="${role}"]:not([aria-disabled="true"]):not([disabled])`)
+  .join(", ");
 
 /** The menu rows directly inside `menu`. A nested submenu holds its own; the
  *  ban/purge reveal form's confirm row is excluded while hidden (it becomes a
@@ -110,14 +112,16 @@ export interface MenuKeyboardOptions {
  */
 export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions): () => void {
   menu.setAttribute("role", "menu");
-  const previous = document.activeElement;
+  // The menu's own document: a call's pop-out window keeps its own focus.
+  const doc = menu.ownerDocument;
+  const previous = doc.activeElement;
   setRovingTabindex(menu, MENU_ITEM_SELECTOR);
 
   // The row that invoked the menu held focus when we captured `previous`
   // (keyboard open); restore it on close so focus never drops to <body>.
   const restore = (): void => {
-    const active = document.activeElement;
-    const lost = active === null || active === document.body || menu.contains(active);
+    const active = doc.activeElement;
+    const lost = active === null || active === doc.body || menu.contains(active);
     if (lost && previous instanceof HTMLElement && previous.isConnected) previous.focus();
   };
   const close = (): void => {

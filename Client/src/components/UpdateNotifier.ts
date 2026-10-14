@@ -2,8 +2,14 @@
 // Mounts at the top of the main page and allows the user to update or dismiss.
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
+import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import { createUpdateChecker } from "../features/updates/updateChecker";
+import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
+import { setAvailableUpdate } from "../features/updates/availableUpdate";
+import { openSettings, uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
 import { connectText } from "../i18n/connect";
@@ -12,7 +18,14 @@ const log = createLogger("update-notifier");
 
 export interface UpdateNotifierOptions {
   readonly serverUrl: string;
+  /** Keep checking while mounted — on an interval and after a reconnect —
+   *  and take the Settings "Check for updates" button.
+   *  The main page sets it; the connect page's refused-client notifier needs
+   *  the one startup check only. */
+  readonly keepChecking?: boolean;
 }
+
+const MANUAL_KEY = "manual-upgrade";
 
 export function isWindows(): boolean {
   return typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
@@ -31,17 +44,62 @@ export function formatDownloadProgress(p: DownloadProgress): string {
   return connectText("update.downloadingMb", { mb });
 }
 
+function toMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+/** "38.4 of 61.9 MB" under the progress bar, or null while the size is unknown. */
+export function formatDownloadSize(p: DownloadProgress): string | null {
+  if (p.total === null || p.total <= 0) return null;
+  return connectText("update.progressMb", {
+    received: toMb(Math.min(p.received, p.total)),
+    total: toMb(p.total),
+  });
+}
+
+/** The banner's fixed frame: an icon tile, then a body for the headline and
+ *  its second line. Callers add the actions after the body. */
+function buildFrame(banner: HTMLDivElement, icon: IconName, headline: string): HTMLDivElement {
+  const tile = createElement("div", { class: "update-banner-icon" });
+  tile.appendChild(createIcon(icon, 18));
+  const body = createElement("div", { class: "update-banner-body" });
+  body.appendChild(createElement("span", { class: "update-banner-text" }, headline));
+  banner.replaceChildren(tile, body);
+  return body;
+}
+
+function buildProgressBar(p: DownloadProgress): HTMLDivElement | null {
+  const size = formatDownloadSize(p);
+  if (size === null || p.total === null) return null;
+  const pct = Math.min(100, Math.max(0, (p.received / p.total) * 100));
+  const row = createElement("div", { class: "update-banner-sub" });
+  // The headline already carries the percentage; the bar repeats it visually.
+  const track = createElement("div", { class: "update-banner-progress", "aria-hidden": "true" });
+  const fill = createElement("div", { class: "update-banner-progress-fill" });
+  fill.style.width = `${pct}%`;
+  track.appendChild(fill);
+  appendChildren(row, track, createElement("span", { class: "update-banner-size" }, size));
+  return row;
+}
+
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
-  const { serverUrl } = options;
+  const { serverUrl, keepChecking = false } = options;
   let container: Element | null = null;
   let banner: HTMLDivElement | null = null;
   /** Polite live region carrying the coarse install status, so a screen
    *  reader hears "update available / downloading / installed / failed" once —
    *  never the once-a-percent progress tick, which would read out continuously. */
   let liveRegion: HTMLDivElement | null = null;
-  let dismissed = false;
+  /** What the user last dismissed (a version, or MANUAL_KEY): that same offer is
+   *  not shown again by a background check, a newer version is. */
+  let dismissedKey: string | null = null;
+  /** The offer the banner currently shows. */
+  let shownKey: string | null = null;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeInstall: (() => void) | null = null;
+  let unsubscribeOutcome: (() => void) | null = null;
+  let unsubscribeStatus: (() => void) | null = null;
+  const checker = createUpdateChecker({ serverUrl });
   let installState: UpdateInstallState = { status: "idle" };
 
   function announce(text: string): void {
@@ -50,20 +108,35 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (liveRegion !== null && liveRegion.textContent !== text) setText(liveRegion, text);
   }
 
-  async function performCheck(): Promise<void> {
-    if (dismissed || installState.status !== "idle") return;
+  function installBusy(): boolean {
+    return (
+      installState.status !== "idle" &&
+      !(installState.status === "failed" && !installState.restartRequired)
+    );
+  }
 
-    const result = await checkForUpdate(serverUrl);
-    if (dismissed || installState.status !== "idle") return;
-
-    if (result.manual_upgrade) {
-      showManualUpgradeBanner();
-      return;
+  function handleOutcome(outcome: UpdateOutcome, reason: UpdateCheckReason): void {
+    // The About tab reads the offer even when the banner was dismissed.
+    if (outcome.kind === "available") {
+      setAvailableUpdate({ version: outcome.version, body: outcome.body, serverUrl });
+    } else if (outcome.kind !== "failed") {
+      setAvailableUpdate(null);
     }
-
-    if (!result.available || result.version === null) return;
-
-    showBanner(result.version, result.body ?? "");
+    if (installBusy()) return;
+    const key =
+      outcome.kind === "available"
+        ? outcome.version
+        : outcome.kind === "manual-upgrade"
+          ? MANUAL_KEY
+          : null;
+    if (key === null) return;
+    // The user asked (Settings → Check for updates): a dismissal does not apply.
+    if (reason === "manual") dismissedKey = null;
+    else if (key === dismissedKey) return;
+    if (shownKey === key) return;
+    removeBanner();
+    if (outcome.kind === "available") showBanner(outcome.version);
+    else showManualUpgradeBanner();
   }
 
   /**
@@ -76,12 +149,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });
-
-    const text = createElement(
-      "span",
-      { class: "update-banner-text" },
-      connectText("update.unavailable"),
-    );
+    shownKey = MANUAL_KEY;
+    buildFrame(banner, "triangle-alert", connectText("update.unavailable"));
 
     const dismissBtn = createElement(
       "button",
@@ -89,25 +158,30 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       connectText("update.dismiss"),
     );
     dismissBtn.addEventListener("click", () => {
-      dismissed = true;
+      dismissedKey = shownKey;
       removeBanner();
     });
 
-    appendChildren(banner, text, dismissBtn);
+    banner.appendChild(dismissBtn);
     container.prepend(banner);
     announce(connectText("update.unavailable"));
   }
 
-  function showBanner(version: string, _notes: string): void {
+  function showBanner(version: string): void {
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });
+    shownKey = version;
+    const body = buildFrame(banner, "download", connectText("update.ready", { version }));
 
-    const text = createElement(
-      "span",
-      { class: "update-banner-text" },
-      connectText("update.available", { version }),
+    // The notes live on the About tab's update card, which reads the same offer.
+    const notesBtn = createElement(
+      "button",
+      { class: "update-banner-link", type: "button" },
+      connectText("update.seeWhatsNew"),
     );
+    // i18n-exempt: settings tab key, not shown text
+    notesBtn.addEventListener("click", () => openSettings("About"));
 
     const updateBtn = createElement(
       "button",
@@ -124,25 +198,25 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       connectText("update.later"),
     );
     laterBtn.addEventListener("click", () => {
-      dismissed = true;
+      dismissedKey = shownKey;
       removeBanner();
     });
 
-    appendChildren(banner, text, updateBtn, laterBtn);
+    appendChildren(banner, notesBtn, updateBtn, laterBtn);
     if (isWindows()) {
       // The Windows installer is unsigned, so SmartScreen warns when the
       // updater launches it. Say so before the click, not as a surprise.
-      banner.appendChild(
-        createElement(
-          "span",
-          { class: "update-banner-warning", id: "update-banner-warning" },
-          connectText("update.smartScreen"),
-        ),
-      );
+      const warning = createElement("span", {
+        class: "update-banner-warning update-banner-sub",
+        id: "update-banner-warning",
+      });
+      warning.appendChild(createIcon("triangle-alert", 13));
+      warning.append(connectText("update.smartScreen"));
+      body.appendChild(warning);
       updateBtn.setAttribute("aria-describedby", "update-banner-warning");
     }
     container.prepend(banner);
-    announce(connectText("update.available", { version }));
+    announce(connectText("update.ready", { version }));
   }
 
   function installUpdate(): void {
@@ -168,7 +242,12 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
           : state.restartRequired
             ? connectText("update.installedRestart")
             : connectText("update.failed");
-    banner.replaceChildren(createElement("span", { class: "update-banner-text" }, text));
+    const failed = state.status === "failed" && !state.restartRequired;
+    const body = buildFrame(banner, failed ? "triangle-alert" : "download", text);
+    if (state.status === "downloading" && state.progress !== null) {
+      const bar = buildProgressBar(state.progress);
+      if (bar !== null) body.appendChild(bar);
+    }
 
     // Announce only the coarse transition. A percentage tick is not a new
     // event; reading "Downloading update… 47%" every frame is noise, so the
@@ -199,7 +278,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
         connectText("update.dismiss"),
       );
       dismissBtn.addEventListener("click", () => {
-        dismissed = true;
+        dismissedKey = shownKey;
         removeBanner();
       });
       banner.appendChild(dismissBtn);
@@ -210,6 +289,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (banner !== null) {
       banner.remove();
       banner = null;
+      shownKey = null;
     }
   }
 
@@ -227,21 +307,45 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     });
     target.appendChild(liveRegion);
     unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
-    // Delay the check slightly so the main UI renders first
+    unsubscribeOutcome = checker.onOutcome(handleOutcome);
+    if (keepChecking) {
+      // A socket that comes back may be an updated server: ask again. Read-only
+      // use of the store; this is not a ws.on handler and writes nothing.
+      let wasDown = false;
+      unsubscribeStatus = uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        (status) => {
+          if (status !== "connected") wasDown = true;
+          else if (wasDown) {
+            wasDown = false;
+            checker.notifyReconnected();
+          }
+        },
+      );
+      checker.start();
+    }
+    // Delay the first check slightly so the main UI renders first
     checkTimer = setTimeout(() => {
       checkTimer = null;
-      void performCheck();
+      if (!installBusy()) void checker.checkNow("startup");
     }, 3000);
   }
 
   function destroy(): void {
     unsubscribeInstall?.();
     unsubscribeInstall = null;
+    unsubscribeOutcome?.();
+    unsubscribeOutcome = null;
+    unsubscribeStatus?.();
+    unsubscribeStatus = null;
+    checker.stop();
     if (checkTimer !== null) {
       clearTimeout(checkTimer);
       checkTimer = null;
     }
     removeBanner();
+    // Another server may offer a different version, or none.
+    setAvailableUpdate(null);
     liveRegion?.remove();
     liveRegion = null;
     container = null;

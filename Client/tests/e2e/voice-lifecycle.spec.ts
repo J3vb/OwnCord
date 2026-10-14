@@ -94,9 +94,15 @@ test.describe("Voice widget", () => {
       ).__owncord.setVoiceStatus("connected"),
     );
 
-    // All five controls are visible and enabled once connected.
-    for (const label of ["Mute", "Deafen", "Camera", "Screenshare", "Disconnect"]) {
+    // All three call controls are visible and enabled once connected; mute
+    // and deafen live in the user panel (WP 1D-1).
+    for (const label of ["Camera", "Screenshare", "Disconnect"]) {
       const btn = widget.locator(`button[aria-label='${label}']`);
+      await expect(btn).toBeVisible();
+      await expect(btn).toBeEnabled();
+    }
+    for (const label of ["Mute", "Deafen"]) {
+      const btn = page.locator(`.user-bar button[aria-label='${label}']`);
       await expect(btn).toBeVisible();
       await expect(btn).toBeEnabled();
     }
@@ -177,16 +183,16 @@ test.describe("Voice WS flow", () => {
   // 6. Mute/deafen toggle — buttons use aria-pressed and .active-ctrl class.
   test("mute and deafen buttons toggle state", async ({ page }) => {
     await joinVoiceChannelByName(page);
-    const widget = page.locator("[data-testid='voice-widget']");
+    const userBar = page.locator(".user-bar");
 
-    const muteBtn = widget.locator("button[aria-label='Mute']");
+    const muteBtn = userBar.locator("button[aria-label='Mute']");
     await expect(muteBtn).toHaveAttribute("aria-pressed", "false", { timeout: 5000 });
 
     await muteBtn.click();
     await expect(muteBtn).toHaveAttribute("aria-pressed", "true", { timeout: 5000 });
     await expect(muteBtn).toHaveClass(/active-ctrl/);
 
-    const deafenBtn = widget.locator("button[aria-label='Deafen']");
+    const deafenBtn = userBar.locator("button[aria-label='Deafen']");
     await deafenBtn.click();
     await expect(deafenBtn).toHaveAttribute("aria-pressed", "true", { timeout: 5000 });
     await expect(deafenBtn).toHaveClass(/active-ctrl/);

@@ -10,6 +10,7 @@ import { setJoinedVoiceStatus } from "@lib/roomEventHandlers";
 import { releaseRoom } from "../features/voice/releaseRoom";
 import { ROOM_CONNECT_OPTIONS } from "../features/voice/sessionState";
 import { voiceText } from "../i18n/voice";
+import { redactTunnelUrl } from "@lib/voiceJoinTrace";
 
 const log = createLogger("livekitReconnect");
 
@@ -88,6 +89,9 @@ export interface ReconnectDeps {
   reapplyMuteGain: () => void;
   /** Clear the pending-reconnect fields now the tail has completed. */
   clearPendingReconnectFields: () => void;
+  /** Tell the user about a camera or screen share the drop stopped. Only a
+   *  reconnect that got all the way through calls it. */
+  noticeLostMedia: () => void;
 }
 
 /** Auto-reconnect budget, sized to outlast a companion LiveKit restart.
@@ -161,6 +165,12 @@ export async function attemptAutoReconnect(
       // D-4: no attempt starts past the ceiling, and none waits on a chat
       // socket closed for good or a channel that is already gone.
       if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
+      // A loop superseded by its failed attempt must not touch the shared token
+      // waiter: that would spend the live session's refresh budget.
+      if (superseded()) {
+        log.info("Auto-reconnect aborted — user left or channel changed");
+        return;
+      }
       // OC-0014: the attempt after this delay must carry a live token.
       if (deps.serverMembership() === "held" && deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
         // oxlint-disable-next-line no-await-in-loop -- the attempt must wait for the fresh token it connects with
@@ -259,7 +269,11 @@ export async function attemptAutoReconnect(
         return;
       }
 
-      log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
+      log.info("Auto-reconnect succeeded", {
+        attempt,
+        channelId,
+        url: redactTunnelUrl(resolvedUrl),
+      });
       // Transition to "connected" — this is the single atomic write.
       deps.setState({
         type: "connected",
@@ -338,6 +352,7 @@ export async function attemptAutoReconnect(
       deps.clearPendingReconnectFields();
       // Request a fresh token since the stored one may be close to expiry.
       deps.requestTokenRefresh();
+      deps.noticeLostMedia();
       return;
     } catch (err) {
       log.warn("Auto-reconnect failed", { attempt, url, error: err });

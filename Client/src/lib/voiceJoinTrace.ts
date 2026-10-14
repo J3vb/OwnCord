@@ -150,6 +150,11 @@ function lateMarkTarget(): InternalAttempt | null {
   return r;
 }
 
+/** `url` with any local tunnel path token replaced by "…", for logs. */
+export function redactTunnelUrl(url: string): string {
+  return url.replace(/\/[0-9a-f]{64}(?=\/)/, "/…");
+}
+
 /** Classify a resolved LiveKit URL for the timeline. A loopback result equal to
  *  the server's `direct_url` is `direct`; the local TLS tunnel and every other
  *  result are told apart by their loopback origin vs the proxy path. */

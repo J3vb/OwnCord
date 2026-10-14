@@ -12,11 +12,50 @@ import type { NativeProxies } from "../contracts/nativeProxies";
 //
 // The Rust `http_proxy` module runs one loopback TCP→TLS tunnel per remote
 // host and pins the server certificate with the same trust-on-first-use store
-// as the WebSocket proxy. REST calls go to http://127.0.0.1:{port} instead of
-// https://{host} directly, so the webview never has to accept an invalid
-// certificate and the bearer token never rides an unpinned TLS connection.
+// as the WebSocket proxy. REST calls go to http://127.0.0.1:{port}/{token}
+// instead of https://{host} directly, so the webview never has to accept an
+// invalid certificate and the bearer token never rides an unpinned TLS
+// connection. Each tunnel only serves requests whose path starts with its own
+// random token.
 
 const httpLog = createLogger("http-proxy");
+
+/** What `start_http_proxy` and `start_livekit_proxy` return. */
+interface TunnelEndpoint {
+  port: number;
+  token: string;
+}
+
+/** Start (or reuse) a tunnel through `start`. A rejection, or a reply without
+ *  a port and a token, becomes one Error the callers' transport handling
+ *  already covers. */
+async function startTunnel(
+  command: "start_http_proxy" | "start_livekit_proxy",
+  start: () => Promise<unknown>,
+): Promise<TunnelEndpoint> {
+  let reply: unknown;
+  try {
+    reply = await start();
+  } catch (err) {
+    // i18n-exempt: internal transport error, logged and mapped by callers
+    throw new Error(`${command} failed: ${err instanceof Error ? err.message : String(err)}`, {
+      cause: err,
+    });
+  }
+  if (
+    reply === null ||
+    typeof reply !== "object" ||
+    !("port" in reply) ||
+    !("token" in reply) ||
+    typeof reply.port !== "number" ||
+    typeof reply.token !== "string" ||
+    reply.token === ""
+  ) {
+    // i18n-exempt: internal transport error, logged and mapped by callers
+    throw new Error(`${command} returned no tunnel endpoint`);
+  }
+  return { port: reply.port, token: reply.token };
+}
 
 /** host → in-flight start so concurrent callers don't race the tunnel. */
 const pending = new Map<string, Promise<string>>();
@@ -38,10 +77,11 @@ async function ensureHttpProxy(host: string): Promise<string> {
   if (inFlight) return inFlight;
 
   const start = (async () => {
-    const port = await invoke<number>("start_http_proxy", { remoteHost: host });
-    const origin = `http://127.0.0.1:${port}`;
-    httpLog.debug("tunnel ready", { host, origin });
-    return origin;
+    const { port, token } = await startTunnel("start_http_proxy", () =>
+      invoke<unknown>("start_http_proxy", { remoteHost: host }),
+    );
+    httpLog.debug("tunnel ready", { host, port });
+    return `http://127.0.0.1:${port}/${token}`;
   })();
 
   pending.set(host, start);
@@ -85,6 +125,13 @@ function setLiveKitServerHost(host: string | null): void {
  *  resolveLiveKitUrl(), which takes the passthrough branch for a null host.
  *  @public */
 export async function ensureLiveKitProxy(): Promise<number> {
+  return (await startLiveKitTunnel()).port;
+}
+
+/** The body of ensureLiveKitProxy, returning the whole endpoint so a caller
+ *  builds its URL from one reply rather than from module state another call
+ *  may have changed meanwhile. */
+async function startLiveKitTunnel(): Promise<TunnelEndpoint> {
   // i18n-exempt: internal proxy guard, never rendered
   if (serverHost === null) throw new Error("no server host for LiveKit proxy");
   // Ensure host:port format — default to 443 (standard HTTPS) when the
@@ -101,11 +148,12 @@ export async function ensureLiveKitProxy(): Promise<number> {
   } else {
     hostWithPort = serverHost.includes(":") ? serverHost : `${serverHost}:443`;
   }
-  proxyPort = await invoke<number>("start_livekit_proxy", {
-    remoteHost: hostWithPort,
-  });
-  livekitLog.info("LiveKit TLS proxy started on localhost", { port: proxyPort });
-  return proxyPort;
+  const tunnel = await startTunnel("start_livekit_proxy", () =>
+    invoke<unknown>("start_livekit_proxy", { remoteHost: hostWithPort }),
+  );
+  proxyPort = tunnel.port;
+  livekitLog.info("LiveKit TLS proxy started on localhost", { port: tunnel.port });
+  return tunnel;
 }
 
 /** True when `url` is a plain ws:/http: URL on a loopback host — exactly the
@@ -151,13 +199,13 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
     if (proxyPath.startsWith("/")) {
       // Remote server: route through the local Rust TLS proxy so WebView2
       // doesn't reject self-signed certificates on the LiveKit signal WS.
-      const port = await ensureLiveKitProxy();
-      const resolved = `ws://127.0.0.1:${port}${proxyPath}`;
+      const tunnel = await startLiveKitTunnel();
       livekitLog.debug("LiveKit URL resolved via TLS proxy", {
-        url: resolved,
+        port: tunnel.port,
+        path: proxyPath,
         remoteHost: serverHost,
       });
-      return resolved;
+      return `ws://127.0.0.1:${tunnel.port}/${tunnel.token}${proxyPath}`;
     }
   }
   livekitLog.debug("LiveKit URL resolved as passthrough", { url: proxyPath });

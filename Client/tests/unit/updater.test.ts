@@ -93,6 +93,9 @@ describe("checkForUpdate", () => {
       version: null,
       body: null,
       manual_upgrade: false,
+      // Marked, so a manual "Check for updates" says "could not check" rather
+      // than "you're up to date" for a check that never completed.
+      failed: true,
     });
     expectConsole("error", /\[updater\] Update check failed/);
   });

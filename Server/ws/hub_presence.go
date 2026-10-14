@@ -279,11 +279,11 @@ func (h *Hub) flushPresenceQueue() {
 // others see db.BroadcastStatus(status) with the custom text blanked (the
 // text would be a tell that an "offline" member is online), the subject sees
 // the truth. Erased users' entries are left out. Called under seqMu, which
-// guards purgedUsers; nil when nothing is left to send.
+// guards the tombstones; nil when nothing is left to send.
 func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[int64][]byte) {
 	entries := make([]presenceBatchEntry, 0, len(queued))
 	for uid, p := range queued {
-		if _, purged := h.purgedUsers[uid]; purged {
+		if h.tombstones.erased(uid) {
 			continue
 		}
 		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus}

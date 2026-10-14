@@ -30,6 +30,12 @@ type Result struct {
 	// SetChannelID, if non-nil, updates the client's focused channel.
 	// Used by channel_focus to mutate client state from a V2 handler.
 	SetChannelID *int64
+	// DeferChannelFocus, if non-nil, is set by channel_focus when the focus
+	// budget is spent. The applier remembers the channel as the client's latest
+	// focus intent (superseding any earlier deferred one) and applies it once
+	// the rate window frees, so a burst of channel switches (holding Alt+Down)
+	// still ends subscribed to the channel the user landed on.
+	DeferChannelFocus *int64
 	// SetPresence, if non-nil, records the presence the handler just
 	// committed as the client's live presence (presentableMembers and
 	// presence snapshots read it). Applied before Events are emitted, so a

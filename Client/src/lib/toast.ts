@@ -5,7 +5,7 @@
  * Then import `showToast` anywhere to display notifications.
  */
 
-import type { ToastContainer, ToastType } from "@components/Toast";
+import type { ToastAction, ToastContainer, ToastType } from "@components/Toast";
 import type { PartialSuccessResponse } from "@lib/types";
 
 let instance: ToastContainer | null = null;
@@ -35,6 +35,19 @@ export function teardownToast(): void {
  */
 export function showToast(message: string, type: ToastType = "info", durationMs?: number): void {
   instance?.show(message, type, durationMs);
+}
+
+/**
+ * Show a toast with a button that acts on it (see ToastAction). Same no-op
+ * before init as showToast. Returns a function that removes the toast.
+ */
+export function showActionToast(
+  message: string,
+  type: ToastType,
+  action: ToastAction,
+  durationMs?: number,
+): () => void {
+  return instance?.show(message, type, durationMs, action) ?? (() => {});
 }
 
 /**

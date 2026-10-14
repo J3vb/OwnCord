@@ -40,6 +40,7 @@ import { verifyPresentation, openIdentityMismatchModal } from "../features/voice
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
+import { shareBlockReason } from "../features/voice/shareGate";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -529,6 +530,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       userId: id,
       label: resolvePerson(id, dm, voice, me).name,
       content: avatar(id, dm, "lg", ringing.includes(id) ? "dcp-avatar--ringing" : ""),
+      // Its avatars draw their own speaking ring and mute badge.
+      marksOwnState: true as const,
     }));
     return videoEl;
   }
@@ -943,8 +946,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       securedEl.title = degraded ? t("encryption.unsecuredLabel") : t("encryption.securedLabel");
     }
 
-    // Controls: the widget's rules. Socket down freezes the signalling
-    // controls (Leave stays live); a moderator mute is not ours to lift.
+    // Controls: the widget's rules. Socket down freezes camera and share
+    // (Leave stays live; mute and deafen apply locally and are restated when
+    // the socket returns); a moderator mute is not ours to lift.
     const frozen = uiStore.getState().connectionStatus !== "connected";
     const reason = frozen ? t("status.notConnected") : "";
     // No room to attach a camera or screen to until the join has connected (D-08).
@@ -954,22 +958,22 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       const selfMuted = isSelfMuted(voice);
       mute.setAttribute("aria-pressed", String(selfMuted));
       swapIcon(mute, selfMuted || voice.listenOnly ? "mic-off" : "mic", 20);
-      mute.disabled = frozen || voice.localServerMuted === true || voice.listenOnly;
+      mute.disabled = voice.localServerMuted === true || voice.listenOnly;
       mute.title =
         voice.localServerMuted === true
           ? t("widget.mutedByModerator")
           : voice.listenOnly
             ? t("widget.control.listenOnly")
-            : reason || t("widget.control.mute");
+            : t("widget.control.mute");
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(voice.localDeafened));
       swapIcon(deafen, voice.localDeafened ? "headphones-off" : "headphones", 20);
-      deafen.disabled = frozen || voice.localServerDeafened === true;
+      deafen.disabled = voice.localServerDeafened === true;
       deafen.title =
         voice.localServerDeafened === true
           ? t("widget.deafenedByModerator")
-          : reason || t("widget.control.deafen");
+          : t("widget.control.deafen");
     }
     if (camera !== null) {
       camera.setAttribute("aria-pressed", String(voice.localCamera));
@@ -980,8 +984,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (share !== null) {
       share.setAttribute("aria-pressed", String(voice.localScreenshare));
       swapIcon(share, voice.localScreenshare ? "monitor-off" : "monitor", 20);
-      share.disabled = frozen || connecting;
-      share.title = reason || (connecting ? t("status.joining") : d("share"));
+      const block = shareBlockReason(voice);
+      share.disabled = frozen || connecting || block !== null;
+      share.title = reason || (connecting ? t("status.joining") : (block ?? d("share")));
     }
     tick();
   }

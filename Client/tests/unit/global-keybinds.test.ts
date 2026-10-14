@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished, type Mock } from "vitest";
 
 const { mockVoiceGetState } = vi.hoisted(() => ({
   mockVoiceGetState: vi.fn(() => ({ currentChannelId: null as number | null })),
@@ -18,6 +18,7 @@ vi.mock("@stores/voice.store", () => ({
 }));
 
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
+const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
 
 function makeHandlers(): {
   onSearch: Mock<() => void>;
@@ -129,7 +130,9 @@ describe("global keybinds", () => {
     composer.remove();
   });
 
-  it("ignores voice shortcuts outside a voice channel", () => {
+  // WP 1D-1: mute and deafen work outside a call (they set the state the next
+  // join starts with); the camera still needs a call.
+  it("toggles mute and deafen outside a voice channel, but not the camera", () => {
     const h = makeHandlers();
     detach = attachGlobalKeybinds(h);
 
@@ -137,13 +140,37 @@ describe("global keybinds", () => {
     const deafen = press("d");
     const camera = press("V", { shiftKey: true });
 
+    expect(h.onToggleMute).toHaveBeenCalledOnce();
+    expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+    expect(h.onToggleCamera).not.toHaveBeenCalled();
+    expect(mute.defaultPrevented).toBe(true);
+    expect(deafen.defaultPrevented).toBe(true);
+    // An untouched key keeps its default behaviour.
+    expect(camera.defaultPrevented).toBe(false);
+  });
+
+  it("leaves Ctrl+M and Ctrl+D to a text field", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+
+    const d = new KeyboardEvent("keydown", {
+      key: "d",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    composer.dispatchEvent(d);
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "m", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+
     expect(h.onToggleMute).not.toHaveBeenCalled();
     expect(h.onToggleDeafen).not.toHaveBeenCalled();
-    expect(h.onToggleCamera).not.toHaveBeenCalled();
-    // Untouched keys keep their default behaviour.
-    expect(mute.defaultPrevented).toBe(false);
-    expect(deafen.defaultPrevented).toBe(false);
-    expect(camera.defaultPrevented).toBe(false);
+    expect(d.defaultPrevented).toBe(false);
+    composer.remove();
   });
 
   it("fires voice shortcuts while connected to voice", () => {
@@ -159,6 +186,134 @@ describe("global keybinds", () => {
     expect(h.onToggleMute).toHaveBeenCalledOnce();
     expect(h.onToggleDeafen).toHaveBeenCalledOnce();
     expect(h.onToggleCamera).toHaveBeenCalledOnce();
+  });
+
+  describe("mute/deafen on the global shortcut binding", () => {
+    beforeEach(() => {
+      mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+      localStorage.clear();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+    });
+
+    it("Ctrl+Shift+M mutes and Ctrl+Shift+D deafens, once each", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const mute = press("M", { shiftKey: true, code: "KeyM" });
+      const deafen = press("D", { shiftKey: true, code: "KeyD" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+      expect(mute.defaultPrevented).toBe(true);
+      expect(deafen.defaultPrevented).toBe(true);
+    });
+
+    it("keeps Ctrl+M and Ctrl+D as aliases that toggle once each", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press("m", { code: "KeyM" });
+      press("d", { code: "KeyD" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+    });
+
+    it("stands down while the global poller is active, still swallowing the key", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, isGlobalPollerActive: () => true });
+
+      const mute = press("M", { shiftKey: true, code: "KeyM" });
+      const deafen = press("D", { shiftKey: true, code: "KeyD" });
+
+      expect(h.onToggleMute).not.toHaveBeenCalled();
+      expect(h.onToggleDeafen).not.toHaveBeenCalled();
+      expect(mute.defaultPrevented).toBe(true);
+      expect(deafen.defaultPrevented).toBe(true);
+    });
+
+    it("leaves a Super+Shift combo to the OS while the poller is active", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, isGlobalPollerActive: () => true });
+
+      const meta = press("M", { ctrlKey: false, metaKey: true, shiftKey: true, code: "KeyM" });
+
+      expect(h.onToggleMute).not.toHaveBeenCalled();
+      expect(meta.defaultPrevented).toBe(false);
+    });
+
+    it("toggles once while the combo is held (auto-repeat is ignored)", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, isGlobalPollerActive: () => false });
+
+      press("M", { shiftKey: true, code: "KeyM" });
+      const repeat = press("M", { shiftKey: true, code: "KeyM", repeat: true });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(repeat.defaultPrevented).toBe(true);
+    });
+
+    it("toggles in-app when the poller reports unsupported (macOS, Wayland)", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, isGlobalPollerActive: () => false });
+
+      press("M", { shiftKey: true, code: "KeyM" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+    });
+
+    it("follows a rebind persisted in Settings", () => {
+      saveGlobalShortcutVk("mute", 0x4b); // K
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const old = press("M", { shiftKey: true, code: "KeyM" });
+      press("K", { shiftKey: true, code: "KeyK" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(old.defaultPrevented).toBe(false);
+    });
+
+    it("reads the binding from the voiceShortcutKeys handler on every press", () => {
+      let keys = { mute: 0x4d, deafen: 0x44 };
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, voiceShortcutKeys: () => keys });
+
+      press("M", { shiftKey: true, code: "KeyM" });
+      keys = { mute: 0x70, deafen: 0x44 }; // F1
+      press("M", { shiftKey: true, code: "KeyM" });
+      press("F1", { shiftKey: true, code: "F1" });
+
+      expect(h.onToggleMute).toHaveBeenCalledTimes(2);
+    });
+
+    it("toggles mute on Ctrl+Shift+M outside a voice channel too", () => {
+      mockVoiceGetState.mockReturnValue({ currentChannelId: null });
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const mute = press("M", { shiftKey: true, code: "KeyM" });
+      const deafen = press("D", { shiftKey: true, code: "KeyD" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+      expect(mute.defaultPrevented).toBe(true);
+      expect(deafen.defaultPrevented).toBe(true);
+    });
+
+    it("does not treat an unbound Ctrl+Shift key as a voice shortcut", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const other = press("J", { shiftKey: true, code: "KeyJ" });
+
+      expect(h.onToggleMute).not.toHaveBeenCalled();
+      expect(h.onToggleDeafen).not.toHaveBeenCalled();
+      expect(other.defaultPrevented).toBe(false);
+    });
   });
 
   it("does nothing while suspended (settings overlay open)", () => {
@@ -206,24 +361,87 @@ describe("global keybinds", () => {
     expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, true);
   });
 
-  it("does not step while typing in the composer", () => {
-    const h = makeHandlers();
-    detach = attachGlobalKeybinds(h);
-
-    const composer = document.createElement("textarea");
-    document.body.appendChild(composer);
-    composer.focus();
-    composer.dispatchEvent(
+  function altArrowIn(el: HTMLElement, init: KeyboardEventInit = {}): void {
+    document.body.appendChild(el);
+    el.focus();
+    el.dispatchEvent(
       new KeyboardEvent("keydown", {
         key: "ArrowDown",
         altKey: true,
         bubbles: true,
+        cancelable: true,
+        ...init,
       }),
     );
+    el.remove();
+  }
+
+  it("steps channels while typing in the message composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer);
+
+    expect(h.onStepChannel).toHaveBeenCalledWith(1, false);
+  });
+
+  it("moves focus to the new channel's composer after stepping from the composer", () => {
+    const h = makeHandlers();
+    const next = document.createElement("textarea");
+    next.className = "msg-textarea";
+    h.onStepChannel.mockImplementation(() => {
+      document.body.appendChild(next);
+    });
+    detach = attachGlobalKeybinds(h);
+
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer);
+    vi.runAllTimers();
+
+    expect(document.activeElement).toBe(next);
+    next.remove();
+  });
+
+  it("leaves Alt+Arrow to a composer popup that already handled it", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    composer.addEventListener("keydown", (e) => e.preventDefault());
+    altArrowIn(composer);
 
     expect(h.onStepChannel).not.toHaveBeenCalled();
+  });
 
-    composer.remove();
+  it("does not step from the composer during an IME composition", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    altArrowIn(composer, { isComposing: true });
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
+  });
+
+  it("does not step while typing in another text field", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const search = document.createElement("input");
+    search.type = "search";
+    altArrowIn(search);
+    altArrowIn(document.createElement("textarea"));
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
   });
 
   it("keeps a handler error from escaping to the document", () => {

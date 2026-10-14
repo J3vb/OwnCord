@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -33,6 +33,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import { createVideoModeController } from "../../src/pages/main-page/VideoModeController";
 import type { VideoModeControllerOptions } from "../../src/pages/main-page/VideoModeController";
+import { createVideoGrid } from "../../src/components/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,6 +59,10 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
     setExitVisible: vi.fn(),
+    showMiniPlayer: vi.fn(),
+    hideMiniPlayer: vi.fn(),
+    raiseCallPopout: vi.fn(() => false),
+    setPeople: vi.fn(),
   } as unknown as VideoModeControllerOptions["videoGrid"];
 }
 
@@ -155,7 +160,7 @@ describe("createVideoModeController", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("checkVideoMode auto-opens when local camera is on (BUG-105)", () => {
+  it("turning on your camera while reading chat stays in chat (WP 1B-4)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -171,11 +176,11 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    expect(ctrl.isVideoMode()).toBe(true);
+    expect(ctrl.isVideoMode()).toBe(false);
   });
 
   it("adds local self-view tile when local camera is on", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalCameraStream.mockReturnValue(fakeStream);
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -262,6 +267,88 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
+  describe("mini-player", () => {
+    it("going to a text channel hands the watched stream to the mini-player before the grid drops its focus", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+      ctrl.setFocus(3);
+
+      ctrl.showChat({ keepWatching: true });
+
+      expect(grid.showMiniPlayer).toHaveBeenCalledTimes(1);
+      const mini = vi.mocked(grid.showMiniPlayer).mock.invocationCallOrder[0]!;
+      const unfocus = vi.mocked(grid.setFocusedTile).mock.invocationCallOrder.at(-1)!;
+      expect(mini).toBeLessThan(unfocus);
+    });
+
+    it("closing the grid itself (its Show chat control) opens no mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+
+      ctrl.showChat();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("showChat with the grid already closed opens no mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.showChat({ keepWatching: true });
+
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("the grid closing on its own (no streams left) opens no mini-player", () => {
+      const users = new Map([
+        [2, { userId: 2, camera: false, screenshare: false, username: "bob" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
+      );
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(grid.showMiniPlayer).not.toHaveBeenCalled();
+    });
+
+    it("showVideoGrid takes the stream back from the mini-player", () => {
+      const grid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.showVideoGrid();
+
+      expect(grid.hideMiniPlayer).toHaveBeenCalled();
+    });
+  });
+
   it("destroy resets video mode state and restores DOM", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
@@ -279,7 +366,7 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
-  it("checkVideoMode auto-opens when local screenshare is on (BUG-105)", () => {
+  it("turning on your screen share while reading chat stays in chat (WP 1B-4)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -298,11 +385,12 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(ctrl.isVideoMode()).toBe(true);
+    expect(ctrl.isVideoMode()).toBe(false);
+    expect(slots.messagesSlot.style.display).toBe("");
   });
 
   it("adds local screenshare self-view tile when local screenshare is on", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -331,6 +419,44 @@ describe("createVideoModeController", () => {
     });
   });
 
+  it("redraws your screen-share tile when the share changes source, not on other updates", () => {
+    const streamOf = (id: string) => ({ getVideoTracks: () => [{ id }] }) as unknown as MediaStream;
+    const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: true,
+        voiceUsers: new Map([[10, users]]),
+      }),
+    );
+    const first = streamOf("window-a");
+    mockGetLocalScreenshareStream.mockReturnValue(first);
+    const vg = makeVideoGrid();
+    const ctrl = createVideoModeController({
+      slots: makeSlots(),
+      videoGrid: vg,
+      getCurrentUserId: () => 1,
+    });
+    ctrl.checkVideoMode();
+    // Same capture (a quality change, a roster update): the tile stays.
+    mockGetLocalScreenshareStream.mockReturnValue(streamOf("window-a"));
+    ctrl.checkVideoMode();
+    expect(vg.removeStream).not.toHaveBeenCalledWith(1_000_001);
+    expect(vg.addStream).toHaveBeenCalledTimes(1);
+
+    // Change source: a new capture under the same publication.
+    const second = streamOf("window-b");
+    mockGetLocalScreenshareStream.mockReturnValue(second);
+    ctrl.checkVideoMode();
+    expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
+    expect(vg.addStream).toHaveBeenLastCalledWith(
+      1_000_001,
+      "me (Screen)",
+      second,
+      expect.objectContaining({ isSelf: true, isScreenshare: true }),
+    );
+  });
+
   it("removes local screenshare tile when screenshare is turned off", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
 
@@ -342,7 +468,7 @@ describe("createVideoModeController", () => {
         voiceUsers: new Map([[10, users]]),
       }),
     );
-    const fakeStream = { getTracks: () => [] } as unknown as MediaStream;
+    const fakeStream = { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
 
     const vg = makeVideoGrid();
@@ -396,7 +522,7 @@ describe("createVideoModeController", () => {
   // -----------------------------------------------------------------------
 
   it("checkVideoMode passes isSelf:true for local camera tile", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalCameraStream.mockReturnValue(fakeStream);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -424,7 +550,7 @@ describe("createVideoModeController", () => {
   });
 
   it("checkVideoMode passes isSelf:true and isScreenshare:true for local screenshare tile", () => {
-    const fakeStream = {} as MediaStream;
+    const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
     mockHasLocalScreenshareAudio.mockReturnValueOnce(true);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
@@ -506,138 +632,121 @@ describe("createVideoModeController", () => {
     expect(ctrl.getFocusedTileId()).toBeNull();
   });
 
-  describe("sticky video-grid dismissal (v048)", () => {
-    it("showChat while local video is on stays dismissed through a later checkVideoMode", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({
-          currentChannelId: 10,
-          localCamera: true,
-          voiceUsers: new Map([[10, users]]),
-        }),
+  describe("your own video never takes over the chat (WP 1B-4)", () => {
+    const me = () =>
+      new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+
+    it("camera on while reading chat stays in chat, and the tile waits in the grid", () => {
+      const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
+      mockGetLocalCameraStream.mockReturnValue(fakeStream);
+      const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
+      mockVoiceStoreGetState.mockReturnValue(state);
+      const slots = makeSlots();
+      const videoGrid = makeVideoGrid();
+      const ctrl = createVideoModeController({ slots, videoGrid, getCurrentUserId: () => 1 });
+      ctrl.checkVideoMode();
+
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(videoGrid.addStream).toHaveBeenCalledWith(1, expect.any(String), fakeStream, {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: false,
+      });
+
+      // Opening the call view shows it.
+      ctrl.openCall();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("camera on in the open call view shows there, and the call stays open", () => {
+      const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
+      mockGetLocalCameraStream.mockReturnValue(fakeStream);
+      const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
+      mockVoiceStoreGetState.mockReturnValue(state);
+      const videoGrid = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.openCall();
+
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(videoGrid.addStream).toHaveBeenCalledWith(
+        1,
+        expect.any(String),
+        fakeStream,
+        expect.objectContaining({ isSelf: true }),
       );
 
+      // Camera off again: still the call view.
+      mockVoiceStoreGetState.mockReturnValue(state);
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("Show chat while your camera is on stays in chat through later changes", () => {
+      const state = makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, me()]]),
+      });
+      mockVoiceStoreGetState.mockReturnValue(state);
       const slots = makeSlots();
       const ctrl = createVideoModeController({
         slots,
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
-
-      // Auto-opens because local camera is on.
-      ctrl.checkVideoMode();
+      ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
-      // User switches to a text channel — explicit dismissal.
+      // User switches to a text channel.
       ctrl.showChat();
       expect(ctrl.isVideoMode()).toBe(false);
 
-      // A remote peer's camera toggling re-invokes checkVideoMode(); local
-      // video is still on, but the dismissal must stick.
+      // A remote peer's camera toggling re-invokes checkVideoMode().
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(false);
       expect(slots.messagesSlot.style.display).toBe("");
-    });
 
-    it("re-arms auto-open once local video turns off after a dismissal", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      const state = makeVoiceState({
-        currentChannelId: 10,
-        localCamera: true,
-        voiceUsers: new Map([[10, users]]),
-      });
-      mockVoiceStoreGetState.mockReturnValue(state);
-
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
-
-      ctrl.checkVideoMode();
-      ctrl.showChat();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // Local camera turns off entirely — dismissal is cleared.
+      // Camera off and on again: still chat.
       mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: false });
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // Local camera turns back on — auto-open fires again since there is
-      // nothing left to have dismissed.
-      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      mockVoiceStoreGetState.mockReturnValue(state);
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(true);
-    });
-
-    it("explicit showVideoGrid clears a prior dismissal", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({
-          currentChannelId: 10,
-          localCamera: true,
-          voiceUsers: new Map([[10, users]]),
-        }),
-      );
-
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
-
-      ctrl.checkVideoMode();
-      ctrl.showChat();
-      expect(ctrl.isVideoMode()).toBe(false);
-
-      // User manually re-opens the grid.
-      ctrl.showVideoGrid();
-      expect(ctrl.isVideoMode()).toBe(true);
-
-      ctrl.showChat();
-      ctrl.checkVideoMode();
-      // Dismissal was cleared by showVideoGrid, but showChat() re-set it —
-      // so this exercises that the flag responds to the most recent call.
       expect(ctrl.isVideoMode()).toBe(false);
     });
 
-    it("does not treat leaving the channel as a dismissal (v048)", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+    it("leaving and joining again with the camera on stays in chat", () => {
       const inChannel = makeVoiceState({
         currentChannelId: 10,
         localCamera: true,
-        voiceUsers: new Map([[10, users]]),
+        voiceUsers: new Map([[10, me()]]),
       });
       mockVoiceStoreGetState.mockReturnValue(inChannel);
-
       const ctrl = createVideoModeController({
         slots: makeSlots(),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
-
-      ctrl.checkVideoMode();
+      ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
-      // leaveVoice() clears currentChannelId before localCamera goes false,
-      // and this checkVideoMode() returns early — closing the grid here must
-      // not record a dismissal that outlives the session.
+      // leaveVoice() clears currentChannelId before localCamera goes false.
       mockVoiceStoreGetState.mockReturnValue({ ...inChannel, currentChannelId: null });
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(false);
 
-      // Next session, camera on again: auto-open must still work.
       mockVoiceStoreGetState.mockReturnValue(inChannel);
       ctrl.checkVideoMode();
-      expect(ctrl.isVideoMode()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(false);
     });
   });
 
@@ -938,6 +1047,359 @@ describe("createVideoModeController", () => {
 
       expect(chatArea.contains(slots.videoGridSlot)).toBe(true);
       expect(host.setActive).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  describe("call view (1B-1)", () => {
+    const user = (userId: number, username: string, video: Partial<{ camera: boolean }> = {}) => ({
+      userId,
+      username,
+      camera: video.camera ?? false,
+      screenshare: false,
+    });
+    let container: HTMLDivElement;
+    let grid: ReturnType<typeof createVideoGrid>;
+    let slots: ReturnType<typeof makeSlots>;
+    let users: Map<number, ReturnType<typeof user>>;
+
+    function setVoice(overrides: Partial<VoiceStateStub> = {}): void {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]), ...overrides }),
+      );
+    }
+    function makeCtrl() {
+      return createVideoModeController({ slots, videoGrid: grid, getCurrentUserId: () => 1 });
+    }
+    const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
+    const tileIds = () => avatarTiles().map((t) => t.dataset.personId);
+
+    beforeEach(() => {
+      // ResizeObserver is not available in JSDOM
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      grid = createVideoGrid();
+      grid.mount(container);
+      slots = makeSlots();
+      users = new Map([
+        [1, user(1, "me")],
+        [2, user(2, "bob")],
+      ]);
+      setVoice();
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.unstubAllGlobals();
+    });
+
+    it("opens with an avatar tile for each person in a call with no video", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(slots.messagesSlot.style.display).toBe("none");
+      expect(tileIds()).toEqual(["1", "2"]);
+      expect(avatarTiles()[1]!.querySelector(".video-username")!.textContent).toBe("bob");
+    });
+
+    it("rings the tile of the person who starts speaking", () => {
+      makeCtrl().openCall();
+      grid.setSpeaking(new Set([2]));
+
+      const [me, bob] = avatarTiles();
+      expect(bob!.classList.contains("video-cell--speaking")).toBe(true);
+      expect(me!.classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("stays open while nobody has video, and follows the roster", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "2", "3"]);
+
+      users.delete(2);
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "3"]);
+    });
+
+    it("closes and drops the avatar tiles on leave", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      setVoice({ currentChannelId: null, voiceUsers: new Map() });
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(avatarTiles()).toHaveLength(0);
+    });
+
+    it("goes back to chat on Show chat, and Open call brings the call view back", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(avatarTiles()).toHaveLength(0);
+
+      ctrl.openCall();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("stays in chat after Show chat when the roster changes", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat();
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("going to a text channel ends the call view, so no-video closes it after", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.showChat({ keepWatching: true });
+      ctrl.showVideoGrid();
+
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("moves with a direct channel switch, showing the new channel's people", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      users = new Map([
+        [1, user(1, "me")],
+        [5, user(5, "eve")],
+      ]);
+      setVoice({ currentChannelId: 11, voiceUsers: new Map([[11, users]]) });
+      ctrl.checkVideoMode();
+
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(tileIds()).toEqual(["1", "5"]);
+    });
+
+    it("stays open while a reconnect's resync briefly drops the channel's roster", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+
+      setVoice({ voiceUsers: new Map() });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(avatarTiles()).toHaveLength(0);
+
+      setVoice();
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("a grid opened for a stream still closes once the video stops", () => {
+      users.set(2, user(2, "bob", { camera: true }));
+      const ctrl = makeCtrl();
+      ctrl.showVideoGrid();
+      ctrl.checkVideoMode();
+      expect(tileIds()).toEqual(["1", "2"]);
+
+      users.set(2, user(2, "bob"));
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(avatarTiles()).toHaveLength(0);
+    });
+
+    it("draws everyone in the call as soon as the grid opens for a stream", () => {
+      users.set(2, user(2, "bob", { camera: true }));
+      const ctrl = makeCtrl();
+      ctrl.checkVideoMode();
+      ctrl.showVideoGrid();
+      expect(tileIds()).toEqual(["1", "2"]);
+    });
+
+    it("keeps each avatar element while the person's name and picture are unchanged", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      const before = avatarTiles()[1]!.firstElementChild;
+
+      users.set(3, user(3, "sam"));
+      ctrl.checkVideoMode();
+      expect(avatarTiles()[1]!.firstElementChild).toBe(before);
+    });
+
+    it("leaves the people to the DM call panel while it hosts the call", () => {
+      const vg = makeVideoGrid();
+      const host = {
+        ownsCall: () => true,
+        element: () => null,
+        setActive: vi.fn(),
+      };
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+      ctrl.openCall();
+
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(vg.setPeople).not.toHaveBeenCalled();
+    });
+
+    it("takes the avatar tiles back on destroy", () => {
+      const ctrl = makeCtrl();
+      ctrl.openCall();
+      ctrl.destroy();
+      expect(avatarTiles()).toHaveLength(0);
+    });
+  });
+  describe("call pop-out (WP 1C-7)", () => {
+    const user = (userId: number, username: string) => ({
+      userId,
+      username,
+      camera: false,
+      screenshare: false,
+    });
+    let container: HTMLDivElement;
+    let grid: ReturnType<typeof createVideoGrid>;
+    let slots: ReturnType<typeof makeSlots>;
+    let users: Map<number, ReturnType<typeof user>>;
+    let popDoc: Document;
+    let win: EventTarget & { closed: boolean; close: () => void; focus: () => void };
+
+    function setVoice(overrides: Partial<VoiceStateStub> = {}): void {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]), ...overrides }),
+      );
+    }
+    const popButton = () =>
+      popDoc.querySelector<HTMLButtonElement>("[data-grid-control='popout']") ??
+      container.querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+    const inWindow = () => popDoc.querySelector("[data-testid='video-grid']") !== null;
+    const tileIds = (d: ParentNode) =>
+      [...d.querySelectorAll<HTMLElement>(".video-cell--avatar")].map((t) => t.dataset.personId);
+
+    function openPoppedCall() {
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      grid.setCallbacks({ onCallPopout: (out, restore) => ctrl.setCallPoppedOut(out, restore) });
+      ctrl.openCall();
+      popButton().click();
+      return ctrl;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      popDoc = document.implementation.createHTMLDocument("");
+      win = Object.assign(new EventTarget(), {
+        closed: false,
+        close: vi.fn(() => {
+          win.closed = true;
+        }),
+        focus: vi.fn(),
+      });
+      Object.defineProperty(win, "document", { get: () => popDoc });
+      vi.stubGlobal(
+        "open",
+        vi.fn(() => win as unknown as Window),
+      );
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      grid = createVideoGrid();
+      grid.mount(container);
+      slots = makeSlots();
+      users = new Map([
+        [1, user(1, "me")],
+        [2, user(2, "bob")],
+      ]);
+      setVoice();
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    it("shows the chat here while the call view lives on in its window", () => {
+      const ctrl = openPoppedCall();
+
+      expect(inWindow()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(slots.videoGridSlot.style.display).toBe("none");
+
+      // The roster still reaches the call in its window.
+      users.set(3, user(3, "cara"));
+      ctrl.checkVideoMode();
+      expect(tileIds(popDoc)).toEqual(["1", "2", "3"]);
+    });
+
+    it("keeps the call in its window when this window switches to a text channel", () => {
+      const ctrl = openPoppedCall();
+      ctrl.showChat({ keepWatching: true });
+      expect(win.close).not.toHaveBeenCalled();
+      expect(inWindow()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("raises the window when the call is opened again from here", () => {
+      const ctrl = openPoppedCall();
+      ctrl.openCall();
+      expect(win.focus).toHaveBeenCalled();
+      expect(inWindow()).toBe(true);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+    });
+
+    it("shows the call here again on Bring back", () => {
+      openPoppedCall();
+      popButton().click();
+      expect(inWindow()).toBe(false);
+      expect(slots.videoGridSlot.style.display).toBe("block");
+      expect(slots.messagesSlot.style.display).toBe("none");
+      expect(tileIds(container)).toEqual(["1", "2"]);
+    });
+
+    it("shows the call here again when the user closes the window", () => {
+      openPoppedCall();
+      win.closed = true;
+      vi.advanceTimersByTime(300);
+      expect(slots.videoGridSlot.style.display).toBe("block");
+      expect(container.querySelector("[data-testid='video-grid']")).not.toBeNull();
+    });
+
+    it("closes the window and stays on the chat when you leave the call", () => {
+      const ctrl = openPoppedCall();
+      setVoice({ currentChannelId: null });
+      ctrl.checkVideoMode();
+      expect(win.close).toHaveBeenCalled();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+      expect(slots.messagesSlot.style.display).toBe("");
     });
   });
 });

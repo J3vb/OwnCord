@@ -451,14 +451,16 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	// Advisory capacity check with JoinVoiceChannelIfCapacity's semantics. The
 	// atomic one still runs on the re-join; this one keeps the common case from
-	// dropping the target into a channel that is already full.
-	if dest.VoiceMaxUsers > 0 {
+	// dropping the target into a channel that is already full. The cap is the
+	// one the target's own re-join is held to, so a target who moderates voice
+	// there is not refused a move their join would be admitted to.
+	if destCap := voiceJoinCapacity(targetSub, dest.VoiceMaxUsers); destCap > 0 {
 		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID)
 		if cErr != nil {
 			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID)
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
 		}
-		if count >= dest.VoiceMaxUsers {
+		if count >= destCap {
 			return Result{Error: ClientError{Code: ErrCodeChannelFull, Message: "voice channel is full"}}
 		}
 	}
@@ -619,6 +621,7 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 // disconnect and channel-switch paths. Reports false when the user has no
 // connection on this node.
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
+	defer h.voiceLock(userID)()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
@@ -637,6 +640,7 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 // callers already treat as "user is not connected". reason is the caller's
 // voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
+	defer h.voiceLock(userID)()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)

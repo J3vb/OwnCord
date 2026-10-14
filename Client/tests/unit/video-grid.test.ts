@@ -12,6 +12,11 @@ const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
+const mockGetUserLocalMute = vi.fn((_userId?: unknown) => false);
+const mockSetUserLocalMute = vi.fn();
+
+const mockShowToast = vi.hoisted(() => vi.fn());
+vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
@@ -20,6 +25,8 @@ vi.mock("@lib/livekitSession", () => ({
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
   getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
+  getUserLocalMute: (userId: unknown) => mockGetUserLocalMute(userId),
+  setUserLocalMute: (...args: unknown[]) => mockSetUserLocalMute(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -459,17 +466,47 @@ describe("VideoGrid", () => {
       expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(99, false);
     });
 
-    it("mute button toggles mic audio when isScreenshare=false", () => {
+    it("mute button toggles the user's local Mute when isScreenshare=false (WP 1D-5)", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 55, isScreenshare: false });
       grid.addStream(55, "charlie", fakeStream(), config);
 
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
 
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(55, 0);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(55, true);
+      // The saved level is kept under the Mute, not overwritten with 0.
+      expect(mockSetUserVolume).not.toHaveBeenCalledWith(55, 0);
 
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(55, 100);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(55, false);
+    });
+
+    it("a voice tile starts muted when the user is locally muted", () => {
+      mockGetUserLocalMute.mockReturnValueOnce(true);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 56, isScreenshare: false });
+      grid.addStream(56, "erin", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      // Shows the kept level until it is muted from here (as before).
+      expect(slider.value).toBe("100");
+    });
+
+    it("a Mute set from the sidebar menu updates the open voice tile", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 57, isScreenshare: false });
+      grid.addStream(57, "finn", fakeStream(), config);
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
+
+      mockGetUserLocalMute.mockImplementation((id) => id === 57);
+      window.dispatchEvent(
+        new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 57 } }),
+      );
+      mockGetUserLocalMute.mockImplementation(() => false);
+
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      expect((container.querySelector(".tile-volume-slider") as HTMLInputElement).value).toBe("0");
     });
 
     it("mute button icon swaps between volume and volume-x SVGs on click", () => {
@@ -623,12 +660,12 @@ describe("VideoGrid", () => {
       expect(overlay!.classList.contains("muted")).toBe(true);
     });
 
-    it("mic slider tops out at 100%", () => {
+    it("mic slider tops out at 200% (WP 1D-5)", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
       grid.addStream(77, "dave", fakeStream(), config);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
-      expect(slider.max).toBe("100");
+      expect(slider.max).toBe("200");
     });
 
     it("mute button unmutes with previous volume when currentVolume was non-zero", () => {
@@ -643,14 +680,14 @@ describe("VideoGrid", () => {
       slider.dispatchEvent(new Event("input"));
       mockSetUserVolume.mockClear();
 
-      // Mute via button
+      // Mute via button: the local Mute, the slider shows 0
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 0);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(77, true);
       expect(slider.value).toBe("0");
 
       // Unmute via button — should restore to 70
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 70);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(77, false);
       expect(slider.value).toBe("70");
     });
   });
@@ -706,6 +743,55 @@ describe("VideoGrid", () => {
       grid.addStream(1, "Alice (Screen)", fakeStream(), screenConfig);
 
       expect(cell.dataset.streamType).toBe("screenshare");
+    });
+  });
+
+  describe("your own camera is mirrored", () => {
+    /** Whether the cascaded transform for `selector` is exactly scaleX(-1). */
+    function mirrored(selector: string): boolean {
+      const d = cascadedDeclaration(selector, "transform")?.value;
+      if (d?.property !== "transform") return false;
+      const fns = d.value as ReadonlyArray<{ type: string; value?: unknown }>;
+      const only = fns.length === 1 ? fns[0] : undefined;
+      return (
+        only?.type === "scaleX" &&
+        JSON.stringify(only.value) === JSON.stringify({ type: "number", value: -1 })
+      );
+    }
+
+    it("marks your own camera tile, and neither a screen share nor someone else's camera", () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true }));
+      grid.addStream(
+        2,
+        "Your screen",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      grid.addStream(3, "Alice", fakeStream(), makeTileConfig());
+
+      const cell = (id: number): HTMLElement =>
+        container.querySelector(`.video-cell[data-user-id="${id}"]`) as HTMLElement;
+      expect(cell(1).classList.contains("video-cell--self")).toBe(true);
+      expect(cell(2).classList.contains("video-cell--self")).toBe(false);
+      expect(cell(3).classList.contains("video-cell--self")).toBe(false);
+    });
+
+    it("drops the mirror when a tile is re-used for a screen share", () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true }));
+      grid.addStream(
+        1,
+        "Your screen",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      const cell = container.querySelector('.video-cell[data-user-id="1"]') as HTMLElement;
+      expect(cell.classList.contains("video-cell--self")).toBe(false);
+    });
+
+    it("flips the self tile's video and the settings camera preview horizontally", () => {
+      expect(mirrored(".video-cell--self video")).toBe(true);
+      expect(mirrored(".camera-preview video")).toBe(true);
+      expect(mirrored(".video-cell video")).toBe(false);
     });
   });
 
@@ -1000,6 +1086,47 @@ describe("VideoGrid", () => {
       grid.setPeople([]);
       expect(avatarTiles()).toHaveLength(0);
     });
+
+    it("rings the avatar tile of a person speaking, and only theirs", () => {
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      grid.setSpeaking(new Set([2]));
+
+      const [otto, sam] = avatarTiles();
+      expect(otto!.classList.contains("video-cell--speaking")).toBe(true);
+      expect(sam!.classList.contains("video-cell--speaking")).toBe(false);
+
+      grid.setSpeaking(new Set());
+      expect(otto!.classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("rings a person's avatar tile drawn after they started speaking", () => {
+      grid.setSpeaking(new Set([2]));
+      grid.setPeople([person(2, "Otto")]);
+      expect(avatarTiles()[0]!.classList.contains("video-cell--speaking")).toBe(true);
+    });
+
+    it("badges a muted or deafened person's avatar tile", () => {
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      grid.setUserAudioState(new Map([[3, { muted: true, deafened: true }]]));
+
+      const [otto, sam] = avatarTiles();
+      expect(otto!.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+      const badge = sam!.querySelector("[data-testid='tile-audio-state']");
+      expect(badge!.classList.contains("video-cell__audio--deafened")).toBe(true);
+
+      grid.setUserAudioState(new Map());
+      expect(sam!.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+    });
+
+    it("adds no ring or badge to a person whose host marks their state itself", () => {
+      grid.setPeople([{ ...person(2, "Otto"), marksOwnState: true }]);
+      grid.setSpeaking(new Set([2]));
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: false }]]));
+
+      const tile = avatarTiles()[0]!;
+      expect(tile.classList.contains("video-cell--speaking")).toBe(false);
+      expect(tile.querySelector("[data-testid='tile-audio-state']")).toBeNull();
+    });
   });
 
   describe("tile interaction and labelling (PR 3)", () => {
@@ -1150,7 +1277,7 @@ describe("VideoGrid", () => {
       expect(stream.getAttribute("aria-label")).toBe("Otto stream volume");
       expect(stream.max).toBe("100");
       expect(voice.getAttribute("aria-label")).toBe("Otto voice volume");
-      expect(voice.max).toBe("100");
+      expect(voice.max).toBe("200");
 
       voice.value = "70";
       voice.dispatchEvent(new Event("input"));
@@ -1161,6 +1288,25 @@ describe("VideoGrid", () => {
 
       const labels = [...menu.querySelectorAll("[role='menuitem']")].map((m) => m.textContent);
       expect(labels).toEqual(expect.arrayContaining(["Mute stream", "Stop watching"]));
+      menu.remove();
+    });
+
+    it("raising the menu's voice slider clears that user's Mute", async () => {
+      mockGetUserLocalMute.mockReturnValue(true);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await vi.dynamicImportSettled();
+
+      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
+      voice.value = "120";
+      voice.dispatchEvent(new Event("input"));
+
+      expect(mockSetUserVolume).toHaveBeenCalledWith(2, 120);
+      expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(2, false);
+      mockGetUserLocalMute.mockReturnValue(false);
       menu.remove();
     });
 
@@ -1469,10 +1615,32 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector("video")!.hidden).toBe(false);
     });
 
+    it("an ended camera or a dropped roster watch is forgotten, not stopped (WP 1B-3)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ setStreamWatched, forgetStreamWatch });
+      const camera = { isSelf: false, audioUserId: 3, isScreenshare: false };
+      grid.addStream(3, "Sam", fakeStream(), camera);
+      grid.removeStream(3);
+      expect(forgetStreamWatch).toHaveBeenCalledWith(3);
+
+      grid.watch(4);
+      grid.clearStreams();
+      expect(forgetStreamWatch).toHaveBeenCalledWith(4);
+      expect(setStreamWatched).not.toHaveBeenCalledWith(3, false);
+      expect(setStreamWatched).not.toHaveBeenCalledWith(4, false);
+    });
+
     it("a stream that ends stops its watch; your own preview is never one", () => {
-      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
-      grid.removeStream(SCREEN);
-      expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+      vi.useFakeTimers();
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        // Held while the tile says it ended, for a re-share (WP 1C-1).
+        vi.advanceTimersByTime(3000);
+        expect(setStreamWatched).toHaveBeenCalledWith(SCREEN, false);
+      } finally {
+        vi.useRealTimers();
+      }
 
       setStreamWatched.mockClear();
       grid.addStream(1, "Me (You)", fakeStream(), {
@@ -1816,6 +1984,7 @@ describe("VideoGrid", () => {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
         control(SCREEN, "pip").click();
         expectConsole("warn", "Pop out window refused");
+        expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
         expect(cell(SCREEN).querySelector("video")).not.toBeNull();
         expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
         expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
@@ -1876,6 +2045,27 @@ describe("VideoGrid", () => {
       const calls = getStreamStats.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6000);
       expect(getStreamStats.mock.calls.length).toBe(calls);
+      container.remove();
+    });
+
+    it("gives a camera tile no quality chip and polls no stats for it, even focused (WP 1B-4)", async () => {
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      const getStreamStats = vi.fn(async () => null);
+      grid.setCallbacks({ getStreamStats });
+      grid.addStream(2, "Otto", fakeStream(), {
+        isSelf: false,
+        audioUserId: 2,
+        isScreenshare: false,
+      });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+
+      expect(cell(2).querySelector(".video-quality")).toBeNull();
+      expect(cell(SCREEN).querySelector(".video-quality")).not.toBeNull();
+
+      grid.setFocusedTile(2);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(getStreamStats).not.toHaveBeenCalled();
       container.remove();
     });
   });
@@ -2460,6 +2650,1175 @@ describe("VideoGrid", () => {
       const { stream } = fakeStreamWithTrack();
       grid.addStream(2, "Otto", stream, makeTileConfig({ audioUserId: 2 }));
       expect(enabled(2)).toBe(false);
+    });
+  });
+
+  describe("mini-player", () => {
+    const mini = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>("[data-testid='stream-mini-player']");
+    /** The mini-player module loads on first use. */
+    const opened = (): Promise<void> => vi.waitFor(() => expect(mini()).not.toBeNull());
+
+    afterEach(() => {
+      grid.hideMiniPlayer();
+    });
+
+    it("takes the focused remote stream's video along, and gives it back", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7, name: "Otto" }));
+      grid.setFocusedTile(7);
+      const video = container.querySelector(".video-cell[data-user-id='7'] video")!;
+
+      grid.showMiniPlayer();
+      await opened();
+
+      expect(mini()!.contains(video)).toBe(true);
+      expect(mini()!.textContent).toContain("Otto");
+      grid.hideMiniPlayer();
+      expect(mini()).toBeNull();
+      expect(container.querySelector(".video-cell[data-user-id='7']")!.contains(video)).toBe(true);
+    });
+
+    it("opens nothing for your own preview or an unwatched stream", async () => {
+      grid.addStream(1, "You", fakeStream(), makeTileConfig({ isSelf: true, audioUserId: 1 }));
+      grid.addStream(7, "Otto", null, makeTileConfig({ audioUserId: 7 }));
+
+      grid.showMiniPlayer();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mini()).toBeNull();
+    });
+
+    it("a hide before it has loaded cancels it", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+
+      grid.showMiniPlayer();
+      grid.hideMiniPlayer();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mini()).toBeNull();
+    });
+
+    it("closes when the stream ends", async () => {
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      grid.removeStream(7);
+
+      expect(mini()).toBeNull();
+    });
+
+    it("Return asks the host for the full view of that stream", async () => {
+      const onReturnToStream = vi.fn();
+      grid.setCallbacks({ onReturnToStream });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      mini()!.querySelector<HTMLButtonElement>("[data-testid='stream-mini-return']")!.click();
+
+      expect(onReturnToStream).toHaveBeenCalledWith(7);
+    });
+
+    it("stops the stream's video while the app is hidden, and resumes it when shown", async () => {
+      const setStreamView = vi.fn();
+      let hidden = false;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      try {
+        grid.setCallbacks({ setStreamView });
+        grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+        grid.showMiniPlayer();
+        await opened();
+
+        hidden = true;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(7, { enabled: false });
+
+        hidden = false;
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(setStreamView).toHaveBeenLastCalledWith(
+          7,
+          expect.objectContaining({ enabled: true }),
+        );
+      } finally {
+        delete (document as { hidden?: boolean }).hidden;
+      }
+    });
+
+    it("moves focus off the closing mini-player, but not when focus was elsewhere", async () => {
+      const focusFallback = vi.fn();
+      grid.setCallbacks({ focusFallback });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      mini()!.focus();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+
+      grid.showMiniPlayer();
+      await opened();
+      grid.hideMiniPlayer();
+      expect(focusFallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("Return from the keyboard lands focus in the grid, not on the page", async () => {
+      const focusFallback = vi.fn();
+      document.body.appendChild(container);
+      grid.setCallbacks({ focusFallback, onReturnToStream: () => grid.hideMiniPlayer() });
+      grid.addStream(7, "Otto", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      grid.showMiniPlayer();
+      await opened();
+
+      const btn = mini()!.querySelector<HTMLButtonElement>("[data-testid='stream-mini-return']")!;
+      btn.focus();
+      btn.click();
+
+      expect(container.contains(document.activeElement)).toBe(true);
+    });
+  });
+
+  describe("call view: control bar and view toggles (WP 1B-2)", () => {
+    const person = (userId: number, label: string) => ({
+      userId,
+      label,
+      content: document.createElement("div"),
+    });
+    const controls = () => ({
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onLeave: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    const root = () => container.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+    const bar = () => root().querySelector<HTMLElement>(":scope > .video-grid__controls");
+    const barButton = (id: string) =>
+      bar()!.querySelector<HTMLButtonElement>(`[data-call-control='${id}']`)!;
+    const toggle = (key: string) =>
+      root().querySelector<HTMLButtonElement>(`[data-view-toggle='${key}']`)!;
+    const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
+    const tile = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const SELF = 1;
+    const selfCfg = makeTileConfig({ isSelf: true, audioUserId: SELF });
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("shows the control bar in the call view, in grid and focus mode", () => {
+      grid.setCallbacks({ callControls: controls() });
+      expect(bar()).toBeNull();
+
+      grid.setExitVisible(true);
+      expect(bar()).not.toBeNull();
+      expect(bar()!.getAttribute("role")).toBe("toolbar");
+      expect(root().classList.contains("video-grid--call")).toBe(true);
+      expect(
+        [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
+          (b) => b.dataset["callControl"],
+        ),
+      ).toEqual(["mute", "deafen", "camera", "share", "leave"]);
+
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.setFocusedTile(2);
+      expect(root().classList.contains("focus-mode")).toBe(true);
+      expect(bar()).not.toBeNull();
+      grid.setFocusedTile(null);
+      expect(bar()).not.toBeNull();
+
+      // Leaving the call view (another host shows the grid) takes it down.
+      grid.setExitVisible(false);
+      expect(bar()).toBeNull();
+      expect(root().classList.contains("video-grid--call")).toBe(false);
+    });
+
+    it("runs the matching call action from each button", () => {
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      grid.setExitVisible(true);
+
+      barButton("mute").click();
+      barButton("deafen").click();
+      barButton("camera").click();
+      barButton("share").click();
+      barButton("leave").click();
+      expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onDeafenToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it("puts the camera picker arrow beside Camera, inert while the camera is locked", () => {
+      const onCameraDevice = vi.fn();
+      grid.setCallbacks({ callControls: { ...controls(), onCameraDevice } });
+      grid.setExitVisible(true);
+      expect(
+        [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
+          (b) => b.dataset["callControl"],
+        ),
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "leave"]);
+
+      const pick = barButton("camera-device");
+      expect(pick.getAttribute("aria-label")).toBe("Choose camera");
+      expect(pick.getAttribute("aria-haspopup")).toBe("menu");
+      pick.click();
+      expect(onCameraDevice).toHaveBeenCalledTimes(1);
+      expect(onCameraDevice.mock.calls[0]![0]).toBe(pick);
+      expect(onCameraDevice.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);
+
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
+      expect(barButton("camera-device").disabled).toBe(true);
+    });
+
+    it("builds the bar from callbacks set after the call view opened", () => {
+      grid.setExitVisible(true);
+      expect(bar()).toBeNull();
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      barButton("camera").click();
+      expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("draws your camera and share state, inert while the join connects", () => {
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const camera = barButton("camera");
+      const share = barButton("share");
+      expect(camera.getAttribute("aria-pressed")).toBe("false");
+      expect(camera.getAttribute("aria-label")).toBe("Turn on camera");
+      expect(share.getAttribute("aria-label")).toBe("Share your screen");
+
+      grid.setCallState({
+        muted: true,
+        deafened: false,
+        listenOnly: false,
+        camera: true,
+        screenshare: true,
+      });
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+      expect(camera.getAttribute("aria-pressed")).toBe("true");
+      expect(camera.getAttribute("aria-label")).toBe("Turn off camera");
+      expect(camera.querySelector("svg")!.getAttribute("data-icon")).toBe("camera-off");
+      expect(share.getAttribute("aria-pressed")).toBe("true");
+      expect(share.getAttribute("aria-label")).toBe("Stop sharing");
+      expect(share.querySelector("svg")!.getAttribute("data-icon")).toBe("monitor-off");
+      expect(camera.disabled).toBe(false);
+
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
+      expect(camera.disabled).toBe(true);
+      expect(share.disabled).toBe(true);
+      expect(camera.title).toBe("Connecting…");
+
+      // The chat socket is down: frozen with the reason, like the voice widget.
+      grid.setCallState({
+        muted: false,
+        deafened: false,
+        listenOnly: false,
+        offline: "reconnecting",
+      });
+      expect(camera.disabled).toBe(true);
+      expect(share.title).toBe("Reconnecting…");
+
+      // A moderator's mute or deafen: that control is inert, with the reason.
+      grid.setCallState({
+        muted: true,
+        deafened: true,
+        listenOnly: false,
+        serverMuted: true,
+        serverDeafened: true,
+      });
+      expect(barButton("mute").disabled).toBe(true);
+      expect(barButton("mute").title).toBe("You were muted by a moderator");
+      expect(barButton("deafen").disabled).toBe(true);
+      expect(barButton("deafen").title).toBe("You were deafened by a moderator");
+      expect(camera.disabled).toBe(false);
+
+      // No share permission or the video limit: share is inert with the reason.
+      grid.setCallState({
+        muted: false,
+        deafened: false,
+        listenOnly: false,
+        shareBlock: "This channel has reached its video limit",
+      });
+      expect(share.disabled).toBe(true);
+      expect(share.title).toBe("This channel has reached its video limit");
+      expect(camera.disabled).toBe(false);
+    });
+
+    it("offers camera and share on a full-screen tile too", async () => {
+      const cc = controls();
+      grid.setCallbacks({ callControls: cc });
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      tile(2).querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']")!.click();
+      await Promise.resolve();
+      const fs = tile(2).querySelector<HTMLElement>(".video-fs-calls")!;
+      fs.querySelector<HTMLButtonElement>("[data-call-control='share']")!.click();
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides avatar tiles without Show non-video participants, and saves it", () => {
+      grid.setExitVisible(true);
+      grid.setPeople([person(2, "Otto"), person(3, "Sam")]);
+      expect(avatarTiles().filter((t) => !t.hidden)).toHaveLength(2);
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("true");
+
+      toggle("nonVideo").click();
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("false");
+      expect(avatarTiles().every((t) => t.hidden)).toBe(true);
+      expect(localStorage.getItem("owncord:settings:callShowNonVideo")).toBe("false");
+      // A person who joins later stays hidden too.
+      grid.setPeople([person(2, "Otto"), person(3, "Sam"), person(4, "Ana")]);
+      expect(avatarTiles().every((t) => t.hidden)).toBe(true);
+
+      toggle("nonVideo").click();
+      expect(avatarTiles().some((t) => t.hidden)).toBe(false);
+    });
+
+    it("hides only your own camera tile without Show my camera", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(SELF + 1_000_000, "Your screen", fakeStream(), {
+        ...selfCfg,
+        isScreenshare: true,
+      });
+
+      toggle("selfCamera").click();
+      expect(tile(SELF).hidden).toBe(true);
+      expect(tile(2).hidden).toBe(false);
+      expect(tile(SELF + 1_000_000).hidden).toBe(false);
+      expect(localStorage.getItem("owncord:settings:callShowSelfCamera")).toBe("false");
+
+      toggle("selfCamera").click();
+      expect(tile(SELF).hidden).toBe(false);
+    });
+
+    it("leaves focus mode when the focused tile is your hidden camera", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.setFocusedTile(SELF);
+
+      toggle("selfCamera").click();
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(root().classList.contains("focus-mode")).toBe(false);
+      expect(tile(2).parentElement).toBe(root());
+    });
+
+    it("offers the strip toggle only in focus view, and hides the strip with it", () => {
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      expect(toggle("strip").hidden).toBe(true);
+
+      grid.setFocusedTile(2);
+      expect(toggle("strip").hidden).toBe(false);
+      expect(root().querySelector(".video-focus-strip")).not.toBeNull();
+
+      toggle("strip").click();
+      // Hidden, not detached: a video taken out of the document pauses.
+      const strip = root().querySelector<HTMLElement>(".video-focus-strip")!;
+      expect(strip.hidden).toBe(true);
+      expect(strip.contains(tile(3))).toBe(true);
+      expect(tile(2).parentElement!.classList.contains("video-focus-main")).toBe(true);
+      expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
+
+      toggle("strip").click();
+      expect(root().querySelector<HTMLElement>(".video-focus-strip")!.hidden).toBe(false);
+    });
+
+    it("moves focus past your hidden camera when the focused stream ends", () => {
+      grid.setExitVisible(true);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      toggle("selfCamera").click();
+      grid.setFocusedTile(2);
+
+      grid.removeStream(2);
+      expect(grid.getFocusedTileId()).toBe(3);
+    });
+
+    it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {
+      document.body.appendChild(container);
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.setFocusedTile(2);
+
+      barButton("camera").focus();
+      grid.setPeople([person(4, "Ana")]);
+      expect(document.activeElement).toBe(barButton("camera"));
+
+      toggle("strip").focus();
+      toggle("strip").click();
+      expect(document.activeElement).toBe(toggle("strip"));
+      // The grid's own controls stay after the tiles.
+      expect(root().lastElementChild).toBe(bar());
+      container.remove();
+    });
+
+    it("reads the saved toggles when the grid mounts", () => {
+      localStorage.setItem("owncord:settings:callShowNonVideo", "false");
+      localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
+      localStorage.setItem("owncord:settings:callShowStrip", "false");
+      grid.destroy?.();
+      container = document.createElement("div");
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setExitVisible(true);
+      grid.setPeople([person(2, "Otto")]);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+
+      expect(toggle("nonVideo").getAttribute("aria-pressed")).toBe("false");
+      expect(toggle("selfCamera").getAttribute("aria-pressed")).toBe("false");
+      expect(toggle("strip").getAttribute("aria-pressed")).toBe("false");
+      expect(avatarTiles()[0]!.hidden).toBe(true);
+      expect(tile(SELF).hidden).toBe(true);
+    });
+
+    it("hides nothing outside the call view (the DM call panel hosts the grid)", () => {
+      localStorage.setItem("owncord:settings:callShowNonVideo", "false");
+      localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
+      grid.destroy?.();
+      container = document.createElement("div");
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setPeople([person(2, "Otto")]);
+      grid.addStream(SELF, "You", fakeStream(), selfCfg);
+
+      expect(root().querySelector(".video-grid__views")).toBeNull();
+      expect(avatarTiles()[0]!.hidden).toBe(false);
+      expect(tile(SELF).hidden).toBe(false);
+
+      grid.setExitVisible(true);
+      expect(tile(SELF).hidden).toBe(true);
+      grid.setExitVisible(false);
+      expect(tile(SELF).hidden).toBe(false);
+      expect(avatarTiles()[0]!.hidden).toBe(false);
+    });
+
+    it("leaves room below the tiles for the bar (CSS)", () => {
+      expect(cascadedDeclaration(".video-grid--call", "padding-bottom")).toBeDefined();
+    });
+  });
+
+  describe("full tile menu (WP 1B-5)", () => {
+    const OTTO = 2;
+    const SCREEN = OTTO + 1_000_000;
+    const SELF = 1;
+    const remote = (overrides: Partial<TileConfig> = {}): TileConfig =>
+      makeTileConfig({ audioUserId: OTTO, name: "Otto", ...overrides });
+    const cell = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const menu = () => document.querySelector<HTMLElement>(".video-tile-menu");
+    const actions = () =>
+      [...menu()!.querySelectorAll<HTMLElement>("[data-action]")].map((m) => m.dataset["action"]);
+    const item = (action: string) =>
+      menu()!.querySelector<HTMLButtonElement>(`[data-action='${action}']`)!;
+    async function openMenu(id: number, x = 30, y = 40): Promise<HTMLElement | null> {
+      cell(id).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+      );
+      await vi.dynamicImportSettled();
+      return menu();
+    }
+    const modOptions = () => ({
+      serverMuted: false,
+      serverDeafened: false,
+      moveTargets: [],
+      onServerMute: vi.fn(),
+      onServerDeafen: vi.fn(),
+      onMove: vi.fn(),
+      onDisconnect: vi.fn(),
+    });
+    const controls = () => ({
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onLeave: vi.fn(),
+      onCameraToggle: vi.fn(),
+    });
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    afterEach(() => {
+      menu()?.remove();
+      mockSetUserLocalMute.mockReset();
+      mockSetUserVolume.mockReset();
+      mockGetUserVolume.mockReturnValue(100);
+      mockGetUserLocalMute.mockReturnValue(false);
+    });
+
+    it("gives another person's tile the person, sound and view rows", async () => {
+      grid.setCallbacks({
+        tileMenu: { onProfile: vi.fn(), onMessage: vi.fn(), moderation: () => modOptions() },
+      });
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+
+      expect(actions()).toEqual([
+        "profile",
+        "message",
+        "local-mute",
+        "focus",
+        "fullscreen",
+        "popout",
+        "stop-watching",
+        "server-mute",
+        "server-deafen",
+        "voice-disconnect",
+      ]);
+      expect(menu()!.querySelector("[data-menu-volume='voice']")).not.toBeNull();
+      expect(menu()!.querySelector("[data-menu-volume='stream']")).toBeNull();
+    });
+
+    it("leaves out Profile, Message and moderation without their handlers", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+
+      expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "popout", "stop-watching"]);
+    });
+
+    it("hides moderation when the host returns nothing, and says why when it returns a reason", async () => {
+      const moderation = vi.fn((_userId: number): string | undefined => undefined);
+      grid.setCallbacks({ tileMenu: { moderation } });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), remote({ isScreenshare: true }));
+      await openMenu(SCREEN);
+      // Asked for the person, not the screen-share tile id.
+      expect(moderation).toHaveBeenCalledWith(OTTO);
+      expect(actions()).not.toContain("server-mute");
+      expect(actions()).not.toContain("voice-mod-unavailable");
+      menu()!.remove();
+
+      moderation.mockReturnValue("No verdict yet");
+      await openMenu(SCREEN);
+      expect(item("voice-mod-unavailable").textContent).toBe("No verdict yet");
+      expect(actions()).not.toContain("server-mute");
+    });
+
+    it("runs Profile and Message for the person at the click, and closes the menu", async () => {
+      const onProfile = vi.fn();
+      const onMessage = vi.fn();
+      grid.setCallbacks({ tileMenu: { onProfile, onMessage } });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), remote({ isScreenshare: true }));
+
+      await openMenu(SCREEN, 30, 40);
+      item("profile").click();
+      expect(onProfile).toHaveBeenCalledWith(OTTO, 30, 40);
+      expect(menu()).toBeNull();
+
+      await openMenu(SCREEN);
+      item("message").click();
+      expect(onMessage).toHaveBeenCalledWith(OTTO);
+      expect(menu()).toBeNull();
+    });
+
+    it("runs each moderation row for the person", async () => {
+      const mod = modOptions();
+      grid.setCallbacks({ tileMenu: { moderation: () => mod } });
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+
+      await openMenu(OTTO);
+      item("server-mute").click();
+      expect(mod.onServerMute).toHaveBeenCalledWith(true);
+      await openMenu(OTTO);
+      item("server-deafen").click();
+      expect(mod.onServerDeafen).toHaveBeenCalledWith(true);
+      await openMenu(OTTO);
+      item("voice-disconnect").click();
+      expect(mod.onDisconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("Profile from a full-screen tile leaves full screen first, so the card can be seen", async () => {
+      const onProfile = vi.fn();
+      grid.setCallbacks({ tileMenu: { onProfile } });
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      item("fullscreen").click();
+      // jsdom has no requestFullscreen: the window-filling fallback.
+      expect(cell(OTTO).classList.contains("video-cell--theatre")).toBe(true);
+
+      await openMenu(OTTO);
+      expect(item("fullscreen").textContent).toBe("Exit full screen");
+      item("profile").click();
+      expect(cell(OTTO).classList.contains("video-cell--theatre")).toBe(false);
+      expect(onProfile).toHaveBeenCalledTimes(1);
+    });
+
+    it("Focus opens the tile in focus view, and then reads Back to grid", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      grid.addStream(3, "Sam", fakeStream(), remote({ audioUserId: 3, name: "Sam" }));
+      await openMenu(OTTO);
+      expect(item("focus").textContent).toBe("Focus");
+      item("focus").click();
+      expect(grid.getFocusedTileId()).toBe(OTTO);
+
+      await openMenu(OTTO);
+      expect(item("focus").textContent).toBe("Back to grid");
+      item("focus").click();
+      expect(grid.getFocusedTileId()).toBeNull();
+    });
+
+    it("Pop out opens the tile in a window of its own", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      try {
+        grid.addStream(OTTO, "Otto", fakeStream(), remote());
+        await openMenu(OTTO);
+        expect(item("popout").textContent).toBe("Pop out");
+        item("popout").click();
+        expect(open).toHaveBeenCalledTimes(1);
+        // No window here: the tile stays and says so.
+        expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
+        expectConsole("warn", "Pop out window refused");
+      } finally {
+        open.mockRestore();
+      }
+    });
+
+    it("lets a menu taller than the window scroll instead of running off it", async () => {
+      const height = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(window.innerHeight + 200);
+      try {
+        grid.addStream(OTTO, "Otto", fakeStream(), remote());
+        await openMenu(OTTO);
+        expect(menu()!.style.maxHeight).toBe(`${window.innerHeight - 16}px`);
+        expect(menu()!.style.overflowY).toBe("auto");
+        expect(menu()!.style.top).toBe("8px");
+      } finally {
+        height.mockRestore();
+      }
+    });
+
+    it("Stop watching in the menu stops the stream", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      item("stop-watching").click();
+      expect(cell(OTTO).classList.contains("video-cell--stopped")).toBe(true);
+    });
+
+    it("Mute silences the person for you only, and stays open", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      const mute = item("local-mute");
+      expect(mute.getAttribute("role")).toBe("menuitemcheckbox");
+      expect(mute.getAttribute("aria-checked")).toBe("false");
+
+      mockSetUserLocalMute.mockImplementation((_id: number, on: boolean) =>
+        mockGetUserLocalMute.mockReturnValue(on),
+      );
+      mute.click();
+      expect(mockSetUserLocalMute).toHaveBeenCalledWith(OTTO, true);
+      expect(mute.getAttribute("aria-checked")).toBe("true");
+      expect(menu()).not.toBeNull();
+    });
+
+    it("unchecking Mute on a person at 0% brings them back at 100% on the slider and tile", async () => {
+      mockGetUserVolume.mockReturnValue(0);
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      const mute = item("local-mute");
+      expect(mute.getAttribute("aria-checked")).toBe("true");
+
+      mockSetUserVolume.mockImplementation((_id: number, v: number) =>
+        mockGetUserVolume.mockReturnValue(v),
+      );
+      mute.click();
+      expect(mockSetUserLocalMute).toHaveBeenCalledWith(OTTO, false);
+      expect(mockSetUserVolume).toHaveBeenCalledWith(OTTO, 100);
+      expect(menu()!.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!.value).toBe(
+        "100",
+      );
+      expect(cell(OTTO).querySelector("output")!.textContent).toBe("100%");
+      expect(mute.getAttribute("aria-checked")).toBe("false");
+    });
+
+    describe("your own camera tile", () => {
+      const self = () => makeTileConfig({ isSelf: true, audioUserId: SELF });
+
+      it("offers Hide my camera and Turn off camera in the call view, nothing about others", async () => {
+        const cc = controls();
+        grid.setCallbacks({
+          callControls: cc,
+          tileMenu: { onProfile: vi.fn(), onMessage: vi.fn(), moderation: () => modOptions() },
+        });
+        grid.setExitVisible(true);
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        await openMenu(SELF);
+
+        expect(menu()!.getAttribute("aria-label")).toBe("Your camera");
+        expect(actions()).toEqual(["hide-self", "camera-off"]);
+        expect(menu()!.querySelector("[data-menu-volume]")).toBeNull();
+      });
+
+      it("Hide my camera hides the tile and turns the Show my camera toggle off", async () => {
+        grid.setCallbacks({ callControls: controls() });
+        grid.setExitVisible(true);
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        await openMenu(SELF);
+        item("hide-self").click();
+
+        expect(cell(SELF).hidden).toBe(true);
+        const toggle = container.querySelector("[data-view-toggle='selfCamera']")!;
+        expect(toggle.getAttribute("aria-pressed")).toBe("false");
+        expect(menu()).toBeNull();
+      });
+
+      it("Turn off camera runs the camera control", async () => {
+        const cc = controls();
+        grid.setCallbacks({ callControls: cc });
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        await openMenu(SELF);
+        // Outside the call view the "Show my camera" toggle does not apply.
+        expect(actions()).toEqual(["camera-off"]);
+        item("camera-off").click();
+        expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
+      });
+
+      it("Hide my camera on a full-screen tile leaves full screen first", async () => {
+        grid.setCallbacks({ callControls: controls() });
+        grid.setExitVisible(true);
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        cell(SELF).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        expect(cell(SELF).classList.contains("video-cell--theatre")).toBe(true);
+
+        await openMenu(SELF);
+        item("hide-self").click();
+        expect(cell(SELF).hidden).toBe(true);
+        expect(cell(SELF).classList.contains("video-cell--theatre")).toBe(false);
+      });
+
+      it("Hide my camera puts focus on the toggle that brings the tile back", async () => {
+        document.body.appendChild(container);
+        try {
+          grid.setCallbacks({ callControls: controls() });
+          grid.setExitVisible(true);
+          grid.addStream(SELF, "Me (You)", fakeStream(), self());
+          await openMenu(SELF);
+          item("hide-self").click();
+          expect(document.activeElement).toBe(
+            container.querySelector("[data-view-toggle='selfCamera']"),
+          );
+        } finally {
+          container.remove();
+        }
+      });
+
+      it("opens no menu outside the call view while the camera is locked", async () => {
+        grid.setCallbacks({ callControls: controls() });
+        grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        expect(await openMenu(SELF)).toBeNull();
+      });
+
+      it("greys Turn off camera with the reason while the camera is locked", async () => {
+        const cc = controls();
+        grid.setCallbacks({ callControls: cc });
+        grid.setExitVisible(true);
+        grid.setCallState({
+          muted: false,
+          deafened: false,
+          listenOnly: false,
+          camera: true,
+          offline: "reconnecting",
+        });
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        await openMenu(SELF);
+        const off = item("camera-off");
+        expect(off.disabled).toBe(true);
+        expect(off.title).not.toBe("");
+        off.click();
+        expect(cc.onCameraToggle).not.toHaveBeenCalled();
+      });
+
+      it("opens no menu with nothing to offer, and none on your own screen share", async () => {
+        grid.addStream(SELF, "Me (You)", fakeStream(), self());
+        expect(await openMenu(SELF)).toBeNull();
+
+        grid.setCallbacks({ callControls: controls() });
+        grid.addStream(
+          SELF + 1_000_000,
+          "Your Screen",
+          null,
+          makeTileConfig({ isSelf: true, audioUserId: SELF, isScreenshare: true }),
+        );
+        expect(await openMenu(SELF + 1_000_000)).toBeNull();
+      });
+    });
+  });
+  describe("stream ended cover (WP 1C-4)", () => {
+    const SCREEN = 2 + 1_000_000;
+    const screen: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };
+    const cell = () =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${SCREEN}']`);
+    let onStreamRemoved: ReturnType<typeof vi.fn<() => void>>;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      onStreamRemoved = vi.fn();
+      grid.setCallbacks({ onStreamRemoved });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a watched stream that ends says so for 3 s, then its tile goes", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      expect(cell()!.querySelector("video")!.srcObject).toBeNull();
+      expect(grid.hasStreams()).toBe(true);
+      // Nothing under the cover can be clicked or tabbed to.
+      const under = [...cell()!.children].filter((c) => !c.classList.contains("video-ended"));
+      expect(under.length).toBeGreaterThan(0);
+      expect(under.every((c) => c.hasAttribute("inert"))).toBe(true);
+      // A second removal (track ended, then unsubscribed) changes nothing.
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2999);
+      expect(cell()).not.toBeNull();
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(cell()).toBeNull();
+      expect(grid.hasStreams()).toBe(false);
+      expect(onStreamRemoved).toHaveBeenCalledTimes(1);
+    });
+
+    it("an unpublish that unsubscribes first still shows the cover", () => {
+      // livekit-client (and the native room) emit TrackUnsubscribed before
+      // TrackUnpublished: the tile is offered back as Watch, then removed.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      vi.advanceTimersByTime(3000);
+      expect(cell()).toBeNull();
+    });
+
+    it("a stream you stopped watching goes at once when it ends", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      cell()!.querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+
+      expect(cell()).toBeNull();
+    });
+
+    it("a stream nobody watched, a camera, or your own share goes at once", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.addStream(2, "Otto", fakeStream(), { ...screen, isScreenshare: false });
+      grid.addStream(9, "You", fakeStream(), { ...screen, isSelf: true });
+      grid.removeStream(SCREEN);
+      grid.removeStream(2);
+      grid.removeStream(9);
+
+      expect(container.querySelectorAll(".video-cell")).toHaveLength(0);
+      expect(container.querySelector(".video-ended")).toBeNull();
+    });
+
+    it("the same person streaming again replaces the cover", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      const again = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+
+      expect(cell()!.querySelector(".video-ended")).toBeNull();
+      expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+      vi.advanceTimersByTime(3000);
+      expect(cell()).not.toBeNull();
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+
+    it("a re-share within the cover stays watched and in focus (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      const setStreamWatched = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch, setStreamWatched });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.setFocusedTile(SCREEN);
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2000);
+      const again = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+
+      expect(cell()!.querySelector(".video-ended")).toBeNull();
+      expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+      expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+      expect(grid.getFocusedTileId()).toBe(SCREEN);
+      vi.advanceTimersByTime(3000);
+      expect(forgetStreamWatch).not.toHaveBeenCalled();
+      expect(setStreamWatched).not.toHaveBeenCalledWith(SCREEN, false);
+    });
+
+    it("after the cover the watch is forgotten: a later share is offered as Watch (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      vi.advanceTimersByTime(2999);
+      expect(forgetStreamWatch).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(forgetStreamWatch).toHaveBeenCalledWith(SCREEN);
+
+      grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+      expect(cell()!.classList.contains("video-cell--stopped")).toBe(true);
+      expect(cell()!.querySelector("[data-tile-control='watch']")).not.toBeNull();
+    });
+
+    it("leaving the call during the cover forgets the held watch (WP 1C-1)", () => {
+      const forgetStreamWatch = vi.fn();
+      grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      grid.clearStreams();
+      expect(forgetStreamWatch).toHaveBeenCalledWith(SCREEN);
+    });
+
+    it("leaving the call drops the cover at once", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+      grid.removeStream(SCREEN);
+      grid.clearStreams();
+
+      expect(cell()).toBeNull();
+      vi.advanceTimersByTime(3000);
+      expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+  });
+  describe("pop out the whole call (WP 1C-7)", () => {
+    const OTTO = 2;
+    let popup: ReturnType<typeof fakePopup>;
+    let open: ReturnType<typeof vi.fn>;
+    let focusWindow: ReturnType<typeof vi.fn>;
+    const controls = () => ({
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onLeave: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onCameraDevice: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    const root = () =>
+      document.querySelector<HTMLElement>("[data-testid='video-grid']") ??
+      popup.doc.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+    const popButton = () =>
+      root().querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+    const barButton = (id: string) =>
+      root().querySelector<HTMLButtonElement>(`.video-grid__controls [data-call-control='${id}']`)!;
+    const exit = () => root().querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']")!;
+
+    beforeEach(() => {
+      localStorage.clear();
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      popup = fakePopup();
+      focusWindow = vi.fn();
+      Object.assign(popup.win, { focus: focusWindow });
+      open = vi.fn(() => popup.win as unknown as Window);
+      vi.stubGlobal("open", open);
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    function startCall() {
+      const cc = controls();
+      const onCallPopout = vi.fn();
+      grid.setCallbacks({ callControls: cc, onCallPopout });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      return { cc, onCallPopout };
+    }
+
+    it("offers Pop out only in the call view", () => {
+      grid.setCallbacks({ callControls: controls() });
+      expect(container.querySelector("[data-grid-control='popout']")).toBeNull();
+      grid.setExitVisible(true);
+      expect(popButton().getAttribute("aria-label")).toBe("Pop out call");
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("moves the grid, its toggles and the control bar into a window of its own", () => {
+      const { onCallPopout } = startCall();
+      const grid0 = root();
+      const video = grid0.querySelector("video")!;
+
+      popButton().click();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(String(open.mock.calls[0]![1])).toMatch(/^owncord-popout-\d+$/);
+      expect(popup.doc.title).toBe("Call — OwnCord");
+      expect(container.querySelector("[data-testid='video-grid']")).toBeNull();
+      expect(popup.doc.body.contains(grid0)).toBe(true);
+      expect(grid0.querySelector("video")).toBe(video);
+      expect(grid0.querySelector(".video-grid__views")).not.toBeNull();
+      expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
+      expect(onCallPopout).toHaveBeenCalledWith(true, false);
+      expect(popButton().getAttribute("aria-pressed")).toBe("true");
+      expect(popButton().getAttribute("aria-label")).toBe("Bring the call back");
+      // No Show chat in the window (the app window shows the chat), and no
+      // camera picker (its menu opens in the app window).
+      expect(exit().hidden).toBe(true);
+      expect(barButton("camera-device").style.display).toBe("none");
+    });
+
+    it("keeps the call controls working in the pop-out", () => {
+      const { cc } = startCall();
+      popButton().click();
+
+      barButton("mute").click();
+      barButton("leave").click();
+      expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onLeave).toHaveBeenCalledTimes(1);
+
+      grid.setCallState({ muted: true, deafened: false, listenOnly: false });
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("brings the call back to the app window before a share picker opens there", () => {
+      const { cc, onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      barButton("share").click();
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops a share from the pop-out without leaving it", () => {
+      const { cc } = startCall();
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, screenshare: true });
+      popButton().click();
+
+      barButton("share").click();
+
+      expect(popup.doc.body.contains(root())).toBe(true);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("brings the grid back to the app window with Bring back", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      popButton().click();
+
+      expect(popup.win.close).toHaveBeenCalled();
+      expect(container.contains(grid0)).toBe(true);
+      expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+      expect(exit().hidden).toBe(false);
+      expect(barButton("camera-device").style.display).toBe("");
+      expect(document.activeElement).toBe(popButton());
+    });
+
+    it("brings the grid back when the user closes the window", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(300);
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+    });
+
+    it("closes the window without restoring when the call view ends", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      grid.setExitVisible(false);
+
+      expect(popup.win.close).toHaveBeenCalled();
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, false);
+      expect(grid0.querySelector(".video-grid__controls")).toBeNull();
+    });
+
+    it("closes the window when the grid is torn down", () => {
+      startCall();
+      popButton().click();
+      grid.destroy?.();
+      expect(popup.win.close).toHaveBeenCalled();
+    });
+
+    it("stays in the app window, with a toast, when no window opens", () => {
+      vi.stubGlobal("open", () => null);
+      const { onCallPopout } = startCall();
+      popButton().click();
+      expectConsole("warn", "Call pop out window refused");
+      expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
+      expect(container.querySelector("[data-testid='video-grid']")).not.toBeNull();
+      expect(onCallPopout).not.toHaveBeenCalled();
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("raises the window rather than moving the call back", () => {
+      startCall();
+      expect(grid.raiseCallPopout()).toBe(false);
+      popButton().click();
+      expect(grid.raiseCallPopout()).toBe(true);
+      expect(focusWindow).toHaveBeenCalledTimes(1);
+      expect(popup.doc.body.contains(root())).toBe(true);
+    });
+
+    it("opens a tile's menu in the pop-out, without the profile card", async () => {
+      grid.setCallbacks({
+        callControls: controls(),
+        tileMenu: { onProfile: vi.fn(), onMessage: vi.fn() },
+      });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      popButton().click();
+
+      root()
+        .querySelector(`.video-cell[data-user-id='${OTTO}']`)!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await vi.dynamicImportSettled();
+
+      const menu = popup.doc.querySelector<HTMLElement>(".video-tile-menu");
+      expect(menu).not.toBeNull();
+      expect(document.querySelector(".video-tile-menu")).toBeNull();
+      expect(menu!.querySelector("[data-action='profile']")).toBeNull();
+      expect(menu!.querySelector("[data-action='message']")).not.toBeNull();
+    });
+
+    it("follows full screen in the pop-out's own document and window", () => {
+      const setWindowFullscreen = vi.fn(() => Promise.resolve());
+      grid.setCallbacks({ callControls: controls(), setWindowFullscreen });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      popButton().click();
+      const label = String(open.mock.calls[0]![1]);
+      const tile = root().querySelector(`.video-cell[data-user-id='${OTTO}']`)!;
+
+      popup.enterFullscreen(tile);
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, label);
+      expect(tile.querySelector(".video-fs-calls")).not.toBeNull();
+
+      // Closing the window ends its full screen; the app window's is untouched.
+      popup.win.closed = true;
+      vi.advanceTimersByTime(300);
+      expect(tile.querySelector(".video-fs-calls")).toBeNull();
+      expect(setWindowFullscreen).not.toHaveBeenCalledWith(false);
     });
   });
 });

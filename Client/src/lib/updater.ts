@@ -16,6 +16,9 @@ export interface UpdateCheckResult {
    *  `src-tauri/src/update_commands.rs`. `available: false` then says nothing
    *  about whether a newer version exists. */
   readonly manual_upgrade: boolean;
+  /** The check itself could not complete (network, feed error): `available: false`
+   *  then says nothing about whether a newer version exists. */
+  readonly failed?: boolean;
 }
 
 /** Download progress reported by the Rust updater during install. */

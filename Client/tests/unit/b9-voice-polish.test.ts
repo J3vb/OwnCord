@@ -15,6 +15,8 @@ vi.mock("@lib/livekitSession", () => ({
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
   getUserVolume: vi.fn().mockReturnValue(100),
   setUserVolume: vi.fn(),
+  getUserLocalMute: vi.fn().mockReturnValue(false),
+  setUserLocalMute: vi.fn(),
   getScreenshareAudioMuted: vi.fn().mockReturnValue(false),
   getScreenshareAudioVolume: vi.fn().mockReturnValue(1),
   muteScreenshareAudio: vi.fn(),
@@ -71,8 +73,6 @@ function resetStores(): void {
 function mountWidget(container: HTMLElement) {
   const widget = createVoiceWidget({
     onDisconnect: vi.fn(),
-    onMuteToggle: vi.fn(),
-    onDeafenToggle: vi.fn(),
     onCameraToggle: vi.fn(),
     onScreenshareToggle: vi.fn(),
   });

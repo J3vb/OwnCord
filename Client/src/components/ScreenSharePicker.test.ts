@@ -27,6 +27,7 @@ const clickTab = (root: HTMLElement, label: string) => {
 describe("showScreenSharePicker", () => {
   afterEach(() => {
     document.body.replaceChildren();
+    vi.restoreAllMocks();
   });
 
   it("lists screens first with thumbnails and resolves the pick on Go Live", async () => {
@@ -68,6 +69,22 @@ describe("showScreenSharePicker", () => {
     );
     root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
     await expect(picking).resolves.not.toHaveProperty("audio");
+  });
+
+  it("asks only for the source when changing a live share's source", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      sourceOnly: true,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    expect(root.querySelector(".ssp-options")).toBeNull();
+    expect(root.querySelectorAll(".ssp-select")).toHaveLength(0);
+    root.querySelector<HTMLButtonElement>(".ssp-source")!.click();
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ source: "screen:1" });
   });
 
   it("keeps the selection on a visible card across tab switches", async () => {
@@ -140,6 +157,8 @@ describe("showScreenSharePicker", () => {
     const root = await mounted();
     const [quality, fps] = root.querySelectorAll<HTMLSelectElement>(".ssp-select");
     expect(fps!.selectedOptions[0]!.textContent).toBe("Default (5 fps)");
+    // Low is 720p too: its frame rate is what tells it apart from Medium.
+    expect(quality!.selectedOptions[0]!.textContent).toBe("Low (720p, 5 fps)");
     quality!.value = "medium";
     quality!.dispatchEvent(new Event("change"));
     expect(fps!.selectedOptions[0]!.textContent).toBe("Default (30 fps)");
@@ -241,6 +260,37 @@ describe("showScreenSharePicker", () => {
     expect(fps.value).toBe("120");
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await expect(picking).resolves.toBeNull();
+  });
+
+  it("shows only the quality step before the Windows picker and resolves the OS pick", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141",
+    );
+    const picking = showScreenSharePicker({
+      sources: [],
+      portal: false,
+      osPicker: true,
+      defaultQuality: "high",
+      defaultFps: 120,
+    });
+    const root = await mounted();
+    expect(root.querySelector(".ssp-tabs")).toBeNull();
+    expect(root.querySelector(".ssp-empty")).toBeNull();
+    expect(root.querySelector(".ssp-portal")?.textContent).toContain(
+      "Windows will now ask which screen or window",
+    );
+    // The OS picker owns the audio choice, so there is no Linux audio note.
+    expect(root.textContent).not.toContain("Audio sharing is not available");
+    const [quality, fps] = root.querySelectorAll<HTMLSelectElement>(".ssp-select");
+    expect(fps!.value).toBe("120");
+    quality!.value = "source";
+    quality!.dispatchEvent(new Event("change"));
+    fps!.value = "60";
+    fps!.dispatchEvent(new Event("change"));
+    const goLive = root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!;
+    expect(goLive.disabled).toBe(false);
+    goLive.click();
+    await expect(picking).resolves.toEqual({ source: "os", quality: "source", fps: 60 });
   });
 
   it("says so when there is nothing to share", async () => {

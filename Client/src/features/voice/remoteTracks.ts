@@ -9,6 +9,8 @@ import {
   getLocalScreenshareFps as doGetLocalScreenshareFps,
 } from "../../lib/screenShare";
 import { parseUserId } from "./sessionState";
+import { isUnencryptedPublication } from "./mediaEncryption";
+import { autoPlayCameras } from "./autoPlayCameras";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
@@ -56,8 +58,14 @@ export class RemoteTracks {
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
   /** The streams the viewer watches, as `${userId}:${type}`. */
   private readonly watched = new Set<string>();
+  /** Cameras the viewer chose Stop watching for, kept until leave: with
+   *  auto-play on, every other camera is watched. */
+  private readonly stopped = new Set<string>();
 
-  constructor(private readonly getRoom: () => Room | null) {}
+  constructor(
+    private readonly getRoom: () => Room | null,
+    private readonly autoPlay: () => boolean = autoPlayCameras,
+  ) {}
 
   setOnRemoteVideo(cb: RemoteVideoCallback): void {
     this.onRemoteVideoCallback = cb;
@@ -122,10 +130,15 @@ export class RemoteTracks {
 
   clearWatched(): void {
     this.watched.clear();
+    this.stopped.clear();
   }
 
+  /** A screen share only once watched; a camera too while auto-play is off,
+   *  otherwise unless the viewer stopped it. */
   isWatched(userId: number, type: "camera" | "screenshare"): boolean {
-    return this.watched.has(`${userId}:${type}`);
+    const key = `${userId}:${type}`;
+    if (type === "camera" && this.autoPlay()) return !this.stopped.has(key);
+    return this.watched.has(key);
   }
 
   /** Watch a user's camera or screen share (with its audio), or stop: the
@@ -133,11 +146,30 @@ export class RemoteTracks {
    *  is (roomEventHandlers' handleTrackPublished asks isWatched). */
   watch(userId: number, type: "camera" | "screenshare", on: boolean): void {
     const key = `${userId}:${type}`;
-    if (on) this.watched.add(key);
-    else this.watched.delete(key);
+    if (on) {
+      this.watched.add(key);
+      this.stopped.delete(key);
+    } else {
+      this.watched.delete(key);
+      if (type === "camera") this.stopped.add(key);
+    }
     const sources =
       type === "screenshare" ? (["screenshare", "screen_share_audio"] as const) : [type];
-    for (const source of sources) this.publication(userId, source)?.setSubscribed(on);
+    for (const source of sources) {
+      const pub = this.publication(userId, source);
+      if (pub === undefined || (on && isUnencryptedPublication(pub))) continue;
+      pub.setSubscribed(on);
+    }
+  }
+
+  /** The stream ended (unpublished, its user left, or a channel change):
+   *  drop its watch, so a new one starts from the default. A screen share is
+   *  unwatched as before; a camera's Stop watching is kept until leave. A
+   *  camera's publication is gone or being torn down here, so there is no
+   *  subscription to drop. */
+  forgetWatch(userId: number, type: "camera" | "screenshare"): void {
+    if (type === "screenshare") this.watch(userId, type, false);
+    else this.watched.delete(`${userId}:${type}`);
   }
 
   /** Forget watches whose stream the room does not publish. */

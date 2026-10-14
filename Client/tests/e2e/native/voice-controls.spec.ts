@@ -35,7 +35,9 @@ test("native voice connects, exposes controls, mutes, deafens and disconnects", 
   await expect(widget.locator(".vw-stats")).not.toHaveClass(/visible/);
   await expect(widget.locator("[data-testid='vw-mod-status']")).toHaveAttribute("role", "status");
 
-  const mute = widget.getByRole("button", { name: "Mute", exact: true });
+  // Mute and deafen live in the user panel (WP 1D-1).
+  const userBar = page.locator(".user-bar");
+  const mute = userBar.getByRole("button", { name: "Mute", exact: true });
   await expect(mute).toHaveAttribute("aria-pressed", "false");
   await mute.click();
   await expect(mute).toHaveAttribute("aria-pressed", "true");
@@ -47,7 +49,7 @@ test("native voice connects, exposes controls, mutes, deafens and disconnects", 
   // The protocol permits two mute/deafen actions per second. This is input
   // pacing after the two mute actions, not a wait for UI/network readiness.
   await delay(1_000);
-  const deafen = widget.getByRole("button", { name: "Deafen", exact: true });
+  const deafen = userBar.getByRole("button", { name: "Deafen", exact: true });
   await expect(deafen).toHaveAttribute("aria-pressed", "false");
   await deafen.click();
   await expect(deafen).toHaveAttribute("aria-pressed", "true");

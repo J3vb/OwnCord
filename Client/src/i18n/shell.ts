@@ -50,6 +50,7 @@ export const shellText = defineCatalog("shell", {
   "channel.ageRestricted": "Age restricted",
   "channel.ageRestrictedTitle": "Age-restricted channel",
   "channel.mentions": { one: "{count} mention", other: "{count} mentions" },
+  "channel.unreadHidden": "Unread channels hidden",
   "channel.reconnecting": "Reconnecting…",
   "channel.notConnected": "Not connected",
   "channel.voiceCapacity": "{connected} of {max} connected",
@@ -57,11 +58,12 @@ export const shellText = defineCatalog("shell", {
   "channel.mutedByModerator": "Muted by a moderator",
   "channel.deafenedByModerator": "Deafened by a moderator",
   "channel.deafened": "Deafened",
+  "channel.locallyMuted": "Muted for you",
   "channel.ownSessionFingerprint":
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
   "channel.empty": "No channels yet",
   "channel.emptyHint": "Ask a moderator to create a channel",
-  "channel.markAllRead": "Mark All as Read",
+  "channel.markAllRead": "Mark Server as Read",
   "channel.deleteWarning":
     "Are you sure you want to delete {channel}? This action cannot be undone and all messages in this channel will be lost.",
   "channel.createFailed": "Failed to create channel",
@@ -102,8 +104,10 @@ export const shellText = defineCatalog("shell", {
   "slowMode.minutes": { one: "{count} minute", other: "{count} minutes" },
   "slowMode.seconds": "{count} seconds",
 
-  "identity.verified": "Identity verified",
-  "identity.verifiedWithNumber": "Identity verified · Safety number: {safetyNumber}",
+  "identity.verified":
+    "Same key as before · Compare safety numbers with them to confirm it is them",
+  "identity.verifiedWithNumber":
+    "Same key as before · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
   "identity.mismatch":
     "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
   "identity.keyChanged": "Security key changed · Safety number: {safetyNumber}",
@@ -244,5 +248,6 @@ export const shellText = defineCatalog("shell", {
 
   "messages.loadHistoryFailed": "Failed to load message history",
   "messages.loadOlderFailed": "Failed to load older messages",
+  "messages.loadNewerFailed": "Failed to load newer messages",
   "messages.reactionSlowDown": "Slow down! Please wait before reacting again.",
 });

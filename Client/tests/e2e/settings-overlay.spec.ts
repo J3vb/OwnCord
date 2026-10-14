@@ -204,16 +204,16 @@ test.describe("Settings — Notifications Tab", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Settings — Voice & Audio tab
+// Tests: Settings — Voice & Video tab
 // ---------------------------------------------------------------------------
 
-test.describe("Settings — Voice & Audio Tab", () => {
+test.describe("Settings — Voice & Video Tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-    await switchSettingsTab(page, "Voice & Audio");
+    await switchSettingsTab(page, "Voice & Video");
   });
 
   test("shows device selectors for input and output", async ({ page }) => {
@@ -233,6 +233,8 @@ test.describe("Settings — Voice & Audio Tab", () => {
   test("names every control and keeps the card text readable", async ({ page }) => {
     const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
     expect(await findUnnamedControls(pane)).toEqual([]);
+    // The sensitivity value shows with the manual slider.
+    await page.getByRole("switch", { name: "Automatically determine input sensitivity" }).click();
     const failures: string[] = [];
     for (const selector of [
       ".settings-card-head h3",
@@ -246,9 +248,28 @@ test.describe("Settings — Voice & Audio Tab", () => {
     expect(failures).toEqual([]);
   });
 
+  test("offers the video codec choice with VP8 as the default", async ({ page }) => {
+    const codec = page.getByRole("combobox", { name: "Video Codec" });
+    await expect(codec).toBeVisible();
+    await expect(codec).toHaveValue("vp8");
+    await expect(codec.locator("option")).toHaveText([
+      "VP8 (default, most compatible)",
+      "H.264 (uses your graphics card when it can)",
+      "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
+    ]);
+  });
+
   test("shows voice sensitivity slider", async ({ page }) => {
-    const slider = page.locator(".settings-slider");
-    await expect(slider.first()).toBeVisible();
+    // Voice Activity is the default input mode, so the sensitivity gate shows:
+    // automatic at first, with the level meter and no handle.
+    const auto = page.getByRole("switch", { name: "Automatically determine input sensitivity" });
+    const slider = page.getByRole("slider", { name: "Input Sensitivity" });
+    await expect(auto).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".mic-meter-bar")).toBeVisible();
+    await expect(slider).toBeHidden();
+
+    await auto.click();
+    await expect(slider).toBeVisible();
   });
 
   test("shows audio processing toggles", async ({ page }) => {
