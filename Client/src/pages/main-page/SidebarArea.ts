@@ -228,11 +228,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   const headerActions = createElement("div", { class: "sidebar-header-actions" });
 
-  // Mark All as Read: a server-wide action, so it lives in this header rather
+  // Mark Server as Read: a server-wide action, so it lives in this header rather
   // than in ChannelSidebar's own header (hidden here, see sidebar.css). First in
   // the row so it appearing and disappearing does not move Invite. Shown only
-  // while a channel or DM is unread; those badges live in channels.store and
-  // dm.store.
+  // while a server channel is unread (DMs are not part of the server and are
+  // left alone); those badges live in channels.store.
   const markAllBtn = headerAction(
     shellText("channel.markAllRead"),
     shellText("channel.markAllRead"),
@@ -240,10 +240,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "mark-all-read",
   );
   markAllBtn.addEventListener("click", () => {
-    markAllRead();
+    // A server-wide action: DMs are not part of the server, so they stay as they are.
+    markAllRead({ includeDms: false });
   });
   const syncMarkAllBtn = (): void => {
-    const show = unreadChannelIds().length > 0;
+    const show = unreadChannelIds({ includeDms: false }).length > 0;
     // Hiding the focused button would drop focus to <body>; hand it to the
     // neighbouring header action (Invite) so the next Tab starts nearby.
     if (!show && document.activeElement === markAllBtn) {

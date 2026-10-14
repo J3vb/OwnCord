@@ -8,7 +8,8 @@
  *     exactly as the sidebar's DM header total does. A mute drops chatter and
  *     never a mention, so a muted channel's mentions still count
  *     (`channel-mutes.ts`);
- *   - the `nothing` notification level counts nothing.
+ *   - the `nothing` notification level drops the guild channels' mentions but
+ *     never the DMs: a DM is a person writing to you, not server chatter.
  *
  * The count is pushed to the native host when it changes, and again when the
  * window is shown or focused (Windows drops the overlay when the taskbar
@@ -24,13 +25,14 @@ import type { Notifier } from "../../platform/contracts/notifications";
 
 /** The badge count for the connected server, from the stores as they are now. */
 export function unreadBadgeCount(): number {
-  if (effectiveNotificationLevel() === "nothing") return 0;
   let count = 0;
-  for (const ch of channelsStore.getState().channels.values()) {
-    // DMs are counted from dmStore below; their channels-store row is a mirror.
-    // Muted or not, a guild channel's mentions count: "excluding muted
-    // channels" in D6 excludes their plain unread, never their mentions.
-    if (ch.type !== "dm") count += ch.mentionCount;
+  if (effectiveNotificationLevel() !== "nothing") {
+    for (const ch of channelsStore.getState().channels.values()) {
+      // DMs are counted from dmStore below; their channels-store row is a mirror.
+      // Muted or not, a guild channel's mentions count: "excluding muted
+      // channels" in D6 excludes their plain unread, never their mentions.
+      if (ch.type !== "dm") count += ch.mentionCount;
+    }
   }
   for (const dm of dmStore.getState().channels) {
     count += isChannelMuted(dm.channelId) ? dm.mentionCount : dm.unreadCount;

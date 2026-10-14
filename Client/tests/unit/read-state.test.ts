@@ -149,6 +149,28 @@ describe("unreadChannelIds / markAllRead", () => {
     expect(unreadChannelIds()).toEqual([]);
   });
 
+  it("includeDms: false lists and marks only server channels, leaving DMs and their mirror rows unread", () => {
+    setChannels([channel(1, 3), { ...channel(60, 4), type: "dm" }]);
+    setDmChannels([dm(60, 4), dm(50, 2, 1)]);
+
+    expect(unreadChannelIds({ includeDms: false })).toEqual([1]);
+    expect(markAllRead({ includeDms: false })).toBe(1);
+    expect(sent).toEqual([1]);
+    expect(hasUnread(1)).toBe(false);
+    expect(hasUnread(50)).toBe(true);
+    expect(hasUnread(60)).toBe(true);
+    expect(dmStore.getState().channels.find((c) => c.channelId === 50)?.unreadCount).toBe(2);
+    expect(dmStore.getState().channels.find((c) => c.channelId === 50)?.mentionCount).toBe(1);
+  });
+
+  it("the default and includeDms: true still clear DMs (every other caller)", () => {
+    setChannels([channel(1, 3)]);
+    setDmChannels([dm(50, 2)]);
+    expect(markAllRead({ includeDms: true })).toBe(2);
+    expect([...sent].sort((a, b) => a - b)).toEqual([1, 50]);
+    expect(unreadChannelIds()).toEqual([]);
+  });
+
   it("is a no-op when nothing is unread", () => {
     setChannels([channel(1, 0)]);
 

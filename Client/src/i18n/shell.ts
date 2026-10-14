@@ -63,7 +63,7 @@ export const shellText = defineCatalog("shell", {
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
   "channel.empty": "No channels yet",
   "channel.emptyHint": "Ask a moderator to create a channel",
-  "channel.markAllRead": "Mark All as Read",
+  "channel.markAllRead": "Mark Server as Read",
   "channel.deleteWarning":
     "Are you sure you want to delete {channel}? This action cannot be undone and all messages in this channel will be lost.",
   "channel.createFailed": "Failed to create channel",
