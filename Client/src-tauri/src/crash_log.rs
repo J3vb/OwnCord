@@ -15,6 +15,10 @@
 //!   in signal context, so it only formats into a stack buffer and calls
 //!   async-signal-safe functions: the file is opened by path at that moment,
 //!   which also follows the log plugin's rotation.
+//! - The same line for the signals that end a process without a crash
+//!   (terminate, hang-up, interrupt, quit), installed only where nothing else
+//!   handles them, so a desktop that closes the app leaves a trace. A signal
+//!   another process sent names that process (pid and name).
 //! - Xlib error and I/O-error handlers that log the error and then call the
 //!   handler they replaced (GDK's). Xlib is not linked here: the setters are
 //!   looked up at runtime, and skipped when the process has no Xlib.
@@ -24,7 +28,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
-const SIGNALS: [(c_int, &str); 6] = [
+/// Crash signals: always handled, then handed back.
+const FATAL: usize = 6;
+const SIGNALS: [(c_int, &str); 10] = [
     (libc::SIGSEGV, "SIGSEGV"),
     (libc::SIGBUS, "SIGBUS"),
     (libc::SIGILL, "SIGILL"),
@@ -32,10 +38,27 @@ const SIGNALS: [(c_int, &str); 6] = [
     (libc::SIGABRT, "SIGABRT"),
     // `g_error` ends in a breakpoint trap.
     (libc::SIGTRAP, "SIGTRAP"),
+    // Not crashes: something asked the process to end. Handled only while
+    // their action is the default (terminate), so one GLib or a library
+    // relies on is never replaced.
+    (libc::SIGTERM, "SIGTERM"),
+    (libc::SIGHUP, "SIGHUP"),
+    (libc::SIGINT, "SIGINT"),
+    (libc::SIGQUIT, "SIGQUIT"),
 ];
 
 /// The native log file, as a C path for `open(2)` in signal context.
 static LOG_FILE: OnceLock<CString> = OnceLock::new();
+/// `exit_watch`'s run file, removed when a terminate or hang-up ends the
+/// process: its line is already logged, so the next start need not report it.
+static RUN_FILE: OnceLock<CString> = OnceLock::new();
+
+/// Name the run file a non-crash signal should remove.
+pub fn set_run_file(path: &Path) {
+    if let Ok(path) = CString::new(path.as_os_str().as_bytes()) {
+        let _ = RUN_FILE.set(path);
+    }
+}
 /// The action each of [`SIGNALS`] had before ours, by index.
 static PREVIOUS: [OnceLock<libc::sigaction>; SIGNALS.len()] =
     [const { OnceLock::new() }; SIGNALS.len()];
@@ -53,6 +76,14 @@ pub fn install(log_file: &Path) {
         // SAFETY: plain sigaction(2) calls on zeroed structs; the handler only
         // calls async-signal-safe functions.
         unsafe {
+            if i >= FATAL {
+                let mut current: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(*signal, std::ptr::null(), &mut current) != 0
+                    || current.sa_sigaction != libc::SIG_DFL
+                {
+                    continue;
+                }
+            }
             let mut action: libc::sigaction = std::mem::zeroed();
             action.sa_sigaction =
                 on_fatal_signal as extern "C" fn(c_int, *mut libc::siginfo_t, *mut c_void) as usize;
@@ -75,8 +106,23 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
     let mut now: libc::timespec = unsafe { std::mem::zeroed() };
     // SAFETY: clock_gettime is async-signal-safe.
     unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut now) };
-    let mut line = [0u8; 256];
-    let len = format_line(&mut line, now.tv_sec, signal, &thread[..name_len]);
+    // A code of 0 or below means another process (or this one) sent it.
+    let code = if info.is_null() {
+        0
+    } else {
+        unsafe { (*info).si_code }
+    };
+    let mut sender_comm = [0u8; 16];
+    let sender = if code <= 0 && !info.is_null() {
+        let pid = unsafe { (*info).si_pid() };
+        let len = read_comm(pid, &mut sender_comm);
+        Some((pid, &sender_comm[..len]))
+    } else {
+        None
+    };
+    let mut line = [0u8; 320];
+    let len = format_line(&mut line, now.tv_sec, signal, &thread[..name_len], sender);
+    let mut logged = false;
     if let Some(path) = LOG_FILE.get() {
         // SAFETY: open/write/close are async-signal-safe.
         unsafe {
@@ -86,12 +132,20 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
                 0o644,
             );
             if fd >= 0 {
-                libc::write(fd, line.as_ptr().cast(), len);
+                let written = libc::write(fd, line.as_ptr().cast(), len);
+                logged = usize::try_from(written) == Ok(len);
                 libc::close(fd);
             }
         }
     }
     let index = SIGNALS.iter().position(|(s, _)| *s == signal);
+    // Only once the line is on disk: otherwise the run file is the trace.
+    if logged && index.is_some_and(|i| i >= FATAL) {
+        if let Some(run_file) = RUN_FILE.get() {
+            // SAFETY: unlink(2) is async-signal-safe.
+            unsafe { libc::unlink(run_file.as_ptr()) };
+        }
+    }
     let previous = index.and_then(|i| PREVIOUS[i].get());
     // SAFETY: restoring the action this signal had before `install`.
     unsafe {
@@ -104,11 +158,6 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
     // again on return, now reaching the previous handler. A sent signal
     // (abort, raise, kill) or a breakpoint trap does not repeat: send it
     // again, to be delivered as soon as this handler returns.
-    let code = if info.is_null() {
-        0
-    } else {
-        unsafe { (*info).si_code }
-    };
     let repeats = code > 0 && code != libc::SI_KERNEL && signal != libc::SIGTRAP;
     if !repeats {
         // SAFETY: raise(3) is async-signal-safe.
@@ -116,17 +165,34 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
     }
 }
 
-/// One log line in the log plugin's format (UTC):
-/// `[YYYY-MM-DD][HH:MM:SS][target][ERROR] message`. No allocation: this runs
-/// in signal context. Returns the length written.
-fn format_line(buf: &mut [u8], unix_secs: i64, signal: c_int, thread: &[u8]) -> usize {
-    let name = SIGNALS
-        .iter()
-        .find(|(s, _)| *s == signal)
-        .map_or("signal", |(_, n)| n);
+/// The name of process `pid` from `/proc/<pid>/comm`, into `out`; the length
+/// read, 0 when it is gone. Async-signal-safe: open/read/close only.
+fn read_comm(pid: libc::pid_t, out: &mut [u8; 16]) -> usize {
+    let mut path = [0u8; 32];
+    let mut w = Writer {
+        buf: &mut path,
+        len: 0,
+    };
+    w.put(b"/proc/");
+    w.num(pid.into(), 1);
+    w.put(b"/comm\0");
+    // SAFETY: a NUL-terminated path in a stack buffer; async-signal-safe calls.
+    unsafe {
+        let fd = libc::open(path.as_ptr().cast(), libc::O_RDONLY | libc::O_CLOEXEC);
+        if fd < 0 {
+            return 0;
+        }
+        let n = libc::read(fd, out.as_mut_ptr().cast(), out.len());
+        libc::close(fd);
+        let n = usize::try_from(n).unwrap_or(0);
+        out[..n].iter().position(|&b| b == b'\n').unwrap_or(n)
+    }
+}
+
+/// Writes `[YYYY-MM-DD][HH:MM:SS]` (UTC), the log plugin's timestamp.
+fn put_timestamp(w: &mut Writer<'_>, unix_secs: i64) {
     let (date, time) = (unix_secs.div_euclid(86_400), unix_secs.rem_euclid(86_400));
     let (year, month, day) = civil_from_days(date);
-    let mut w = Writer { buf, len: 0 };
     w.put(b"[");
     w.num(year, 4);
     w.put(b"-");
@@ -139,13 +205,65 @@ fn format_line(buf: &mut [u8], unix_secs: i64, signal: c_int, thread: &[u8]) -> 
     w.num(time / 60 % 60, 2);
     w.put(b":");
     w.num(time % 60, 2);
-    w.put(b"][owncord_client_lib::crash_log][ERROR] [crash] fatal signal ");
+    w.put(b"]");
+}
+
+/// `unix_secs` as `YYYY-MM-DD HH:MM:SS UTC`, for lines that read back a time.
+pub fn utc(unix_secs: i64) -> String {
+    let mut buf = [0u8; 32];
+    let mut w = Writer {
+        buf: &mut buf,
+        len: 0,
+    };
+    put_timestamp(&mut w, unix_secs);
+    let len = w.len;
+    let text = String::from_utf8_lossy(&buf[1..len - 1]).into_owned();
+    format!("{} UTC", text.replace("][", " "))
+}
+
+/// One log line in the log plugin's format (UTC):
+/// `[YYYY-MM-DD][HH:MM:SS][target][ERROR] message`. No allocation: this runs
+/// in signal context. Returns the length written.
+fn format_line(
+    buf: &mut [u8],
+    unix_secs: i64,
+    signal: c_int,
+    thread: &[u8],
+    sender: Option<(libc::pid_t, &[u8])>,
+) -> usize {
+    let index = SIGNALS.iter().position(|(s, _)| *s == signal);
+    let name = index.map_or("signal", |i| SIGNALS[i].1);
+    let fatal = index.is_some_and(|i| i < FATAL);
+    let mut w = Writer { buf, len: 0 };
+    put_timestamp(&mut w, unix_secs);
+    if fatal {
+        w.put(b"[owncord_client_lib::crash_log][ERROR] [crash] fatal signal ");
+    } else {
+        w.put(b"[owncord_client_lib::crash_log][WARN] [exit] ended by signal ");
+    }
     w.put(name.as_bytes());
     w.put(b" (");
     w.num(signal.into(), 1);
     w.put(b") on thread '");
     w.put(thread);
-    w.put(b"'\n");
+    w.put(b"'");
+    if let Some((pid, comm)) = sender {
+        // SAFETY: getpid(2) is async-signal-safe.
+        if pid == unsafe { libc::getpid() } {
+            w.put(b", sent by this process");
+        } else {
+            w.put(b", sent by pid ");
+            w.num(pid.into(), 1);
+            if comm.is_empty() {
+                w.put(b" (exited)");
+            } else {
+                w.put(b" (");
+                w.put(comm);
+                w.put(b")");
+            }
+        }
+    }
+    w.put(b"\n");
     w.len
 }
 
@@ -353,10 +471,104 @@ mod tests {
     fn lines_match_the_log_plugins_utc_format() {
         let mut buf = [0u8; 256];
         // 2026-10-02T16:27:19Z
-        let n = format_line(&mut buf, 1_790_958_439, libc::SIGABRT, b"owncord-screen");
+        let n = format_line(
+            &mut buf,
+            1_790_958_439,
+            libc::SIGABRT,
+            b"owncord-screen",
+            None,
+        );
         assert_eq!(
             std::str::from_utf8(&buf[..n]).unwrap(),
             "[2026-10-02][16:27:19][owncord_client_lib::crash_log][ERROR] [crash] fatal signal SIGABRT (6) on thread 'owncord-screen'\n"
+        );
+    }
+
+    #[test]
+    fn a_sent_signal_names_its_sender() {
+        let mut buf = [0u8; 320];
+        let n = format_line(
+            &mut buf,
+            1_790_958_439,
+            libc::SIGTERM,
+            b"owncord-client",
+            Some((4242, b"kwin_wayland")),
+        );
+        assert_eq!(
+            std::str::from_utf8(&buf[..n]).unwrap(),
+            "[2026-10-02][16:27:19][owncord_client_lib::crash_log][WARN] [exit] ended by signal SIGTERM (15) on thread 'owncord-client', sent by pid 4242 (kwin_wayland)\n"
+        );
+        let n = format_line(
+            &mut buf,
+            1_790_958_439,
+            libc::SIGHUP,
+            b"main",
+            Some((4242, b"")),
+        );
+        assert!(std::str::from_utf8(&buf[..n])
+            .unwrap()
+            .ends_with("sent by pid 4242 (exited)\n"));
+    }
+
+    #[test]
+    fn reads_a_live_process_name() {
+        let mut comm = [0u8; 16];
+        let n = read_comm(unsafe { libc::getpid() }, &mut comm);
+        assert!(n > 0);
+        assert_eq!(read_comm(i32::MAX, &mut comm), 0);
+    }
+
+    #[test]
+    fn utc_reads_like_the_log() {
+        assert_eq!(utc(1_790_958_439), "2026-10-02 16:27:19 UTC");
+    }
+
+    /// Runs only as the child of `a_terminate_is_logged_with_its_sender`.
+    #[test]
+    fn child_waits_for_a_terminate() {
+        let Some(path) = std::env::var_os(CHILD_TERM) else {
+            return;
+        };
+        install(Path::new(&path));
+        println!("ready");
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+
+    const CHILD_TERM: &str = "OWNCORD_CRASH_LOG_TERM_CHILD";
+
+    #[test]
+    fn a_terminate_is_logged_with_its_sender() {
+        use std::io::BufRead;
+        let dir = std::env::temp_dir().join(format!("owncord-term-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("owncord-client.log");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "crash_log::tests::child_waits_for_a_terminate",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(CHILD_TERM, &log)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut out = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while out.read_line(&mut line).unwrap() > 0 && !line.contains("ready") {
+            line.clear();
+        }
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+        let status = child.wait().unwrap();
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(status.signal(), Some(libc::SIGTERM), "{status:?}");
+        assert!(
+            text.contains("[exit] ended by signal SIGTERM (15)")
+                && text.contains(&format!("sent by pid {}", std::process::id())),
+            "{text}"
         );
     }
 }

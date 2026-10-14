@@ -483,6 +483,8 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
                 "[update] installer launching for version {} (old window will ignore forwarded launches)",
                 u.version
             );
+            #[cfg(target_os = "linux")]
+            crate::exit_watch::note_update_handoff();
             // A successful Windows install exits the process and never returns.
             // Any return (an error, or Linux/macOS success awaiting the
             // frontend relaunch) leaves this process serving the user, so clear
