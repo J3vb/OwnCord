@@ -127,7 +127,7 @@ test.describe("B9-4 shared navigation", () => {
 
   test("the header actions are one named row of icon buttons, in Tab order", async ({ page }) => {
     const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
-    // Mark All as Read is in the row too but hidden while nothing is unread (the
+    // Mark Server as Read is in the row too but hidden while nothing is unread (the
     // mock server has no unread channel here), so only visible buttons count.
     const actions = header.locator(".sidebar-header-actions > button:visible");
     await expect(actions).toHaveCount(3);
@@ -219,7 +219,7 @@ test.describe("B9-4 shared navigation", () => {
   });
 });
 
-test.describe("Mark All as Read in the server header", () => {
+test.describe("Mark Server as Read in the server header", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -253,7 +253,7 @@ test.describe("Mark All as Read in the server header", () => {
     await expect(badge).toHaveText("2");
     await expect(actions).toHaveCount(4);
     await expect(actions.nth(0)).toHaveAttribute("data-testid", "mark-all-read");
-    await expect(markAll).toHaveAccessibleName("Mark All as Read");
+    await expect(markAll).toHaveAccessibleName("Mark Server as Read");
     await expect(markAll).toHaveText("");
     expect(await findUnnamedControls(header)).toEqual([]);
 

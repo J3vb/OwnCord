@@ -1,6 +1,6 @@
 /**
  * Explicit mark-as-read, for affordances that clear a badge without opening
- * the channel (the channel context menu, "Mark All as Read").
+ * the channel (the channel context menu, "Mark Server as Read").
  *
  * Opening a channel already marks it read via `channel_focus`. That message
  * also rebinds the connection's focused channel, so it is the wrong tool here:
