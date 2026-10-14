@@ -78,6 +78,7 @@ func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map
 type presenceRepairState struct {
 	drops    atomic.Uint64 // process-lifetime count (PresenceDropCount)
 	staleAny atomic.Bool   // some client owes a snapshot at the next flush
+	lostAll  atomic.Bool   // a presence frame was refused by the full dispatch queue
 	// users holds whoever dropped a presence frame since their last full
 	// ready; their next resume takes the full ready. joins holds the users
 	// owed a member_join: marked by a first-ever connect before its stamp
@@ -260,6 +261,9 @@ func (h *Hub) flushPresenceQueue() {
 		lost = !h.enqueue(broadcastMsg{presence: queued, droppable: true}, "presence_batch")
 	}
 	h.presenceMu.Unlock()
+	if h.presenceRepair.lostAll.Swap(false) {
+		lost = true
+	}
 	if lost {
 		h.mu.RLock()
 		for _, c := range h.clients {
@@ -315,8 +319,15 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 // broadcastPresenceFrame enqueues one user's presence (the presence_update
 // path) as a sequenced global frame on the same dispatch FIFO as the batches,
 // in the presence class: a full queue drops it instead of kicking the client.
+// A refused frame reached nobody, so the next flush snapshots every client;
+// the callers may hold presenceMu, so the clients are marked there, not here.
 func (h *Hub) broadcastPresenceFrame(excludeUserID int64, msg []byte) {
-	h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence")
+	if h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence") {
+		return
+	}
+	if h.presenceRepair.lostAll.CompareAndSwap(false, true) {
+		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
+	}
 }
 
 func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {

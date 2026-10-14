@@ -27,6 +27,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 6,
           "payload": {
             "attachments": [],
             "channel_id": 3,

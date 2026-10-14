@@ -148,6 +148,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 1,
           "payload": {
             "status": "online",
             "user": {
@@ -166,6 +167,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 2,
           "payload": {
             "updates": [
               {
@@ -182,6 +184,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "status": "online",
             "user": {
@@ -198,6 +201,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 4,
           "payload": {
             "updates": [
               {
@@ -372,6 +376,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 1,
           "payload": {
             "status": "online",
             "user": {
@@ -388,6 +393,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 2,
           "payload": {
             "updates": [
               {

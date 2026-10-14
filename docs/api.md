@@ -3163,6 +3163,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
   "backpressure_presence_drops": 0,
+  "delivery_loss_marks": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
   "db_writer_wait_count": 3,
@@ -3198,7 +3199,10 @@ sends that fell back to the normal queue), `backpressure_low_drops`
 means clients are draining too slowly), and `backpressure_presence_drops`
 (presence frames dropped on a full normal queue instead of disconnecting the
 client; each is repaired by a presence snapshot, and growth during a reconnect
-herd is expected). `reconnect_tier_*` counts resume
+herd is expected). `delivery_loss_marks` counts connected clients told to
+resync because a sequenced frame meant for them was dropped or withheld before
+it reached their queue: each such client sees a gap in `cseq` and its next
+resume takes the full-ready path. `reconnect_tier_*` counts resume
 attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
 small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`

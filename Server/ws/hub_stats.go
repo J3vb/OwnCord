@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // Hub accessor and stats methods split out of hub.go (OC-0400) to keep it
@@ -157,6 +158,13 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 type queueDropState struct {
 	dropped atomic.Uint64
 	applied uint64
+	// routes are the audiences of drops not yet marked (hub_loss.go);
+	// guarded by mu, a leaf lock.
+	mu             syncutil.Mutex
+	routes         []lossRoute
+	routesOverflow bool
+	routesPending  atomic.Bool
+	lossMarks      atomic.Uint64
 }
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue and
@@ -168,6 +176,7 @@ type queueDropState struct {
 // retries it.
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
+	h.noteDropRoute(bm)
 	if !bm.presenceSnapshot {
 		h.queueDrops.dropped.Add(1)
 	}
@@ -185,6 +194,7 @@ func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 // under seqMu after each frame; mustFullResyncAtRegister bumps for an
 // unsettled drop but never settles it.
 func (h *Hub) applyQueueContentDrops() {
+	h.markDroppedRoutes()
 	n := h.queueDrops.dropped.Load()
 	if n == h.queueDrops.applied {
 		return
@@ -200,12 +210,13 @@ func (h *Hub) applyQueueContentDrops() {
 // under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
 // so a resume racing the dispatch of the frames ahead of it still takes the
 // full-ready path. So does a targeted fan-out still in flight
-// (beginTargetedFanout).
-func (h *Hub) mustFullResyncAtRegister(lastSeq uint64) bool {
+// (beginTargetedFanout), and a loss marked for this user (markLoss) since
+// reconnectPrecheck looked.
+func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64) bool {
 	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
 		h.bumpVisibilityWatermark()
 	}
-	return h.targetedFanouts > 0 || h.mustFullResync(lastSeq)
+	return h.targetedFanouts > 0 || h.mustFullResync(lastSeq) || h.presenceResyncPending(userID)
 }
 
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's
