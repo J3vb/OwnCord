@@ -59,6 +59,40 @@ func (s *MessageService) GetMessages(ctx context.Context, userID, channelID, bef
 	return msgs, hasMore, nil
 }
 
+// GetMessagesAfter retrieves the page of messages newer than `after`, ordered
+// oldest-first, with the same read gate as GetMessages. It is the downward
+// continuation of a window the client reached through GetMessagesAround:
+// hasMore is false once the page runs into the newest message, which is the
+// client's cue to re-attach to the live tail.
+func (s *MessageService) GetMessagesAfter(ctx context.Context, userID, channelID, after int64, limit int) ([]db.MessageAPIResponse, bool, error) {
+	if after <= 0 {
+		return nil, false, fmt.Errorf("%w: after must be positive", ErrBadRequest)
+	}
+	if err := s.requireChannelRead(ctx, userID, channelID); err != nil {
+		return nil, false, err
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Fetch one extra to detect has_more.
+	msgs, err := s.st.GetMessagesAfterForAPI(ctx, channelID, after, limit+1, userID)
+	if err != nil {
+		slog.Error("MessageService.GetMessagesAfter", "err", err, "channel_id", channelID)
+		return nil, false, fmt.Errorf("%w: failed to fetch messages", ErrInternal)
+	}
+
+	hasMore := len(msgs) > limit
+	if hasMore {
+		msgs = msgs[:limit]
+	}
+	return msgs, hasMore, nil
+}
+
 // requireSearchChannelAccess is SearchMessages' single-channel branch gate.
 // Inlined rather than routed through requireChannelRead — search has always
 // had its own bespoke access checks and error codes (a DM non-participant is

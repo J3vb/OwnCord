@@ -41,6 +41,8 @@ import {
   reduceClearChannelContent,
   reduceReattachToPresent,
   reducePrependMessages,
+  reduceAppendNewerMessages,
+  reduceMergeTailMessages,
 } from "../features/messaging/historyWindows";
 import {
   reduceEditMessage,
@@ -307,6 +309,24 @@ export function prependMessages(
   hasMore: boolean,
 ): void {
   messagesStore.setState((prev) => reducePrependMessages(prev, channelId, messages, hasMore));
+}
+
+/** Append the next newer page below a detached window. The server returns an
+ *  `after` page oldest-first (render order). A page with `hasMore` false
+ *  reaches the newest message and reattaches the window to the live tail; a
+ *  window that is not detached ignores the page. */
+export function appendNewerMessages(
+  channelId: number,
+  messages: readonly MessageResponse[],
+  hasMore: boolean,
+): void {
+  messagesStore.setState((prev) => reduceAppendNewerMessages(prev, channelId, messages, hasMore));
+}
+
+/** Union an oldest-first page into an attached window (the follow-up after a
+ *  re-attach, which recovers a live message refused while detached). */
+export function mergeTailMessages(channelId: number, messages: readonly MessageResponse[]): void {
+  messagesStore.setState((prev) => reduceMergeTailMessages(prev, channelId, messages));
 }
 
 /** Update message content and editedAt from a chat_edited WS event. */

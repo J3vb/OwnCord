@@ -1157,11 +1157,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getMessages(
       channelId: number,
-      options?: { before?: number; limit?: number },
+      options?: { before?: number; after?: number; limit?: number },
       signal?: AbortSignal,
     ): Promise<MessagesResponse> {
       const params = new URLSearchParams();
       if (options?.before !== undefined) params.set("before", String(options.before));
+      // `after` pages the other way (oldest-first) and the server rejects it
+      // combined with `before`.
+      if (options?.after !== undefined) params.set("after", String(options.after));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       const qs = params.toString();
       return channelContent(channelId, () =>

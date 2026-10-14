@@ -7,6 +7,9 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 const {
   mockSetMessages,
   mockPrependMessages,
+  mockAppendNewerMessages,
+  mockMergeTailMessages,
+  mockInvalidateChannelMessageWindow,
   mockIsChannelLoaded,
   mockGetChannelMessages,
   mockSetChannelLoading,
@@ -15,6 +18,9 @@ const {
 } = vi.hoisted(() => ({
   mockSetMessages: vi.fn(),
   mockPrependMessages: vi.fn(),
+  mockAppendNewerMessages: vi.fn(),
+  mockMergeTailMessages: vi.fn(),
+  mockInvalidateChannelMessageWindow: vi.fn(),
   mockIsChannelLoaded: vi.fn((): boolean => false),
   mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string }> => []),
   mockSetChannelLoading: vi.fn(),
@@ -34,6 +40,9 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@stores/messages.store", () => ({
   setMessages: mockSetMessages,
   prependMessages: mockPrependMessages,
+  appendNewerMessages: mockAppendNewerMessages,
+  mergeTailMessages: mockMergeTailMessages,
+  invalidateChannelMessageWindow: mockInvalidateChannelMessageWindow,
   isChannelLoaded: mockIsChannelLoaded,
   getChannelMessages: mockGetChannelMessages,
   setChannelLoading: mockSetChannelLoading,
@@ -208,6 +217,158 @@ describe("createMessageController", () => {
       // fetch must not retroactively flag the channel load-errored or pop an
       // error toast on top of a visibly-working jump.
       expect(mockSetChannelLoadError).not.toHaveBeenCalled();
+      expect(showError).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("loadNewerMessages", () => {
+    it("fetches the page after the newest delivered row and appends it", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([
+        { id: 10, content: "a" },
+        { id: 20, content: "b" },
+        { id: 0, content: "pending optimistic row" },
+      ]);
+      const page = [{ id: 21, content: "c" }];
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({ messages: page, has_more: true }),
+      });
+      const ctrl = createMessageController({ api, showError });
+      const { signal } = makeAbort();
+
+      await ctrl.loadNewerMessages(42, signal);
+
+      expect(api.getMessages).toHaveBeenCalledWith(42, { after: 20, limit: 50 }, signal);
+      expect(mockAppendNewerMessages).toHaveBeenCalledWith(42, page, true);
+    });
+
+    it("passes has_more false through so the store can reattach", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({ messages: [], has_more: false }),
+      });
+      const ctrl = createMessageController({ api, showError });
+      const { signal } = makeAbort();
+
+      await ctrl.loadNewerMessages(42, signal);
+
+      expect(mockAppendNewerMessages).toHaveBeenCalledWith(42, [], false);
+      // One follow-up tail fetch after the re-attach, from the start id when
+      // the final page was empty.
+      expect(api.getMessages).toHaveBeenLastCalledWith(42, { after: 20, limit: 50 }, signal);
+      expect(mockMergeTailMessages).toHaveBeenCalledWith(42, []);
+    });
+
+    it("falls back to a tail reload when the follow-up has more", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      const getMessages = vi
+        .fn()
+        .mockResolvedValueOnce({ messages: [{ id: 21 }], has_more: false })
+        .mockResolvedValue({ messages: [{ id: 22 }], has_more: true });
+      const ctrl = createMessageController({ api: makeApi({ getMessages }), showError });
+
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+
+      expect(getMessages).toHaveBeenNthCalledWith(
+        2,
+        42,
+        { after: 21, limit: 50 },
+        expect.anything(),
+      );
+      expect(mockMergeTailMessages).not.toHaveBeenCalled();
+      expect(mockInvalidateChannelMessageWindow).toHaveBeenCalledWith(42);
+    });
+
+    it("skips the follow-up when more pages remain", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: true }),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+
+      expect(api.getMessages).toHaveBeenCalledTimes(1);
+      expect(mockMergeTailMessages).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for an attached window or an empty one", async () => {
+      const api = makeApi();
+      const ctrl = createMessageController({ api, showError });
+
+      mockIsWindowDetached.mockReturnValue(false);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([]);
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+
+      expect(api.getMessages).not.toHaveBeenCalled();
+    });
+
+    it("drops the page when the window was replaced while the fetch was in flight", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      // Before the fetch the window ends at 20; by the time it resolves a new
+      // jump has swapped in a window ending at 900.
+      mockGetChannelMessages
+        .mockReturnValueOnce([{ id: 20 }])
+        .mockReturnValueOnce([{ id: 880 }, { id: 900 }]);
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: true }),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+
+      expect(mockAppendNewerMessages).not.toHaveBeenCalled();
+    });
+
+    it("drops the page when the window reattached while the fetch was in flight", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      mockIsWindowDetached.mockReturnValueOnce(true).mockReturnValueOnce(false);
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: false }),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+
+      expect(mockAppendNewerMessages).not.toHaveBeenCalled();
+    });
+
+    it("drops the page after abort (channel switch)", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      const { signal, abort } = makeAbort();
+      const api = makeApi({
+        getMessages: vi.fn().mockImplementation(async () => {
+          abort();
+          return { messages: [{ id: 21 }], has_more: true };
+        }),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadNewerMessages(42, signal);
+
+      expect(mockAppendNewerMessages).not.toHaveBeenCalled();
+    });
+
+    it("shows an error on failure, but not when aborted", async () => {
+      mockIsWindowDetached.mockReturnValue(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
+      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("fail")) });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadNewerMessages(42, makeAbort().signal);
+      expect(showError).toHaveBeenCalledWith("Failed to load newer messages");
+
+      showError.mockClear();
+      const { signal, abort } = makeAbort();
+      abort();
+      await ctrl.loadNewerMessages(42, signal);
       expect(showError).not.toHaveBeenCalled();
     });
   });

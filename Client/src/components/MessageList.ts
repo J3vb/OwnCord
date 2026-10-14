@@ -72,6 +72,14 @@ export interface MessageListOptions {
   /** May return a promise (e.g. the underlying fetch); MessageList clears its
    *  loadingOlder latch once it settles, success or failure. */
   readonly onScrollTop: () => void | Promise<void>;
+  /**
+   * Load the page of messages below a window detached from the live tail
+   * (after a jump to an old message). Fired near the bottom of a detached
+   * window only; may return a promise, which clears the in-flight latch once
+   * it settles. The page that reaches the newest message reattaches the
+   * window through the store. No paging below the window without it.
+   */
+  readonly onScrollBottom?: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
   readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
@@ -104,6 +112,9 @@ const SCROLL_TOP_THRESHOLD = 50;
 /** Older history starts loading this many viewport heights before the top
  *  (DP-46), so the next page is usually in before the reader gets there. */
 const SCROLL_TOP_VIEWPORTS = 2;
+/** Newer history (below a detached window) starts loading this many viewport
+ *  heights before the bottom, mirroring SCROLL_TOP_VIEWPORTS. */
+const SCROLL_BOTTOM_VIEWPORTS = 2;
 /** After a failed older-page fetch, scrolling inside the trigger zone waits
  *  this long before retrying, unless the reader leaves the zone first. */
 const OLDER_RETRY_COOLDOWN_MS = 5000;
@@ -507,10 +518,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Scroll helpers
   // ---------------------------------------------------------------------------
 
-  function isNearBottom(): boolean {
+  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD): boolean {
     if (root === null) return true;
     const { scrollTop, scrollHeight, clientHeight } = root;
-    return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
+    return scrollHeight - scrollTop - clientHeight < threshold;
   }
 
   /** The true bottom (1 px tolerates fractional scrollTop on HiDPI), unlike the 100 px isNearBottom. */
@@ -1043,7 +1054,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
-    const atBottom = isNearBottom();
+    // A newer history page landing below the reader is not a live arrival:
+    // the reader keeps their place instead of being carried to the new bottom.
+    const atBottom = isNearBottom() && !loadingNewer;
     // Record the rendered rows' heights under their current keys before the
     // items change, and the topmost visible message row that stays as the
     // anchor: a divider is no anchor, since the NEW line can move.
@@ -1186,7 +1199,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAllRunning = true;
     try {
       log.debug("renderAll START", { count: renderAllCount });
-      wasAtBottom = isNearBottom();
+      wasAtBottom = isNearBottom() && !loadingNewer;
 
       // When scrolled away from the bottom, remember which message is
       // topmost in the viewport *before* rebuildItems() swaps virtualItems
@@ -1284,6 +1297,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let loadingOlder = false;
   let olderRetryAt = 0;
+  // In-flight latch for the page below a detached window: rapid scrolling
+  // fires one fetch, not one per scroll event. Also marks the store change
+  // that lands while it is set as a history page, not a live arrival.
+  let loadingNewer = false;
+  let newerRetryAt = 0;
   /** Spinner row at the top of the history while an older page is in flight.
    *  Absolutely positioned in the scroller, so showing or hiding it never
    *  moves the rows (and never fires a scroll that could refetch). */
@@ -1313,6 +1331,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     },
   );
+
+  /** The newest delivered row's id (optimistic rows carry id 0). */
+  function lastSentId(): number {
+    return getChannelMessages(options.channelId).findLast((m) => m.id > 0)?.id ?? 0;
+  }
 
   let scrollRafId = 0;
   let resizeRafId = 0;
@@ -1346,6 +1369,30 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
           olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
         }
+      });
+    }
+
+    // A detached window pages DOWN toward the present as the reader nears its
+    // bottom; the page that reaches the newest message reattaches it.
+    const nearBottomZone = isNearBottom(
+      Math.max(SCROLL_BOTTOM_THRESHOLD, root.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+    );
+    if (!nearBottomZone) newerRetryAt = 0;
+    if (
+      nearBottomZone &&
+      options.onScrollBottom !== undefined &&
+      !loadingNewer &&
+      performance.now() >= newerRetryAt &&
+      isWindowDetached(options.channelId)
+    ) {
+      loadingNewer = true;
+      const newestAtFire = lastSentId();
+      void Promise.resolve(options.onScrollBottom()).finally(() => {
+        loadingNewer = false;
+        // Nothing landed (failed, or the window was replaced): hold off so
+        // continued scrolling does not send one failing request after another.
+        if (lastSentId() === newestAtFire)
+          newerRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
       });
     }
 
@@ -1596,7 +1643,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           // Only an append counts: a window swap drops the previous last row.
           const appended =
             firstLive || (prevLast > 0 && allMessages.some((m) => m.id === prevLast));
-          if (!wasBottom && appended) {
+          if (!wasBottom && appended && !loadingNewer) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
@@ -1604,7 +1651,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           }
           updateScrollToBottomBtn();
           settleUnreadNav();
-          if (wasBottom && appended && allMessages.some((m) => m.id > prevLast)) {
+          if (wasBottom && appended && !loadingNewer && allMessages.some((m) => m.id > prevLast)) {
             markLiveArrivalSeen();
           }
         },

@@ -81,6 +81,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Messages & files**
+
+- After jumping to an old message (a search hit, a pin or a link), scrolling down now loads the messages that follow and, on reaching the newest, returns you to the live channel. Before, the list stopped at the bottom of what the jump had loaded until you chose Jump to present.
+
 **Desktop UI**
 
 - A mention in a channel you are not looking at now shows a desktop notification ("You were mentioned in #channel"); clicking it opens the channel.

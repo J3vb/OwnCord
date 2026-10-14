@@ -248,5 +248,6 @@ export const shellText = defineCatalog("shell", {
 
   "messages.loadHistoryFailed": "Failed to load message history",
   "messages.loadOlderFailed": "Failed to load older messages",
+  "messages.loadNewerFailed": "Failed to load newer messages",
   "messages.reactionSlowDown": "Slow down! Please wait before reacting again.",
 });
