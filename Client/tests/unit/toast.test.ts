@@ -299,6 +299,16 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
 
+  it("returns a function that removes the toast", () => {
+    const remove = toast.show("Share stopped", "warning", Infinity, {
+      label: "Share again",
+      run: vi.fn(),
+    });
+    remove();
+    vi.advanceTimersByTime(400);
+    expect(container.querySelectorAll(".toast").length).toBe(0);
+  });
+
   it("shows no action button on a plain toast", () => {
     toast.show("Hello");
     expect(container.querySelector(".toast-action")).toBeNull();
