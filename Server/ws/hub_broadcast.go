@@ -329,7 +329,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 
-	if h.dropsForPurgedUser(msg) || h.dropsForPurgedMessage(msg) {
+	if h.dropsForTombstones(msg) {
 		return
 	}
 	seq := h.nextSeq()
@@ -396,7 +396,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// A frame naming an erased user, produced by a request that read
 		// its rows before the erasure and reached the hub after the purge,
 		// must not be sequenced: nothing it describes exists any more.
-		if h.dropsForPurgedUser(bm.msg) || h.dropsForPurgedMessage(bm.msg) {
+		if h.dropsForTombstones(bm.msg) {
 			return 0, 0, false
 		}
 

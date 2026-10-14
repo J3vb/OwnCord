@@ -22,6 +22,7 @@ var staleClientTimeout = 90 * time.Second
 func (h *Hub) onStaleTick() {
 	h.sweepStaleClients()
 	h.refreshTelemetryGauges()
+	h.expireReplayTombstones()
 }
 
 // refreshTelemetryGauges recomputes the connection and voice gauges from live
