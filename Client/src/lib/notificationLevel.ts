@@ -3,7 +3,10 @@
  *
  *   - `all`      every message in a channel you are not looking at;
  *   - `mentions` only messages that name you, plus direct messages;
- *   - `nothing`  no popup, no chime, no taskbar flash at all.
+ *   - `nothing`  no popup, no chime, no taskbar flash for the server's
+ *                channels. A direct message is never silenced by the level:
+ *                it is a person writing to you, not server chatter (Discord
+ *                does the same).
  *
  * The default is `mentions` (owner question Q8: "Mentions-only for new
  * installs"), because "every message pings you" is the pain this level exists
@@ -20,8 +23,9 @@
  * This module only decides *whether* a level permits a notification; the
  * per-channel mute (`channel-mutes.ts`) and the focused-window check stay
  * where they are. A level of `nothing` is the one case that also silences a
- * direct mention — the mute rule deliberately never does — so the level gate
- * is applied before the mute gate in `notifications.ts`.
+ * channel mention — the mute rule deliberately never does — so the level gate
+ * is applied before the mute gate in `notifications.ts`. It never silences a
+ * DM; muting that DM still does, through the mute gate.
  */
 
 import { loadPref, savePref } from "./preferences";
@@ -125,15 +129,16 @@ export interface NotificationSubject {
 /**
  * Whether `level` permits a notification for `subject`.
  *
- * A direct message is treated as addressed to you, so `mentions` lets it
- * through — a DM is a message to you, not channel chatter. `nothing` admits
- * nothing, the one case that overrides the mute module's "a mention is never
- * silenced" rule; that is what choosing it means.
+ * A direct message is addressed to you, so every level lets it through — a DM
+ * is a message to you, not server chatter. `nothing` admits nothing else, the
+ * one case that overrides the mute module's "a mention is never silenced"
+ * rule for a channel; that is what choosing it means.
  */
 export function shouldNotifyForLevel(
   level: NotificationLevel,
   subject: NotificationSubject,
 ): boolean {
+  if (subject.isDm) return true;
   switch (level) {
     case "nothing":
       return false;

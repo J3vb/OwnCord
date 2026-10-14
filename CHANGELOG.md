@@ -64,6 +64,11 @@ and only when it changes something a contributor or fork holder must do
 
 - A server update shows one restart countdown instead of two.
 
+**Desktop UI**
+
+- Setting a server's notification level to Nothing no longer silences direct messages: they still show a notification and count in the taskbar badge. Muting a direct message still silences it.
+- The server header's Mark All as Read button is now Mark Server as Read: it marks only the server's channels read and leaves your direct messages alone.
+
 **Voice**
 
 - Mute and Deafen now use the same keys inside the app as the global shortcuts: Ctrl+Shift+M and Ctrl+Shift+D by default, or whatever you set in Settings → Keybinds. Before, the app used Ctrl+M / Ctrl+D while focused, so a rebind changed only the unfocused keys. Ctrl+M and Ctrl+D still work for now. A focused press toggles once, never twice.

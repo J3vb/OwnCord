@@ -140,6 +140,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // a global preference with a per-server override. This is the first gate
   // because `nothing` must silence the popup, the chime AND the taskbar flash —
   // unlike a channel mute, which deliberately lets a direct mention through.
+  // A DM passes every level; its own mute and Do Not Disturb still apply.
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
   if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm })) return;
 

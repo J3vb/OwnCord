@@ -99,8 +99,15 @@ describe("notification level storage", () => {
 });
 
 describe("shouldNotifyForLevel", () => {
-  it("never notifies at Nothing, even for a mention", () => {
-    expect(shouldNotifyForLevel("nothing", { mentioned: true, isDm: true })).toBe(false);
+  it("never notifies for a channel at Nothing, even for a mention", () => {
+    expect(shouldNotifyForLevel("nothing", { mentioned: true, isDm: false })).toBe(false);
+    expect(shouldNotifyForLevel("nothing", { mentioned: false, isDm: false })).toBe(false);
+  });
+
+  it("never silences a direct message, at any level", () => {
+    for (const level of NOTIFICATION_LEVELS) {
+      expect(shouldNotifyForLevel(level, { mentioned: false, isDm: true })).toBe(true);
+    }
   });
 
   it("notifies for every message at All", () => {

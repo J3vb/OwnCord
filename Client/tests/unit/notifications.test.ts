@@ -1406,6 +1406,90 @@ describe("notifyIncomingMessage", () => {
       expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
+    const bobDm = (): void =>
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+    it("Nothing does not silence a DM; a server channel message stays silent", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      bobDm();
+
+      notifyIncomingMessage(makePayload({ content: "plain channel chatter" }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    it("Nothing: a muted DM stays silent (the mute still applies)", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      bobDm();
+      setChannelMutesHost("a.example");
+      muteChannel(55);
+
+      try {
+        notifyIncomingMessage(
+          makePayload({
+            channel_id: 55,
+            content: "hey",
+            user: { id: 2, username: "bob", avatar: null },
+          }),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(sendNotification).not.toHaveBeenCalled();
+      } finally {
+        unmuteChannel(55);
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("Nothing + Do Not Disturb: a DM shows no popup and plays no chime", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+      testPrefs.set("userStatus", "dnd");
+      bobDm();
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
     it("Mentions only suppresses a plain message but not one that names you", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
