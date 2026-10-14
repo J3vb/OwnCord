@@ -314,6 +314,7 @@ export class LiveKitSession {
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
     microphonePublishingAllowed: (room) => this._media.microphonePublishingAllowed(room),
     applyMicMuteState: (muted) => this.applyMicMuteState(muted),
+    dropDeniedVideo: (room) => this._media.dropDeniedVideo(room),
   });
   /** Mute/deafen policy, mic publishing, camera/screenshare/device/volume control. */
   private _media = new MediaControl({
@@ -902,6 +903,11 @@ export class LiveKitSession {
     return this._media.disableScreenshare();
   }
 
+  /** `ready`'s camera/share flags for this user, checked against what we send. */
+  reconcileVideoFlags(camera: boolean, screenshare: boolean): void {
+    this._media.reconcileVideoFlags(camera, screenshare);
+  }
+
   changeScreenshareSource(): Promise<void> {
     return this._media.changeScreenshareSource();
   }
@@ -1119,6 +1125,7 @@ export const enableCamera = session.enableCamera.bind(session);
 export const disableCamera = session.disableCamera.bind(session);
 export const enableScreenshare = session.enableScreenshare.bind(session);
 export const disableScreenshare = session.disableScreenshare.bind(session);
+export const reconcileVideoFlags = session.reconcileVideoFlags.bind(session);
 export const changeScreenshareSource = session.changeScreenshareSource.bind(session);
 export const setScreenshareQuality = session.setScreenshareQuality.bind(session);
 export const getScreenshareQuality = session.getScreenshareQuality.bind(session);

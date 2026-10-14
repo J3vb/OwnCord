@@ -27,6 +27,7 @@ vi.mock("../../lib/livekitSession", () => ({
   isVoiceSessionActive: vi.fn(() => false),
   isAutoReconnecting: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
+  reconcileVideoFlags: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import { setMuted, setDeafened, handleParticipantLeft } from "../../lib/livekitSession";

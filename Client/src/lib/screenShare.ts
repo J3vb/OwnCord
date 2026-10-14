@@ -22,7 +22,12 @@ import {
   type TrackPublishOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { bumpLocalShareRev, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
+import {
+  bumpLocalShareRev,
+  setLocalCamera,
+  setLocalScreenshare,
+  voiceStore,
+} from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
@@ -296,6 +301,8 @@ export interface CameraTrackState extends GenerationGuarded {
   /** The live camera's unplug handler, re-armed when a device switch
    *  restarts its capture. */
   onCameraEnded?: () => void;
+  /** The track the server was last told is on. */
+  announced?: LocalVideoTrack | NativeCameraTrack;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -470,6 +477,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     }
     const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "camera");
+    state.announced = videoTrack;
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", {
       quality,
@@ -542,6 +550,8 @@ export interface ScreenTrackState extends GenerationGuarded {
   fps?: number;
   /** A Change source or Quality change is running. */
   changing?: boolean;
+  /** The share's video track the server was last told is on. */
+  announced?: LocalTrack;
 }
 
 /** Stop sharing when the OS ends the capture (its own Stop sharing bar), as
@@ -728,6 +738,7 @@ export async function enableScreenshare(
     }
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
+    state.announced = videoTrack;
     // The Linux native capture changes source through its own picker only.
     if (!isLinuxDesktop()) {
       state.quality = quality;
@@ -802,6 +813,42 @@ export async function disableScreenshare(
       if (ws !== null) ws.send({ type: "voice_screenshare", payload: { enabled: false } });
       log.info("Screenshare disabled");
     }
+  }
+}
+
+/** Bring the server's camera and share flags from `ready` back in line with
+ *  what this session sends. A live track the server lost track of (its
+ *  announce went out while the socket was down) is announced again, and the
+ *  server may still refuse it, which rolls it back. A flag still on for a
+ *  track already stopped is turned off. A toggle in flight sends its own. */
+export function reconcileVideoFlags(
+  camera: CameraTrackState,
+  screen: ScreenTrackState,
+  deps: VideoTrackDeps,
+  server: { readonly camera: boolean; readonly screenshare: boolean },
+): void {
+  const ws = deps.getWs();
+  if (ws === null) return;
+  const { localCamera, localScreenshare } = voiceStore.getState();
+  const cameraLive =
+    camera.manualCameraTrack !== null && camera.announced === camera.manualCameraTrack;
+  if (cameraLive && !server.camera) {
+    registerPendingVideoEnable(
+      ws.send({ type: "voice_camera", payload: { enabled: true } }),
+      "camera",
+    );
+  } else if (!localCamera && server.camera) {
+    ws.send({ type: "voice_camera", payload: { enabled: false } });
+  }
+  const shareLive =
+    screen.announced !== undefined && screen.manualScreenTracks.includes(screen.announced);
+  if (shareLive && !server.screenshare) {
+    registerPendingVideoEnable(
+      ws.send({ type: "voice_screenshare", payload: { enabled: true } }),
+      "screen",
+    );
+  } else if (!localScreenshare && server.screenshare) {
+    ws.send({ type: "voice_screenshare", payload: { enabled: false } });
   }
 }
 
