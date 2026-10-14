@@ -93,6 +93,7 @@ export const voiceText = defineCatalog("voice", {
   "grid.showStrip": "Show participant strip",
   "tile.stopWatching": "Stop watching",
   "tile.watchStream": "Watch stream",
+  "tile.streamEnded": "{name} ended the stream",
   "tile.showPreview": "Show preview",
   "tile.streamVolume": "{name} stream volume",
   "tile.voiceVolume": "{name} voice volume",

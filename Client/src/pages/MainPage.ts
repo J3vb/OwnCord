@@ -1466,6 +1466,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
       getLocalShareFps: () => getLocalScreenshareFps(),
+      onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)

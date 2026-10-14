@@ -95,6 +95,8 @@ export interface VideoGridCallbacks {
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
+  /** A tile left later than the removeStream call that ended it. */
+  readonly onStreamRemoved?: () => void;
   /** Back to the full stream view of `tileId`, from its mini-player. */
   readonly onReturnToStream?: (tileId: number) => void;
   /** Focus a control on the main page, for focus that was in a mini-player
@@ -329,7 +331,15 @@ interface CellEntry {
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
   view?: string;
+  /** Playing until the stream stopped arriving without the viewer's Stop
+   *  watching: an unpublish unsubscribes first, then removes the tile. */
+  lost?: boolean;
+  /** The stream ended: the tile shows who ended it until this timer drops it. */
+  ending?: ReturnType<typeof setTimeout>;
 }
+
+/** How long a watched stream's tile says it ended before it goes. */
+const ENDED_COVER_MS = 3000;
 
 /** A remote stream playing in its tile (watched, not in a pop-out window). */
 function isPlayingHere(e: CellEntry | undefined): boolean {
@@ -1091,7 +1101,10 @@ export function createVideoGrid(): VideoGridComponent {
   function syncStatsPolling(): void {
     const target = fullscreenTile ?? theatreTile ?? focusedTileId;
     const entry = target === null ? undefined : cells.get(target);
-    const wanted = entry?.config?.isScreenshare === true && !entry.config.isSelf ? target : null;
+    const wanted =
+      entry?.config?.isScreenshare === true && !entry.config.isSelf && entry.ending === undefined
+        ? target
+        : null;
     if (wanted === statsTile) return;
     if (statsTimer !== null) {
       clearInterval(statsTimer);
@@ -1386,6 +1399,7 @@ export function createVideoGrid(): VideoGridComponent {
       entry.popout?.close();
       entry.mini?.close();
     }
+    if (!stopped) entry.lost = false;
     cell.classList.toggle("video-cell--stopped", stopped);
     syncViews();
     entry.video.hidden = stopped;
@@ -1508,6 +1522,8 @@ export function createVideoGrid(): VideoGridComponent {
   ): void {
     if (root === null) return;
 
+    // A tile still saying its stream ended makes way for the new stream.
+    if (cells.get(userId)?.ending !== undefined) dropTile(userId);
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
     if (existing !== undefined && stream === null) {
@@ -1516,11 +1532,15 @@ export function createVideoGrid(): VideoGridComponent {
       existing.trackCleanup = undefined;
       existing.video.srcObject = null;
       setTrackMuted(existing, false);
-      if (!existing.el.classList.contains("video-cell--stopped")) setStopped(userId, true, false);
+      if (!existing.el.classList.contains("video-cell--stopped")) {
+        existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
+        setStopped(userId, true, false);
+      }
       applyNames(existing, username, config?.name ?? username);
       return;
     }
     if (existing !== undefined && stream !== null) {
+      existing.lost = false;
       // Received only while watched: a stream on a tile showing Watch plays.
       if (
         existing.config?.isSelf !== true &&
@@ -1816,10 +1836,42 @@ export function createVideoGrid(): VideoGridComponent {
     applyNames(entry, username, name ?? username);
   }
 
+  /** A watched remote screen share that ends says so for a few seconds
+   *  before its tile goes, instead of vanishing. */
   function removeStream(userId: number): void {
     pendingWatch.delete(userId);
     const entry = cells.get(userId);
+    if (entry === undefined || entry.ending !== undefined) return;
+    const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
+    if (entry.config?.isScreenshare !== true || !watched) {
+      dropTile(userId);
+      return;
+    }
+    // The stream and its watch are gone now; only the tile lingers.
+    forgetWatch(userId);
+    entry.listeners.destroy();
+    entry.trackCleanup?.();
+    entry.trackCleanup = undefined;
+    entry.video.srcObject = null;
+    // Its controls are dead now: nothing under the cover can be reached.
+    for (const child of entry.el.children) child.toggleAttribute("inert", true);
+    const cover = createElement(
+      "div",
+      { class: "video-stopped video-ended", role: "status" },
+      voiceText("tile.streamEnded", { name: entry.name }),
+    );
+    entry.el.appendChild(cover);
+    entry.ending = setTimeout(() => {
+      dropTile(userId);
+      callbacks.onStreamRemoved?.();
+    }, ENDED_COVER_MS);
+    syncStatsPolling();
+  }
+
+  function dropTile(userId: number): void {
+    const entry = cells.get(userId);
     if (entry === undefined) return;
+    clearTimeout(entry.ending);
 
     // Capture the focused tile control before detaching, so a user tabbing
     // through the overlay keeps a focus target when this tile leaves (Q1).
@@ -1828,7 +1880,8 @@ export function createVideoGrid(): VideoGridComponent {
     entry.popout?.close();
     entry.mini?.close();
     // The stream is gone: so is the watch (a new one starts from the default).
-    if (entry.config !== undefined && !entry.config.isSelf) {
+    // An ended tile forgot it already, and a new stream may be watched now.
+    if (entry.ending === undefined && entry.config !== undefined && !entry.config.isSelf) {
       forgetWatch(userId);
     }
     if (entry.trackCleanup) {
@@ -1862,14 +1915,14 @@ export function createVideoGrid(): VideoGridComponent {
     restoreFocusedControl(savedFocus);
   }
 
-  /** Remove every tile (trackCleanup + srcObject=null via removeStream).
+  /** Remove every tile at once (trackCleanup + srcObject=null via dropTile).
    *  Deleting the current key mid-iteration is well-defined for Map — no
    *  entries are skipped — so this needs no snapshot copy of the keys. */
   function clearStreams(): void {
     for (const id of pendingWatch) forgetWatch(id);
     pendingWatch.clear();
     for (const userId of cells.keys()) {
-      removeStream(userId);
+      dropTile(userId);
     }
   }
 
@@ -2016,6 +2069,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     for (const [, entry] of cells) {
+      clearTimeout(entry.ending);
       entry.popout?.close();
       entry.mini?.close();
       if (entry.trackCleanup) {

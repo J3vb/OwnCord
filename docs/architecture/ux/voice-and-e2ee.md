@@ -160,7 +160,10 @@ is subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
 out; with the setting off, a camera is opt-in the same way. Stop watching
 unsubscribes either and returns the card; a stopped camera stays stopped,
 across its owner turning it off and on and across a channel switch, until you
-leave voice, and a stream that ends is forgotten rather than stopped. A watch
+leave voice, and a stream that ends is forgotten rather than stopped. A
+screen share you were watching that ends says "Otto ended the stream" in its
+tile for 3 s before the tile goes; the tile's controls are dead meanwhile, and
+leaving voice or the same person sharing again replaces it at once. A watch
 survives a channel switch and the app's own reconnect or rejoin, but not
 livekit-client's full reconnect, and ends when you leave voice. The setting is
 read as each camera is published (and on a reconnect's sweep), so turning it
@@ -445,8 +448,10 @@ those sounds fall back to the system default — see
 [known limitations](../../known-limitations.md#client).
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
-leave and move; on another member joining or leaving the channel you are in; and
-on your mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+leave and move; on another member joining or leaving the channel you are in;
+on a screen share starting or ending in that channel, your own included (keyed
+off the server's roster, so a cancelled picker plays nothing); and on your
+mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
 Notifications, on by default) gates them, and DND silences them like the message
 chime. Two edges stay silent by design: push-to-talk, and the wholesale roster
 replacement (`setVoiceStates`) behind the initial `ready` and a reconnect
