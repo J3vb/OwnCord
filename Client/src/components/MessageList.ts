@@ -1649,6 +1649,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
             }
           }
+          // The page kept the reader in place: the live-tail flag now describes
+          // that spot, not the one before the page landed.
+          if (loadingNewer) setLiveTailInView(options.channelId, isNearBottom());
           updateScrollToBottomBtn();
           settleUnreadNav();
           if (wasBottom && appended && !loadingNewer && allMessages.some((m) => m.id > prevLast)) {

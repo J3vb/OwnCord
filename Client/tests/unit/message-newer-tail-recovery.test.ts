@@ -5,6 +5,10 @@
  * dropping a live row that landed in between.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+vi.mock("@lib/logger", () => ({
+  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
+
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import {
   messagesStore,
@@ -12,6 +16,7 @@ import {
   addMessage,
   getChannelMessages,
   isWindowDetached,
+  isChannelLoaded,
 } from "../../src/stores/messages.store";
 import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
 
@@ -105,5 +110,51 @@ describe("loadNewerMessages: recovering a live message refused while detached", 
     await run;
 
     expect(ids()).toEqual([10, 11, 12, 13, 14, 15]);
+  });
+
+  it("resolves once the page is applied, without waiting for the recovery request", async () => {
+    const followUp = deferred<{ messages: MessageResponse[]; has_more: boolean }>();
+    const getMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [response(13)], has_more: false })
+      .mockReturnValueOnce(followUp.promise);
+
+    await setup(getMessages).loadNewerMessages(1, new AbortController().signal);
+
+    expect(ids()).toEqual([10, 11, 12, 13]);
+    expect(getMessages).toHaveBeenCalledTimes(2); // recovery is still pending
+    followUp.resolve({ messages: [], has_more: false });
+  });
+
+  it("invalidates the window when the recovery request fails, so the next visit refetches", async () => {
+    const getMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [response(13)], has_more: false })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({ messages: [response(14), response(13)], has_more: false });
+    const ctrl = setup(getMessages);
+
+    await ctrl.loadNewerMessages(1, new AbortController().signal);
+    await vi.waitFor(() => expect(isChannelLoaded(1)).toBe(false));
+
+    await ctrl.loadMessages(1, new AbortController().signal);
+    expect(getMessages).toHaveBeenCalledTimes(3);
+    expect(ids()).toContain(14);
+  });
+
+  it("invalidates the window when the recovery is aborted by a channel switch", async () => {
+    const abort = new AbortController();
+    const followUp = deferred<{ messages: MessageResponse[]; has_more: boolean }>();
+    const getMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [response(13)], has_more: false })
+      .mockReturnValueOnce(followUp.promise);
+
+    await setup(getMessages).loadNewerMessages(1, abort.signal);
+    abort.abort();
+    followUp.resolve({ messages: [response(14)], has_more: false });
+
+    await vi.waitFor(() => expect(isChannelLoaded(1)).toBe(false));
+    expect(ids()).toEqual([10, 11, 12, 13]);
   });
 });

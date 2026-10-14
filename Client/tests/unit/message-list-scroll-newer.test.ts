@@ -17,8 +17,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
+import { isChannelAway } from "@lib/read-state";
 import {
   messagesStore,
+  addMessage,
   setAroundMessages,
   appendNewerMessages,
   isWindowDetached,
@@ -29,8 +31,8 @@ import { setChannels, setActiveChannel } from "@stores/channels.store";
 import type { MessageResponse } from "@lib/types";
 
 const CHANNEL_ID = 1;
-const SCROLL_HEIGHT = 100_000;
-const NEAR_BOTTOM = SCROLL_HEIGHT - 50;
+let scrollHeight = 100_000;
+const NEAR_BOTTOM = 100_000 - 50;
 
 function resetStores(): void {
   messagesStore.setState(() => ({
@@ -80,6 +82,7 @@ describe("MessageList: paging down from a detached window", () => {
 
   beforeEach(() => {
     resetStores();
+    scrollHeight = 100_000;
     container = document.createElement("div");
     document.body.appendChild(container);
     onScrollBottom = vi.fn<() => void | Promise<void>>();
@@ -101,7 +104,7 @@ describe("MessageList: paging down from a detached window", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get(): number {
-        return SCROLL_HEIGHT;
+        return scrollHeight;
       },
     });
   });
@@ -204,5 +207,50 @@ describe("MessageList: paging down from a detached window", () => {
     expect(isWindowDetached(CHANNEL_ID)).toBe(false);
     // Not carried to the new bottom as a live arrival would be.
     expect(root.scrollTop).toBe(NEAR_BOTTOM);
+  });
+
+  /** A final page lands: the list grows below the reader and the window re-attaches. */
+  function landFinalPage(): void {
+    // Lands after the scroll handler has run, as a fetch response does.
+    onScrollBottom.mockImplementation(() =>
+      Promise.resolve().then(() => {
+        scrollHeight = 200_000; // rows below the viewport now
+        appendNewerMessages(CHANNEL_ID, window(60, 79), false);
+        messagesStore.flush();
+      }),
+    );
+  }
+
+  it("recomputes live-tail visibility after the page lands, so a message below the viewport counts as unread", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    landFinalPage();
+    mountDetached();
+
+    scrollTo(NEAR_BOTTOM); // near the bottom: tail "in view"
+    await vi.waitFor(() => expect(isWindowDetached(CHANNEL_ID)).toBe(false));
+    expect(isChannelAway(CHANNEL_ID)).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it("counts a live message from someone else as a normal arrival once the final page landed", async () => {
+    landFinalPage();
+    mountDetached();
+    scrollTo(NEAR_BOTTOM);
+    await vi.waitFor(() => expect(isWindowDetached(CHANNEL_ID)).toBe(false));
+    root.scrollTop = NEAR_BOTTOM; // the reader's spot (jsdom lays nothing out)
+
+    addMessage({
+      id: 200,
+      channel_id: CHANNEL_ID,
+      user: { id: 2, username: "bob", avatar: null },
+      content: "live",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T12:00:00Z",
+    } as Parameters<typeof addMessage>[0]);
+    messagesStore.flush();
+
+    const badge = container.querySelector('[data-testid="scroll-to-bottom-count"]')!;
+    expect(badge.textContent).toBe("1");
   });
 });

@@ -196,20 +196,30 @@ export function createMessageController(opts: MessageControllerOptions): Message
   // The window was detached while the final page was in flight, so a live
   // message committed after the server's read was refused and is in neither
   // that page nor the list. One tail fetch after the re-attach fills the hole.
+  // Runs detached from the page load (its own catch: nothing rejects). If it
+  // fails or is aborted the hole would persist on an attached, "loaded"
+  // window, so the window is invalidated and the next visit refetches the tail.
   async function recoverRefusedTail(
     channelId: number,
     after: number,
     signal: AbortSignal,
   ): Promise<void> {
-    const tail = await api.getMessages(channelId, { after, limit: PAGE_SIZE }, signal);
-    if (signal.aborted) return;
-    if (tail.has_more) {
-      // Too much arrived to patch: reload the live tail instead.
-      invalidateChannelMessageWindow(channelId);
-      await loadMessages(channelId, signal);
-      return;
+    try {
+      const tail = await api.getMessages(channelId, { after, limit: PAGE_SIZE }, signal);
+      if (!signal.aborted) {
+        if (tail.has_more) {
+          // Too much arrived to patch: reload the live tail instead.
+          invalidateChannelMessageWindow(channelId);
+          await loadMessages(channelId, signal);
+        } else {
+          mergeTailMessages(channelId, tail.messages);
+        }
+        return;
+      }
+    } catch (err) {
+      log.error("Failed to recover the tail after a newer page", { channelId, error: String(err) });
     }
-    mergeTailMessages(channelId, tail.messages);
+    invalidateChannelMessageWindow(channelId);
   }
 
   async function loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void> {
@@ -225,8 +235,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // only while the window is still detached and ends at the same row.
       if (!signal.aborted && isWindowDetached(channelId) && newestSentId(channelId) === newest) {
         appendNewerMessages(channelId, resp.messages, resp.has_more);
-        if (!resp.has_more)
-          await recoverRefusedTail(channelId, resp.messages.at(-1)?.id ?? newest, signal);
+        if (!resp.has_more) {
+          void recoverRefusedTail(channelId, resp.messages.at(-1)?.id ?? newest, signal);
+        }
       }
     } catch (err) {
       if (!signal.aborted) {
