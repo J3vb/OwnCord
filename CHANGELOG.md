@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+**Login & connection**
+
+- New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
+
 ## v2.3.0-beta.1
 
 **OwnCord 2.3 beta 1** (the fourth public beta) is the voice release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. Calls get their own view with tiles and a control bar, voice settings work the way Discord's do, streaming gets a stream card with Change source, and the app tells you what changed after an update. It also fixes a long list of voice, scrolling and server problems.
@@ -107,11 +113,6 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 ### Changed
 
-**Login & connection**
-
-- New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
-
-**Channels**
 **Voice and video**
 
 - Mute and deafen moved from the voice panel to the user panel, next to Settings. They, the keys and the tray work outside a call too, and are remembered across restarts; your next join applies them.
