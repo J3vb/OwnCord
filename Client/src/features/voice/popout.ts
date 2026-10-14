@@ -52,15 +52,88 @@ function isFullscreenKey(e: KeyboardEvent): boolean {
   return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey;
 }
 
-/** Open the pop-out window and move the video into it, or null when no
- *  window could open. */
-export function openPopout(opts: PopoutOptions): Popout | null {
+export interface PopoutWindowOptions {
+  readonly title: string;
+  /** What fills the window: moved into its document, the caller's to put
+   *  back once `onClosed` runs. */
+  readonly content: HTMLElement;
+  /** Each time `content` lands in the window's document (again on load):
+   *  listeners for that document, owned by `signal`. */
+  readonly onDraw?: (doc: Document, signal: AbortSignal) => void;
+  /** The window is gone, closed by the user (`byUser`) or by close(). Called
+   *  once. */
+  readonly onClosed: (byUser: boolean) => void;
+}
+
+export interface PopoutWindow extends Popout {
+  /** The desktop window's label, for its full-screen state. */
+  readonly label: string;
+  /** Bring the window to the front. */
+  focus(): void;
+}
+
+/** Open a pop-out window with the app's theme and styles and move `content`
+ *  into it, or null when no window could open. */
+export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null {
   const label = `owncord-popout-${++openings}`;
   const win = window.open(`about:blank#${label}`, label, "popup,width=960,height=540");
   if (win === null) return null;
 
   const listeners = new Disposable();
   const { signal } = listeners;
+  const { content } = opts;
+
+  /** Draw the page into the window's document. Again on load: a window that
+   *  loads its URL after open() returned replaces the document drawn into
+   *  (the Window, and its listeners, carry over). */
+  function draw(): void {
+    const doc = win!.document;
+    if (content.ownerDocument === doc && content.isConnected) return;
+    doc.title = opts.title;
+    // The app's theme and styles, so the window looks like the app.
+    for (const attr of document.documentElement.attributes) {
+      doc.documentElement.setAttribute(attr.name, attr.value);
+    }
+    for (const sheet of document.head.querySelectorAll("link[rel='stylesheet'], style")) {
+      const copy = doc.importNode(sheet, true);
+      if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
+      doc.head.appendChild(copy);
+    }
+    doc.body.appendChild(content);
+    opts.onDraw?.(doc, signal);
+  }
+
+  const poll = setInterval(() => {
+    if (win.closed) finish(true);
+  }, CLOSED_POLL_MS);
+
+  function finish(byUser: boolean): void {
+    if (signal.aborted) return;
+    clearInterval(poll);
+    listeners.destroy();
+    opts.onClosed(byUser);
+  }
+
+  win.addEventListener("load", draw, { signal });
+  // No orphan windows: the app page going away takes them along.
+  window.addEventListener("pagehide", () => win.close(), { signal });
+  draw();
+
+  return {
+    label,
+    focus(): void {
+      win.focus();
+    },
+    close(): void {
+      if (!win.closed) win.close();
+      finish(false);
+    },
+  };
+}
+
+/** Open the pop-out window and move the video into it, or null when no
+ *  window could open. */
+export function openPopout(opts: PopoutOptions): Popout | null {
   const root = createElement("div", { class: "video-popout" });
   const button = createElement("button", {
     type: "button",
@@ -68,6 +141,7 @@ export function openPopout(opts: PopoutOptions): Popout | null {
     "data-popout-control": "fullscreen",
   });
   let fullscreen = false;
+  let label = "";
 
   function setFullscreen(on: boolean): void {
     const text = on ? voiceText("tile.exitFullscreen") : voiceText("tile.fullscreen");
@@ -82,7 +156,7 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   /** As a tile does: HTML full screen, the window following it; the window
    *  alone where the page cannot. */
   function toggleFullscreen(): void {
-    const doc = win!.document;
+    const doc = root.ownerDocument;
     if (doc.fullscreenElement !== null && doc.fullscreenElement !== undefined) {
       void doc.exitFullscreen().catch(() => {});
       return;
@@ -106,58 +180,27 @@ export function openPopout(opts: PopoutOptions): Popout | null {
     }
   }
 
-  /** Draw the page into the window's document. Again on load: a window that
-   *  loads its URL after open() returned replaces the document drawn into
-   *  (the Window, and its listeners, carry over). */
-  function draw(): void {
-    const doc = win!.document;
-    if (root.ownerDocument === doc && root.isConnected) return;
-    doc.title = opts.title;
-    // The app's theme and styles, so the window looks like the app.
-    for (const attr of document.documentElement.attributes) {
-      doc.documentElement.setAttribute(attr.name, attr.value);
-    }
-    for (const sheet of document.head.querySelectorAll("link[rel='stylesheet'], style")) {
-      const copy = doc.importNode(sheet, true);
-      if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
-      doc.head.appendChild(copy);
-    }
-    root.replaceChildren(
-      opts.video,
-      ...(opts.controls === undefined ? [] : [opts.controls]),
-      button,
-    );
-    doc.body.appendChild(root);
-    doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {
-      signal,
-    });
-    doc.addEventListener("keydown", onKey, { signal });
-    void opts.video.play()?.catch(() => {});
-  }
-
-  const poll = setInterval(() => {
-    if (win.closed) finish(true);
-  }, CLOSED_POLL_MS);
-
-  function finish(byUser: boolean): void {
-    if (signal.aborted) return;
-    clearInterval(poll);
-    listeners.destroy();
-    opts.onClosed(byUser);
-  }
-
-  button.addEventListener("click", toggleFullscreen, { signal });
-  root.addEventListener("dblclick", toggleFullscreen, { signal });
-  win.addEventListener("load", draw, { signal });
-  // No orphan windows: the app page going away takes them along.
-  window.addEventListener("pagehide", () => win.close(), { signal });
   setFullscreen(false);
-  draw();
-
-  return {
-    close(): void {
-      if (!win.closed) win.close();
-      finish(false);
+  const popout = openPopoutWindow({
+    title: opts.title,
+    content: root,
+    onDraw: (doc, signal) => {
+      root.replaceChildren(
+        opts.video,
+        ...(opts.controls === undefined ? [] : [opts.controls]),
+        button,
+      );
+      doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {
+        signal,
+      });
+      doc.addEventListener("keydown", onKey, { signal });
+      void opts.video.play()?.catch(() => {});
     },
-  };
+    onClosed: opts.onClosed,
+  });
+  if (popout === null) return null;
+  label = popout.label;
+  button.addEventListener("click", toggleFullscreen);
+  root.addEventListener("dblclick", toggleFullscreen);
+  return popout;
 }

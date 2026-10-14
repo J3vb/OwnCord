@@ -27,7 +27,12 @@ import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
-import { openPopout, type Popout } from "../features/voice/popout";
+import {
+  openPopout,
+  openPopoutWindow,
+  type Popout,
+  type PopoutWindow,
+} from "../features/voice/popout";
 import type { MiniPlayer } from "../features/voice/miniPlayer";
 
 /** How often a watched stream's quality chip refreshes. */
@@ -98,6 +103,10 @@ export interface VideoGridCallbacks {
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
+  /** The whole call moved into its own window (`out`), or came back:
+   *  `restore` when the main window should show it again (Bring back, or the
+   *  user closed the window), not when the call view ended. */
+  readonly onCallPopout?: (out: boolean, restore: boolean) => void;
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
   /** Back to the full stream view of `tileId`, from its mini-player. */
@@ -188,6 +197,9 @@ export interface VideoGridComponent extends MountableComponent {
   showMiniPlayer(): void;
   /** Put the mini-player's stream back in its tile. */
   hideMiniPlayer(): void;
+  /** Bring the call's pop-out window to the front: false when the call is
+   *  not popped out. */
+  raiseCallPopout(): boolean;
 }
 
 /** Create a fresh volume icon element. */
@@ -489,6 +501,8 @@ export function createVideoGrid(): VideoGridComponent {
   const personCells = new Map<number, HTMLDivElement>();
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
+  /** The window `resizeRafId` was requested on. */
+  let rafWindow: Window = window;
   let callbacks: VideoGridCallbacks = {};
   let speaking: ReadonlySet<number> = new Set();
   let userAudioState: ReadonlyMap<number, { muted: boolean; deafened: boolean }> = new Map();
@@ -509,6 +523,18 @@ export function createVideoGrid(): VideoGridComponent {
   const pendingWatch = new Set<number>();
   /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
+  /** The whole call in a window of its own (the call view's Pop out), and
+   *  where the grid goes back to. */
+  let callPop: PopoutWindow | null = null;
+  let callHome: Element | null = null;
+  let popBtn: HTMLButtonElement | null = null;
+  /** The pop-out closes for Bring back (true) or because the call view ended. */
+  let popRestore = true;
+
+  /** The document the grid is in: the call's pop-out window's, or the app's. */
+  function doc(): Document {
+    return root?.ownerDocument ?? document;
+  }
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
@@ -660,8 +686,11 @@ export function createVideoGrid(): VideoGridComponent {
 
   /** Schedule a layout recalculation on the next animation frame. */
   function scheduleResize(): void {
-    if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
-    resizeRafId = requestAnimationFrame(() => {
+    // The grid's own window: the app window can be minimised under a pop-out.
+    const view = doc().defaultView ?? window;
+    if (resizeRafId !== 0) rafWindow.cancelAnimationFrame(resizeRafId);
+    rafWindow = view;
+    resizeRafId = view.requestAnimationFrame(() => {
       resizeRafId = 0;
       applyGridSizes();
     });
@@ -675,7 +704,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  `data-tile-control` role, not node identity. */
   function captureFocusedControl(): { userId: number; control: string } | null {
     if (root === null) return null;
-    const active = document.activeElement;
+    const active = doc().activeElement;
     if (active === null || !root.contains(active)) return null;
     const cell = active.closest(".video-cell");
     const control = (active as HTMLElement).dataset["tileControl"];
@@ -853,8 +882,9 @@ export function createVideoGrid(): VideoGridComponent {
       leaveTheatre();
       return;
     }
-    if (document.fullscreenElement !== null && document.fullscreenElement !== undefined) {
-      void document.exitFullscreen().catch((err: unknown) => {
+    const d = doc();
+    if (d.fullscreenElement !== null && d.fullscreenElement !== undefined) {
+      void d.exitFullscreen().catch((err: unknown) => {
         log.debug("Exit full screen failed", { err });
       });
     }
@@ -866,7 +896,7 @@ export function createVideoGrid(): VideoGridComponent {
     theatreTile = tileId;
     entry.el.classList.add("video-cell--theatre");
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(true).catch(() => {});
+    windowFullscreen(true);
   }
 
   function leaveTheatre(): void {
@@ -874,7 +904,7 @@ export function createVideoGrid(): VideoGridComponent {
     entry?.el.classList.remove("video-cell--theatre");
     theatreTile = null;
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(false).catch(() => {});
+    windowFullscreen(false);
   }
 
   /** Escape or F leaves the theatre fallback wherever focus is: a click on the
@@ -889,14 +919,14 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function onFullscreenChange(): void {
-    const el = document.fullscreenElement ?? null;
+    const el = doc().fullscreenElement ?? null;
     let next: number | null = null;
     for (const [id, entry] of cells) if (entry.el === el) next = id;
     const was = fullscreenTile;
     fullscreenTile = next;
     if (was === next) return;
     syncFullscreenUi();
-    void callbacks.setWindowFullscreen?.(next !== null).catch(() => {});
+    windowFullscreen(next !== null);
   }
 
   /** Label the full-screen buttons and give a full-screen tile the call
@@ -953,7 +983,13 @@ export function createVideoGrid(): VideoGridComponent {
       }
     }
     if (cc.onScreenshareToggle !== undefined) {
-      const onShare = cc.onScreenshareToggle;
+      const toggle = cc.onScreenshareToggle;
+      // Starting a share opens its picker in the app window: the call comes
+      // back there first, so the picker is in view.
+      const onShare = (): void => {
+        if (callPop !== null && callState.screenshare !== true) closeCallPopout(true);
+        toggle();
+      };
       bar.appendChild(
         callButton(voiceText("widget.control.shareStart"), "monitor", "share", onShare),
       );
@@ -1006,7 +1042,11 @@ export function createVideoGrid(): VideoGridComponent {
       camera.title = mediaLockReason() ?? label;
     }
     const pick = bar.querySelector<HTMLButtonElement>("[data-call-control='camera-device']");
-    if (pick !== null) pick.disabled = mediaLockReason() !== null;
+    if (pick !== null) {
+      pick.disabled = mediaLockReason() !== null;
+      // Its menu opens in the app window.
+      pick.style.display = callPop === null ? "" : "none";
+    }
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
     if (share !== null) {
       const on = callState.screenshare === true;
@@ -1061,7 +1101,118 @@ export function createVideoGrid(): VideoGridComponent {
       btn.addEventListener("click", () => setView(key, !viewOn[key]));
       bar.appendChild(btn);
     }
+    popBtn = createElement("button", {
+      type: "button",
+      class: "video-grid__view",
+      "data-grid-control": "popout",
+    });
+    popBtn.appendChild(createIcon("external-link", 18));
+    popBtn.addEventListener("click", () => {
+      if (callPop === null) popOutCall();
+      else closeCallPopout(true);
+    });
+    bar.appendChild(popBtn);
+    syncPopButton();
     return bar;
+  }
+
+  // --- Pop out the whole call ----------------------------------------------------
+
+  function syncPopButton(): void {
+    if (exitBtn !== null) exitBtn.hidden = !callView || callPop !== null;
+    for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
+    if (popBtn === null) return;
+    const label = voiceText(callPop === null ? "grid.popOutCall" : "grid.popInCall");
+    popBtn.setAttribute("aria-label", label);
+    popBtn.title = label;
+    popBtn.setAttribute("aria-pressed", String(callPop !== null));
+  }
+
+  /** Watch the grid's sizes with its own window's observer: the pop-out's
+   *  layout runs there. */
+  function observeGrid(): void {
+    resizeObserver?.disconnect();
+    if (root === null) return;
+    const Observer = doc().defaultView?.ResizeObserver ?? ResizeObserver;
+    resizeObserver = new Observer(() => {
+      scheduleResize();
+      scheduleViewSync();
+    });
+    resizeObserver.observe(root);
+    for (const entry of cells.values()) {
+      if (entry.config !== undefined && !entry.config.isSelf) resizeObserver.observe(entry.el);
+    }
+  }
+
+  /** The full-screen state of the window the grid is in. */
+  function windowFullscreen(on: boolean): void {
+    const args: [boolean, string?] = callPop === null ? [on] : [on, callPop.label];
+    void callbacks.setWindowFullscreen?.(...args).catch(() => {});
+  }
+
+  /** Full screen ends where the grid leaves its window. */
+  function dropFullscreen(): void {
+    if (theatreTile !== null) leaveTheatre();
+    if (fullscreenTile === null) return;
+    leaveFullscreen();
+    fullscreenTile = null;
+    syncFullscreenUi();
+    windowFullscreen(false);
+  }
+
+  /** Move the grid, with its toggles and control bar, into a window of its
+   *  own; the app window goes back to the chat. */
+  function popOutCall(): void {
+    const grid = root;
+    if (grid === null || callPop !== null) return;
+    dropFullscreen();
+    callHome = grid.parentElement;
+    const frame = createElement("div", { style: "position:fixed;inset:0" });
+    callPop = openPopoutWindow({
+      title: voiceText("grid.popoutTitle"),
+      content: frame,
+      onDraw: (d, signal) => {
+        frame.appendChild(grid);
+        d.addEventListener("fullscreenchange", onFullscreenChange, { signal });
+        d.addEventListener("keydown", onTheatreKey, { signal });
+        d.addEventListener("visibilitychange", syncViews, { signal });
+        observeGrid();
+        for (const entry of cells.values()) entry.video.play()?.catch(() => {});
+      },
+      onClosed: (byUser) => bringCallBack(byUser),
+    });
+    if (callPop === null) {
+      log.warn("Call pop out window refused");
+      showToast(voiceText("tile.popoutFailed"), "error");
+      return;
+    }
+    syncPopButton();
+    callbacks.onCallPopout?.(true, false);
+    relayout();
+    syncViews();
+  }
+
+  function closeCallPopout(restore: boolean): void {
+    if (callPop === null) return;
+    popRestore = restore;
+    callPop.close();
+  }
+
+  /** The call's window closed: the grid goes back to the app window. */
+  function bringCallBack(byUser: boolean): void {
+    const restore = byUser || popRestore;
+    popRestore = true;
+    dropFullscreen();
+    callPop = null;
+    if (root !== null) callHome?.appendChild(root);
+    callHome = null;
+    observeGrid();
+    syncPopButton();
+    callbacks.onCallPopout?.(false, restore);
+    for (const entry of cells.values()) entry.video.play()?.catch(() => {});
+    if (restore) popBtn?.focus();
+    relayout();
+    syncViews();
   }
 
   /** Turn a view toggle on or off, and remember it. */
@@ -1092,13 +1243,15 @@ export function createVideoGrid(): VideoGridComponent {
 
   /** Show or take down the call view's header toggles and control bar. */
   function setCallView(on: boolean): void {
+    if (!on) closeCallPopout(false);
     callView = on;
-    if (exitBtn !== null) exitBtn.hidden = !on;
+    if (exitBtn !== null) exitBtn.hidden = !on || callPop !== null;
     if (root === null) return;
     if (on && viewBar === null) viewBar = buildViewBar();
     if (!on && viewBar !== null) {
       viewBar.remove();
       viewBar = null;
+      popBtn = null;
     }
     const cc = callbacks.callControls;
     if (on && callBar === null && cc !== undefined) {
@@ -1227,7 +1380,7 @@ export function createVideoGrid(): VideoGridComponent {
       };
     }
     const { width, height } = entry.el.getBoundingClientRect();
-    if (document.hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
+    if (doc().hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
       return { enabled: false };
     }
     if (id === focusedTileId || isFullscreen(id)) return { enabled: true };
@@ -1320,8 +1473,9 @@ export function createVideoGrid(): VideoGridComponent {
     const cover = entry.el.querySelector(".video-popped");
     // Keep a keyboard user on the tile: Bring back goes with its cover, and a
     // window the user closed leaves focus nowhere (Pop out was inert).
-    const active = document.activeElement;
-    const lost = active === null || active === document.body;
+    const d = doc();
+    const active = d.activeElement;
+    const lost = active === null || active === d.body;
     const hadFocus = cover?.contains(active) === true || (byUser && lost);
     cover?.remove();
     for (const child of entry.el.children) child.removeAttribute("inert");
@@ -1763,7 +1917,8 @@ export function createVideoGrid(): VideoGridComponent {
       if (isFullscreen(tileId)) leaveFullscreen();
       run();
     };
-    const onProfile = actions?.onProfile;
+    // The profile card opens in the app window, out of sight of a pop-out.
+    const onProfile = callPop === null ? actions?.onProfile : undefined;
     const onMessage = actions?.onMessage;
     const moderation = actions?.moderation?.(personId);
     return {
@@ -1771,6 +1926,7 @@ export function createVideoGrid(): VideoGridComponent {
       y,
       name: entry.name,
       config,
+      doc: doc(),
       signal: entry.listeners.signal,
       onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
         applyVolume(personId, isScreenshare, level, muted),
@@ -1805,6 +1961,7 @@ export function createVideoGrid(): VideoGridComponent {
     return {
       x,
       y,
+      doc: doc(),
       signal: entry.listeners.signal,
       ...(callView ? { onHide: hide } : {}),
       ...(onCamera === undefined ? {} : { onCameraOff: onCamera, cameraLocked: mediaLockReason() }),
@@ -2064,14 +2221,11 @@ export function createVideoGrid(): VideoGridComponent {
 
     // Observe container size changes to recalculate tile layout, and the
     // remote tiles' sizes (0 once the grid is closed) for their video views.
-    resizeObserver = new ResizeObserver(() => {
-      scheduleResize();
-      scheduleViewSync();
-    });
-    resizeObserver.observe(root);
+    observeGrid();
   }
 
   function destroy(): void {
+    closeCallPopout(false);
     if (theatreTile !== null) leaveTheatre();
     if (fullscreenTile !== null) {
       fullscreenTile = null;
@@ -2084,7 +2238,7 @@ export function createVideoGrid(): VideoGridComponent {
       statsTimer = null;
     }
     statsTile = null;
-    if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
+    if (resizeRafId !== 0) rafWindow.cancelAnimationFrame(resizeRafId);
     resizeRafId = 0;
     if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
     viewResizeTimer = null;
@@ -2113,6 +2267,7 @@ export function createVideoGrid(): VideoGridComponent {
     personCells.clear();
     callView = false;
     viewBar = null;
+    popBtn = null;
     callBar = null;
 
     if (root !== null) {
@@ -2151,5 +2306,9 @@ export function createVideoGrid(): VideoGridComponent {
     setExitVisible: setCallView,
     showMiniPlayer,
     hideMiniPlayer,
+    raiseCallPopout(): boolean {
+      callPop?.focus();
+      return callPop !== null;
+    },
   };
 }

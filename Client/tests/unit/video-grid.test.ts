@@ -3594,4 +3594,231 @@ describe("VideoGrid", () => {
       expect(onStreamRemoved).not.toHaveBeenCalled();
     });
   });
+  describe("pop out the whole call (WP 1C-7)", () => {
+    const OTTO = 2;
+    let popup: ReturnType<typeof fakePopup>;
+    let open: ReturnType<typeof vi.fn>;
+    let focusWindow: ReturnType<typeof vi.fn>;
+    const controls = () => ({
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onLeave: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onCameraDevice: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    const root = () =>
+      document.querySelector<HTMLElement>("[data-testid='video-grid']") ??
+      popup.doc.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+    const popButton = () =>
+      root().querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+    const barButton = (id: string) =>
+      root().querySelector<HTMLButtonElement>(`.video-grid__controls [data-call-control='${id}']`)!;
+    const exit = () => root().querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']")!;
+
+    beforeEach(() => {
+      localStorage.clear();
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      popup = fakePopup();
+      focusWindow = vi.fn();
+      Object.assign(popup.win, { focus: focusWindow });
+      open = vi.fn(() => popup.win as unknown as Window);
+      vi.stubGlobal("open", open);
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    function startCall() {
+      const cc = controls();
+      const onCallPopout = vi.fn();
+      grid.setCallbacks({ callControls: cc, onCallPopout });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      return { cc, onCallPopout };
+    }
+
+    it("offers Pop out only in the call view", () => {
+      grid.setCallbacks({ callControls: controls() });
+      expect(container.querySelector("[data-grid-control='popout']")).toBeNull();
+      grid.setExitVisible(true);
+      expect(popButton().getAttribute("aria-label")).toBe("Pop out call");
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("moves the grid, its toggles and the control bar into a window of its own", () => {
+      const { onCallPopout } = startCall();
+      const grid0 = root();
+      const video = grid0.querySelector("video")!;
+
+      popButton().click();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(String(open.mock.calls[0]![1])).toMatch(/^owncord-popout-\d+$/);
+      expect(popup.doc.title).toBe("Call — OwnCord");
+      expect(container.querySelector("[data-testid='video-grid']")).toBeNull();
+      expect(popup.doc.body.contains(grid0)).toBe(true);
+      expect(grid0.querySelector("video")).toBe(video);
+      expect(grid0.querySelector(".video-grid__views")).not.toBeNull();
+      expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
+      expect(onCallPopout).toHaveBeenCalledWith(true, false);
+      expect(popButton().getAttribute("aria-pressed")).toBe("true");
+      expect(popButton().getAttribute("aria-label")).toBe("Bring the call back");
+      // No Show chat in the window (the app window shows the chat), and no
+      // camera picker (its menu opens in the app window).
+      expect(exit().hidden).toBe(true);
+      expect(barButton("camera-device").style.display).toBe("none");
+    });
+
+    it("keeps the call controls working in the pop-out", () => {
+      const { cc } = startCall();
+      popButton().click();
+
+      barButton("mute").click();
+      barButton("leave").click();
+      expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
+      expect(cc.onLeave).toHaveBeenCalledTimes(1);
+
+      grid.setCallState({ muted: true, deafened: false, listenOnly: false });
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("brings the call back to the app window before a share picker opens there", () => {
+      const { cc, onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      barButton("share").click();
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops a share from the pop-out without leaving it", () => {
+      const { cc } = startCall();
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, screenshare: true });
+      popButton().click();
+
+      barButton("share").click();
+
+      expect(popup.doc.body.contains(root())).toBe(true);
+      expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("brings the grid back to the app window with Bring back", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      popButton().click();
+
+      expect(popup.win.close).toHaveBeenCalled();
+      expect(container.contains(grid0)).toBe(true);
+      expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+      expect(exit().hidden).toBe(false);
+      expect(barButton("camera-device").style.display).toBe("");
+      expect(document.activeElement).toBe(popButton());
+    });
+
+    it("brings the grid back when the user closes the window", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(300);
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+    });
+
+    it("closes the window without restoring when the call view ends", () => {
+      const { onCallPopout } = startCall();
+      popButton().click();
+      const grid0 = root();
+
+      grid.setExitVisible(false);
+
+      expect(popup.win.close).toHaveBeenCalled();
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, false);
+      expect(grid0.querySelector(".video-grid__controls")).toBeNull();
+    });
+
+    it("closes the window when the grid is torn down", () => {
+      startCall();
+      popButton().click();
+      grid.destroy?.();
+      expect(popup.win.close).toHaveBeenCalled();
+    });
+
+    it("stays in the app window, with a toast, when no window opens", () => {
+      vi.stubGlobal("open", () => null);
+      const { onCallPopout } = startCall();
+      popButton().click();
+      expectConsole("warn", "Call pop out window refused");
+      expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
+      expect(container.querySelector("[data-testid='video-grid']")).not.toBeNull();
+      expect(onCallPopout).not.toHaveBeenCalled();
+      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("raises the window rather than moving the call back", () => {
+      startCall();
+      expect(grid.raiseCallPopout()).toBe(false);
+      popButton().click();
+      expect(grid.raiseCallPopout()).toBe(true);
+      expect(focusWindow).toHaveBeenCalledTimes(1);
+      expect(popup.doc.body.contains(root())).toBe(true);
+    });
+
+    it("opens a tile's menu in the pop-out, without the profile card", async () => {
+      grid.setCallbacks({
+        callControls: controls(),
+        tileMenu: { onProfile: vi.fn(), onMessage: vi.fn() },
+      });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      popButton().click();
+
+      root()
+        .querySelector(`.video-cell[data-user-id='${OTTO}']`)!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await vi.dynamicImportSettled();
+
+      const menu = popup.doc.querySelector<HTMLElement>(".video-tile-menu");
+      expect(menu).not.toBeNull();
+      expect(document.querySelector(".video-tile-menu")).toBeNull();
+      expect(menu!.querySelector("[data-action='profile']")).toBeNull();
+      expect(menu!.querySelector("[data-action='message']")).not.toBeNull();
+    });
+
+    it("follows full screen in the pop-out's own document and window", () => {
+      const setWindowFullscreen = vi.fn(() => Promise.resolve());
+      grid.setCallbacks({ callControls: controls(), setWindowFullscreen });
+      grid.setExitVisible(true);
+      grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+      popButton().click();
+      const label = String(open.mock.calls[0]![1]);
+      const tile = root().querySelector(`.video-cell[data-user-id='${OTTO}']`)!;
+
+      popup.enterFullscreen(tile);
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, label);
+      expect(tile.querySelector(".video-fs-calls")).not.toBeNull();
+
+      // Closing the window ends its full screen; the app window's is untouched.
+      popup.win.closed = true;
+      vi.advanceTimersByTime(300);
+      expect(tile.querySelector(".video-fs-calls")).toBeNull();
+      expect(setWindowFullscreen).not.toHaveBeenCalledWith(false);
+    });
+  });
 });

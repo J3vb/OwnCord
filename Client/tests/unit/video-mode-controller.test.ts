@@ -61,6 +61,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     setExitVisible: vi.fn(),
     showMiniPlayer: vi.fn(),
     hideMiniPlayer: vi.fn(),
+    raiseCallPopout: vi.fn(() => false),
     setPeople: vi.fn(),
   } as unknown as VideoModeControllerOptions["videoGrid"];
 }
@@ -1261,6 +1262,144 @@ describe("createVideoModeController", () => {
       ctrl.openCall();
       ctrl.destroy();
       expect(avatarTiles()).toHaveLength(0);
+    });
+  });
+  describe("call pop-out (WP 1C-7)", () => {
+    const user = (userId: number, username: string) => ({
+      userId,
+      username,
+      camera: false,
+      screenshare: false,
+    });
+    let container: HTMLDivElement;
+    let grid: ReturnType<typeof createVideoGrid>;
+    let slots: ReturnType<typeof makeSlots>;
+    let users: Map<number, ReturnType<typeof user>>;
+    let popDoc: Document;
+    let win: EventTarget & { closed: boolean; close: () => void; focus: () => void };
+
+    function setVoice(overrides: Partial<VoiceStateStub> = {}): void {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]), ...overrides }),
+      );
+    }
+    const popButton = () =>
+      popDoc.querySelector<HTMLButtonElement>("[data-grid-control='popout']") ??
+      container.querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+    const inWindow = () => popDoc.querySelector("[data-testid='video-grid']") !== null;
+    const tileIds = (d: ParentNode) =>
+      [...d.querySelectorAll<HTMLElement>(".video-cell--avatar")].map((t) => t.dataset.personId);
+
+    function openPoppedCall() {
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
+      grid.setCallbacks({ onCallPopout: (out, restore) => ctrl.setCallPoppedOut(out, restore) });
+      ctrl.openCall();
+      popButton().click();
+      return ctrl;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      popDoc = document.implementation.createHTMLDocument("");
+      win = Object.assign(new EventTarget(), {
+        closed: false,
+        close: vi.fn(() => {
+          win.closed = true;
+        }),
+        focus: vi.fn(),
+      });
+      Object.defineProperty(win, "document", { get: () => popDoc });
+      vi.stubGlobal(
+        "open",
+        vi.fn(() => win as unknown as Window),
+      );
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      grid = createVideoGrid();
+      grid.mount(container);
+      slots = makeSlots();
+      users = new Map([
+        [1, user(1, "me")],
+        [2, user(2, "bob")],
+      ]);
+      setVoice();
+    });
+
+    afterEach(() => {
+      grid.destroy?.();
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    it("shows the chat here while the call view lives on in its window", () => {
+      const ctrl = openPoppedCall();
+
+      expect(inWindow()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(slots.videoGridSlot.style.display).toBe("none");
+
+      // The roster still reaches the call in its window.
+      users.set(3, user(3, "cara"));
+      ctrl.checkVideoMode();
+      expect(tileIds(popDoc)).toEqual(["1", "2", "3"]);
+    });
+
+    it("keeps the call in its window when this window switches to a text channel", () => {
+      const ctrl = openPoppedCall();
+      ctrl.showChat({ keepWatching: true });
+      expect(win.close).not.toHaveBeenCalled();
+      expect(inWindow()).toBe(true);
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("raises the window when the call is opened again from here", () => {
+      const ctrl = openPoppedCall();
+      ctrl.openCall();
+      expect(win.focus).toHaveBeenCalled();
+      expect(inWindow()).toBe(true);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+    });
+
+    it("shows the call here again on Bring back", () => {
+      openPoppedCall();
+      popButton().click();
+      expect(inWindow()).toBe(false);
+      expect(slots.videoGridSlot.style.display).toBe("block");
+      expect(slots.messagesSlot.style.display).toBe("none");
+      expect(tileIds(container)).toEqual(["1", "2"]);
+    });
+
+    it("shows the call here again when the user closes the window", () => {
+      openPoppedCall();
+      win.closed = true;
+      vi.advanceTimersByTime(300);
+      expect(slots.videoGridSlot.style.display).toBe("block");
+      expect(container.querySelector("[data-testid='video-grid']")).not.toBeNull();
+    });
+
+    it("closes the window and stays on the chat when you leave the call", () => {
+      const ctrl = openPoppedCall();
+      setVoice({ currentChannelId: null });
+      ctrl.checkVideoMode();
+      expect(win.close).toHaveBeenCalled();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+      expect(slots.messagesSlot.style.display).toBe("");
     });
   });
 });
