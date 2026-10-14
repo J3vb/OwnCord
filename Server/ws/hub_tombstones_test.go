@@ -66,6 +66,78 @@ func TestPurgeReplay_DeleteRunsOutsideSeqMuAndFailsColdReads(t *testing.T) {
 	}
 }
 
+// A purge that drops the ring's copies but fails to delete the rows keeps
+// cold-tier reads off until a retry of it succeeds.
+func TestPurgeReplay_FailedDeleteKeepsColdReadsOffUntilRetried(t *testing.T) {
+	database := newTeardownTestDB(t)
+	h := newTestHubWith(t, HubOptions{DB: database})
+	h.SetEventStore(database)
+	store := *h.eventStore.Load()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	setReplayPurgeBeforeDelete(t, cancel)
+	if err := h.PurgeUserFromReplay(ctx, 42); err == nil {
+		t.Fatal("PurgeUserFromReplay with a context canceled before the delete: want an error")
+	}
+	replayPurgeBeforeDelete = nil
+	if _, err := store.GetEventsSince(context.Background(), 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
+		t.Fatalf("cold read after a failed purge: err = %v, want errReplayPurgeInProgress", err)
+	}
+	if err := h.PurgeMessagesFromReplay(context.Background(), []int64{9}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetEventsSince(context.Background(), 0, 10); !errors.Is(err, errReplayPurgeInProgress) {
+		t.Fatal("another purge succeeding turned cold reads back on while the failed one is unfinished")
+	}
+	if err := h.PurgeUserFromReplay(context.Background(), 42); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if _, err := store.GetEventsSince(context.Background(), 0, 10); err != nil {
+		t.Fatalf("cold read after the retry succeeded: %v", err)
+	}
+}
+
+// A purge waiting behind a cold read returns when its context ends, and
+// turns new cold reads away while it waits.
+func TestPurgeReplay_LockHonorsContext(t *testing.T) {
+	h := newTestHubWith(t, HubOptions{DB: newTeardownTestDB(t)})
+	h.tombstones.mu.RLock()
+	released := false
+	defer func() {
+		if !released {
+			h.tombstones.mu.RUnlock()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.PurgeUserFromReplay(ctx, 42) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for h.tombstones.waiting.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if h.tombstones.tryColdRead() {
+		h.tombstones.mu.RUnlock()
+		t.Error("a cold read started while a purge was waiting for the lock")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the purge kept waiting for the lock after its context ended")
+	}
+	h.tombstones.mu.RUnlock()
+	released = true
+	if !h.tombstones.tryColdRead() {
+		t.Fatal("cold reads stayed off after a purge gave up before changing anything")
+	}
+	h.tombstones.mu.RUnlock()
+}
+
 // sequenceFiller delivers one frame and returns how many seqs it took.
 func sequenceFiller(h *Hub) uint64 {
 	before := atomic.LoadUint64(&h.seq)

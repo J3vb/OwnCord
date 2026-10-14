@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // EventStore persists broadcast events for cold-tier replay during reconnection
@@ -36,32 +35,33 @@ var errReplayPurgeInProgress = errors.New("replay purge in progress")
 
 // purgeGuardedStore is the EventStore the cold-tier reads go through: each
 // read holds replayPurgeState.mu for reading, and fails with
-// errReplayPurgeInProgress rather than wait when a purge holds it.
+// errReplayPurgeInProgress rather than wait when a purge is running, waiting
+// or unfinished.
 type purgeGuardedStore struct {
 	EventStore
-	mu *syncutil.RWMutex
+	purge *replayPurgeState
 }
 
 func (s purgeGuardedStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
-	if !s.mu.TryRLock() {
+	if !s.purge.tryColdRead() {
 		return nil, errReplayPurgeInProgress
 	}
-	defer s.mu.RUnlock()
+	defer s.purge.mu.RUnlock()
 	return s.EventStore.GetEventsSince(ctx, afterSeq, limit)
 }
 
 func (s purgeGuardedStore) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error) {
-	if !s.mu.TryRLock() {
+	if !s.purge.tryColdRead() {
 		return nil, errReplayPurgeInProgress
 	}
-	defer s.mu.RUnlock()
+	defer s.purge.mu.RUnlock()
 	return s.EventStore.GetEventsSinceForChannels(ctx, afterSeq, channelIDs, limit)
 }
 
 func (s purgeGuardedStore) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
-	if !s.mu.TryRLock() {
+	if !s.purge.tryColdRead() {
 		return 0, errReplayPurgeInProgress
 	}
-	defer s.mu.RUnlock()
+	defer s.purge.mu.RUnlock()
 	return s.EventStore.CountEventsInRange(ctx, afterSeq, uptoSeq)
 }

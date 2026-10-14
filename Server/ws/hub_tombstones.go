@@ -1,8 +1,10 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync/atomic"
@@ -41,16 +43,67 @@ type tombstoneBatch struct {
 //
 // mu is held for writing across a whole purge, from the ring drop to the
 // persisted-row delete. A cold-tier read (purgeGuardedStore) that finds it
-// held fails at once instead of waiting, so a resume falls through to the
-// full ready rather than reading rows the ring has already dropped but the
-// database still holds. Lock order: mu before seqMu; no path takes mu while
-// holding seqMu.
+// held, or finds a purge waiting for it, fails at once instead of waiting,
+// so a resume falls through to the full ready rather than reading rows the
+// ring has already dropped but the database still holds. A purge that fails
+// after its ring drop leaves its ids in unfinished, and cold reads keep
+// failing until a retry of that purge succeeds. Lock order: mu before
+// seqMu; no path takes mu while holding seqMu.
 type replayPurgeState struct {
 	mu       syncutil.RWMutex
+	waiting  atomic.Int32
 	users    map[int64]uint64
 	messages map[int64]uint64
 	batches  []tombstoneBatch
 	now      func() time.Time
+
+	unfinishedUsers    map[int64]struct{}
+	unfinishedMessages map[int64]struct{}
+}
+
+// lock takes mu for a purge, giving up when ctx ends. It polls rather than
+// blocks so a purge can return on its own deadline; waiting turns new cold
+// reads away meanwhile, so a stream of reconnects cannot starve it.
+func (t *replayPurgeState) lock(ctx context.Context) error {
+	t.waiting.Add(1)
+	defer t.waiting.Add(-1)
+	for !t.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("purge replay: wait for cold reads: %w", ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// tryColdRead takes mu for a cold-tier read, or reports that a purge is
+// running, waiting or unfinished. The caller releases mu with RUnlock.
+func (t *replayPurgeState) tryColdRead() bool {
+	if t.waiting.Load() > 0 || !t.mu.TryRLock() {
+		return false
+	}
+	if t.waiting.Load() > 0 || len(t.unfinishedUsers) > 0 || len(t.unfinishedMessages) > 0 {
+		t.mu.RUnlock()
+		return false
+	}
+	return true
+}
+
+// settlePurge records whether a purge of ids finished. Caller holds mu.
+func settlePurge(set *map[int64]struct{}, ids []int64, finished bool) {
+	if finished {
+		for _, id := range ids {
+			delete(*set, id)
+		}
+		return
+	}
+	if *set == nil {
+		*set = make(map[int64]struct{}, len(ids))
+	}
+	for _, id := range ids {
+		(*set)[id] = struct{}{}
+	}
 }
 
 func (t *replayPurgeState) clock() time.Time {

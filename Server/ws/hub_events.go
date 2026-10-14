@@ -55,7 +55,7 @@ func (h *Hub) SetEventStore(s EventStore) {
 		h.eventStore.Store(nil)
 		return
 	}
-	var guarded EventStore = purgeGuardedStore{EventStore: s, mu: &h.tombstones.mu}
+	var guarded EventStore = purgeGuardedStore{EventStore: s, purge: &h.tombstones}
 	h.eventStore.Store(&guarded)
 }
 
@@ -130,7 +130,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	for _, id := range ids {
 		set[id] = struct{}{}
 	}
-	dropped, rows, err := h.purgeReplay(ctx,
+	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedMessages, ids,
 		func(seq uint64) { h.tombstones.add(&h.tombstones.messages, seq, ids...) },
 		func(data []byte) bool { return eventNamesMessage(data, set) },
 		func(ctx context.Context) (int64, error) { return h.db.DeleteEventsForMessages(ctx, ids) })
@@ -150,7 +150,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 // deletes the persisted rows after releasing it. Idempotent and retried
 // from the erasure journal on failure.
 func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
-	dropped, rows, err := h.purgeReplay(ctx,
+	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedUsers, []int64{userID},
 		func(seq uint64) {
 			h.tombstones.add(&h.tombstones.users, seq, userID)
 			h.bumpReplayPurgeWatermark()
@@ -171,12 +171,15 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 // them is sequenced; release seqMu; flush the persister, so every frame
 // sequenced before the tombstones is on disk; delete the persisted rows.
 func (h *Hub) purgeReplay(
-	ctx context.Context, install func(seq uint64), names func([]byte) bool, deleteRows func(context.Context) (int64, error),
+	ctx context.Context, unfinished *map[int64]struct{}, ids []int64,
+	install func(seq uint64), names func([]byte) bool, deleteRows func(context.Context) (int64, error),
 ) (dropped int, rows int64, err error) {
 	if err := h.awaitDispatch(ctx); err != nil {
 		return 0, 0, fmt.Errorf("purge replay: %w", err)
 	}
-	h.tombstones.mu.Lock()
+	if err := h.tombstones.lock(ctx); err != nil {
+		return 0, 0, err
+	}
 	defer h.tombstones.mu.Unlock()
 
 	func() {
@@ -188,20 +191,33 @@ func (h *Hub) purgeReplay(
 		dropped = h.replayBuf.RemoveWhere(names)
 	}()
 
+	rows, err = h.purgePersisted(ctx, deleteRows)
+	settlePurge(unfinished, ids, err == nil)
+	if err != nil {
+		slog.Warn("hub: replay purge unfinished; cold-tier replay is off until it is retried", "err", err)
+		return dropped, 0, err
+	}
+	return dropped, rows, nil
+}
+
+// purgePersisted flushes the persister, so every frame sequenced before the
+// tombstones is on disk, then deletes the persisted rows.
+func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Context) (int64, error)) (rows int64, err error) {
 	if p := h.eventPersister.Load(); p != nil {
 		if err := p.Flush(ctx); err != nil {
-			return dropped, 0, fmt.Errorf("purge replay: flush: %w", err)
+			return 0, fmt.Errorf("purge replay: flush: %w", err)
 		}
 	}
 	if replayPurgeBeforeDelete != nil {
 		replayPurgeBeforeDelete()
 	}
-	if h.db != nil {
-		if rows, err = deleteRows(ctx); err != nil {
-			return dropped, 0, fmt.Errorf("purge replay: %w", err)
-		}
+	if h.db == nil {
+		return 0, nil
 	}
-	return dropped, rows, nil
+	if rows, err = deleteRows(ctx); err != nil {
+		return 0, fmt.Errorf("purge replay: %w", err)
+	}
+	return rows, nil
 }
 
 // awaitDispatch returns once every broadcast enqueued on h.broadcast before
