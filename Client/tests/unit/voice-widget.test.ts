@@ -6,6 +6,10 @@ const mockShareQuality = vi.fn<() => string | null>(() => "medium");
 const mockChangeSource = vi.fn().mockResolvedValue(undefined);
 const mockSetQuality = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhanced = vi.fn().mockResolvedValue(undefined);
+const mockIsLinuxDesktop = vi.fn(() => false);
+vi.mock("../../src/features/voice/native/platform", () => ({
+  isLinuxDesktop: () => mockIsLinuxDesktop(),
+}));
 vi.mock("@lib/livekitSession", () => ({
   getLocalScreenshareStream: () => ({
     getVideoTracks: () => [
@@ -1154,6 +1158,15 @@ describe("VoiceWidget", () => {
       expect(mockReapplyEnhanced).toHaveBeenCalledTimes(2);
       expect(btn.getAttribute("aria-pressed")).toBe("false");
 
+      widget.destroy?.();
+    });
+
+    it("says the change applies on the next join on Linux native", () => {
+      mockIsLinuxDesktop.mockReturnValueOnce(true);
+      const { widget, btn } = mountWidget();
+      expect(btn.getAttribute("aria-label")).toBe(
+        "Enhanced Noise Suppression (applies the next time you join)",
+      );
       widget.destroy?.();
     });
 
