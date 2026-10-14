@@ -5512,7 +5512,7 @@ describe("WS Dispatcher", () => {
   // WP 1C-8: an announce lost while the socket was down leaves the server's
   // camera/share flag behind what this session sends; `ready` checks it.
   it("ready hands the server's camera and share flags to the live voice session", async () => {
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected", currentChannelId: 10 }));
     authStore.setState(() => ({
       token: "test-token",
       user: { id: 42, username: "active", avatar: null, role: "member" },

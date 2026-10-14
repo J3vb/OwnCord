@@ -1892,8 +1892,23 @@ describe("reconcileVideoFlags", () => {
     expect(deps.wsSend).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing without a live session", () => {
+  it("turns off a stale flag while the media room is still reconnecting", () => {
     const deps = fakeDeps(null);
+
+    reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
+      camera: true,
+      screenshare: true,
+    });
+
+    expect(deps.wsSend).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
+    expect(deps.wsSend).toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: false },
+    });
+  });
+
+  it("does nothing without a socket", () => {
+    const deps = fakeDeps(fakeRoom().room, false);
 
     reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
       camera: true,

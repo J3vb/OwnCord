@@ -828,7 +828,7 @@ export function reconcileVideoFlags(
   server: { readonly camera: boolean; readonly screenshare: boolean },
 ): void {
   const ws = deps.getWs();
-  if (ws === null || deps.getRoom() === null) return;
+  if (ws === null) return;
   const { localCamera, localScreenshare } = voiceStore.getState();
   const cameraLive =
     camera.manualCameraTrack !== null && camera.announced === camera.manualCameraTrack;

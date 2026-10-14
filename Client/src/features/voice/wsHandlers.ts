@@ -195,7 +195,8 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // the socket was down never reached the server (WP 1C-8).
       void livekitSession().then(({ handleParticipantLeft, reconcileVideoFlags }) => {
         for (const uid of left) void handleParticipantLeft(uid);
-        reconcileVideoFlags(selfVoiceState.camera === true, selfVoiceState.screenshare === true);
+        if (prevVoiceChannelId === selfVoiceState.channel_id)
+          reconcileVideoFlags(selfVoiceState.camera === true, selfVoiceState.screenshare === true);
       });
     }
   };
