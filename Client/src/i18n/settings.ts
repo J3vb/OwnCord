@@ -190,6 +190,12 @@ export const settingsText = defineCatalog("settings", {
   "advanced.button.confirmAgain": "Are you sure? Click again",
   "advanced.launchOnLogin.label": "Launch on Login",
   "advanced.launchOnLogin.desc": "Start OwnCord automatically when you sign in to your computer",
+  "advanced.minimizeToTray.label": "Close to Tray",
+  "advanced.minimizeToTray.desc":
+    "Closing the window keeps OwnCord running in the tray, if your desktop shows one. Quit from the tray menu.",
+  "advanced.startMinimized.label": "Start Minimized",
+  "advanced.startMinimized.desc":
+    "When OwnCord starts at login, keep the window hidden in the tray",
 
   "diagnostics.title": "Connection test",
   "diagnostics.description":

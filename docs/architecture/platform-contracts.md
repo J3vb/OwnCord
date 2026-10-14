@@ -79,9 +79,9 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
-| Distinct `invoke` command names called from `Client/src/`  | 66    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 69    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
+| Distinct `invoke` command names called from `Client/src/`  | 69    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 72    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -123,6 +123,7 @@ frontend_ready
 get_cert_fingerprint
 get_identity_pin
 get_settings
+get_window_prefs
 load_credential
 load_identity_key
 load_pending_messages
@@ -167,6 +168,8 @@ save_identity_key
 save_pending_messages
 save_settings
 set_unread_badge
+set_window_pref
+show_next_launch
 start_http_proxy
 start_livekit_proxy
 stop_http_proxy
