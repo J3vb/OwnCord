@@ -24,25 +24,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	)
 	defer done()
 
-	if err := s.sendMessageRateGate(p); err != nil {
-		return nil, err
-	}
-	// A retry of an accepted send is answered from its receipt before the
-	// channel, permission and content gates: the message already exists, so a
-	// permission change since then must not turn its acknowledgment into a
-	// refusal (ARCH-039).
-	delivery, err := messageDeliveryParams(p, s.st.MessageDeliveryFloorMS())
-	if err != nil {
-		return nil, err
-	}
-	if delivery != nil {
-		previous, lookupErr := s.st.FindMessageDelivery(ctx, *delivery)
-		if lookupErr != nil {
-			return nil, messageDeliveryError(lookupErr)
-		}
-		if previous != nil {
-			return &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
-		}
+	delivery, retry, err := s.answerSendRetry(ctx, p)
+	if err != nil || retry != nil {
+		return retry, err
 	}
 	ch, content, err := s.sendMessagePrecheck(ctx, p)
 	if err != nil {
@@ -147,18 +131,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
-}
-
-// sendMessageRateGate runs before anything reads the database, retries
-// included: the per-user chat rate limit, then the channel id's shape.
-func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
-	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat", p.UserID), 10, time.Second) {
-		return ErrRateLimited
-	}
-	if p.ChannelID <= 0 {
-		return fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
-	}
-	return nil
 }
 
 // sendMessagePrecheck runs every gate a new send must clear before anything
