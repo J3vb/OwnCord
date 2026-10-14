@@ -28,6 +28,7 @@ vi.mock("../../../platform/desktop", () => ({
 import {
   armScreenRestart,
   disarmScreenRestart,
+  noteChangedSource,
   pickChangeSource,
   pickScreenSource,
 } from "./screenPicker";
@@ -217,6 +218,7 @@ describe("pickChangeSource", () => {
       return { source: "screen:277", quality: "low", fps: 5 };
     };
     await expect(pickChangeSource()).resolves.toBe("screen:277");
+    noteChangedSource("screen:277");
 
     await expect(armScreenRestart()).resolves.toBe(true);
     // Same capture and encoding as the share's own pick, the new source.
@@ -229,6 +231,16 @@ describe("pickChangeSource", () => {
     host.pick = shown;
     await expect(pickChangeSource()).resolves.toBe("portal");
     expect(shown).not.toHaveBeenCalled();
+  });
+
+  it("a picked source the host never swapped in leaves the restart on the old one", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30 });
+    const first = await pickScreenSource();
+    host.pick = () => ({ source: "screen:277", quality: "low", fps: 5 });
+    await expect(pickChangeSource()).resolves.toBe("screen:277");
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    await expect(pickScreenSource()).resolves.toEqual(first);
   });
 
   it("resolves null when the dialog is dismissed", async () => {

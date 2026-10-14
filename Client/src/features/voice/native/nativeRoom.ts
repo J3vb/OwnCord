@@ -49,7 +49,7 @@ const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
-import { pickChangeSource, pickScreenSource } from "./screenPicker";
+import { noteChangedSource, pickChangeSource, pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
 
@@ -606,6 +606,7 @@ export class NativeRoom {
       return;
     }
     track.retarget(started);
+    noteChangedSource(source);
     if (this.endedCapture === track.capture) track.end();
   }
 
