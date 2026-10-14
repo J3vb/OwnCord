@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 
+**Desktop UI**
+
+- On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
+
 ### Fixed
 
 **Login & connection**

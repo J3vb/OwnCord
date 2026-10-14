@@ -158,7 +158,10 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
         Some(MenuAction::Status(status)) => emit_status_change(app_handle, status),
         Some(MenuAction::Voice(action)) => emit_voice_shortcut(app_handle, action),
         Some(MenuAction::OpenLogs) => open_log_folder(app_handle),
-        Some(MenuAction::Quit) => app_handle.exit(0),
+        Some(MenuAction::Quit) => {
+            log::info!("[exit] Quit chosen from the tray menu");
+            app_handle.exit(0);
+        }
         None => {}
     }
 }

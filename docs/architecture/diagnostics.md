@@ -64,6 +64,21 @@ loaded lazily from the button); there is no Rust command behind it.
 | `logs/*.jsonl`             | the rotated client log files (at most five days)                                                                                                                                                                                                                  |
 | `logs/owncord-client*.log` | the native host log (the Rust `owncord-client.log` plus rotated `owncord-client_<date>.log`), newest first, each tail-capped at 2 MB                                                                                                                              |
 
+On Linux the native log also says how each run ended, so a window that
+vanished can be told apart from a quit. `crash_log.rs` writes a `[crash]` line
+for a crash signal or X error and an `[exit] ended by signal` line for a
+terminate, hang-up, interrupt or quit signal, naming the process that sent it.
+`exit_watch.rs` logs the session (X11 or Wayland, desktop, AppImage, kernel,
+RAM) at startup; `[hang]` lines when the main thread stops answering for 5 s
+or the webview stops responding, and again when they recover; a `[resource]`
+line each time memory passes another 512 MB; how a normal exit began (window
+close, tray Quit, an app exit request) and its `[exit] … normal exit` line.
+Each run keeps `run-<pid>.state` (time, memory, threads, hang state) in the log
+directory, refreshed every 10 s and deleted on a normal exit. A start that
+finds one from a process that is gone logs it as a run that ended without a
+normal exit, with its last record, which is how an uncatchable `SIGKILL` (the
+out-of-memory killer, or a desktop killing a frozen window) shows up.
+
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The
 OS keychain, which holds saved passwords and session tokens, is never read.

@@ -10,6 +10,8 @@ mod credentials;
 mod diagnostics;
 #[cfg(windows)]
 mod dpapi;
+#[cfg(target_os = "linux")]
+mod exit_watch;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
@@ -285,6 +287,9 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
                 crash_log::install(&dir.join("owncord-client.log"));
+                // A run that ends without a trace (SIGKILL) is reported by
+                // the next start; freezes and memory are logged as they happen.
+                exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
             }
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
@@ -305,11 +310,20 @@ pub fn run() {
                 // WebView2 hides device names until mic/camera are allowed.
                 #[cfg(windows)]
                 windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
+                #[cfg(target_os = "linux")]
+                exit_watch::watch_webview(&window);
                 let handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.on_window_event(move |event| match event {
+                    // The window's close button, Alt+F4, or the desktop
+                    // closing it: the usual first step of a quit.
+                    tauri::WindowEvent::CloseRequested { .. } => {
+                        log::info!("[exit] main window close requested (close button, keyboard or desktop)");
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        log::info!("[exit] main window destroyed");
                         popout::close_all(&handle);
                     }
+                    _ => {}
                 });
             }
             diagnostics::spawn_frontend_watchdog(app.handle());
@@ -324,7 +338,17 @@ pub fn run() {
     {
         Ok(app) => {
             app.run(|_app, event| {
+                if let tauri::RunEvent::ExitRequested { code, .. } = &event {
+                    match code {
+                        Some(code) => log::info!("[exit] exit requested by the app (code {code})"),
+                        None => log::info!("[exit] exit requested: the last window closed"),
+                    }
+                }
                 if let tauri::RunEvent::Exit = event {
+                    #[cfg(target_os = "linux")]
+                    exit_watch::note_exit("event loop finished");
+                    #[cfg(not(target_os = "linux"))]
+                    log::info!("[exit] event loop finished; normal exit");
                     // Stop the PTT polling thread before the process tears down.
                     // This ensures the AppHandle held inside the thread is released
                     // cleanly and the thread does not call app.emit on a dead runtime.
