@@ -21,6 +21,7 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@stores/voice.store", () => ({
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
+  bumpLocalShareRev: vi.fn(),
 }));
 
 import {

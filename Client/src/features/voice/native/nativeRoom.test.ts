@@ -27,6 +27,8 @@ vi.mock("livekit-client", () => ({
       ScreenShare: "screen_share",
       ScreenShareAudio: "screen_share_audio",
     },
+    sourceToProto: (source: string) =>
+      ({ camera: 1, microphone: 2, screen_share: 3, screen_share_audio: 4 })[source],
   },
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
 }));
@@ -621,9 +623,10 @@ describe("NativeRoom room surface", () => {
     // over the OwnCord socket before the SFU's restored grant arrives.
     emit({ session: 1, event: { type: "microphonePermission", allowed: false } });
     expect(room.localParticipant.permissions).toEqual({
-      canPublish: false,
-      canPublishSources: [],
+      canPublish: true,
+      canPublishSources: [1, 3, 4],
     });
+    // The microphone (2) is left out; camera and screen share stay allowed.
     expect(changed).toHaveBeenLastCalledWith(undefined, room.localParticipant);
     changed.mockClear();
     emit({ session: 1, event: { type: "microphonePermission", allowed: true } });

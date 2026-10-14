@@ -78,6 +78,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   /** Track whether we've already added the local self-view tile. */
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
+  /** The capture the self screen-share tile shows. */
+  let localShareTrackId: string | undefined;
   let focusedTileId: number | null = null;
   /** The channel currentChannelId was on the previous checkVideoMode() call.
    *  A voice channel switch (A -> B) moves currentChannelId directly from A
@@ -297,6 +299,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     // Manage local screenshare self-view tile
     const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
     if (voice.localScreenshare) {
+      // A changed source is a new capture: draw the tile again.
+      if (
+        localScreenshareTileAdded &&
+        getLocalScreenshareStream()?.getVideoTracks()[0]?.id !== localShareTrackId
+      ) {
+        videoGrid.removeStream(screenshareUserId);
+        localScreenshareTileAdded = false;
+      }
       if (!localScreenshareTileAdded) {
         const localStream = getLocalScreenshareStream();
         if (localStream !== null) {
@@ -312,6 +322,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
             },
           );
           localScreenshareTileAdded = true;
+          localShareTrackId = localStream.getVideoTracks()[0]?.id;
         }
       }
     } else {

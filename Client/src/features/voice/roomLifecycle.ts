@@ -33,6 +33,7 @@ import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
+import { syncShareGrant } from "./mediaControl";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -302,6 +303,9 @@ export class RoomLifecycle {
     );
     onRoom(newRoom, RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
     onRoom(newRoom, RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+      if (participant === newRoom.localParticipant && this._room === newRoom) {
+        syncShareGrant(newRoom);
+      }
       if (
         participant !== newRoom.localParticipant ||
         this._room !== newRoom ||

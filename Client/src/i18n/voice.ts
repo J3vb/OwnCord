@@ -52,6 +52,8 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.cameraOff": "Turn off camera",
   "widget.control.shareStart": "Share your screen",
   "widget.control.shareStop": "Stop sharing",
+  "widget.control.shareDenied": "You don't have permission to share your screen here",
+  "widget.control.shareVideoLimit": "This channel has reached its video limit",
   "widget.control.disconnect": "Disconnect",
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",
@@ -82,6 +84,9 @@ export const voiceText = defineCatalog("voice", {
   "call.isCalling": "{name} is calling",
   "call.goToCall": "Go to the call",
   "call.inProgress": "Call in progress",
+  "call.chooseCamera": "Choose camera",
+  "call.defaultCamera": "Default",
+  "call.cameraNumber": "Camera {n}",
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
@@ -93,6 +98,7 @@ export const voiceText = defineCatalog("voice", {
   "grid.showStrip": "Show participant strip",
   "tile.stopWatching": "Stop watching",
   "tile.watchStream": "Watch stream",
+  "tile.streamEnded": "{name} ended the stream",
   "tile.showPreview": "Show preview",
   "tile.streamVolume": "{name} stream volume",
   "tile.voiceVolume": "{name} voice volume",
@@ -156,6 +162,10 @@ export const voiceText = defineCatalog("voice", {
   "picker.tabEmpty": "Nothing to share in this tab.",
   "picker.portalNote":
     "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the quality below.",
+  "picker.windowsNote":
+    "Windows will now ask which screen or window to share, and whether to share its audio. OwnCord only sets the quality below.",
+  "picker.browserNote":
+    "Your browser will now ask which screen or window to share. OwnCord only sets the quality below.",
   "picker.audio": "Audio",
   "picker.audioUnavailable":
     "Audio sharing is not available on Linux yet; only the picture is shared.",
@@ -219,6 +229,11 @@ export const voiceText = defineCatalog("voice", {
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "share.screenDenied": "Screen sharing permission denied",
   "share.screenFailed": "Failed to start screen sharing",
+  "share.changeFailed": "Couldn't change what you're sharing",
+  "share.qualityFailed": "Couldn't change the stream quality",
+  "card.label": "Your stream",
+  "card.changeSource": "Change source",
+  "card.sourceNamed": "{kind}: {name}",
   "share.screenNotStarted":
     "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
   "device.pipelineError": "Audio pipeline error after device switch",

@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const mockSwitchInputDevice = vi.fn().mockResolvedValue(undefined);
 const mockSwitchOutputDevice = vi.fn().mockResolvedValue(undefined);
+const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
@@ -24,6 +25,7 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
   switchOutputDevice: (...args: unknown[]) => mockSwitchOutputDevice(...args),
+  switchVideoDevice: (...args: unknown[]) => mockSwitchVideoDevice(...args),
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
   applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
@@ -1331,6 +1333,8 @@ describe("VoiceAudioTab UI structure", () => {
     const videoSelect = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
     videoSelect.value = "cam-1";
     videoSelect.dispatchEvent(new Event("change"));
+    // A live camera in a call moves to the picked device too.
+    expect(mockSwitchVideoDevice).toHaveBeenCalledWith("cam-1");
 
     await vi.waitFor(() => {
       const preview = el.querySelector("video") as HTMLVideoElement;

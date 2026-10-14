@@ -160,7 +160,12 @@ is subscribed until the viewer clicks Watch stream, its voice-roster row or Pop
 out; with the setting off, a camera is opt-in the same way. Stop watching
 unsubscribes either and returns the card; a stopped camera stays stopped,
 across its owner turning it off and on and across a channel switch, until you
-leave voice, and a stream that ends is forgotten rather than stopped. A watch
+leave voice, and a stream that ends is forgotten rather than stopped. A
+screen share you were watching that ends says "Otto ended the stream" in its
+tile for 3 s before the tile goes; the tile's controls are dead meanwhile, and
+leaving voice or the same person sharing again replaces it at once. The watch
+lasts as long as that cover: the same person sharing again within it is still
+watched, and keeps the focus. A watch
 survives a channel switch and the app's own reconnect or rejoin, but not
 livekit-client's full reconnect, and ends when you leave voice. The setting is
 read as each camera is published (and on a reconnect's sweep), so turning it
@@ -172,7 +177,15 @@ the native backend still auto-subscribes, so it unsubscribes an unwatched
 stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
 Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. In a DM call, focus view stays inside the call panel and the
+**Hide preview**. While you share, the voice widget shows a stream card
+(`components/voice-widget/streamCard.ts`, loaded on the first share): what is
+going out, **Change source**, **Quality** and **Stop sharing**. Change source
+opens the picker and swaps the new capture under the published track
+(`features/voice/screenshareChange.ts`), so viewers keep watching and the
+server hears no `voice_screenshare`; cancelling the picker changes nothing.
+Quality re-sizes the running capture for this share only (the Settings default
+stays). On Linux the native capture picks in its own dialog, so the card has
+Stop sharing only. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
@@ -271,10 +284,11 @@ Per-user volume is adjustable (0–200%; saved values above 200% are read as 200
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. One exception on success: a reconnect
-drops your camera and screen share (`teardownForReconnect`), so once it lands a toast names what stopped,
-with a "Turn on again" button ("Share again" for a screen share alone) that runs the normal enable path;
-nothing is restored automatically. The 60 s token-refresh response guard and the
+"Voice connection lost — failed to reconnect" + auto-leave. A reconnect drops your camera and screen
+share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
+the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
+with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host
+still lists it. Leaving voice removes the toast. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 **A planned restart returns the call (RT-12).** The hub wipes `voice_states` on
@@ -445,8 +459,10 @@ those sounds fall back to the system default — see
 [known limitations](../../known-limitations.md#client).
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
-leave and move; on another member joining or leaving the channel you are in; and
-on your mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+leave and move; on another member joining or leaving the channel you are in;
+on a screen share starting or ending in that channel, your own included (keyed
+off the server's roster, so a cancelled picker plays nothing); and on your
+mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
 Notifications, on by default) gates them, and DND silences them like the message
 chime. Two edges stay silent by design: push-to-talk, and the wholesale roster
 replacement (`setVoiceStates`) behind the initial `ready` and a reconnect
