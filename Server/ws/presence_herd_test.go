@@ -108,7 +108,7 @@ func TestPresenceHerd_500ConnectsInOneSecond_NoKicks(t *testing.T) {
 		c := herdClient(ctx, h, u)
 		h.registerNow(c, nil)
 		c.user.Status = db.StatusOnline
-		c.setLivePresence(db.StatusOnline, nil)
+		c.setLivePresence(db.StatusOnline, nil, "")
 		// The ready payload: every connected member as the hub sees them.
 		views[i] = map[int64]string{}
 		for uid, p := range h.livePresences() {

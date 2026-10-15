@@ -61,7 +61,7 @@ func (q *Queries) GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiT
 const getOwnerUser = `-- name: GetOwnerUser :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status
+       display_name, about, custom_status, registration_status, custom_status_expires_at
 FROM users
 WHERE banned = 0
    OR (ban_expires IS NOT NULL
@@ -105,6 +105,7 @@ func (q *Queries) GetOwnerUser(ctx context.Context) (User, error) {
 		&i.About,
 		&i.CustomStatus,
 		&i.RegistrationStatus,
+		&i.CustomStatusExpiresAt,
 	)
 	return i, err
 }

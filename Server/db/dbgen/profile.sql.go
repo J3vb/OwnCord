@@ -10,6 +10,26 @@ import (
 	"database/sql"
 )
 
+const clearCustomStatusIfExpiry = `-- name: ClearCustomStatusIfExpiry :execrows
+UPDATE users SET custom_status = NULL, custom_status_expires_at = NULL
+WHERE id = ? AND custom_status_expires_at = ?
+`
+
+type ClearCustomStatusIfExpiryParams struct {
+	ID                    int64   `json:"id"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+}
+
+// Compare-and-clear: only clears while the stored expiry still equals the one
+// the caller read, so a status set in the same instant survives.
+func (q *Queries) ClearCustomStatusIfExpiry(ctx context.Context, arg ClearCustomStatusIfExpiryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, clearCustomStatusIfExpiry, arg.ID, arg.CustomStatusExpiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countUsersWithAvatar = `-- name: CountUsersWithAvatar :one
 SELECT COUNT(*) FROM users WHERE avatar = ?
 `
@@ -24,20 +44,81 @@ func (q *Queries) CountUsersWithAvatar(ctx context.Context, avatar *string) (int
 	return count, err
 }
 
+const listExpiredCustomStatuses = `-- name: ListExpiredCustomStatuses :many
+SELECT id, custom_status_expires_at FROM users
+WHERE custom_status_expires_at IS NOT NULL AND custom_status_expires_at <= ?
+ORDER BY custom_status_expires_at, id
+LIMIT ?
+`
+
+type ListExpiredCustomStatusesParams struct {
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+	Limit                 int64   `json:"limit"`
+}
+
+type ListExpiredCustomStatusesRow struct {
+	ID                    int64   `json:"id"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+}
+
+// Rows whose expiry has passed, oldest first. The expirer clears each with
+// ClearCustomStatusIfExpiry so a status set after this read is never undone.
+func (q *Queries) ListExpiredCustomStatuses(ctx context.Context, arg ListExpiredCustomStatusesParams) ([]ListExpiredCustomStatusesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listExpiredCustomStatuses, arg.CustomStatusExpiresAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListExpiredCustomStatusesRow{}
+	for rows.Next() {
+		var i ListExpiredCustomStatusesRow
+		if err := rows.Scan(&i.ID, &i.CustomStatusExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const nextCustomStatusExpiry = `-- name: NextCustomStatusExpiry :one
+SELECT custom_status_expires_at FROM users
+WHERE custom_status_expires_at IS NOT NULL
+ORDER BY custom_status_expires_at
+LIMIT 1
+`
+
+// The soonest pending expiry; no row when none is pending. Served by the
+// partial index on custom_status_expires_at.
+func (q *Queries) NextCustomStatusExpiry(ctx context.Context) (*string, error) {
+	row := q.db.QueryRowContext(ctx, nextCustomStatusExpiry)
+	var custom_status_expires_at *string
+	err := row.Scan(&custom_status_expires_at)
+	return custom_status_expires_at, err
+}
+
 const updateUserCustomStatus = `-- name: UpdateUserCustomStatus :exec
-UPDATE users SET custom_status = ? WHERE id = ?
+UPDATE users SET custom_status = ?, custom_status_expires_at = ? WHERE id = ?
 `
 
 type UpdateUserCustomStatusParams struct {
-	CustomStatus *string `json:"customStatus"`
-	ID           int64   `json:"id"`
+	CustomStatus          *string `json:"customStatus"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+	ID                    int64   `json:"id"`
 }
 
 // Separate from UpdateUserProfile because a custom status arrives over the
 // WebSocket presence path, not the REST profile PATCH, and must not be able to
 // clobber the username/avatar of a profile edit racing it.
+// The expiry rides with the text: a new text without an expiry replaces any old
+// one, and a NULL text (logout, clear) clears both.
 func (q *Queries) UpdateUserCustomStatus(ctx context.Context, arg UpdateUserCustomStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserCustomStatus, arg.CustomStatus, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateUserCustomStatus, arg.CustomStatus, arg.CustomStatusExpiresAt, arg.ID)
 	return err
 }
 

@@ -53,6 +53,16 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 		{"about only", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"))) }, true},
 		{"about rewrite, nothing changed", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"))) }, false},
 		{"custom status", func() { must(database.UpdateUserCustomStatus(ctx, uid, str("busy"))) }, true},
+		{"expiry rewrite, same text", func() {
+			must(database.UpdateUserPresence(ctx, uid, db.StatusOnline, str("busy"), str("2099-01-01T00:00:00Z")))
+		}, false},
+		{"custom status expiry clear", func() {
+			ok, err := database.ClearCustomStatusIfExpiry(ctx, uid, "2099-01-01T00:00:00Z")
+			must(err)
+			if !ok {
+				t.Fatal("ClearCustomStatusIfExpiry cleared nothing")
+			}
+		}, true},
 		{"identity key", func() { must(database.UpdateUserIdentityKey(ctx, uid, str("k"))) }, true},
 		{"role rename", func() {
 			r, err := database.GetRoleByID(ctx, 4)

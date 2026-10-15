@@ -58,17 +58,17 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 		t.Errorf("DM pin while timed out = %v, want ErrTimedOut", err)
 	}
 	status := "look at me"
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &status, nil); !errors.Is(err, ErrTimedOut) {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &status, nil, nil); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("custom status while timed out = %v, want ErrTimedOut", err)
 	}
 
 	// Changing only the presence status, or clearing the custom status,
 	// publishes no text of the user's own, so it stays allowed.
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "idle", nil, nil); err != nil {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "idle", nil, nil, nil); err != nil {
 		t.Errorf("plain status change while timed out = %v, want nil", err)
 	}
 	cleared := ""
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &cleared, nil); err != nil {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &cleared, nil, nil); err != nil {
 		t.Errorf("clearing custom status while timed out = %v, want nil", err)
 	}
 
