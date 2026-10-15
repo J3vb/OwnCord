@@ -149,9 +149,14 @@ const WAKE_KICK_FLOOR_MS = 2_000;
 // WP 2A-5: a `cseq` gap means the server lost a frame meant for this socket
 // and owes it a full ready. The resume waits a random 1-5 s so that, when one
 // server-side fault (a DB outage) marks every client at once, the herd does
-// not redial in one instant.
-const GAP_RESUME_MIN_MS = 1_000;
-const GAP_RESUME_MAX_MS = 5_000;
+// not redial in one instant. Gap resumes close together (losses that keep
+// coming) wait longer each time, and the window resets after a quiet minute.
+const GAP_RESUME_WINDOWS_MS: ReadonlyArray<readonly [number, number]> = [
+  [1_000, 5_000],
+  [5_000, 15_000],
+  [15_000, 30_000],
+];
+const GAP_RESUME_QUIET_MS = 60_000;
 // U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
 // the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
 // whether that wake would displace another device's live session: a lone
@@ -293,6 +298,9 @@ export function createWsClient({
   let lastCseq = 0;
   let socketId = 0;
   let gapResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  // Back-to-back gap resumes, kept across sockets (auth_ok does not reset it).
+  let gapStreak = 0;
+  let lastGapResumeAt = -Infinity;
   // P5-S04: an announced restart's redial point (receipt + delay_seconds +
   // this client's random offset in reconnect_spread_ms), so the whole server
   // does not redial into one instant. Cleared by the next dial.
@@ -704,7 +712,10 @@ export function createWsClient({
     const expected = lastCseq + 1;
     lastCseq = cseq;
     if (cseq === expected || gapResumeTimer !== null) return;
-    const delay = GAP_RESUME_MIN_MS + random() * (GAP_RESUME_MAX_MS - GAP_RESUME_MIN_MS);
+    if (Date.now() - lastGapResumeAt > GAP_RESUME_QUIET_MS) gapStreak = 0;
+    const [min, max] =
+      GAP_RESUME_WINDOWS_MS[Math.min(gapStreak, GAP_RESUME_WINDOWS_MS.length - 1)]!;
+    const delay = min + random() * (max - min);
     log.info("Missed a live update; resuming to fetch fresh", {
       expected,
       received: cseq,
@@ -731,6 +742,8 @@ export function createWsClient({
   function resumeForGap(): void {
     if (intentionalClose || certMismatchBlock || !config) return;
     if (state !== "connected" || !proxyOpen) return;
+    gapStreak++;
+    lastGapResumeAt = Date.now();
     proxyOpen = false;
     stopHeartbeat();
     stopLiveness();

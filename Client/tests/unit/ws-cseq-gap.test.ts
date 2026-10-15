@@ -194,4 +194,60 @@ describe("cseq gap detection (WP 2A-5)", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(dials()).toBe(0);
   });
+
+  it("finishes a resume cycle: the new socket's own count raises nothing", async () => {
+    await connectAndAuth();
+    emitTauriEvent("ws-message", frame(10, 1));
+    emitTauriEvent("ws-message", frame(12, 3));
+    await vi.advanceTimersByTimeAsync(1_010);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent("ws-message", AUTH_OK);
+    mockInvoke.mockClear();
+
+    emitTauriEvent("ws-message", frame(13, 1));
+    emitTauriEvent("ws-message", frame(14, 2));
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(dials()).toBe(0);
+  });
+
+  it("waits longer for gap resumes close together, and resets after a quiet minute", async () => {
+    await connectAndAuth();
+    const gapThenResume = async (): Promise<number> => {
+      mockInvoke.mockClear();
+      emitTauriEvent("ws-message", frame(1, 1));
+      emitTauriEvent("ws-message", frame(2, 3));
+      let waited = 0;
+      while (dials() === 0 && waited < 40_000) {
+        await vi.advanceTimersByTimeAsync(500);
+        waited += 500;
+      }
+      emitTauriEvent("ws-state", "open");
+      emitTauriEvent("ws-message", AUTH_OK);
+      return waited;
+    };
+    expect(await gapThenResume()).toBe(1_000);
+    expect(await gapThenResume()).toBe(5_000);
+    expect(await gapThenResume()).toBe(15_000);
+    expect(await gapThenResume()).toBe(15_000);
+
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(16_000);
+      emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
+    }
+    expect(await gapThenResume()).toBe(1_000);
+  });
+
+  it("leaves the redial to the liveness deadline when it fires during the wait", async () => {
+    sample = 1;
+    await connectAndAuth();
+    emitTauriEvent("ws-message", frame(10, 1));
+    // The gap is the last frame; the socket then goes silent.
+    emitTauriEvent("ws-message", frame(12, 3));
+    mockInvoke.mockClear();
+    // Liveness only counts silence once a heartbeat ping is unanswered: the
+    // 30 s heartbeat pings, and 15 s later the deadline gives up. The 5 s gap
+    // timer fires first and redials; the liveness path must not add a second.
+    await vi.advanceTimersByTimeAsync(80_000);
+    expect(dials()).toBe(1);
+  });
 });
