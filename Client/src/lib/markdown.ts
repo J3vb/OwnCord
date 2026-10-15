@@ -41,10 +41,10 @@ export type InlineNode =
 
 export type { TimestampStyle };
 
-/** `<t:1700000000>` or `<t:1700000000:R>`, at the start of the input. */
-const TIMESTAMP_RE = /^<t:(-?\d{1,13})(?::([tTdDfFR]))?>/;
-/** `<https://…>`, at the start of the input. */
-const ANGLE_URL_RE = /^<(https?:\/\/[^\s<>]+)>/i;
+/** `<t:1700000000>` or `<t:1700000000:R>`, sticky: matched at `lastIndex`. */
+const TIMESTAMP_RE = /<t:(-?\d{1,13})(?::([tTdDfFR]))?>/y;
+/** `<https://…>`, sticky: matched at `lastIndex`. */
+const ANGLE_URL_RE = /<(https?:\/\/[^\s<>]+)>/iy;
 
 /** Characters a backslash can neutralise. Anything else keeps its backslash. */
 const ESCAPABLE = "\\`*_~|[]()<>#-+.!";
@@ -279,8 +279,8 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
     }
 
     if (c === "<") {
-      const rest = src.slice(i, i + 2100);
-      const ts = TIMESTAMP_RE.exec(rest);
+      TIMESTAMP_RE.lastIndex = i;
+      const ts = TIMESTAMP_RE.exec(src);
       // Past what a Date can hold (±8.64e12 s) the token stays text.
       if (ts !== null && Math.abs(Number(ts[1])) <= 8.64e12) {
         flush();
@@ -289,7 +289,8 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
         i += ts[0].length;
         continue;
       }
-      const angle = ANGLE_URL_RE.exec(rest);
+      ANGLE_URL_RE.lastIndex = i;
+      const angle = ANGLE_URL_RE.exec(src);
       if (angle !== null) {
         flush();
         out.push({ type: "url", url: angle[1]!, raw: angle[0] });

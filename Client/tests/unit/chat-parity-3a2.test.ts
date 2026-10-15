@@ -76,6 +76,14 @@ describe("filterChannelSuggestions", () => {
     ]);
   });
 
+  it("orders channels that share a position by id, as the sidebar does", () => {
+    setChannels([
+      { id: 9, name: "chat-a", type: "text", category: null, position: 0 },
+      { id: 7, name: "chat-b", type: "text", category: null, position: 0 },
+    ]);
+    expect(filterChannelSuggestions("chat").map((s) => s.name)).toEqual(["chat-b", "chat-a"]);
+  });
+
   it("shows the category, or Voice channel for an uncategorised voice channel", () => {
     const byName = new Map(filterChannelSuggestions("").map((s) => [s.name, s.detail]));
     expect(byName.get("general")).toBe("Text");
@@ -265,6 +273,12 @@ describe("<url> posts a link with no embed", () => {
   });
   it("keeps the embed when the opening bracket is escaped", () => {
     expect(extractUrls("\\<https://a.example/x>")).toEqual(["https://a.example/x"]);
+    expect(extractUrls("\\\\<https://a.example/x>")).toEqual([]);
+  });
+
+  it("holds an address as long as a message allows", () => {
+    const url = `https://a.example/${"x".repeat(3000)}`;
+    expect(parseInline(`<${url}>`)).toEqual([{ type: "url", url, raw: `<${url}>` }]);
   });
 
   it("needs an address with no spaces between the brackets", () => {

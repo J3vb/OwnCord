@@ -34,8 +34,12 @@ export interface ChannelAutocompleteOptions {
 
 export type ChannelAutocompleteComponent = InlineAutocompleteComponent;
 
-function byPosition(a: { position: number }, b: { position: number }): number {
-  return a.position - b.position;
+/** The sidebar's order: position, then id for channels that share one. */
+function byPosition(
+  a: { position: number; id: number },
+  b: { position: number; id: number },
+): number {
+  return a.position - b.position || a.id - b.id;
 }
 
 /**
@@ -45,15 +49,15 @@ function byPosition(a: { position: number }, b: { position: number }): number {
  */
 export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
   const q = query.toLowerCase();
-  const prefix: { s: ChannelSuggestion; position: number }[] = [];
-  const substring: { s: ChannelSuggestion; position: number }[] = [];
+  const prefix: { s: ChannelSuggestion; position: number; id: number }[] = [];
+  const substring: { s: ChannelSuggestion; position: number; id: number }[] = [];
   for (const ch of channelsStore.getState().channels.values()) {
     if (ch.type === "dm" || !CHANNEL_NAME.test(ch.name)) continue;
     const lower = ch.name.toLowerCase();
     if (q !== "" && !lower.includes(q)) continue;
     const detail =
       ch.category ?? (ch.type === "voice" ? messagingText("channelMention.voice") : "");
-    const entry = { s: { id: ch.id, name: ch.name, detail }, position: ch.position };
+    const entry = { s: { id: ch.id, name: ch.name, detail }, position: ch.position, id: ch.id };
     (q === "" || lower.startsWith(q) ? prefix : substring).push(entry);
   }
   return [...prefix.toSorted(byPosition), ...substring.toSorted(byPosition)]
