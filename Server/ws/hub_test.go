@@ -1834,7 +1834,7 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"))
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {
