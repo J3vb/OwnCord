@@ -8,12 +8,11 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-10-14._
+_Last updated 2026-10-15._
 
 ## Current release
 
-**v2.2.0-beta.3**, published 2026-10-11. **v2.3.0-beta.1** is prepared on
-`dev` and is tagged once the owner gives the go. It is still a beta and a hobby
+**v2.3.0-beta.1**, published 2026-10-14. It is still a beta and a hobby
 project: desktop only (Windows and Linux, x64 and ARM64). Update the server and
 the desktop app together.
 
