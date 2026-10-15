@@ -583,6 +583,20 @@ describe("renderAttachment — server thumbnails", () => {
     expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
   });
 
+  it("an image row is a keyboard control that opens the lightbox", async () => {
+    const el = renderAttachment(att);
+    document.body.appendChild(el);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    const img = el.querySelector("img")!;
+    expect(img.tabIndex).toBe(0);
+    expect(img.getAttribute("aria-label")).toBe("Open photo.jpg");
+
+    img.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(document.querySelector(".image-lightbox")).not.toBeNull();
+    el.remove();
+  });
+
   it("right-click on an image row opens Copy Image and Save Image", async () => {
     const el = renderAttachment(att);
     document.body.appendChild(el);

@@ -1159,6 +1159,19 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     }
 
     function attachLightbox(img: HTMLImageElement): void {
+      // Keyboard-operable like an inline image (B9-9): focus it and Enter or
+      // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
+      img.tabIndex = 0;
+      img.setAttribute("role", "button");
+      img.setAttribute(
+        "aria-label",
+        messageStatusText("file.openImage", { filename: att.filename }),
+      );
+      img.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        img.click();
+      });
       img.addEventListener("click", () => {
         openImageLightbox(img.src, att.filename, { url: resolvedUrl });
       });
@@ -1516,6 +1529,12 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
+    // Focus stays on the close button, so the Menu key / Shift+F10 open the
+    // image's menu from there, centred on the image.
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    }
     if (e.key === "Tab") {
       // Contain focus in the dialog: its close button is the only Tab stop.
       e.preventDefault();

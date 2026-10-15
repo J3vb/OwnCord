@@ -370,6 +370,17 @@ describe("lightbox image menu", () => {
     expect(menuLabels()).toEqual(["Copy Image", "Save Image"]);
   });
 
+  it("the Menu key opens the image menu from the lightbox's close button", async () => {
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(menuLabels()).toEqual(["Copy Image", "Copy Link", "Open Link", "Save Image"]);
+  });
+
   it("a right-button press does not start a pan on a zoomed image", () => {
     openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
     const overlay = document.querySelector(".image-lightbox")!;
