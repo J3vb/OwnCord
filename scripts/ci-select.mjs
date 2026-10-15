@@ -38,6 +38,8 @@
 //     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
 //     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
 //     CHANGELOG.md                             admin/changelog_bundle_test.go
+//                                              (the `changelog` capability runs
+//                                              only that test; see CHANGELOG_PATH)
 //
 //   Client reads outside Client/:
 //     docs/api.md                              tests/contract/api-profile-route.test.ts
@@ -71,6 +73,7 @@ export const CAPABILITIES = [
   "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
   "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
+  "changelog", // TestBundledChangelog alone, without the race legs (see CHANGELOG_PATH)
 ];
 
 /** Server paths outside the Client/Server pair that a Server test reads. */
@@ -87,10 +90,6 @@ const SERVER_READS_OUTSIDE = new Set([
   "Client/src/lib/types.ts",
   "Client/src-tauri/tauri.conf.json",
   ".superpowers/findings-ledger.json",
-  // The admin panel embeds a copy of the released sections and
-  // TestBundledChangelog fails when a release moves notes under a version
-  // heading without refreshing it.
-  "CHANGELOG.md",
   // GENERATED from protocol/schema.json, but asserted from the Server side:
   // `make protocol-verify` regenerates BOTH Server/ws/message_types.go and this
   // file and fails on drift, so editing, deleting or renaming this path has to
@@ -98,6 +97,18 @@ const SERVER_READS_OUTSIDE = new Set([
   // which already selects the job.
   "Client/src/lib/protocolTypes.ts",
 ]);
+
+/**
+ * The admin panel embeds a copy of CHANGELOG.md's released sections, and
+ * TestBundledChangelog fails when a release moves notes under a version
+ * heading without refreshing it. That one test is the server's only reader of
+ * the file. A changelog edit selects `changelog` rather than `server`: the
+ * required ubuntu server leg then runs that one test alone (its "Changelog
+ * gate" step) and Server Lint & Invariants reports it early. Almost every
+ * client PR adds a changelog line, and `server` would put both 30-35 minute
+ * race legs on each of them for a test that takes under a second.
+ */
+const CHANGELOG_PATH = "CHANGELOG.md";
 
 /** Client paths outside Client/ that a Client test reads. */
 const CLIENT_READS_OUTSIDE = new Set([
@@ -274,6 +285,7 @@ export function classify(paths) {
     // Traced dependencies, checked before the generic prefixes below so a
     // specific file can pull in a component its generic prefix would not.
     if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
+    if (path === CHANGELOG_PATH) add("changelog");
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
     if (RUST_HARNESS_PREFIXES.some((p) => path.startsWith(p))) add("rust");
