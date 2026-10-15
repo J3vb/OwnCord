@@ -42,6 +42,9 @@ export interface EmojiState {
    * broadcast.
    */
   readonly rev?: number;
+  /** Whether the server's set has arrived since the last clear. Optional,
+   *  absent reads as not loaded. */
+  readonly loaded?: boolean;
 }
 
 const INITIAL: EmojiState = {
@@ -89,7 +92,7 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
   }
   emojiStore.setState((prev) => {
     if (rev !== undefined && rev !== (prev.rev ?? 0)) return prev;
-    return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1 };
+    return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1, loaded: true };
   });
 }
 
@@ -119,6 +122,12 @@ export function resolveEmoji(shortcode: string): CustomEmoji | null {
 }
 
 /** The whole set, for the picker and the composer autocomplete. */
+/** Whether this server's custom set is known, so a shortcode that does not
+ *  resolve really is not one of its emoji. */
+export function customEmojiLoaded(): boolean {
+  return emojiStore.getState().loaded === true;
+}
+
 export function listCustomEmoji(): readonly CustomEmoji[] {
   return emojiStore.getState().emoji;
 }

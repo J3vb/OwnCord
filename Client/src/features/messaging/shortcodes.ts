@@ -7,7 +7,7 @@
  * backslash. Before the emoji set has loaded, the text is sent as typed.
  */
 import { codeSpanEnd } from "../../lib/markdown";
-import { resolveEmoji } from "@stores/emoji.store";
+import { customEmojiLoaded, resolveEmoji } from "@stores/emoji.store";
 import { emojiCatalog, emojiForShortcode, skinTone, withSkinTone } from "./emojiCatalog";
 
 /** Parts never touched besides code spans and masked links: code blocks,
@@ -63,12 +63,18 @@ function replaceInProse(prose: string, tone: number): string {
 }
 
 export function replaceEmojiShortcodes(content: string): string {
-  if (emojiCatalog() === null || !content.includes(":")) return content;
+  // Until the server's custom set is known, :joy: could be its own emoji.
+  if (emojiCatalog() === null || !customEmojiLoaded() || !content.includes(":")) return content;
   const tone = skinTone();
   let out = "";
   let proseStart = 0;
   let i = 0;
   while (i < content.length) {
+    // An escaped `[`, backtick or `<` opens nothing, as in the parser.
+    if (content[i] === "\\") {
+      i += 2;
+      continue;
+    }
     const end = protectedEnd(content, i);
     if (end < 0) {
       i++;

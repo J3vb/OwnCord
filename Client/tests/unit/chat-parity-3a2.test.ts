@@ -54,6 +54,7 @@ beforeEach(() => {
   setChannels(CHANNELS);
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   clearCustomEmoji();
+  setCustomEmoji([]);
   emojiStore.flush();
 });
 
@@ -227,6 +228,7 @@ describe("replaceEmojiShortcodes", () => {
     expect(replaceEmojiShortcodes(text)).toBe("[docs](https://ex.com/a_(b):joy:) 😂");
     const escaped = "[docs](https://ex.com/a\\):joy:)";
     expect(replaceEmojiShortcodes(escaped)).toBe(escaped);
+    expect(replaceEmojiShortcodes("\\[a :joy:](https://ex.com)")).toBe("\\[a 😂](https://ex.com)");
   });
 
   it("leaves colon pairs inside words, numbers, addresses and links alone", () => {
@@ -247,6 +249,11 @@ describe("replaceEmojiShortcodes", () => {
     ]) {
       expect(replaceEmojiShortcodes(text)).toBe(text);
     }
+  });
+
+  it("sends shortcodes as typed until the server's custom set is known", () => {
+    clearCustomEmoji();
+    expect(replaceEmojiShortcodes(":joy:")).toBe(":joy:");
   });
 
   it("keeps a server's custom emoji as its shortcode", () => {
