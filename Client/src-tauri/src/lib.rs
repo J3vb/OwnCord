@@ -441,21 +441,55 @@ fn show_startup_failure(error: &str) {
     }
 }
 
-/// Whether a Wayland or X11 display actually accepts a connection, the way
-/// GTK would try them.
+/// Whether a display GTK is allowed to use actually accepts a connection.
+/// `GDK_BACKEND` limits GTK to the backends it names, so a live display of
+/// another kind does not count.
 #[cfg(target_os = "linux")]
 fn display_opens() -> bool {
-    let wayland = wayland_socket(
-        std::env::var_os("WAYLAND_DISPLAY"),
-        std::env::var_os("XDG_RUNTIME_DIR"),
-    )
-    .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok());
-    wayland || std::env::var_os("DISPLAY").is_some_and(|display| x11_display_opens(&display))
+    let allowed = gdk_backends(std::env::var_os("GDK_BACKEND").as_deref());
+    let wayland = || {
+        wayland_socket(
+            std::env::var_os("WAYLAND_DISPLAY"),
+            std::env::var_os("XDG_RUNTIME_DIR"),
+        )
+        .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
+    };
+    let x11 = || std::env::var_os("DISPLAY").is_some_and(|display| x11_display_opens(&display));
+    (allowed.wayland && wayland()) || (allowed.x11 && x11())
+}
+
+/// The display backends GTK may try under `GDK_BACKEND`: both when it is
+/// unset, empty or holds `*`, otherwise only those it lists.
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+struct GdkBackends {
+    wayland: bool,
+    x11: bool,
+}
+
+#[cfg(target_os = "linux")]
+fn gdk_backends(value: Option<&std::ffi::OsStr>) -> GdkBackends {
+    let value = value.map(|v| v.to_string_lossy()).unwrap_or_default();
+    let names: Vec<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if names.is_empty() || names.contains(&"*") {
+        return GdkBackends {
+            wayland: true,
+            x11: true,
+        };
+    }
+    GdkBackends {
+        wayland: names.contains(&"wayland"),
+        x11: names.contains(&"x11"),
+    }
 }
 
 /// The Wayland socket `WAYLAND_DISPLAY` names: an absolute path as is, a bare
 /// name under `XDG_RUNTIME_DIR`.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn wayland_socket(
     wayland_display: Option<std::ffi::OsString>,
     runtime_dir: Option<std::ffi::OsString>,
@@ -492,10 +526,10 @@ fn x11_display_opens(name: &std::ffi::OsStr) -> bool {
     true
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod startup_dialog_tests {
-    use super::wayland_socket;
-    use std::ffi::OsString;
+    use super::{gdk_backends, wayland_socket, GdkBackends};
+    use std::ffi::{OsStr, OsString};
     use std::path::PathBuf;
 
     #[test]
@@ -514,6 +548,39 @@ mod startup_dialog_tests {
     }
 
     #[test]
+    fn gdk_backend_limits_which_displays_count() {
+        let both = GdkBackends {
+            wayland: true,
+            x11: true,
+        };
+        assert_eq!(gdk_backends(None), both);
+        assert_eq!(gdk_backends(Some(OsStr::new(""))), both);
+        assert_eq!(gdk_backends(Some(OsStr::new("*"))), both);
+        assert_eq!(gdk_backends(Some(OsStr::new("wayland,*"))), both);
+        assert_eq!(
+            gdk_backends(Some(OsStr::new("x11"))),
+            GdkBackends {
+                wayland: false,
+                x11: true
+            }
+        );
+        assert_eq!(
+            gdk_backends(Some(OsStr::new("wayland"))),
+            GdkBackends {
+                wayland: true,
+                x11: false
+            }
+        );
+        assert_eq!(
+            gdk_backends(Some(OsStr::new("broadway"))),
+            GdkBackends {
+                wayland: false,
+                x11: false
+            }
+        );
+    }
+
+    #[test]
     fn no_wayland_name_or_runtime_dir_means_no_socket() {
         assert_eq!(wayland_socket(None, Some(OsString::from("/run"))), None);
         assert_eq!(
@@ -527,7 +594,6 @@ mod startup_dialog_tests {
     }
 
     /// Needs a display: `xvfb-run cargo test -- --ignored x11`.
-    #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "needs an X display (xvfb-run)"]
     fn x11_a_live_display_opens_and_a_stale_one_does_not() {
