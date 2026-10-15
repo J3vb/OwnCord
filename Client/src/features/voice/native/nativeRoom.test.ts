@@ -681,10 +681,13 @@ describe("NativeRoom room surface", () => {
     await room.connect("u", "t");
     emit({ session: 1, event: { type: "activeSpeakers", identities: ["user-2", "user-3"] } });
     expect(speakers).toHaveBeenCalledWith([{ identity: "user-2" }, { identity: "user-3" }]);
+    expect(room.isSignalingConnected()).toBe(true);
     emit({ session: 1, event: { type: "reconnecting" } });
     expect(room.state).toBe("reconnecting");
+    expect(room.isSignalingConnected()).toBe(false);
     emit({ session: 1, event: { type: "reconnected" } });
     expect(room.state).toBe("connected");
+    expect(room.isSignalingConnected()).toBe(true);
     emit({ session: 1, event: { type: "encryptionStatus", identity: "user-1", encrypted: false } });
     expect(encryptionError).toHaveBeenCalledTimes(1);
     emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
@@ -693,6 +696,7 @@ describe("NativeRoom room surface", () => {
     emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
     expect(disconnected).toHaveBeenCalledWith(0);
     expect(room.state).toBe("disconnected");
+    expect(room.isSignalingConnected()).toBe(false);
     room.removeAllListeners();
     emit({ session: 1, event: { type: "disconnected", reason: "ClientInitiated" } });
     expect(disconnected).toHaveBeenCalledTimes(1);

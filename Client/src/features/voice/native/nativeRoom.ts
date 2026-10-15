@@ -208,6 +208,12 @@ export class NativeRoom {
   /** connectionStats/connectionDiagnostics read `engine.pcManager`; native
    *  has no browser peer connection, so they see "no transports". */
   readonly engine = { pcManager: undefined, client: { ws: undefined } };
+  /** connectionDiagnostics asks this instead of `engine.client.ws`: the
+   *  backend's signaling is up exactly while the room reads "connected"
+   *  (it reports "reconnecting" and "disconnected" as they happen). */
+  isSignalingConnected(): boolean {
+    return this.state === "connected";
+  }
   readonly remoteParticipants = new Map<string, NativeRemoteParticipant>();
   /** OC-0473: one re-report per remote identity whose frames stopped
    *  decrypting; cleared when they decrypt again or the peer leaves. */
