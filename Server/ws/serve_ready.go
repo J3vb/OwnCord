@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -28,6 +29,15 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 
 	serverName, motd := h.getCachedSettings(ctx)
 
+	// Only the user's own auth_ok carries the expiry instant; everyone else is
+	// told the status went to null. Both fields are guarded together, so an
+	// expired status the expirer has not cleared yet is not handed back.
+	customStatus, expiresAt := storedCustomStatus(user.CustomStatus, user.CustomStatusExpiresAt, time.Now())
+	var expiresAtVal any
+	if expiresAt != "" {
+		expiresAtVal = expiresAt
+	}
+
 	return buildJSON(map[string]any{
 		"type": MsgTypeAuthOK,
 		"payload": map[string]any{
@@ -41,7 +51,9 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				// is what the "edit my profile" form pre-fills from.
 				"display_name":  user.DisplayName,
 				"about":         user.About,
-				"custom_status": user.CustomStatus,
+				"custom_status": customStatus,
+				// RFC 3339 instant the custom status clears itself, or null.
+				"custom_status_expires_at": expiresAtVal,
 				// The user's own true status — invisible included. Only their
 				// own auth_ok ever carries it, which is the whole point: the
 				// picker has to render what they chose, while every other
@@ -69,7 +81,13 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     (readyMembers), which may predate that write, since users.status does
 //     not move the member generation. A connection that has not stamped one
 //     yet shows as offline, like no connection; its connect presence is
-//     announced after the stamp, so the viewer still converges.
+//     announced after the stamp, so the viewer still converges. The live
+//     custom status is a second guard: when the connection stamped a presence
+//     with no custom status, the row's text is stale (a reconnect, resume or
+//     bare status flip cleared it live up to a second before the expirer
+//     clears the row, and the expirer then sends no null frame because the
+//     live text is already nil), so it is blanked here. A live status past
+//     its expiry is blanked too, for the second before the expirer clears it.
 //  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
@@ -80,10 +98,16 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 // ready payloads: each element is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
 	live := h.livePresences()
+	now := time.Now()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
-			if status := live[m.ID].status; status != "" {
-				m.Status = status
+			if lp := live[m.ID]; lp.status != "" {
+				m.Status = lp.status
+				if visibleCustomStatus(lp.customStatus, lp.customStatusExpiresAt, now) == nil {
+					// Only ever to nil: the splice contract, and the shared
+					// encoded roster is untouched (m is this iteration's copy).
+					m.CustomStatus = nil
+				}
 			} else {
 				m.Status = db.StatusOffline
 				m.CustomStatus = nil
@@ -406,6 +430,11 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
 	}
 
+	timeouts, err := h.readyMemberTimeouts(ctx, userID, sub)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
 	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
@@ -442,6 +471,8 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,
+
+			MemberTimeouts: timeouts.entries,
 		},
 		tail: readyTail{
 			MOTD:        motd,
@@ -450,33 +481,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			ServerName:  serverName,
 			VoiceStates: voiceStates,
 		},
-		roster:   roster,
-		viewerID: userID,
+		roster:       roster,
+		viewerID:     userID,
+		timeoutsFull: timeouts.full,
 	}, nil
-}
-
-// readyNoticePayload is one row of ready's notices slot (B5-9): an
-// unacknowledged warning. Never the actor, never the report link.
-type readyNoticePayload struct {
-	ID        int64  `json:"id"`
-	Kind      string `json:"kind"`
-	Reason    string `json:"reason"`
-	CreatedAt string `json:"created_at"`
-}
-
-// readyNotices resolves the connecting user's unacknowledged warnings for
-// ready's notices slot, always as a non-nil (possibly empty) slice so the
-// wire payload never carries a bare `null`.
-func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int64) ([]readyNoticePayload, error) {
-	rows, err := database.ListUnacknowledgedWarnings(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]readyNoticePayload, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, readyNoticePayload{ID: r.ID, Kind: r.Kind, Reason: r.Reason, CreatedAt: r.CreatedAt})
-	}
-	return out, nil
 }
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
@@ -586,7 +594,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// resync owed (P5-S03). Cleared before the build, so a drop after it
 	// marks the user again; restored if the ready never reaches the client.
 	owedResync := h.takeOwedResync(c)
-	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
+	ready, readyErr := h.buildFreshReady(ctx, database, c, userRole)
 	release() // the write below is the peer's pace, not the database's
 	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
 		return err

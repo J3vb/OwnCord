@@ -43,6 +43,7 @@ func (a *App) stages() []stage {
 		{"event-persistence", a.startEventPersistence},
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
+		{"status-expiry", a.startStatusExpiry},
 		{"pprof", a.startPprof},
 		{"acme", a.startACME},
 		{"signals", a.startSignals},

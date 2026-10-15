@@ -82,6 +82,8 @@ type PresenceUpdateCmd struct {
 	// sends a bare status flip several times an hour and must not wipe the
 	// text the user typed.
 	CustomStatus *string
+	// ExpiresIn is custom_status_expires_in (seconds), nil when absent.
+	ExpiresIn *int64
 }
 
 func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
@@ -440,14 +442,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypePresenceUpdate: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			Status       string  `json:"status"`
-			CustomStatus *string `json:"custom_status"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid presence_update payload: %w", err)
-		}
-		return PresenceUpdateCmd{userID: userID, Status: p.Status, CustomStatus: p.CustomStatus}, nil
+		return parsePresenceUpdate(userID, raw)
 	},
 
 	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {

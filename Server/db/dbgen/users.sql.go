@@ -130,6 +130,7 @@ SET registration_status = 'denied',
     display_name = NULL,
     about = NULL,
     custom_status = NULL,
+    custom_status_expires_at = NULL,
     status = 'offline'
 WHERE id = ? AND registration_status = 'pending'
 `
@@ -159,7 +160,7 @@ func (q *Queries) GetMemberGeneration(ctx context.Context) (int64, error) {
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status
+       display_name, about, custom_status, registration_status, custom_status_expires_at
 FROM users WHERE id = ?
 `
 
@@ -184,6 +185,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.About,
 		&i.CustomStatus,
 		&i.RegistrationStatus,
+		&i.CustomStatusExpiresAt,
 	)
 	return i, err
 }
@@ -191,7 +193,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status
+       display_name, about, custom_status, registration_status, custom_status_expires_at
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
@@ -216,6 +218,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.About,
 		&i.CustomStatus,
 		&i.RegistrationStatus,
+		&i.CustomStatusExpiresAt,
 	)
 	return i, err
 }

@@ -27,6 +27,7 @@
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
               "custom_status": "fixture custom status",
+              "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
@@ -88,6 +89,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",
@@ -269,6 +271,7 @@
               "about": null,
               "avatar": null,
               "custom_status": null,
+              "custom_status_expires_at": "<ts:null>",
               "display_name": null,
               "id": "<id:number>",
               "role": "member",
@@ -330,6 +333,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",

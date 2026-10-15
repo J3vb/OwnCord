@@ -1777,24 +1777,45 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
+    // The server's per-channel verdicts change on a role or override edit.
+    // Delete and pin are built into each row, so a change there rebuilds; react
+    // only flips the lock on the rendered controls.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => {
+          const ch = s.channels.get(options.channelId);
+          return `${String(ch?.canDeleteOthers)}|${String(ch?.canPin)}`;
+        },
+        () => renderAll(),
+      ),
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(options.channelId)?.canReact,
+        () => {
+          if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
+        },
+      ),
+    );
+
     // A timeout starting or ending toggles the reaction controls' lock in place
     // (B9-15); no row is rebuilt, so video, spoilers and focus survive.
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
         () => {
-          if (contentContainer !== null) refreshReactionLocks(contentContainer);
+          if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
         },
       ),
     );
 
-    // The delete action is disabled while the socket is down (CLI-08); flip the
-    // gate on the rendered buttons in place, without a rebuild.
+    // Delete (CLI-08) and reactions are disabled while the socket is down; flip
+    // the gates on the rendered controls in place, without a rebuild.
     unsubscribers.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
         () => {
-          if (contentContainer !== null) refreshConnectionControls(contentContainer);
+          if (contentContainer === null) return;
+          refreshConnectionControls(contentContainer);
+          refreshReactionLocks(contentContainer, options.channelId);
         },
       ),
     );

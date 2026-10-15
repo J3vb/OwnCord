@@ -102,6 +102,7 @@ type Client struct {
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
 	sendLow       chan []byte    // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
+	timeouts      heldTimeouts   // which member_timeouts list this client holds (member_timeouts_delivery.go)
 	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	cseq          cseqState      // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
@@ -179,6 +180,11 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
+	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// of customStatus, "" when it has none. It is the tag the expirer's
+	// CustomStatusExpired compares: only a connection still showing the status
+	// that expired is cleared.
+	customStatusExpiresAt string
 }
 
 // livePresence returns the connection's live presence, a zero value (status
@@ -191,8 +197,8 @@ func (c *Client) livePresence() livePresence {
 }
 
 // setLivePresence records the presence this connection just stamped or chose.
-func (c *Client) setLivePresence(status string, customStatus *string) {
-	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
+func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
+	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.

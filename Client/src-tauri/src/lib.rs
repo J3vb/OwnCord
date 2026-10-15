@@ -49,6 +49,8 @@ mod update_commands;
 mod window_prefs;
 #[cfg(windows)]
 mod windows_media;
+#[cfg(windows)]
+mod windows_share_bar;
 mod ws_proxy;
 
 /// Map the RUST_LOG env var to a global level filter for the log plugin.
@@ -390,6 +392,12 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // WebView2 hides device names until mic/camera are allowed.
         #[cfg(windows)]
         windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
+        // WebView2's own "is sharing your screen" bar; the stream card has Stop.
+        #[cfg(windows)]
+        windows_share_bar::hide_on_capture(
+            &window,
+            windows_media::app_origin(app.config(), config.use_https_scheme),
+        );
         #[cfg(target_os = "linux")]
         exit_watch::watch_webview(&window);
         let handle = app.handle().clone();

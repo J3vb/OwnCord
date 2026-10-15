@@ -95,15 +95,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                               |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below)             |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                  |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                      |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                    |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                   |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                          |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                   |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -203,6 +203,7 @@ keeps it until one authenticates.
       "display_name": "Alex A.",
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
+      "custom_status_expires_at": "2026-10-15T18:00:00Z",
       "status": "invisible"
     },
     "server_name": "My Server",
@@ -221,6 +222,14 @@ keeps it until one authenticates.
 profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
+
+`custom_status_expires_at` (RFC 3339 UTC, or `null` when the custom status has
+no expiry or there is none) is the instant the signed-in user's own custom
+status clears itself, so a client can show a countdown. It is **only** in the
+user's own `auth_ok` and `GET /api/v1/users/me`: every other client is never
+told the instant, it just sees the status go to `null` (see `presence`). A
+status whose instant has passed but that the server has not cleared yet is
+sent as `null` in both fields.
 
 `status` is the user's **own true status**, `"invisible"` included. Only this
 message and their own `ready` entry ever carry it — every other client is told
@@ -532,6 +541,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+
+**member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
 `status` is per-viewer. Two rules apply, in this order, so a client never has
 to reconstruct them:
@@ -957,6 +968,17 @@ Typing broadcasts are ephemeral -- they are NOT stored in the replay ring buffer
 }
 ```
 
+```json
+{
+  "type": "presence_update",
+  "payload": {
+    "status": "dnd",
+    "custom_status": "in a meeting",
+    "custom_status_expires_in": 3600
+  }
+}
+```
+
 Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 `"offline"` is still accepted from older clients (which used it to mean
 "appear offline") and is treated as the plain offline it says. Rate limited:
@@ -968,6 +990,19 @@ clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
 typed. While the user is timed out a non-empty `custom_status` is refused with
 `TIMED_OUT`; a bare status change and `""` still apply.
+
+`custom_status_expires_in` is optional: whole seconds, **60 to 604800** (one
+minute to seven days), after which the server clears the custom status by
+itself. A relative duration, so a client's clock skew does not matter; "clear
+today" is the seconds to local midnight. It is valid only with a non-empty
+`custom_status`: sent without one, with `""`, as a string or a fraction, or out
+of range, the frame is refused with `BAD_REQUEST`. A new `custom_status`
+without it has no expiry and replaces any old one; a bare status flip leaves
+both text and expiry alone; `""` clears both. The user's own `auth_ok.user` and
+`GET /api/v1/users/me` return the resulting `custom_status_expires_at`; it is
+never sent to other users. Idle, DnD and Invisible timers are not part of this:
+they stay on the client. An older server ignores the field, so the status just
+never expires there.
 
 The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
@@ -989,7 +1024,10 @@ cleared on `POST /api/v1/auth/logout`.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
 distinguishable from "this event does not mention it"; every presence
-broadcast carries the current value.
+broadcast carries the current value. When a custom status expires the server
+broadcasts a `presence` for the user with `custom_status: null` and the same
+`status` (split for an invisible user like any other presence), exactly as if
+they had cleared it; clients need no timer for other users' statuses.
 
 **Invisible splits this message in two.** When a user's status is
 `"invisible"`, everyone else receives a broadcast that says `"offline"`, and
@@ -1589,6 +1627,21 @@ with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (
 
 `kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
 for a lifted timeout; present for an active timeout.
+
+### member_timeouts (Server -> Client)
+
+WP 3C-7c: the active-timeout list changed. A timeout was issued, lifted or ran out, or the viewer's role changed so that they now (or no longer) hold `MODERATE_MEMBERS`/`ADMINISTRATOR`. Targeted and unsequenced, never replayed. It **replaces the viewer's list wholesale**, the way `roles_update` and `emoji_update` do: drop what you hold and keep exactly these entries.
+
+```json
+{
+  "type": "member_timeouts",
+  "payload": {
+    "timeouts": [{ "user_id": 5, "expires_at": "2026-10-15T13:00:00Z" }]
+  }
+}
+```
+
+Audience: every connected moderator (`MODERATE_MEMBERS` or `ADMINISTRATOR`) receives the full list; a timed-out member receives only their own entry (or `[]` once it ends). Anyone else normally receives nothing, but after a role change or a reconnect a non-moderator may receive a redundant frame holding only their own entry (often `[]`); apply it like any other. When a viewer stops being a moderator they receive one last frame holding only their own entry. A frame can arrive straight after `ready` when a role change lands while the connection is being set up; apply it over the `ready` list like any other. `ready.member_timeouts` carries the same view on every connect, and a resume that missed a change takes a full `ready`, so a client that was offline never needs the frame. An entry is active while now is before `expires_at`; a client should also drop it locally at that moment. The list names no actor and no reason. An Administrator target is exempt from the timeout's effect, but the sanction still exists, so the list shows it. The server does not consult this view: enforcement stays in the send predicates.
 
 ## Appeals
 
@@ -2501,54 +2554,55 @@ tables below add per-type behavioral notes.
 
 ### Server -> Client (45 types)
 
-| Type                  | Has seq? | Delivery                                                                |
-| --------------------- | -------- | ----------------------------------------------------------------------- |
-| `auth_ok`             | No       | Direct                                                                  |
-| `auth_error`          | No       | Direct (then close)                                                     |
-| `ready`               | No       | Direct                                                                  |
-| `chat_message`        | Yes      | Channel or DM participants                                              |
-| `chat_send_ok`        | No       | Direct to sender                                                        |
-| `chat_edited`         | Yes      | Channel or DM participants                                              |
-| `chat_deleted`        | Yes      | Channel or DM participants                                              |
-| `chat_bulk_deleted`   | Yes      | Channel                                                                 |
-| `chat_pinned`         | Yes      | Channel                                                                 |
-| `reaction_update`     | Yes      | Channel or DM participants                                              |
-| `typing`              | No       | Channel (excl. sender) or DM                                            |
-| `presence`            | Yes      | All clients                                                             |
-| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                 |
-| `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
-| `channel_update`      | Yes      | All clients                                                             |
-| `channel_delete`      | Yes      | All clients                                                             |
-| `voice_state`         | Yes      | All clients                                                             |
-| `voice_leave`         | Yes      | All clients                                                             |
-| `voice_moved`         | No       | Direct to moved user                                                    |
-| `voice_disconnected`  | No       | Direct to disconnected user                                             |
-| `voice_config`        | No       | Direct to joiner                                                        |
-| `voice_token`         | No       | Direct to joiner                                                        |
-| `member_join`         | Yes      | All clients                                                             |
-| `member_update`       | Yes      | All clients                                                             |
-| `user_update`         | Yes      | All clients (profile changes)                                           |
-| `member_ban`          | Yes      | All clients                                                             |
-| `roles_update`        | Yes      | All clients (full role list)                                            |
-| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
-| `upload_policy`       | No       | All clients (both upload file-type lists)                               |
-| `dm_channel_open`     | No       | Direct to participant                                                   |
-| `dm_channel_close`    | No       | Direct to participant                                                   |
-| `dm_request`          | No       | Direct to recipient (B5-6)                                              |
-| `call_incoming`       | No       | Direct to each other DM participant                                     |
-| `call_declined`       | No       | Direct to each other DM participant                                     |
-| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
-| `voice_e2ee_offer`    | No       | Direct to target participant                                            |
-| `server_restart`      | Yes      | All clients                                                             |
-| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
-| `mod_action`          | No       | Direct to the live target only                                          |
-| `appeal_status`       | No       | Direct to the appellant only                                            |
-| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                |
-| `error`               | No       | Direct to requester                                                     |
-| `pong`                | No       | Direct to pinger                                                        |
-| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
-| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
-| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                 |
+| Type                  | Has seq? | Delivery                                                                                               |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `auth_ok`             | No       | Direct                                                                                                 |
+| `auth_error`          | No       | Direct (then close)                                                                                    |
+| `ready`               | No       | Direct                                                                                                 |
+| `chat_message`        | Yes      | Channel or DM participants                                                                             |
+| `chat_send_ok`        | No       | Direct to sender                                                                                       |
+| `chat_edited`         | Yes      | Channel or DM participants                                                                             |
+| `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
+| `chat_bulk_deleted`   | Yes      | Channel                                                                                                |
+| `chat_pinned`         | Yes      | Channel                                                                                                |
+| `reaction_update`     | Yes      | Channel or DM participants                                                                             |
+| `typing`              | No       | Channel (excl. sender) or DM                                                                           |
+| `presence`            | Yes      | All clients                                                                                            |
+| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
+| `channel_create`      | No       | Each client that may view the channel (per-recipient)                                                  |
+| `channel_update`      | Yes      | All clients                                                                                            |
+| `channel_delete`      | Yes      | All clients                                                                                            |
+| `voice_state`         | Yes      | All clients                                                                                            |
+| `voice_leave`         | Yes      | All clients                                                                                            |
+| `voice_moved`         | No       | Direct to moved user                                                                                   |
+| `voice_disconnected`  | No       | Direct to disconnected user                                                                            |
+| `voice_config`        | No       | Direct to joiner                                                                                       |
+| `voice_token`         | No       | Direct to joiner                                                                                       |
+| `member_join`         | Yes      | All clients                                                                                            |
+| `member_update`       | Yes      | All clients                                                                                            |
+| `user_update`         | Yes      | All clients (profile changes)                                                                          |
+| `member_ban`          | Yes      | All clients                                                                                            |
+| `roles_update`        | Yes      | All clients (full role list)                                                                           |
+| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                                                    |
+| `upload_policy`       | No       | All clients (both upload file-type lists)                                                              |
+| `dm_channel_open`     | No       | Direct to participant                                                                                  |
+| `dm_channel_close`    | No       | Direct to participant                                                                                  |
+| `dm_request`          | No       | Direct to recipient (B5-6)                                                                             |
+| `call_incoming`       | No       | Direct to each other DM participant                                                                    |
+| `call_declined`       | No       | Direct to each other DM participant                                                                    |
+| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                                                           |
+| `voice_e2ee_offer`    | No       | Direct to target participant                                                                           |
+| `server_restart`      | Yes      | All clients                                                                                            |
+| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
+| `mod_action`          | No       | Direct to the live target only                                                                         |
+| `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
+| `appeal_status`       | No       | Direct to the appellant only                                                                           |
+| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
+| `error`               | No       | Direct to requester                                                                                    |
+| `pong`                | No       | Direct to pinger                                                                                       |
+| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
+| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
+| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                                                |
 
 ### Plugin command types
 

@@ -34,6 +34,10 @@ type User struct {
 	// CustomStatus is the optional free-text status line shown under the name.
 	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
 	CustomStatus *string
+	// CustomStatusExpiresAt is the instant CustomStatus clears itself, as
+	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
+	// non-nil CustomStatus.
+	CustomStatusExpiresAt *string
 }
 
 // EffectiveDisplayName returns the name to render for the user: the display

@@ -88,6 +88,10 @@ type Services struct {
 	// Attention is the admin attention panel's state (RI-07), nil until the
 	// composition root builds it over the hub's counters.
 	Attention *AttentionService
+	// StatusExpiry clears custom statuses at their expiry. The composition
+	// root installs its notifier and runs it; ChannelService wakes it when a
+	// status with an expiry is set.
+	StatusExpiry *CustomStatusExpirer
 }
 
 // New creates all domain services wired together.
@@ -110,11 +114,15 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
+	channels := NewChannelService(st, permSvc)
+	statusExpiry := NewCustomStatusExpirer(st)
+	channels.SetExpiryWake(statusExpiry.Wake)
 	return &Services{
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),
 		Messages:        messages,
-		Channels:        NewChannelService(st, permSvc),
+		Channels:        channels,
+		StatusExpiry:    statusExpiry,
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
 		DMs:             NewDMService(st, permSvc),

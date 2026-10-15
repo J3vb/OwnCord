@@ -61,6 +61,8 @@ and only when it changes something a contributor or fork holder must do
 **Profiles**
 
 - The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
+- A custom status can clear itself: `presence_update` takes an optional `custom_status_expires_in` (60 seconds to 7 days), the server clears the status at that moment and tells everyone with a `presence` whose `custom_status` is `null`, and an expired status no longer comes back when you reconnect. Your own `auth_ok.user` and `/users/me` carry `custom_status_expires_at`; nobody else sees it. The desktop app's "Clear after" picker follows in a later change.
+- Moderators can see who is timed out: `ready` gains `member_timeouts` and a new `member_timeouts` frame is sent when a timeout is issued, lifted or runs out, to everyone who can moderate members and to the timed-out member (their own entry only). Other members are not told. The desktop app's timeout icon follows in a later change.
 
 **Messaging**
 
@@ -76,6 +78,9 @@ and only when it changes something a contributor or fork holder must do
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
 - Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
 - The server now tells each client, per channel, whether it may delete other members' messages, pin, and react (`can_delete_others`, `can_pin`, `can_react` in `ready` and in the per-viewer `channel_create`), so the app can disable controls the server would refuse. Pinning now follows the same permission rule as before, defined in one place; nothing about who can pin changes. A timed-out moderator keeps pin and delete-others in channels; a timed-out member cannot react. The desktop app's buttons follow in a later change.
+- The desktop app's message box, as in Discord: the + button takes several files at once, dragging a file over the chat shows **Upload to #channel**, and a draft's text and reply are kept when you restart the app (per server and account; attachments are not).
+- A character counter appears when 200 characters are left and turns red past 4,000, and pasting text that would go past the limit attaches it as `message.txt` instead.
+- Clearing an edit and pressing Enter now asks whether to delete the message, instead of doing nothing.
 
 ### Changed
 
@@ -109,6 +114,9 @@ and only when it changes something a contributor or fork holder must do
 - A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
 - Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
+- Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.
+- Editing a message showed you as typing to everyone in the channel. Editing no longer does.
+- Delete, Pin and React now follow the channel's permissions. A channel that grants or removes them for you now shows or hides those buttons, instead of the buttons following your role alone.
 
 **Voice and video**
 

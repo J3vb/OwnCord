@@ -75,6 +75,7 @@ const (
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeModQueue            = "mod_queue"        // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
 	MsgTypeModAction           = "mod_action"       // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeMemberTimeouts      = "member_timeouts"  // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
 	MsgTypeAppealStatus        = "appeal_status"    // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
 	MsgTypeMentionCount        = "mention_count"    // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
 	MsgTypeChannelActivity     = "channel_activity" // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed

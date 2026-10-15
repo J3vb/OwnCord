@@ -5,6 +5,7 @@
 
 import { createElement } from "@lib/dom";
 import { createEmojiPicker } from "@components/EmojiPicker";
+import { channelCanReact, reactionLockReason } from "@components/message-list/reactions";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
@@ -48,7 +49,13 @@ export function createReactionController(opts: ReactionControllerOptions): React
   const { ws, reactionsLimiter, getChannelId, showError } = opts;
 
   function sendReaction(msgId: number, emoji: string): void {
+    // A picker opened before the socket dropped must not send into the void.
     const channelId = getChannelId();
+    const locked = reactionLockReason(channelCanReact(channelId));
+    if (locked !== null) {
+      showError(locked);
+      return;
+    }
     const msgs = getChannelMessages(channelId);
     const msg = msgs.find((m) => m.id === msgId);
     if (msg !== undefined && atReactionLimit(msg.reactions, emoji)) {

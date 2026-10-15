@@ -552,6 +552,7 @@ Get the current authenticated user's profile.
   "display_name": "Alex",
   "about": "A short bio.",
   "custom_status": "building things",
+  "custom_status_expires_at": "2026-10-15T18:00:00Z",
   "status": "online",
   "role_id": 2,
   "totp_enabled": true,
@@ -562,18 +563,19 @@ Get the current authenticated user's profile.
 This is the canonical **user object**, also returned as `user` by register,
 login and the TOTP challenge.
 
-| Field           | Type         | Description                                                                                                                                                                                                   |
-| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | int64        | User ID                                                                                                                                                                                                       |
-| `username`      | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
-| `avatar`        | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
-| `display_name`  | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
-| `about`         | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
-| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
-| `status`        | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
-| `role_id`       | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
-| `totp_enabled`  | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
-| `created_at`    | string       | ISO 8601 timestamp                                                                                                                                                                                            |
+| Field                      | Type         | Description                                                                                                                                                                                                   |
+| -------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | int64        | User ID                                                                                                                                                                                                       |
+| `username`                 | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
+| `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
+| `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
+| `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
+| `custom_status`            | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
+| `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                          |
+| `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
+| `role_id`                  | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
+| `totp_enabled`             | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
+| `created_at`               | string       | ISO 8601 timestamp                                                                                                                                                                                            |
 
 ---
 
@@ -5070,7 +5072,7 @@ Check whether the LiveKit server is reachable.
 }
 ```
 
-### /livekit/* (Reverse Proxy)
+### /livekit/\* (Reverse Proxy)
 
 All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The `/livekit` prefix is stripped before forwarding. This allows the client to connect to LiveKit through OwnCord's HTTPS server, avoiding mixed-content blocks.
 

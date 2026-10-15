@@ -58,6 +58,10 @@ export interface MessageInputOptions {
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
+  /** Enter on an edit whose text was cleared: offer to delete the message. */
+  readonly onEmptyEdit?: (messageId: number) => void;
+  /** The draft's text or reply changed; read it back with peekDraft(). */
+  readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
   readonly disabledReason?: string | null;
 }
@@ -130,6 +134,9 @@ export type MessageInputComponent = MountableComponent & {
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */
   restoreDraft(draft: ComposerDraft): void;
+  /** The draft's text and reply (the one an edit displaced, mid-edit), with
+   *  none of getDraft()'s upload hand-off. */
+  peekDraft(): { readonly content: string; readonly replyTo: ReplyTarget | null };
   /**
    * Put back files a send did not carry, as chips in their error state, and
    * the send's reply target when the composer has no reply or edit of its own.
@@ -291,6 +298,12 @@ const MAX_ATTACHMENTS = 10;
 // visibly instead of producing an optimistic row whose retry fails identically.
 // Counted in code points, not UTF-16 units -- see the guard in handleSend.
 const MAX_MESSAGE_LEN = 4000;
+// The counter shows once this few characters are left, as Discord's does.
+const COUNTER_FROM_REMAINING = 200;
+/** Where a file dragged in from the OS is accepted. */
+const DROP_SLOTS = ".messages-slot, .typing-slot, .input-slot";
+/** The file a too-long paste becomes, the name Discord gives it. */
+const LONG_PASTE_FILENAME = "message.txt"; // i18n-exempt: a file name, not UI text
 // The server's maintenance sweep deletes unlinked attachments about an hour
 // after upload (Server/internal/app/maintenance.go), and a send silently skips
 // an id it no longer knows. A staged chip past this age (a margin under the
@@ -365,6 +378,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
    *  reused node, not a fresh one per call. */
   let uploadErrorEl: HTMLDivElement | null = null;
+  let charCounter: HTMLSpanElement | null = null;
   const uploadErrorId = `composer-refusal-${++nextComposerId}`;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
@@ -694,9 +708,29 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (textarea === null) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+    updateCounter();
+    options.onDraftChange?.();
+  }
+
+  /** Characters left near the limit, red past it. Every change to the text,
+   *  typed or programmatic (formatting, completions), goes through
+   *  autoResize(), so the counter and the draft hook are driven from there. */
+  function updateCounter(): void {
+    if (charCounter === null || textarea === null) return;
+    const left = MAX_MESSAGE_LEN - [...textarea.value.trim()].length;
+    const show = left <= COUNTER_FROM_REMAINING;
+    charCounter.hidden = !show;
+    if (!show) return;
+    setText(charCounter, String(left));
+    charCounter.classList.toggle("over", left < 0);
+    charCounter.title = messagingText(left < 0 ? "counter.over" : "counter.left", {
+      count: String(Math.abs(left)),
+    });
   }
 
   function maybeEmitTyping(): void {
+    // Editing an old message is not typing a new one (Discord shows nothing).
+    if (state.editing !== null) return;
     const now = Date.now();
     if (now - lastTypingTime >= TYPING_THROTTLE_MS) {
       lastTypingTime = now;
@@ -843,7 +877,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Edits are text-only, so a queued attachment must not unlock submitting
     // an edit whose text was cleared -- that would tear down edit mode for a
     // send the host refuses anyway.
-    if (content.length === 0 && (state.editing !== null || !hasAttachments)) return;
+    if (content.length === 0 && state.editing !== null) {
+      options.onEmptyEdit?.(state.editing.messageId);
+      return;
+    }
+    if (content.length === 0 && !hasAttachments) return;
 
     // The spread counts code points, which is what the server counts. A
     // `.length` check here would count UTF-16 units and refuse ~2000 astral
@@ -912,6 +950,91 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     autoResize();
     textarea.focus();
     clearUploadError();
+  }
+
+  /** A paste that would take the message past the limit goes up as
+   *  message.txt, as Discord does, instead of a draft that can never send.
+   *  When the file could not be attached the paste stays plain text. */
+  function pasteLongTextAsFile(e: ClipboardEvent): void {
+    if (textarea === null || options.onUploadFile === undefined) return;
+    if (state.editing !== null || disabledReason !== null || uploadsDisabledByServer()) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (text === "") return;
+    const { value, selectionStart, selectionEnd } = textarea;
+    const after = value.slice(0, selectionStart) + text + value.slice(selectionEnd);
+    if ([...after.trim()].length <= MAX_MESSAGE_LEN) return;
+    const file = new File([text], LONG_PASTE_FILENAME, { type: "text/plain" });
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
+    if (
+      refusedExtension(file.name) !== null ||
+      file.size > maxBytes ||
+      pendingAttachments.length >= MAX_ATTACHMENTS
+    ) {
+      return;
+    }
+    e.preventDefault();
+    void handlePasteFile(file);
+  }
+
+  /** "Upload to #channel" over the chat while a file from the OS is dragged
+   *  over a slot that takes the drop. It ignores the pointer, so the drop
+   *  still lands on the slot underneath. */
+  function wireDropOverlay(container: Element): void {
+    if (root === null) return;
+    const area = container.closest(".chat-area") ?? container;
+    const overlay = createElement("div", {
+      class: "drop-overlay",
+      "data-testid": "drop-overlay",
+      "aria-hidden": "true",
+    });
+    const card = createElement("div", { class: "drop-overlay-card" });
+    appendChildren(
+      card,
+      createElement("strong", {}, messagingText("drop.title", { channel: options.channelName })),
+      createElement("span", {}, messagingText("drop.hint")),
+    );
+    overlay.appendChild(card);
+    overlay.hidden = true;
+    root.appendChild(overlay);
+    const hide = (): void => {
+      overlay.hidden = true;
+    };
+    document.addEventListener(
+      "dragover",
+      (e: DragEvent) => {
+        if (e.dataTransfer?.types.includes("Files") !== true) return;
+        const target = e.target;
+        const accepts =
+          target instanceof Element &&
+          target.closest(DROP_SLOTS) !== null &&
+          disabledReason === null &&
+          state.editing === null &&
+          !uploadsDisabledByServer() &&
+          !dialogOpen();
+        if (!accepts) {
+          hide();
+          return;
+        }
+        if (!overlay.hidden) return;
+        const r = area.getBoundingClientRect();
+        overlay.style.top = `${r.top}px`;
+        overlay.style.left = `${r.left}px`;
+        overlay.style.width = `${r.width}px`;
+        overlay.style.height = `${r.height}px`;
+        overlay.hidden = false;
+      },
+      { signal },
+    );
+    // A null relatedTarget is the drag leaving the window.
+    document.addEventListener(
+      "dragleave",
+      (e: DragEvent) => {
+        if (e.relatedTarget === null) hide();
+      },
+      { signal },
+    );
+    document.addEventListener("drop", hide, { signal });
+    document.addEventListener("dragend", hide, { signal });
   }
 
   /** Unique counter for preview items (before upload completes and we have a server ID). */
@@ -1226,11 +1349,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     state = { replyTo: { messageId, username, ...opts }, editing: null };
     showReplyBar();
     textarea?.focus();
+    options.onDraftChange?.();
   }
 
   function clearReply(): void {
     state = { ...state, replyTo: null };
     hideReplyBar();
+    options.onDraftChange?.();
   }
 
   function startEdit(messageId: number, content: string): void {
@@ -1263,6 +1388,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     if (stashed.replyTo !== null) showReplyBar();
     else hideReplyBar();
+    options.onDraftChange?.();
   }
 
   function cancelEdit(): void {
@@ -1298,6 +1424,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         if (state.replyTo === null) return;
         state = { ...state, replyTo: { ...state.replyTo, ping: !replyPing() } };
         showReplyBar();
+        options.onDraftChange?.();
         textarea?.focus();
       },
       { signal },
@@ -1338,16 +1465,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (options.onUploadFile !== undefined) {
       const fileInput = createElement("input", {
         type: "file",
+        multiple: "",
         style: "display: none;",
       });
       fileInput.addEventListener(
         "change",
         () => {
-          const file = fileInput.files?.[0];
-          if (file != null) {
-            void handlePasteFile(file);
-          }
+          // Copied first: clearing the value empties the live FileList.
+          const files = [...(fileInput.files ?? [])];
           fileInput.value = "";
+          for (const file of files) void handlePasteFile(file);
         },
         { signal },
       );
@@ -1473,13 +1600,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       (e: ClipboardEvent) => {
         const items = e.clipboardData?.items;
         if (items === undefined) return;
+        let pastedFile = false;
         for (const item of items) {
           if (item.kind !== "file") continue;
           const file = item.getAsFile();
           if (file === null) continue;
           e.preventDefault();
+          pastedFile = true;
           void handlePasteFile(file);
         }
+        if (!pastedFile) pasteLongTextAsFile(e);
       },
       { signal },
     );
@@ -1495,13 +1625,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           if (dt === null || !dt.types.includes("Files")) return;
           const target = e.target;
           if (!(target instanceof Element)) return;
-          if (target.closest(".messages-slot, .typing-slot, .input-slot") === null) return;
+          if (target.closest(DROP_SLOTS) === null) return;
           if (dialogOpen()) return;
           e.preventDefault();
           for (const file of dt.files) void handlePasteFile(file);
         },
         { signal },
       );
+      wireDropOverlay(container);
     }
 
     // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
@@ -1693,7 +1824,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closeEmojiPopup();
     };
 
-    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
+    charCounter = createElement("span", {
+      class: "char-counter",
+      "data-testid": "char-counter",
+    });
+    charCounter.hidden = true;
+    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, charCounter, sendBtn);
     appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
     container.appendChild(root);
     // Apply any initial disabled reason before focusing.
@@ -1732,6 +1868,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     preEditDraft = null;
     attachmentPreviewBar = null;
     uploadErrorEl = null;
+    charCounter = null;
     openPicker = null;
     togglePickerOf = null;
   }
@@ -1751,6 +1888,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  Mid-edit this is the draft the edit displaced: the edit text itself is
    *  never stashed, since restored outside edit mode it would send as a
    *  duplicate new message. */
+  function peekDraft(): { content: string; replyTo: ReplyTarget | null } {
+    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
+    return { content: stashed.text, replyTo: stashed.replyTo };
+  }
+
   function getDraft(): ComposerDraft {
     const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     const uploads: DraftUpload[] = [];
@@ -1895,6 +2037,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     togglePicker,
     getDraft,
     restoreDraft,
+    peekDraft,
     restoreUnsent,
   };
 }

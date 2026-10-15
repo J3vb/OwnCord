@@ -227,7 +227,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus)
+		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
 	}
 	if result.SetE2EEPubKey != nil {
 		sig := ""

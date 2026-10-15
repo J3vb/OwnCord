@@ -244,11 +244,13 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// a connected user to offline, never upgrades one) would then never
 		// self-correct for the rest of this session (OC-0298). The live
 		// presence follows the row for the same reason.
-		c.setLivePresence(c.user.Status, c.user.CustomStatus)
+		text, tag := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
+		c.setLivePresence(c.user.Status, text, tag)
 		return
 	}
 	c.user.Status = status
-	c.setLivePresence(status, c.user.CustomStatus)
+	text, tag := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
+	c.setLivePresence(status, text, tag)
 }
 
 // announceFreshConnect tells every other client that c came online after a
@@ -260,7 +262,8 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 // user whose temporary ban lapsed (member_ban removed them everywhere, and
 // users.banned stays 1 until an unban).
 func (h *Hub) announceFreshConnect(c *Client) {
-	p := pendingPresence{status: c.user.Status, customStatus: c.user.CustomStatus}
+	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
+	p := pendingPresence{status: c.user.Status, customStatus: text}
 	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
 		m := memberPayloadFor(c.user, c.roleName)
 		p.member = &m
@@ -272,7 +275,8 @@ func (h *Hub) announceFreshConnect(c *Client) {
 // announceConnectPresence fans out the status applyConnectStatus settled on,
 // with the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
-	h.QueuePresence(c.userID, c.user.Status, c.user.CustomStatus)
+	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
+	h.QueuePresence(c.userID, c.user.Status, text)
 }
 
 // gateResumeChannel resolves the read-permission set a resume fallback

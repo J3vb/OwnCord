@@ -211,11 +211,18 @@ var presenceFlushRaceHook func(*Hub)
 func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
+	h.dropQueuedPresenceLocked(userID)
+	broadcast()
+}
+
+// dropQueuedPresenceLocked is dropQueuedPresenceAndBroadcast's drop half, for a
+// caller that already holds presenceMu and only broadcasts after a check of its
+// own passes.
+func (h *Hub) dropQueuedPresenceLocked(userID int64) {
 	if p, ok := h.presenceQueue[userID]; ok && p.member != nil {
 		h.announceMember(userID, p)
 	}
 	delete(h.presenceQueue, userID)
-	broadcast()
 }
 
 // announceMember enqueues the member_join for a member other clients' lists

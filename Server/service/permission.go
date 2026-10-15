@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -168,6 +170,47 @@ func (s *PermissionService) reloadTimeoutsLocked(ctx context.Context) error {
 	s.timeouts.Store(&m)
 	return nil
 }
+
+// TimeoutSnapshot returns a copy of the unexpired entries of the in-memory
+// timeout mirror (user_id -> expires_at), without reloading it. The bool is
+// false when the mirror is not loaded (never loaded, or dropped by a failed
+// reload), so a caller can tell "nobody is timed out" from "unknown". The
+// copy is the caller's to read without any lock; expired entries are
+// filtered out, so a lapsed timeout is never reported as active.
+func (s *PermissionService) TimeoutSnapshot() (map[int64]time.Time, bool) {
+	m := s.timeouts.Load()
+	if m == nil {
+		return nil, false
+	}
+	now := time.Now()
+	out := make(map[int64]time.Time, len(*m))
+	for uid, until := range *m {
+		if now.Before(until) {
+			out[uid] = until
+		}
+	}
+	return out, true
+}
+
+// ActiveTimeouts reloads the timeout mirror from the store and returns its
+// unexpired entries. It fails closed: a store error is returned (and the
+// mirror is left dropped, as RefreshTimeouts does) rather than answered
+// from a set that may be missing a timeout. For a fresh connect's ready,
+// which must not ship a list older than the last timeout write.
+func (s *PermissionService) ActiveTimeouts(ctx context.Context) (map[int64]time.Time, error) {
+	if err := s.RefreshTimeouts(ctx); err != nil {
+		return nil, fmt.Errorf("active timeouts: %w", err)
+	}
+	m, ok := s.TimeoutSnapshot()
+	if !ok {
+		return nil, fmt.Errorf("active timeouts: %w", errTimeoutMirrorUnloaded)
+	}
+	return m, nil
+}
+
+// errTimeoutMirrorUnloaded reports that the timeout mirror was dropped
+// between a successful reload and its read (a concurrent failed reload).
+var errTimeoutMirrorUnloaded = errors.New("timeout mirror not loaded")
 
 // timedOut reports whether userID has an unexpired timeout, loading the
 // mirror first if it is not loaded.

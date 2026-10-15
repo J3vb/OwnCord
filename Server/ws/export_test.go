@@ -331,15 +331,16 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 	return buildJSON(map[string]any{
 		"type": MsgTypeReady,
 		"payload": map[string]any{
-			"capabilities": f.head.Capabilities,
-			"channels":     f.head.Channels,
-			"members":      members,
-			"voice_states": f.tail.VoiceStates,
-			"roles":        f.tail.Roles,
-			"dm_channels":  f.head.DMChannels,
-			"server_name":  f.tail.ServerName,
-			"motd":         f.tail.MOTD,
-			"notices":      f.tail.Notices,
+			"capabilities":    f.head.Capabilities,
+			"channels":        f.head.Channels,
+			"member_timeouts": f.head.MemberTimeouts,
+			"members":         members,
+			"voice_states":    f.tail.VoiceStates,
+			"roles":           f.tail.Roles,
+			"dm_channels":     f.head.DMChannels,
+			"server_name":     f.tail.ServerName,
+			"motd":            f.tail.MOTD,
+			"notices":         f.tail.Notices,
 		},
 	}), nil
 }
@@ -673,4 +674,10 @@ func (h *Hub) FlushChannelActivityNowForTest() {
 // BuildChatSendOKForTest exposes buildChatSendOK for external tests.
 func BuildChatSendOKForTest(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skipped []string) []byte {
 	return buildChatSendOK(requestID, msgID, timestamp, clientMessageID, duplicate, skipped)
+}
+
+// SetLivePresenceForTest records c's live presence as a connect stamp or
+// presence_update would.
+func SetLivePresenceForTest(c *Client, status string, customStatus *string, expiresAt string) {
+	c.setLivePresence(status, customStatus, expiresAt)
 }
