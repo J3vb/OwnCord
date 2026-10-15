@@ -154,11 +154,13 @@ windows = { version = "0.58", features = [
     "UI_Notifications",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
-# fallback in secret_store. Version tracks keyring's own windows-sys dep so the
-# two share one build of the crate.
+# fallback in secret_store, and the window lookup that hides WebView2's
+# screen-sharing bar (windows_share_bar.rs). Version tracks keyring's own
+# windows-sys dep so the two share one build of the crate.
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.
