@@ -23,6 +23,10 @@ import {
 } from "@lib/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
+import {
+  formatDiscordTimestamp,
+  type TimestampStyle,
+} from "../../features/messaging/discordTimestamp";
 import { messagingText } from "../../i18n/messaging";
 import {
   parseInline,
@@ -49,6 +53,8 @@ export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
  * (`\|`) is content that never closes the span.
  */
 export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
+/** `<https://…>` — a link its author asked to post without an embed. */
+export const ANGLE_URL_REGEX = /(?<!(?:^|[^\\])\\(?:\\\\)*)<https?:\/\/[^\s<>]+>/gi;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
 
@@ -160,6 +166,23 @@ function buildMaskedLink(
   return link;
 }
 
+/** `<https://…>`: the link without its brackets, and (in extractUrls) no embed. */
+function buildAngleUrl(node: { readonly url: string; readonly raw: string }): HTMLElement {
+  if (!isSafeUrl(node.url)) {
+    const raw = createElement("span", { class: "msg-link-raw" });
+    setText(raw, node.raw);
+    return raw;
+  }
+  const link = createElement("a", {
+    class: "msg-link",
+    href: node.url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+  });
+  setText(link, node.url);
+  return link;
+}
+
 /** Turn inline nodes into DOM under `parent`. */
 function appendInline(parent: Node, nodes: readonly InlineNode[], info?: MentionInfo): void {
   for (const node of nodes) {
@@ -182,6 +205,21 @@ function appendInline(parent: Node, nodes: readonly InlineNode[], info?: Mention
           setText(raw, node.raw);
           parent.appendChild(raw);
         }
+        break;
+      }
+      case "url":
+        parent.appendChild(buildAngleUrl(node));
+        break;
+      case "timestamp": {
+        const { text, title } = formatDiscordTimestamp(node.unix, node.style);
+        const time = createElement("time", {
+          class: "md-timestamp",
+          datetime: new Date(node.unix * 1000).toISOString(),
+          title,
+          "data-style": node.style,
+        });
+        setText(time, text);
+        parent.appendChild(time);
         break;
       }
       case "spoiler":
@@ -513,6 +551,7 @@ interface ParsedListItem {
 type ParsedBlock =
   | { readonly type: "paragraph"; readonly inline: readonly InlineNode[] }
   | { readonly type: "heading"; readonly level: 1 | 2 | 3; readonly inline: readonly InlineNode[] }
+  | { readonly type: "subtext"; readonly inline: readonly InlineNode[] }
   | { readonly type: "quote"; readonly blocks: readonly ParsedBlock[] }
   | {
       readonly type: "list";
@@ -541,6 +580,9 @@ function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
     switch (block.type) {
       case "heading":
         out.push({ type: "heading", level: block.level, inline: parseInline(block.text) });
+        break;
+      case "subtext":
+        out.push({ type: "subtext", inline: parseInline(block.text) });
         break;
       case "quote":
         if (depth + 1 >= MAX_BLOCK_DEPTH) {
@@ -638,6 +680,12 @@ function renderParsedBlocks(
         });
         appendInline(heading, block.inline, info);
         parent.appendChild(heading);
+        break;
+      }
+      case "subtext": {
+        const sub = createElement("div", { class: "md-subtext" });
+        appendInline(sub, block.inline, info);
+        parent.appendChild(sub);
         break;
       }
       case "quote": {
@@ -768,4 +816,19 @@ export function renderMessageContent(
   }
 
   return fragment;
+}
+
+/**
+ * Rewrite the `<t:…>` timestamps under `root` in the current clock preference
+ * and relative to now, for a 12h/24h switch or a passing midnight.
+ */
+export function relabelInlineTimestamps(root: ParentNode): void {
+  for (const el of root.querySelectorAll<HTMLTimeElement>("time.md-timestamp")) {
+    const ms = Date.parse(el.dateTime);
+    if (Number.isNaN(ms)) continue;
+    const style = (el.dataset["style"] ?? "f") as TimestampStyle;
+    const { text, title } = formatDiscordTimestamp(ms / 1000, style);
+    el.textContent = text;
+    el.title = title;
+  }
 }

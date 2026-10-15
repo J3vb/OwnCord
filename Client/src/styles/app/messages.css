@@ -786,6 +786,18 @@
   font-size: 1.1em;
 }
 
+.md-subtext {
+  font-size: 0.8125em;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.md-timestamp {
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-modifier-hover);
+}
+
 .md-quote {
   margin: 2px 0;
   padding: 0 8px 0 12px;
