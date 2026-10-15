@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 
 **Messaging**

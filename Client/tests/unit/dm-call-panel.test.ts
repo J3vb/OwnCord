@@ -1130,3 +1130,89 @@ describe("DmCallPanel — video in the call", () => {
     expect(opts.onVideoHostChange).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("DmCallPanel — resize", () => {
+  const PREF = "owncord:settings:dmCallHeight";
+  const box = (height: number) => ({ height }) as DOMRect;
+
+  /** jsdom lays nothing out: a 1000px chat column and a 400px panel. */
+  function sized(root: HTMLElement): void {
+    vi.spyOn(host, "getBoundingClientRect").mockReturnValue(box(1000));
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue(box(400));
+  }
+
+  const pointer = (type: string, clientY: number) =>
+    new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientY });
+
+  beforeEach(() => localStorage.removeItem(PREF));
+  afterEach(() => localStorage.removeItem(PREF));
+
+  it("drags the bottom edge, keeps room for the chat, and remembers the height", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    sized(root);
+    const handle = q(root, "dcp-resize")!;
+    expect(handle.hidden).toBe(false);
+    expect(handle.getAttribute("role")).toBe("separator");
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("");
+
+    handle.dispatchEvent(pointer("pointerdown", 400));
+    handle.dispatchEvent(pointer("pointermove", 520));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("520px");
+    // 1000px column less 160px kept for the chat.
+    handle.dispatchEvent(pointer("pointermove", 2000));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("840px");
+    handle.dispatchEvent(pointer("pointermove", -500));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("160px");
+    expect(localStorage.getItem(PREF)).toBeNull();
+    handle.dispatchEvent(pointer("pointermove", 450));
+    handle.dispatchEvent(pointer("pointerup", 450));
+    expect(localStorage.getItem(PREF)).toBe("450");
+
+    // A move without a press does nothing.
+    handle.dispatchEvent(pointer("pointermove", 700));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("450px");
+
+    panel!.destroy();
+    const { root: again } = mount();
+    expect(again.style.getPropertyValue("--dcp-height")).toBe("450px");
+  });
+
+  it("hides the handle and drops the height while collapsed", () => {
+    localStorage.setItem(PREF, "300");
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("300px");
+
+    q(root, "dcp-collapse")!.click();
+    expect(q(root, "dcp-resize")!.hidden).toBe(true);
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("");
+
+    q(root, "dcp-collapse")!.click();
+    expect(q(root, "dcp-resize")!.hidden).toBe(false);
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("300px");
+  });
+
+  it("resizes from the keyboard and double-click restores the default", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    sized(root);
+    const handle = q(root, "dcp-resize")!;
+
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("424px");
+    expect(handle.getAttribute("aria-valuenow")).toBe("424");
+    expect(localStorage.getItem(PREF)).toBe("424");
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("376px");
+
+    handle.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("");
+    expect(localStorage.getItem(PREF)).toBe("0");
+  });
+
+  it("clamps the dragged height to the chat column in the stylesheet", () => {
+    const height = cascadedDeclaration(".dm-call-panel--expanded", "height");
+    expect(JSON.stringify(height)).toContain("dcp-height");
+  });
+});

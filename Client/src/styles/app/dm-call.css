@@ -16,9 +16,33 @@
 .dm-call-panel[hidden] {
   display: none;
 }
+/* --dcp-height is the dragged height (DmCallPanel's MIN_HEIGHT and
+   CHAT_MIN_HEIGHT match the clamp), so a smaller window never squeezes out
+   the chat. */
 .dm-call-panel--expanded {
-  height: 58%;
+  height: clamp(160px, var(--dcp-height, 58%), calc(100% - 160px));
   min-height: fit-content;
+}
+/* The drag handle straddles the bottom border; ns-resize like Discord's. */
+.dcp-resize {
+  position: absolute;
+  inset: auto 0 -4px;
+  z-index: 2;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.dcp-resize[hidden] {
+  display: none;
+}
+.dcp-resize:hover,
+.dcp-resize:focus-visible,
+.dm-call-panel--resizing > .dcp-resize {
+  outline: none;
+  background: linear-gradient(var(--accent) 0 0) center / 100% 2px no-repeat;
+}
+.dm-call-panel--resizing {
+  user-select: none;
 }
 .dcp-body {
   display: contents;
