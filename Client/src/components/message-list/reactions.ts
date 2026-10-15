@@ -4,16 +4,24 @@
 
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
+import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
+import { shellText } from "../../i18n/shell";
 import type { MessageListOptions } from "../MessageList";
 import { attachReactionTooltip } from "./reaction-tooltip";
 import { buildCustomEmojiNode } from "./custom-emoji";
 
 // -- Reaction rendering -------------------------------------------------------
 
-/** While timed out (B9-15, Q4): why reacting is disabled, with the server's expiry; else null. */
+/** Why reacting is disabled: the socket is down (a reaction frame would be
+ *  lost), or the user is timed out (B9-15, Q4), with the server's expiry.
+ *  Null when reacting works. */
 export function reactionLockReason(): string | null {
+  const status = uiStore.getState().connectionStatus;
+  if (status !== "connected") {
+    return shellText(status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected");
+  }
   const timeout = safetyStore.getState().timeout;
   return timeout === null
     ? null
@@ -123,8 +131,8 @@ export function applyReactionLock(el: HTMLElement, locked: string | null, defaul
   el.title = locked;
 }
 
-/** Apply the current timeout lock to every reaction control under `root`.
- *  Called when the timeout changes; no row is rebuilt. */
+/** Apply the current lock to every reaction control under `root`. Called when
+ *  the timeout or the connection changes; no row is rebuilt. */
 export function refreshReactionLocks(root: ParentNode): void {
   const locked = reactionLockReason();
   for (const el of root.querySelectorAll<HTMLElement>(

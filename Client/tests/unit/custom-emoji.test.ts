@@ -48,6 +48,13 @@ import {
 } from "../../src/stores/emoji.store";
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 const EMOJI = [
   { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
