@@ -144,6 +144,7 @@ export const messagingText = defineCatalog("messaging", {
   "action.retry": "Retry",
   "action.delete": "Delete",
   "action.react": "React",
+  "reaction.channelLocked": "You can't add reactions in this channel",
   "action.reply": "Reply",
   "action.pin": "Pin",
   "action.unpin": "Unpin",

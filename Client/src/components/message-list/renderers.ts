@@ -8,7 +8,8 @@
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { loadPref } from "@lib/preferences";
-import { canManageMessages } from "@lib/permissions";
+import { channelBitOrRole } from "@lib/permissions";
+import { channelsStore } from "@stores/channels.store";
 import { showToast } from "@lib/toast";
 import { formatMessageLink } from "@lib/deep-link";
 import type { Message } from "@stores/messages.store";
@@ -61,7 +62,12 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
-import { reactionLockReason, renderReactions, wireReactionControl } from "./reactions";
+import {
+  channelCanReact,
+  reactionLockReason,
+  renderReactions,
+  wireReactionControl,
+} from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
 
@@ -464,7 +470,7 @@ export function renderMessage(
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
-      reactionLockReason(),
+      reactionLockReason(channelCanReact(msg.channelId)),
       signal,
     );
     actionsBar.appendChild(reactBtn);
@@ -491,7 +497,12 @@ export function renderMessage(
     // any DM participant may pin — so offering it to a plain member is a
     // broken affordance (PRD.md: permission is a pre-disabled affordance, not
     // a rejection after the fact).
-    if (opts.channelType === "dm" || canManageMessages()) {
+    // In a channel it follows the server's per-channel verdict (a channel
+    // override can grant or deny it), falling back to the role on an older server.
+    if (
+      opts.channelType === "dm" ||
+      channelBitOrRole(channelsStore.getState().channels.get(msg.channelId)?.canPin)
+    ) {
       actionsBar.appendChild(pinBtn);
     }
 
@@ -506,8 +517,13 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    // Own message, or a moderator acting on someone else's.
-    if (msg.user.id === opts.currentUserId || canManageMessages()) {
+    // Own message (always), or someone else's where the channel allows it. A
+    // DM never lets anyone delete the other participant's messages.
+    if (
+      msg.user.id === opts.currentUserId ||
+      (opts.channelType !== "dm" &&
+        channelBitOrRole(channelsStore.getState().channels.get(msg.channelId)?.canDeleteOthers))
+    ) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
