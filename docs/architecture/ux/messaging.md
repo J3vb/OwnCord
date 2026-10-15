@@ -400,6 +400,9 @@ every `href` passes `isSafeUrl` first.
 | Escape                             | `\*literal\*`                             | A backslash neutralises any markdown punctuation; escapes are inert inside code                                                                                                                                         |
 | Block quote                        | `> line` at line start                    | Contiguous `>` lines merge into one quote; `>>>` quotes the rest of the message. Quotes may contain other blocks, one level deep                                                                                        |
 | Heading                            | `# `, `## `, `### ` at line start         | h1–h3; the space is required, so `#nospace` and `#channel` are untouched                                                                                                                                                |
+| Subtext                            | `-# ` at line start                       | One line in smaller, muted text                                                                                                                                                                                         |
+| Timestamp                          | `<t:unix>`, `<t:unix:style>`              | A `<time>` in the reader's time zone and 12h/24h setting, the full date as its tooltip. Styles `t T d D f F R` as in Discord (`f` default, `R` relative)                                                                |
+| Link with no embed                 | `<https://…>`                             | Shown without the brackets and left out of link previews                                                                                                                                                                |
 | Lists                              | `- ` / `* ` bullets, `1. ` ordered        | Contiguous items form one list; two leading spaces nest a single level; an ordered list keeps its starting number                                                                                                       |
 | Masked link                        | `[text](url)`                             | `http(s)` absolute URLs only — `javascript:`, `data:` and relative URLs render as literal source text. Shows `title=url`, and produces **no** link embed (an author who hid the address does not get it previewed back) |
 | Inline code                        | `` `code` ``, ` ``code`` `                | Markdown, mentions and autolinking are all dead inside                                                                                                                                                                  |
@@ -414,7 +417,9 @@ markers are inserted around the caret. Ctrl+U is only Underline; the file
 picker is Ctrl+Shift+U, Ctrl+E and Ctrl+G open the emoji and GIF pickers, Page
 Up / Page Down scroll the chat, and typing with nothing focused starts a
 message. Escape cancels an edit or reply first; with nothing to cancel it marks
-the channel read (Shift+Escape the server).
+the channel read (Shift+Escape the server). Typing `#` after a space or at the start offers
+channels to link, and a typed `:name:` shortcode is sent as its Unicode emoji
+(custom emoji keep their shortcode, code is left as written).
 
 ---
 

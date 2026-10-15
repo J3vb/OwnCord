@@ -90,6 +90,7 @@ export const messagingText = defineCatalog("messaging", {
   "mention.everyone": "Notify everyone in this channel",
   "mention.here": "Notify everyone who is online",
   "mention.userDetail": "@{username} · {role}",
+  "channelMention.voice": "Voice channel",
 
   "search.placeholder": "Search messages...",
   "search.label": "Search messages",

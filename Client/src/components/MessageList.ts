@@ -4,7 +4,7 @@
  * virtual scrolling (DOM windowing) for performance with large message counts.
  */
 import { Disposable } from "@lib/disposable";
-import { createElement, clearChildren } from "@lib/dom";
+import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import {
@@ -22,6 +22,9 @@ import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup"
 import { uiStore } from "@stores/ui.store";
 import { discardMedia } from "@lib/media-visibility";
 
+/** How often rendered `<t:…:R>` timestamps are rewritten. */
+const RELATIVE_TIMESTAMP_REFRESH_MS = 60_000;
+
 const log = createLogger("message-list");
 import {
   shouldGroup,
@@ -35,7 +38,11 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { clearContentParseCache, resyncMentions } from "./message-list/content-parser";
+import {
+  clearContentParseCache,
+  relabelInlineTimestamps,
+  resyncMentions,
+} from "./message-list/content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
@@ -1798,6 +1805,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // by disposable.signal: destroy() releases the pending timer.
     atEachMidnight(disposable.signal, relabelRenderedTimes);
 
+    // A relative <t:…:R> timestamp ("in 5 minutes") drifts while the channel
+    // sits open, so the rendered ones are rewritten once a minute.
+    const relabelRelative = (): void => {
+      setOwnedTimeout(
+        disposable.signal,
+        () => {
+          if (contentContainer?.querySelector('time.md-timestamp[data-style="R"]')) {
+            relabelInlineTimestamps(contentContainer);
+          }
+          relabelRelative();
+        },
+        RELATIVE_TIMESTAMP_REFRESH_MS,
+      );
+    };
+    relabelRelative();
+
     // Switching the 12h/24h clock preference relabels the rendered rows in
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
@@ -1908,6 +1931,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
         el.textContent = text;
       }
+      relabelInlineTimestamps(children[i]!);
     }
   }
 

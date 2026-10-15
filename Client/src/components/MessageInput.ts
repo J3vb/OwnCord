@@ -21,7 +21,12 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import {
+  createChannelAutocomplete,
+  type ChannelAutocompleteComponent,
+} from "@components/ChannelAutocomplete";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
+import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
@@ -337,6 +342,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let emojiPopup: EmojiAutocompleteComponent | null = null;
   /** Index of the ":" the open emoji popup is completing; -1 when closed. */
   let emojiStart = -1;
+  let channelPopup: ChannelAutocompleteComponent | null = null;
+  /** Index of the "#" the open channel popup is completing; -1 when closed. */
+  let channelStart = -1;
 
   /** Pending attachment IDs to send with the next message. `upload` is set
    *  exactly while the upload is in flight, which blocks Send (as does a chip
@@ -458,6 +466,70 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.focus();
   }
 
+  /**
+   * The `#token` immediately before the caret, or null. It opens only after
+   * whitespace or at the start, so "C#" and "issue#12" stay text; a heading's
+   * "# " closes it at the space.
+   */
+  function activeChannelToken(): { query: string; start: number } | null {
+    if (textarea === null) return null;
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, caret);
+    const match = /(?:^|\s)#([\p{L}\p{N}_-]{0,64})$/u.exec(before);
+    if (match === null) return null;
+    const query = match[1] ?? "";
+    return { query, start: caret - query.length - 1 };
+  }
+
+  function closeChannelPopup(): void {
+    if (channelPopup === null) return;
+    channelPopup.destroy();
+    channelPopup = null;
+    channelStart = -1;
+  }
+
+  /** Replace the `#token` under the caret with "#name ". */
+  function insertChannel(name: string): void {
+    // Same staleness guard as insertMention.
+    const active = activeChannelToken();
+    if (textarea === null || channelStart < 0 || active === null || active.start !== channelStart) {
+      closeChannelPopup();
+      return;
+    }
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, channelStart);
+    const after = textarea.value.slice(caret);
+    const inserted = `#${name} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    closeChannelPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  /** Open, refilter, or close the channel popup for whatever is under the caret. */
+  function syncChannelPopup(): void {
+    const active = disabledReason === null ? activeChannelToken() : null;
+    if (active === null) {
+      closeChannelPopup();
+      return;
+    }
+    if (channelPopup === null) {
+      channelPopup = createChannelAutocomplete({
+        onSelect: insertChannel,
+        onClose: closeChannelPopup,
+        comboboxInput: textarea ?? undefined,
+      });
+      root?.appendChild(channelPopup.element);
+    }
+    channelStart = active.start;
+    if (!channelPopup.setQuery(active.query)) {
+      closeChannelPopup();
+    }
+  }
+
   /** Open, refilter, or close the emoji popup for whatever is under the caret. */
   function syncEmojiPopup(): void {
     const active = disabledReason === null ? activeEmojiToken() : null;
@@ -540,6 +612,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function syncAutocomplete(): void {
     syncMentionPopup();
     if (mentionPopup !== null) {
+      closeChannelPopup();
+      closeEmojiPopup();
+      return;
+    }
+    syncChannelPopup();
+    if (channelPopup !== null) {
       closeEmojiPopup();
       return;
     }
@@ -710,7 +788,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
     if (textarea === null) return;
-    const content = textarea.value.trim();
+    const content = replaceEmojiShortcodes(textarea.value.trim());
     const hasAttachments = pendingAttachments.length > 0;
     // Edits are text-only, so a queued attachment must not unlock submitting
     // an edit whose text was cleared -- that would tear down edit mode for a
@@ -1252,6 +1330,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         // Whichever popup is open owns navigation keys, so Enter completes the
         // token instead of sending a half-typed message.
         if (mentionPopup?.handleKeydown(e) === true) return;
+        if (channelPopup?.handleKeydown(e) === true) return;
         if (emojiPopup?.handleKeydown(e) === true) return;
 
         // Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in markdown markers.
@@ -1355,6 +1434,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "blur",
       () => {
         closeMentionPopup();
+        closeChannelPopup();
         closeEmojiPopup();
       },
       { signal },
@@ -1524,6 +1604,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closeEmojiPicker();
       closeGifPicker();
       closeMentionPopup();
+      closeChannelPopup();
       closeEmojiPopup();
     };
 

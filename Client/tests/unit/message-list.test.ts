@@ -1782,6 +1782,25 @@ describe("MessageList", () => {
         vi.useRealTimers();
       }
     });
+
+    it("rewrites a relative <t:…:R> timestamp as time passes", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
+        const target = Math.floor(Date.now() / 1000) + 5 * 60;
+        setMessages(1, [
+          makeMessage({ id: 1, content: `<t:${target}:R>`, timestamp: new Date().toISOString() }),
+        ]);
+        msgList.mount(container);
+        const time = container.querySelector("time.md-timestamp")!;
+        expect(time.textContent).toBe("in 5 minutes");
+
+        vi.advanceTimersByTime(3 * 60_000);
+        expect(time.textContent).toBe("in 2 minutes");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {
