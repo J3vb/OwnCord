@@ -233,6 +233,7 @@ describe("replaceEmojiShortcodes", () => {
       "10:30:45",
       ":JOY:",
       "`a\n:joy:`",
+      "``a`:joy:``",
     ]) {
       expect(replaceEmojiShortcodes(text)).toBe(text);
     }
@@ -311,6 +312,12 @@ describe("<t:…> timestamps", () => {
     expect(time.getAttribute("datetime")).toBe("2023-11-14T22:13:20.000Z");
     localStorage.clear();
     refreshTimeFormat();
+  });
+
+  it("stays text after a backslash", () => {
+    const el = renderMessageContent("\\<t:1700000000>");
+    expect(el.querySelector("time")).toBeNull();
+    expect(el.textContent).toBe("<t:1700000000>");
   });
 
   it("stays text inside code", () => {

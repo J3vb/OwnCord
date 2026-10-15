@@ -6,11 +6,13 @@
  * custom emoji (that is how they render) and a shortcode escaped with a
  * backslash. Before the emoji set has loaded, the text is sent as typed.
  */
+import { codeSpanEnd } from "../../lib/markdown";
 import { resolveEmoji } from "@stores/emoji.store";
 import { emojiCatalog, emojiForShortcode, skinTone, withSkinTone } from "./emojiCatalog";
 
-/** Parts never touched besides masked links: code, `<https://…>` and bare URLs. */
-const PROTECTED = /```[\s\S]*?```|`[^`]+`|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/y;
+/** Parts never touched besides code spans and masked links: code blocks,
+ * `<https://…>` and bare URLs. */
+const PROTECTED = /```[\s\S]*?```|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/y;
 /** A shortcode with no letter, digit, `_` or backslash right before or after it. */
 const SHORTCODE = /(?<![\\\p{L}\p{N}_]):([a-z0-9_+-]{2,32}):(?![\p{L}\p{N}_])/gu;
 
@@ -29,6 +31,7 @@ function balanced(s: string, start: number, open: string, close: string): number
 /** End of the protected part starting at `i`, or -1. A masked link's target
  * may hold balanced parentheses, as the markdown renderer reads it. */
 function protectedEnd(s: string, i: number): number {
+  if (s[i] === "`" && !s.startsWith("```", i)) return codeSpanEnd(s, i);
   if (s[i] === "[") {
     const text = balanced(s, i, "[", "]");
     if (text > 0 && s[text + 1] === "(") {

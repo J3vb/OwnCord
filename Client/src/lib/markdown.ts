@@ -47,7 +47,7 @@ const TIMESTAMP_RE = /^<t:(-?\d{1,13})(?::([tTdDfFR]))?>/;
 const ANGLE_URL_RE = /^<(https?:\/\/[^\s<>]+)>/i;
 
 /** Characters a backslash can neutralise. Anything else keeps its backslash. */
-const ESCAPABLE = "\\`*_~|[]()>#-+.!";
+const ESCAPABLE = "\\`*_~|[]()<>#-+.!";
 
 /** Nesting cap — a guard against pathological input, not a style choice. */
 const MAX_DEPTH = 6;
@@ -90,7 +90,7 @@ function runLength(src: string, i: number, ch: string): number {
  * End index (exclusive) of the code span opening at `i`, or -1 when it never
  * closes. Supports single and double backtick fences.
  */
-function codeSpanEnd(src: string, i: number): number {
+export function codeSpanEnd(src: string, i: number): number {
   const run = Math.min(runLength(src, i, "`"), 2);
   const fence = "`".repeat(run);
   const close = src.indexOf(fence, i + run);
