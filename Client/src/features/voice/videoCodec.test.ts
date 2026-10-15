@@ -8,8 +8,14 @@ vi.mock("./native/platform", () => ({
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 vi.mock("livekit-client", () => ({ supportsVP9: () => supportsVP9() }));
 
-const { getVideoCodecPref, gpuRenderer, pickAutoCodec, resolveVideoCodec, vp9Offered } =
-  await import("./videoCodec");
+const {
+  getVideoCodecPref,
+  gpuRenderer,
+  pickAutoCodec,
+  resolveCodecChoice,
+  resolveVideoCodec,
+  vp9Offered,
+} = await import("./videoCodec");
 const { DEV_VP9_OPTION_KEY } = await import("./decodeCaps");
 const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
 const { channelPeerDecode } = await import("./peerDecode");
@@ -171,6 +177,17 @@ describe("resolveVideoCodec with VP9", () => {
       throw new ReferenceError("RTCRtpSender is not defined");
     });
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("reports the preferred codec beside the pick, for the live switch (WP M-5b)", async () => {
+    await expect(resolveCodecChoice(track(), 30, 1_700_000)).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp9",
+    });
+    await expect(resolveCodecChoice(track(), 30, 1_700_000, () => [undefined])).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp8",
+    });
   });
 
   it("falls back to VP8 with a peer whose decode list is unknown", async () => {

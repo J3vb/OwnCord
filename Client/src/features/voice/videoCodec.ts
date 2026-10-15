@@ -90,7 +90,27 @@ export async function resolveVideoCodec(
   bitrate: number,
   peers: () => PeerDecodeLists = () => [],
 ): Promise<PublishCodec> {
-  return pickCommonCodec(await resolvePreferredCodec(track, fps, bitrate), peers());
+  return (await resolveCodecChoice(track, fps, bitrate, peers)).codec;
+}
+
+/** What one publish resolved: the codec it goes out with, and the one the
+ *  user's settings asked for before peers were considered. The live switch
+ *  (M-5b) keeps both, so it can tell when `codec` is no longer the pick and
+ *  never has to re-read the settings mid-share. */
+export interface CodecChoice {
+  readonly preferred: PublishCodec;
+  readonly codec: PublishCodec;
+}
+
+/** `resolveVideoCodec`, also reporting the preferred codec. */
+export async function resolveCodecChoice(
+  track: MediaStreamTrack,
+  fps: number,
+  bitrate: number,
+  peers: () => PeerDecodeLists = () => [],
+): Promise<CodecChoice> {
+  const preferred = await resolvePreferredCodec(track, fps, bitrate);
+  return { preferred, codec: pickCommonCodec(preferred, peers()) };
 }
 
 /** The codec for one publish of `track` at `fps` and `bitrate`, before peers

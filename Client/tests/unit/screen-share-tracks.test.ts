@@ -1685,6 +1685,30 @@ describe("video codec", () => {
     });
   });
 
+  it("records the preferred and the published codec on the camera and the share, for the live switch", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+      const camera: CameraTrackState = { manualCameraTrack: null };
+      await enableCamera(camera, fakeDeps(rig.room));
+      expect(camera).toMatchObject({ preferred: "h264", published: "vp8", quality: "medium" });
+
+      createLocalScreenTracks.mockResolvedValue([fakeVideoTrack(), fakeAudioTrack()]);
+      const screen: ScreenTrackState = { manualScreenTracks: [] };
+      await enableScreenshare(screen, fakeDeps(rig.room));
+      expect(screen).toMatchObject({ preferred: "h264", published: "vp8" });
+
+      stopManualCameraTrack(camera, rig.room);
+      stopManualScreenTracks(screen, rig.room);
+      expect(camera.published).toBeUndefined();
+      expect(screen.published).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
   it("publishes the screen share's video with the saved codec, audio without", async () => {
     prefs({ videoCodec: "h264" });
     const rig = fakeRoom();

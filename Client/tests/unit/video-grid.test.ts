@@ -3575,6 +3575,84 @@ describe("VideoGrid", () => {
       expect(onStreamRemoved).not.toHaveBeenCalled();
     });
 
+    describe("a sharer republishing for another codec (WP M-5b)", () => {
+      let live: boolean;
+      beforeEach(() => {
+        live = true;
+        grid.setCallbacks({ onStreamRemoved, isShareLive: () => live });
+      });
+
+      it("shows no cover while the owner's voice state still says they share, and plays the share when it returns", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStreamWithTrack().stream, screen);
+        grid.removeStream(SCREEN);
+        // The track's own ended event and the unpublish both arrive.
+        grid.removeStream(SCREEN);
+
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+        expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+        expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+        // The wait is over: nothing ends the tile later.
+        vi.advanceTimersByTime(10_000);
+        expect(cell()).not.toBeNull();
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
+
+      it("shows the cover as soon as the owner's voice state says the share is over", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        vi.advanceTimersByTime(500);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        live = false;
+        vi.advanceTimersByTime(250);
+        expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+        vi.advanceTimersByTime(3000);
+        expect(cell()).toBeNull();
+      });
+
+      it("shows the cover once the grace runs out with no share back", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+
+        vi.advanceTimersByTime(2249);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(cell()!.querySelector(".video-ended")).not.toBeNull();
+      });
+
+      it("shows the cover at once when the owner is not sharing, and for a camera never waits", () => {
+        live = false;
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        expect(cell()!.querySelector(".video-ended")).not.toBeNull();
+
+        live = true;
+        grid.addStream(2, "Otto", fakeStream(), { ...screen, isScreenshare: false });
+        grid.removeStream(2);
+        expect(container.querySelector(".video-cell[data-user-id='2']")).toBeNull();
+      });
+
+      it("a held tile that is closed stops looking at the owner", () => {
+        const isShareLive = vi.fn(() => true);
+        grid.setCallbacks({ onStreamRemoved, isShareLive });
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        const looked = isShareLive.mock.calls.length;
+
+        grid.destroy?.();
+        vi.advanceTimersByTime(10_000);
+
+        expect(isShareLive.mock.calls.length).toBe(looked);
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
+    });
+
     it("a re-share within the cover stays watched and in focus (WP 1C-1)", () => {
       const forgetStreamWatch = vi.fn();
       const setStreamWatched = vi.fn();
