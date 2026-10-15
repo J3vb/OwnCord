@@ -88,6 +88,25 @@ export const settingsText = defineCatalog("settings", {
   "notifications.voiceSounds.label": "Voice Sounds",
   "notifications.voiceSounds.desc":
     "Play a sound when someone joins or leaves your call, and when you mute or deafen",
+  "notifications.volume.label": "App sounds volume",
+  "notifications.volume.desc":
+    "How loud OwnCord's own sounds are. 100% is the normal level, 0% is silent.",
+  "notifications.volume.value": "{percent}%",
+  "notifications.sound.message.label": "Message sound",
+  "notifications.sound.message.desc": "The chime for a new message",
+  "notifications.sound.mention.label": "Mention sound",
+  "notifications.sound.mention.desc": "The chime when a message names you",
+  "notifications.sound.ring.label": "Ring sound",
+  "notifications.sound.ring.desc": "The chime that repeats while someone calls you",
+  "notifications.sound.ringback.label": "Ringback sound",
+  "notifications.sound.ringback.desc": "The soft tone you hear while your call rings",
+  "notifications.sound.joinLeave.label": "Join and leave sounds",
+  "notifications.sound.joinLeave.desc":
+    "When you or someone in your call joins, leaves or is moved",
+  "notifications.sound.muteDeafen.label": "Mute and deafen sounds",
+  "notifications.sound.muteDeafen.desc": "When you mute, unmute, deafen or undeafen",
+  "notifications.sound.stream.label": "Stream sounds",
+  "notifications.sound.stream.desc": "When a screen share starts or ends in your call",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",
@@ -419,5 +438,5 @@ export const settingsText = defineCatalog("settings", {
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
-    "On Linux, audio runs in the app's native engine. Your microphone level is handled by the engine's automatic gain control, so the input volume control is not available here and the level bar stays empty. Use your system mixer to adjust your microphone level.",
+    "On Linux, the level bar shows your microphone while you are in a voice channel.",
 });

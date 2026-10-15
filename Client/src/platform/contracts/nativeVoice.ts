@@ -76,6 +76,10 @@ export type NativeVoiceEvent =
   | { type: "permission"; canPublish: boolean; canPublishSources: number[] }
   /** The input-sensitivity gate opened (speech) or closed (silence). */
   | { type: "voiceGate"; open: boolean }
+  /** A capture level report, every ~50 ms while the microphone runs: the
+   *  loudest ~10 ms RMS after the input volume (the detector's scale) and
+   *  whether the voice gate is open. */
+  | { type: "inputLevel"; rms: number; open: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */
@@ -226,8 +230,12 @@ export interface NativeVoice {
   setPttGated(session: number, gated: boolean): Promise<void>;
   /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
    *  capture must reach to send, 0 for no gate. Its verdicts arrive as
-   *  `voiceGate` events. */
-  setVoiceGate(session: number, threshold: number): Promise<void>;
+   *  `voiceGate` events. `retune` moves the level without restarting the
+   *  detector (automatic sensitivity's steps). */
+  setVoiceGate(session: number, threshold: number, retune?: boolean): Promise<void>;
+  /** The input volume, 0-200 % as the `inputVolume` pref: a gain on the
+   *  processed microphone, ahead of the voice gate and the level reports. */
+  setInputGain(session: number, percent: number): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */

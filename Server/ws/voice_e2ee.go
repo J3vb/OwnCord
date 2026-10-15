@@ -97,7 +97,7 @@ func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 }
 
 // handleVoiceE2EEAnnounceV2 is the V2 (pure) handler for voice_e2ee_announce.
-// It validates the public key and returns a SetE2EEPubKey mutation plus a
+// It validates the public key and returns a SetE2EEAnnounce mutation plus a
 // VoiceE2EEAnnounceEvent for relay to other voice channel participants.
 func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
@@ -138,19 +138,48 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		}
 	}
 
-	msg := buildVoiceE2EEAnnounce(userID, pubKey, sig)
-	result := Result{
-		SetE2EEPubKey: &pubKey,
+	// video_decode (WP M-4) is optional and never fatal: a malformed list is
+	// dropped and the announce (the key) is still accepted.
+	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode)}
+	msg := buildVoiceE2EEAnnounce(userID, announce)
+	return Result{
+		SetE2EEAnnounce: &announce,
 		Events: []Event{VoiceE2EEAnnounceEvent{
 			voiceChannelID: voiceChID,
 			excludeUserID:  userID,
 			payload:        msg,
 		}},
 	}
-	if sig != "" {
-		result.SetE2EESignature = &sig
+}
+
+const (
+	maxVideoDecodeEntries = 8
+	maxVideoDecodeNameLen = 16
+)
+
+// sanitizeVideoDecode validates the announced video decode list: at most
+// maxVideoDecodeEntries entries, each 1..maxVideoDecodeNameLen characters of
+// [a-z0-9]. On any violation it returns nil (the whole field is dropped; the
+// announce itself is kept). Values are otherwise opaque. The result is a copy
+// and never aliases the input.
+func sanitizeVideoDecode(in []string) []string {
+	if len(in) == 0 || len(in) > maxVideoDecodeEntries {
+		return nil
 	}
-	return result
+	out := make([]string, len(in))
+	for i, name := range in {
+		if name == "" || len(name) > maxVideoDecodeNameLen {
+			return nil
+		}
+		for j := 0; j < len(name); j++ {
+			ch := name[j]
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') {
+				return nil
+			}
+		}
+		out[i] = name
+	}
+	return out
 }
 
 // handleVoiceE2EEOfferV2 is the V2 (pure) handler for voice_e2ee_offer.
@@ -271,26 +300,25 @@ func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg
 	h.pubsub.Publish(VoiceTopic(channelID), msg, excludeUserID)
 }
 
-// getClientE2EEPubKey returns the stored ECDH public key and its identity
-// signature ("" for legacy announces) for a connected user.
+// getClientE2EEAnnounce returns the stored announce (ECDH public key, identity
+// signature, video decode list) for a connected user; the zero value if none.
 // I-6 fix: Copy the values while h.mu.RLock is still held so the client
 // cannot be garbage collected between the lookup and the key read.
-func (h *Hub) getClientE2EEPubKey(userID int64) (string, string) {
+func (h *Hub) getClientE2EEAnnounce(userID int64) e2eeAnnounce {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
 	if !ok {
 		h.mu.RUnlock()
-		return "", ""
+		return e2eeAnnounce{}
 	}
-	key, sig := c.getE2EEPubKey()
+	a := c.getE2EEAnnounce()
 	h.mu.RUnlock()
-	return key, sig
+	return a
 }
 
 // GetClientE2EEPubKeyForTest is an exported wrapper for tests.
 func (h *Hub) GetClientE2EEPubKeyForTest(userID int64) string {
-	key, _ := h.getClientE2EEPubKey(userID)
-	return key
+	return h.getClientE2EEAnnounce(userID).key
 }
 
 // voiceChannelPeerUserIDs returns the user IDs of every currently connected
@@ -328,8 +356,8 @@ func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 // client in a voice channel.
 func (h *Hub) sendVoicePeerKeys(c *Client, channelID int64) {
 	for _, uid := range h.voiceChannelPeerUserIDs(channelID, c.userID) {
-		if pubKey, sig := h.getClientE2EEPubKey(uid); pubKey != "" {
-			c.sendMsg(buildVoiceE2EEAnnounce(uid, pubKey, sig))
+		if a := h.getClientE2EEAnnounce(uid); a.key != "" {
+			c.sendMsg(buildVoiceE2EEAnnounce(uid, a))
 		}
 	}
 }

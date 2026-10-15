@@ -128,6 +128,7 @@ export const shards = {
     "src/lib/notificationLevel.ts",
     "src/lib/notificationSound.ts",
     "src/lib/notifications.ts",
+    "src/lib/soundPrefs.ts",
     "src/features/unread-badge/unreadBadge.ts",
     "src/lib/os-motion.ts",
     "src/lib/preferences.ts",

@@ -52,7 +52,12 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
+- Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
+
+**Voice**
+
+- On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
 
 **Profiles**
 
@@ -81,6 +86,10 @@ and only when it changes something a contributor or fork holder must do
 - Three people typing are now named ("Ana, Ben, and Cy are typing..."), with the names in bold. Four or more still read "Several people are typing...".
 - The delete confirmation now shows who wrote the message and the start of its text, and tells you that holding Shift when you click Delete skips the question.
 - A channel with slow mode now says so under the message box, with the interval ("Slow mode is on: one message every 5s"), before you send anything. Moderators, who are not limited, do not see it.
+
+**Voice and video**
+
+- A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
 
 ### Changed
 

@@ -29,6 +29,7 @@
 import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { loadPref } from "../../../lib/preferences";
+import { NoiseFloorTracker } from "../../../lib/noiseFloor";
 import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
 import type {
@@ -236,14 +237,18 @@ export class NativeRoom {
       if (this.sessionId === null) throw new Error("native room is not connected");
       if (enabled) {
         await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
-        // A new session starts with no sensitivity gate.
+        // A new session starts with no sensitivity gate and at 100 %.
         if (this.voiceThreshold > 0)
           await desktop.nativeVoice.setVoiceGate(this.sessionId, this.voiceThreshold);
+        if (this.inputGainPercent !== 100)
+          await desktop.nativeVoice.setInputGain(this.sessionId, this.inputGainPercent);
       }
       // A device-switch re-enable passes no options: keep the last bitrate
       // so a first publish after a failed one is not left at the default.
       const bitrate = publishOptions?.audioPreset?.maxBitrate ?? this.micBitrate;
       this.micBitrate = bitrate;
+      if (enabled) this.capturing = true;
+      else this.stopInputLevels();
       if (bitrate === undefined) await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
       else await desktop.nativeVoice.setMicrophone(this.sessionId, enabled, bitrate);
     },
@@ -291,6 +296,18 @@ export class NativeRoom {
    *  verdicts. */
   private voiceThreshold = 0;
   private onVoiceGate: (speaking: boolean | null) => void = () => {};
+  /** Automatic sensitivity's noise-floor estimate over the capture's level
+   *  reports, as the web detector runs it; null on a fixed threshold. */
+  private autoFloor: NoiseFloorTracker | null = null;
+  private onAutoThreshold: (threshold: number) => void = () => {};
+  /** The input volume (0-200 %); a new session starts at 100. */
+  private inputGainPercent = 100;
+  /** Who hears the capture's level reports (the settings meter); null as
+   *  the level means the capture stopped. */
+  private onInputLevel: ((rms: number | null, open: boolean) => void) | null = null;
+  /** Whether the session's capture runs, so a report still in flight after a
+   *  mute or leave cannot repaint the meter. */
+  private capturing = false;
   /** The session's frame-socket base URL (token included); never logged. */
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
@@ -364,10 +381,19 @@ export class NativeRoom {
   }
   /** The input-sensitivity gate for the native room, which has no web mic
    *  processor to run the detector (AudioPipeline.startVadPolling): the
-   *  session's capture gates on `threshold`, the web path's scale, and its
-   *  verdicts go to `onSpeaking` — open at the start, as the web detector
-   *  starts, and null when 0 runs no gate. */
-  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void {
+   *  session's capture gates on `gate`, a threshold on the web path's scale,
+   *  and its verdicts go to `onSpeaking` — open at the start, as the web
+   *  detector starts, and null when 0 runs no gate. "auto" runs the web
+   *  path's noise-floor estimate over the capture's level reports, starting
+   *  at `auto.seed` and telling `auto.onThreshold` each step. */
+  setVoiceGate(
+    gate: number | "auto",
+    onSpeaking: (speaking: boolean | null) => void,
+    auto?: { seed?: number; onThreshold?: (threshold: number) => void },
+  ): void {
+    this.autoFloor = gate === "auto" ? new NoiseFloorTracker(auto?.seed) : null;
+    this.onAutoThreshold = auto?.onThreshold ?? (() => {});
+    const threshold = this.autoFloor?.threshold ?? (gate === "auto" ? 0 : gate);
     this.voiceThreshold = threshold;
     this.onVoiceGate = onSpeaking;
     onSpeaking(threshold > 0 ? true : null);
@@ -375,6 +401,39 @@ export class NativeRoom {
     desktop.nativeVoice
       .setVoiceGate(this.sessionId, threshold)
       .catch((err) => log.warn("Voice sensitivity could not reach the native gate", err));
+  }
+  /** Automatic sensitivity moved: the gate takes the new level without
+   *  restarting, as the web detector's worklet does. */
+  private retuneVoiceGate(threshold: number): void {
+    this.voiceThreshold = threshold;
+    this.onAutoThreshold(threshold);
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setVoiceGate(this.sessionId, threshold, true)
+      .catch((err) => log.warn("Automatic sensitivity could not reach the native gate", err));
+  }
+  /** The input volume (0-200 %, the `inputVolume` pref) for the session's
+   *  capture, as AudioPipeline.setInputVolume sets the web processor's gain.
+   *  The noise floor learned behind the old gain is dropped, as the web
+   *  detector's resetFloor does. */
+  setInputGain(percent: number): void {
+    this.inputGainPercent = Math.max(0, Math.min(200, percent));
+    this.autoFloor?.reset(performance.now());
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setInputGain(this.sessionId, this.inputGainPercent)
+      .catch((err) => log.warn("Input volume could not reach the native capture", err));
+  }
+  /** Hear the capture's level reports (null to stop): the settings meter's
+   *  feed while the native capture runs. */
+  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void {
+    this.onInputLevel = listener;
+  }
+  /** The capture stopped (mute, deafen, leave): no more reports will come. */
+  private stopInputLevels(): void {
+    if (!this.capturing) return;
+    this.capturing = false;
+    this.onInputLevel?.(null, false);
   }
   /** Native playout needs no autoplay gesture. */
   startAudio(): Promise<void> {
@@ -440,6 +499,7 @@ export class NativeRoom {
     this.pending = null;
     this.releaseVideo();
     this.clearDecryptTimers();
+    this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
     if (this.counted) nativeCounters.openRooms--;
@@ -882,6 +942,13 @@ export class NativeRoom {
       case "voiceGate":
         if (this.voiceThreshold > 0) this.onVoiceGate(event.open);
         break;
+      case "inputLevel": {
+        if (!this.capturing) break;
+        this.onInputLevel?.(event.rms, event.open);
+        const next = this.autoFloor?.push(event.rms, performance.now()) ?? null;
+        if (next !== null) this.retuneVoiceGate(next);
+        break;
+      }
       case "activeSpeakers":
         this.emit(
           RoomEvent.ActiveSpeakersChanged,

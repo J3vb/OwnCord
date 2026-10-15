@@ -300,8 +300,7 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, c
 	if matched {
 		c.voiceChID = 0
 		c.voiceJoinToken = ""
-		c.e2eePubKey = ""
-		c.e2eeSignature = ""
+		c.e2ee = e2eeAnnounce{}
 	}
 	c.voiceMu.Unlock()
 

@@ -111,7 +111,7 @@ func TestWebhookParticipantLeft_UnsubscribesVoiceTopic(t *testing.T) {
 // the fact: a same-channel rejoin is rejected with ALREADY_JOINED.
 func TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey(t *testing.T) {
 	h, c1, _ := setupVoiceRoom(t)
-	c1.setE2EEPubKey("ecdh-pub-1", "identity-sig-1")
+	c1.setE2EEAnnounce(e2eeAnnounce{key: "ecdh-pub-1", sig: "identity-sig-1"})
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1 // network reconnect — voice state is preserved
@@ -123,9 +123,9 @@ func TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey(t *testing.T) {
 	if sub != replacement {
 		t.Error("resumed connection is not subscribed to its voice channel's topic")
 	}
-	key, sig := replacement.getE2EEPubKey()
-	if key != "ecdh-pub-1" || sig != "identity-sig-1" {
-		t.Errorf("announced E2EE key was not transferred on resume: got key=%q sig=%q", key, sig)
+	got := replacement.getE2EEAnnounce()
+	if got.key != "ecdh-pub-1" || got.sig != "identity-sig-1" {
+		t.Errorf("announced E2EE key was not transferred on resume: got key=%q sig=%q", got.key, got.sig)
 	}
 }
 

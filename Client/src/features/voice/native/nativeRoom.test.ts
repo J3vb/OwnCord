@@ -121,6 +121,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setVoiceGate", args]);
         return Promise.resolve();
       },
+      setInputGain: (...args: unknown[]) => {
+        host.calls.push(["setInputGain", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
@@ -539,6 +543,135 @@ describe("NativeRoom room surface", () => {
       room.setVoiceGate(0, (speaking) => verdicts.push(speaking));
       emit({ session: 1, event: { type: "voiceGate", open: true } });
       expect(verdicts).toEqual([null]);
+    });
+
+    // Automatic sensitivity runs the web detector's noise-floor estimate over
+    // the capture's level reports, and moves the session's gate without
+    // restarting it.
+    it("auto starts at the seed and retunes the gate from the level reports", async () => {
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      host.calls.length = 0;
+      const steps: number[] = [];
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate("auto", (speaking) => verdicts.push(speaking), {
+        seed: 0.03,
+        onThreshold: (next) => steps.push(next),
+      });
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.03]]]);
+      expect(verdicts).toEqual([true]);
+      host.calls.length = 0;
+
+      // A quiet room at RMS 0.002 for a little over a second: the gate settles
+      // 10 dB above it.
+      for (; now <= 1100; now += 50) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.002, open: true } });
+      }
+      expect(steps).toHaveLength(1);
+      expect(steps[0]).toBeCloseTo(0.002 * 10 ** 0.5, 5);
+      expect(host.calls).toEqual([["setVoiceGate", [1, steps[0], true]]]);
+      // Its verdicts still reach the speaking ring.
+      emit({ session: 1, event: { type: "voiceGate", open: false } });
+      expect(verdicts).toEqual([true, false]);
+
+      // An input volume move forgets the floor: the next second's reports
+      // only re-learn it, as the web detector's resetFloor does.
+      room.setInputGain(200);
+      host.calls.length = 0;
+      const resetAt = now;
+      for (; now < resetAt + 1000; now += 50) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.004, open: true } });
+      }
+      expect(host.calls).toEqual([]);
+      vi.restoreAllMocks();
+    });
+
+    it("a fixed threshold ignores the level reports", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      room.setVoiceGate(0.05, () => {});
+      host.calls.length = 0;
+      for (let i = 0; i < 100; i++) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: true } });
+      }
+      expect(host.calls).toEqual([]);
+    });
+  });
+
+  describe("input volume and level", () => {
+    // The session's capture applies the input volume, as the web processor's
+    // gain does; a new session starts at 100 %, so the saved one goes with
+    // every enable, after the gates.
+    it("sends the input volume to the session, and with every enable", async () => {
+      const room = createNativeRoom(audio);
+      room.setInputGain(150);
+      expect(host.calls).toEqual([]);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, false]],
+        ["setInputGain", [1, 150]],
+        ["setMicrophone", [1, true]],
+      ]);
+      host.calls.length = 0;
+
+      room.setInputGain(50);
+      room.setInputGain(300);
+      expect(host.calls).toEqual([
+        ["setInputGain", [1, 50]],
+        ["setInputGain", [1, 200]],
+      ]);
+    });
+
+    it("forwards the capture's level reports to the listener", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      const levels: Array<[number | null, boolean]> = [];
+      room.setInputLevelListener((rms, open) => levels.push([rms, open]));
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: false } });
+      room.setInputLevelListener(null);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.03, open: true } });
+      expect(levels).toEqual([
+        [0.02, true],
+        [0.001, false],
+      ]);
+    });
+
+    // Neither a mute nor a leave reports a last level, so the meter would
+    // freeze on the last one: the room says the capture stopped, and a report
+    // still in flight is dropped.
+    it("tells the listener when the capture stops, and drops late reports", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const levels: Array<[number | null, boolean]> = [];
+      room.setInputLevelListener((rms, open) => levels.push([rms, open]));
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
+      await room.localParticipant.setMicrophoneEnabled(false);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.03, open: true } });
+      expect(levels).toEqual([
+        [0.02, true],
+        [null, false],
+      ]);
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.01, open: false } });
+      await room.disconnect();
+      expect(levels.slice(2)).toEqual([
+        [0.01, false],
+        [null, false],
+      ]);
+      // A second stop (leave after mute) says nothing more.
+      await room.disconnect();
+      expect(levels).toHaveLength(4);
     });
   });
 
