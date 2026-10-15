@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 )
 
 // EmitEvents routes typed events to the appropriate broadcast methods.
@@ -134,7 +135,11 @@ func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event
 		case ActivityEvent:
 			// Not a ChannelEvent: it takes no seq and no topic, only a note for
 			// the coalescer, which flushes it off this goroutine.
-			h.activity.note(e.ActivityNote())
+			if n := e.ActivityNote(); n.readBy != 0 {
+				h.activity.markRead(n.readBy, n.channelID, time.Now())
+			} else {
+				h.activity.note(n)
+			}
 		case ChannelEvent:
 			h.broadcastChannelEvent(ctx, senderID, e)
 		case VoiceVisibilityEvent:

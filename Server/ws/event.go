@@ -193,6 +193,13 @@ type channelActivityEvt struct {
 	mentions  []int64
 	everyone  bool
 	hereOnly  bool
+	readBy    int64
+}
+
+// channelReadEvt tells the coalescer a user marked a channel read or opened
+// it, so a pending hint for what they have read is not sent.
+func channelReadEvt(userID, channelID int64) ActivityEvent {
+	return channelActivityEvt{channelID: channelID, readBy: userID}
 }
 
 func (e channelActivityEvt) EventType() string { return MsgTypeChannelActivity }

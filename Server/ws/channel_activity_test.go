@@ -697,3 +697,57 @@ func TestChannelActivity_ForgetDropsErasedUserAndSweptMessages(t *testing.T) {
 		t.Errorf("erased user's message still produced %+v", got)
 	}
 }
+
+// markReadVia runs the real mark_read handler for u and emits its events.
+func (f *activityFixture) markReadVia(t *testing.T, u *db.User, chID int64) {
+	t.Helper()
+	res := handleMarkReadV2(context.Background(), MarkReadCmd{userID: u.ID, ChannelID: chID},
+		ClientInfo{UserID: u.ID, Username: u.Username}, PresenceDeps{ChannelSvc: f.svc.Channels})
+	if res.Error != nil {
+		t.Fatalf("mark_read: %v", res.Error)
+	}
+	f.hub.EmitEvents(context.Background(), res.Events)
+}
+
+func TestChannelActivity_MarkReadInWindowSuppresses(t *testing.T) {
+	f := newActivityFixture(t)
+	b := f.user(t, "b", permissions.MemberRoleID)
+	c := f.user(t, "c", permissions.MemberRoleID)
+	bSend := f.connect(b, 0)
+	cSend := f.connect(c, 0)
+
+	_, m := f.send(t, f.author, f.textID, "hello")
+	f.markReadVia(t, b, f.textID)
+	f.flush()
+	if got := activityFrames(bSend); len(got) != 0 {
+		t.Errorf("b marked the channel read in the window but got %+v", got)
+	}
+	if e := wantOneEntry(t, "c", activityFrames(cSend)); e.MessageID != m {
+		t.Errorf("c entry = %+v, want message %d", e, m)
+	}
+
+	// A message noted after the mark is still delivered to b.
+	_, m2 := f.send(t, f.author, f.textID, "later")
+	f.flush()
+	if e := wantOneEntry(t, "b after", activityFrames(bSend)); e.MessageID != m2 {
+		t.Errorf("b entry = %+v, want message %d", e, m2)
+	}
+}
+
+func TestChannelActivity_FocusInWindowSuppresses(t *testing.T) {
+	f := newActivityFixture(t)
+	b := f.user(t, "b", permissions.MemberRoleID)
+	bSend := f.connect(b, 0)
+
+	f.send(t, f.author, f.textID, "hello")
+	res := handleChannelFocusV2(context.Background(), ChannelFocusCmd{ChannelID: f.textID},
+		ClientInfo{UserID: b.ID, Username: b.Username}, PresenceDeps{ChannelSvc: f.svc.Channels})
+	if res.SetChannelID == nil {
+		t.Fatalf("focus did not apply: %+v", res)
+	}
+	f.hub.EmitEvents(context.Background(), res.Events)
+	f.flush()
+	if got := activityFrames(bSend); len(got) != 0 {
+		t.Errorf("b opened the channel in the window but got %+v", got)
+	}
+}

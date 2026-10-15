@@ -35,14 +35,28 @@ import (
 // flush and forget take it, forget before mu, so a purge returns only after a
 // flush already resolving has finished and cannot send an erased id afterwards.
 // note never takes it, and neither purge entry point holds a hub lock when it
-// calls forget. Nothing here takes seqMu or runs on the dispatch goroutine.
+// calls forget. markRead takes mu alone: it runs on the readPump goroutine and
+// never waits on a flush. Nothing here takes seqMu or runs on the dispatch
+// goroutine.
 const (
 	activityWindow       = time.Second
 	activityFlushTimeout = 2 * time.Second
 	// activityMaxMentions bounds the mentioning messages kept per channel per
 	// window; the oldest are dropped, and mention_count still raises the badge.
 	activityMaxMentions = 16
+	// activityReadKeep is how long a recipient's read mark can still suppress
+	// a hint: a flush resolves within activityFlushTimeout of its take.
+	activityReadKeep = 5 * time.Second
 )
+
+// readKey names one recipient's channel; readMark is the highest message they
+// had read through there, and when.
+type readKey struct{ uid, ch int64 }
+
+type readMark struct {
+	msgID int64
+	at    time.Time
+}
 
 // activityNote is one committed send, as the coalescer records it.
 type activityNote struct {
@@ -52,6 +66,9 @@ type activityNote struct {
 	mentions  []int64
 	everyone  bool
 	hereOnly  bool
+	// readBy, when set, makes the note a read mark for that user instead of a
+	// send (see channelReadEvt).
+	readBy int64
 }
 
 type activityMention struct {
@@ -75,6 +92,11 @@ type activityState struct {
 	pending   map[int64]*pendingChannel
 	lastFlush time.Time
 	wake      chan struct{} // cap 1; made on first use so a zero Hub works
+	// highest is the highest message id ever noted per channel; readUpTo is
+	// what mark_read and channel_focus read through, so a hint for a message
+	// the recipient already read is not sent. Both under mu.
+	highest  map[int64]int64
+	readUpTo map[readKey]readMark
 
 	flushMu syncutil.Mutex
 }
@@ -97,6 +119,10 @@ func (a *activityState) note(n activityNote) {
 		a.wake = make(chan struct{}, 1)
 	}
 	wake := a.wake
+	if a.highest == nil {
+		a.highest = make(map[int64]int64)
+	}
+	a.highest[n.channelID] = max(a.highest[n.channelID], n.msgID)
 	pc := a.pending[n.channelID]
 	if pc == nil {
 		pc = &pendingChannel{}
@@ -128,6 +154,24 @@ func (a *activityState) note(n activityNote) {
 	}
 }
 
+// markRead records that uid read channel ch through every message noted so
+// far; hints for those are dropped at send time.
+func (a *activityState) markRead(uid, ch int64, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.readUpTo == nil {
+		a.readUpTo = make(map[readKey]readMark)
+	}
+	a.readUpTo[readKey{uid, ch}] = readMark{msgID: a.highest[ch], at: now}
+}
+
+// readMarks is a copy of the read marks, for the flush's send loop.
+func (a *activityState) readMarks() map[readKey]readMark {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return maps.Clone(a.readUpTo)
+}
+
 // forget drops pending state that names an erased user or a swept message. A
 // frame already sent cannot be recalled (the contract nsfw_content.go states
 // for shed content).
@@ -136,6 +180,11 @@ func (a *activityState) forget(userIDs, msgIDs []int64) {
 	defer a.flushMu.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	for k := range a.readUpTo {
+		if slices.Contains(userIDs, k.uid) {
+			delete(a.readUpTo, k)
+		}
+	}
 	for chID, pc := range a.pending {
 		if slices.Contains(userIDs, pc.latestAuthorID) || slices.Contains(msgIDs, pc.latestID) {
 			delete(a.pending, chID)
@@ -173,6 +222,11 @@ func (a *activityState) take(now time.Time) map[int64]*pendingChannel {
 	}
 	a.pending = nil
 	a.lastFlush = now
+	for k, m := range a.readUpTo {
+		if now.Sub(m.at) > activityReadKeep {
+			delete(a.readUpTo, k)
+		}
+	}
 	return batch
 }
 
@@ -241,13 +295,20 @@ func (h *Hub) flushChannelActivity(ctx context.Context) {
 	for _, chID := range slices.Sorted(maps.Keys(batch)) {
 		h.resolveChannelActivity(ctx, chID, batch[chID], perUser)
 	}
+	reads := a.readMarks()
 	for _, uid := range slices.Sorted(maps.Keys(perUser)) {
+		entries := slices.DeleteFunc(perUser[uid], func(e channelActivityEntry) bool {
+			return e.MessageID <= reads[readKey{uid, e.ChannelID}].msgID
+		})
+		if len(entries) == 0 {
+			continue
+		}
 		// Resolved at send time: a reconnect inside the window gets the frame
 		// on its new connection, and the displaced one is never touched.
 		if c := h.GetClient(uid); c != nil {
 			c.sendLowMsg(buildJSON(wsMsg{
 				Type:    MsgTypeChannelActivity,
-				Payload: channelActivityPayload{Channels: perUser[uid]},
+				Payload: channelActivityPayload{Channels: entries},
 			}))
 		}
 	}

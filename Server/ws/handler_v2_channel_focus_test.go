@@ -250,7 +250,11 @@ func TestChannelFocusV2_NoEvents(t *testing.T) {
 
 	result := handleChannelFocusV2(context.Background(), cmd, info, deps)
 
-	if len(result.Events) != 0 {
-		t.Errorf("expected no events, got %d", len(result.Events))
+	// Nothing is broadcast: the only event is the channel_activity read mark,
+	// which reaches the coalescer and no client.
+	for _, ev := range result.Events {
+		if _, ok := ev.(ActivityEvent); !ok {
+			t.Errorf("unexpected broadcast event %T", ev)
+		}
 	}
 }

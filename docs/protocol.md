@@ -1091,7 +1091,8 @@ many channels are busy.
   entry **without `author_id`**, with `channel_id`, `message_id` and both flags
   intact. `ready` already gives them the unread count and last message id.
 - **Delivery.** Unsequenced (no `seq`), on the low-priority queue, never stored
-  or replayed. A full queue drops it silently and never forces a full `ready`.
+  or replayed. A hint is not sent for a message the recipient already marked
+  read or opened. A full queue drops it silently and never forces a full `ready`.
   A frame is not recalled once sent; pending state naming an erased user or a
   swept message is dropped before the flush.
 
