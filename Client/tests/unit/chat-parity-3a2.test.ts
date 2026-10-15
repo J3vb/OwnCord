@@ -237,6 +237,9 @@ describe("replaceEmojiShortcodes", () => {
     expect(replaceEmojiShortcodes(text)).toBe("[docs](https://ex.com/a_(b):joy:) 😂");
     const escaped = "[docs](https://ex.com/a\\):joy:)";
     expect(replaceEmojiShortcodes(escaped)).toBe(escaped);
+    expect(replaceEmojiShortcodes("[a :joy:](https://ex.com/a b)")).toBe(
+      "[a 😂](https://ex.com/a b)",
+    );
     expect(replaceEmojiShortcodes("\\[a :joy:](https://ex.com)")).toBe("\\[a 😂](https://ex.com)");
   });
 
@@ -245,6 +248,7 @@ describe("replaceEmojiShortcodes", () => {
       "https://ex.com/a:joy:b",
       "<https://ex.com/w:cool:x>",
       "<HTTPS://ex.com/:joy:>",
+      "\\https://ex.com/:joy:",
       "[docs](https://ex.com/a:joy:b)",
       "MAC 00:1A:2B:AB:CD:EF",
       "fe80::ab:cd",

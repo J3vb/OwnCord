@@ -18,6 +18,9 @@ const PROTECTED = /```[\s\S]*?```|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/iy
 const SHORTCODE =
   /(?<![\p{L}\p{N}_])(?<!(?:^|[^\\])\\(?:\\\\)*):([a-z0-9_+-]{2,32}):(?![\p{L}\p{N}_])/gu;
 
+/** Characters whose opening role a backslash cancels here. */
+const ESCAPED_OPENERS = "\\[`<";
+
 /** Index of the `close` that balances the `open` at `start` on the same line,
  * skipping escaped characters as the markdown parser does, or -1. */
 function balanced(s: string, start: number, open: string, close: string): number {
@@ -36,14 +39,16 @@ function balanced(s: string, start: number, open: string, close: string): number
 }
 
 /** End of the protected part starting at `i`, or -1. A masked link's target
- * may hold balanced parentheses, as the markdown renderer reads it. */
+ * may hold balanced parentheses and must be non-empty with no whitespace, as
+ * the markdown renderer reads it (lib/markdown parseLink). */
 function protectedEnd(s: string, i: number): number {
   if (s[i] === "`" && !s.startsWith("```", i)) return codeSpanEnd(s, i);
   if (s[i] === "[") {
     const text = balanced(s, i, "[", "]");
     if (text > 0 && s[text + 1] === "(") {
       const target = balanced(s, text + 1, "(", ")");
-      if (target > 0) return target + 1;
+      const url = target > 0 ? s.slice(text + 2, target).trim() : "";
+      if (url !== "" && !/\s/.test(url)) return target + 1;
     }
   }
   PROTECTED.lastIndex = i;
@@ -72,9 +77,14 @@ export function replaceEmojiShortcodes(content: string): string {
   let proseStart = 0;
   let i = 0;
   while (i < content.length) {
-    // An escaped `[`, backtick or `<` opens nothing, as in the parser; a code
-    // fence is found before escapes, so a backslash cannot open one up.
-    if (content[i] === "\\" && !content.startsWith("```", i + 1)) {
+    // An escaped `[`, backtick, `<` or backslash opens nothing, as in the
+    // parser; a code fence is found before escapes, and a backslash before
+    // anything else (a bare URL's `h`) is kept as text.
+    if (
+      content[i] === "\\" &&
+      ESCAPED_OPENERS.includes(content[i + 1] ?? "") &&
+      !content.startsWith("```", i + 1)
+    ) {
       i += 2;
       continue;
     }
