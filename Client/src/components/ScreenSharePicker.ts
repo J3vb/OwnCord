@@ -334,13 +334,29 @@ export function showScreenSharePicker(
       if (!FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
       else if (selectedFps > maxFps) selectedFps = maxFps;
       fpsSelect.value = String(selectedFps);
+      // Windows (M-2): what 120 fps needs, while it is chosen.
+      const fps120Hint =
+        opts.osPicker === true
+          ? createElement(
+              "div",
+              { class: "ssp-hint", id: "ssp-fps120-hint", "data-testid": "ssp-fps120-hint" },
+              t("picker.fps120Hint"),
+            )
+          : null;
+      if (fps120Hint !== null) fpsSelect.setAttribute("aria-describedby", fps120Hint.id);
+      const syncFpsHint = (): void => {
+        if (fps120Hint !== null) fps120Hint.hidden = selectedFps !== 120;
+      };
+      syncFpsHint();
       fpsSelect.addEventListener("change", () => {
         selectedFps = Number(fpsSelect.value);
+        syncFpsHint();
       });
 
       appendChildren(row, qualitySelect, fpsSelect);
       wrap.appendChild(row);
       wrap.appendChild(createElement("div", { class: "ssp-hint" }, t("picker.qualityHint")));
+      if (fps120Hint !== null) wrap.appendChild(fps120Hint);
       return wrap;
     }
 
