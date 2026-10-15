@@ -10,19 +10,31 @@ import (
 	"database/sql"
 )
 
-const addReaction = `-- name: AddReaction :exec
-INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)
+const addReactionCapped = `-- name: AddReactionCapped :execresult
+INSERT INTO reactions (message_id, user_id, emoji)
+SELECT ?1, ?2, ?3
+WHERE EXISTS (SELECT 1 FROM reactions e WHERE e.message_id = ?1 AND e.emoji = ?3)
+   OR (SELECT COUNT(DISTINCT c.emoji) FROM reactions c WHERE c.message_id = ?1) < CAST(?4 AS INTEGER)
 `
 
-type AddReactionParams struct {
-	MessageID int64  `json:"messageId"`
-	UserID    int64  `json:"userId"`
-	Emoji     string `json:"emoji"`
+type AddReactionCappedParams struct {
+	MessageID   int64  `json:"messageId"`
+	UserID      int64  `json:"userId"`
+	Emoji       string `json:"emoji"`
+	MaxDistinct int64  `json:"maxDistinct"`
 }
 
-func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) error {
-	_, err := q.db.ExecContext(ctx, addReaction, arg.MessageID, arg.UserID, arg.Emoji)
-	return err
+// Inserts only when the emoji is already on the message or the message holds
+// fewer than max_distinct distinct emoji. The test and the insert are one
+// statement on the single writer, so two racing first-time emoji cannot both
+// pass at the cap. Zero rows affected means the cap refused it.
+func (q *Queries) AddReactionCapped(ctx context.Context, arg AddReactionCappedParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, addReactionCapped,
+		arg.MessageID,
+		arg.UserID,
+		arg.Emoji,
+		arg.MaxDistinct,
+	)
 }
 
 const getReactionCounts = `-- name: GetReactionCounts :many

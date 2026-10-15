@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -158,5 +159,80 @@ func TestValidateEmoji_LongestSkinToneSequence(t *testing.T) {
 		if err := validateEmoji(emoji); err != nil {
 			t.Errorf("validateEmoji(%q) = %v, want nil", emoji, err)
 		}
+	}
+}
+
+// reactWith adds n distinct emoji "e0".."e{n-1}" to msgID from user 1 straight
+// in the database, so a fixture can sit at or over the cap.
+func reactWith(ctx context.Context, t *testing.T, database *db.DB, msgID int64, n int) {
+	t.Helper()
+	for i := range n {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, 1, ?)`, msgID, fmt.Sprintf("e%d", i)); err != nil {
+			t.Fatalf("seed reaction %d: %v", i, err)
+		}
+	}
+}
+
+func TestAddReaction_CapReturnsReactionLimit(t *testing.T) {
+	svc, database := newTestMessageService(t)
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	ctx := context.Background()
+
+	dm, _, err := database.GetOrCreateDMChannel(ctx, 1, 2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	for name, channelID := range map[string]int64{"channel": 10, "dm": dm.ID} {
+		t.Run(name, func(t *testing.T) {
+			msgID, err := database.CreateMessage(ctx, channelID, 1, "react to me", nil)
+			if err != nil {
+				t.Fatalf("CreateMessage: %v", err)
+			}
+			reactWith(ctx, t, database, msgID, db.MaxDistinctReactions)
+
+			_, err = svc.AddReaction(ctx, 2, msgID, "new")
+			if !errors.Is(err, ErrReactionLimit) || !errors.Is(err, ErrBadRequest) {
+				t.Fatalf("AddReaction(new) = %v, want ErrReactionLimit and ErrBadRequest", err)
+			}
+			if errors.Is(err, ErrConflict) {
+				t.Errorf("a cap refusal must not read as CONFLICT: %v", err)
+			}
+			// An emoji already on the message still works at the cap.
+			if _, err := svc.AddReaction(ctx, 2, msgID, "e0"); err != nil {
+				t.Errorf("AddReaction(existing emoji) at cap: %v", err)
+			}
+		})
+	}
+}
+
+func TestAddReaction_LegacyOverCapUntouched(t *testing.T) {
+	svc, database := newTestMessageService(t)
+	ctx := context.Background()
+	msgID, err := database.CreateMessage(ctx, 10, 1, "legacy", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	reactWith(ctx, t, database, msgID, 22)
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+
+	if _, err := svc.AddReaction(ctx, 2, msgID, "e5"); err != nil {
+		t.Errorf("adding an existing emoji to an over-cap message: %v", err)
+	}
+	if _, err := svc.RemoveReaction(ctx, 1, msgID, "e6"); err != nil {
+		t.Errorf("removing from an over-cap message: %v", err)
+	}
+	if _, err := svc.AddReaction(ctx, 2, msgID, "brand-new"); !errors.Is(err, ErrReactionLimit) {
+		t.Errorf("a new emoji on an over-cap message = %v, want ErrReactionLimit", err)
+	}
+	counts, err := database.GetReactions(ctx, msgID)
+	if err != nil {
+		t.Fatalf("GetReactions: %v", err)
+	}
+	// 22 seeded, one removed, one added to an existing emoji, nothing deleted.
+	if len(counts) != 21 {
+		t.Errorf("distinct emoji = %d, want 21 (nothing else deleted)", len(counts))
 	}
 }

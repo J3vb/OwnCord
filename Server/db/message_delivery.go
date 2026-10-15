@@ -39,7 +39,10 @@ type MessageDeliveryParams struct {
 	ReplyTo           *int64
 	AttachmentIDs     []string
 	MentionedUserIDs  []int64
-	MentionsEveryone  bool
+	// ReplyPingUserID is the replied-to author a reply_ping adds to the mention
+	// set, 0 for none. It is stored as a message_mentions row flagged reply_ping.
+	ReplyPingUserID  int64
+	MentionsEveryone bool
 }
 
 // MessageDelivery is the committed result. A duplicate carries only the
@@ -114,7 +117,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err != nil {
 		return nil, fmt.Errorf("message delivery insert: %w", err)
 	}
-	if err := insertMentionRows(ctx, tx, r.ID, p.MentionedUserIDs); err != nil {
+	if err := insertMentionRows(ctx, tx, r.ID, p.MentionedUserIDs, p.ReplyPingUserID); err != nil {
 		return nil, err
 	}
 	linked, err := linkAttachmentsToMessage(ctx, tx, r.ID, p.UserID, p.AttachmentIDs)

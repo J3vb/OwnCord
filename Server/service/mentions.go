@@ -47,6 +47,23 @@ type mentionSet struct {
 	// HereOnly narrows an Everyone fan-out to users who are not offline. It is
 	// set when @here matched and @everyone did not.
 	HereOnly bool
+	// ReplyPingUserID is the replied-to author a reply_ping added to UserIDs,
+	// 0 for none. UserIDs holds at most maxMentionsPerMessage content mentions
+	// plus this one, and the target is never displaced by the cap.
+	ReplyPingUserID int64
+}
+
+// withReplyPing adds the reply target to the set, after the content mentions.
+// The content cap is applied before this, so the target is extra.
+func (m mentionSet) withReplyPing(targetID int64) mentionSet {
+	if targetID == 0 {
+		return m
+	}
+	m.ReplyPingUserID = targetID
+	if !slices.Contains(m.UserIDs, targetID) {
+		m.UserIDs = append(slices.Clone(m.UserIDs), targetID)
+	}
+	return m
 }
 
 // mentionCandidate is one @token and the username spellings it may resolve to,

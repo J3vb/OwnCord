@@ -551,8 +551,22 @@ to reconstruct them:
 | `channel_id`        | number         | Yes      | Positive integer                                                              |
 | `content`           | string         | Yes\*    | Max 4000 runes. HTML-sanitized. \*Can be empty if `attachments` is non-empty. |
 | `reply_to`          | number or null | No       | ID of a message in the same channel that is not deleted, else `BAD_REQUEST`.  |
+| `reply_ping`        | bool           | No       | With `reply_to`, `true` adds the replied-to author to `mentions`. See below.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
+
+`reply_ping` is optional and defaults to `false`: a send that omits it does
+not ping, so a client from before the field existed keeps its old behaviour.
+When it is `true`, `reply_to` is set and the replied-to author is not the
+sender, the author's id is added to the message's `mentions`, so the highlight,
+`mention_count`, `channel_activity.mentions_you` and push candidates all follow
+as for an `@username`. The same rules apply as for an `@username`: a parent
+author who blocked the sender, or who cannot read the channel, is listed in
+`mentions` but gets no badge or push. Without `reply_to`, or when replying to
+your own message, `reply_ping` is ignored. A non-boolean value is a bad
+payload (`BAD_REQUEST`). The ping is stored with the message and kept when the
+message is edited; deleting the message takes back the badge it raised. An
+edit never raises a badge. Older servers ignore the field.
 
 `chat_send` also accepts optional `client_message_id`: exactly
 `<13-digit Unix milliseconds>:<lowercase UUID v4>` (50 characters), generated
@@ -567,7 +581,7 @@ clients must keep the timestamp unchanged and retain expired text for copying
 or discarding rather than silently minting another id for an uncertain send.
 
 The first accepted request binds `(sender, client_message_id)` transactionally
-to its channel, raw content, reply target and ordered attachment ids. A repeat
+to its channel, raw content, reply target, `reply_ping` and ordered attachment ids. A repeat
 of the same request returns the original message id and timestamp, with the
 current envelope `id`, optional echoed `client_message_id`, and
 `deduplicated: true`. New sends omit `deduplicated` (equivalent to false).
@@ -675,12 +689,12 @@ error instead (see Error Codes). Clients that do not know the field ignore it.
 `user.display_name` is the author's nickname to render instead of `username`;
 present only when the author has one, omitted otherwise (see `member_join`).
 
-| Field                | Type           | Description                                                                                                              |
-| -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `mentions`           | number[]       | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                       |
-| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.      |
-| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                  |
-| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below. |
+| Field                | Type           | Description                                                                                                                                              |
+| -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mentions`           | number[]       | User IDs the server resolved from `@username` tokens, plus the replied-to author when `reply_ping` was set. Always present; empty when nothing resolved. |
+| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.                                      |
+| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                                                  |
+| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below.                                 |
 
 `referenced_message` is `{id, user: {id, username, avatar}, content, deleted,
 has_attachments}`, computed when the frame is built (never stored). `content`
@@ -699,7 +713,8 @@ parent bar. A client that holds a snippet redacts it (`deleted: true`, no
 deleted message is the parent.
 
 Mentions are resolved server-side at send time against existing usernames
-(case-insensitive, whole-word, capped at 20 per message). An `@word` that
+(case-insensitive, whole-word, capped at 20 per message, plus the replied-to
+author when the reply pinged, who never counts against the cap). An `@word` that
 matches no username, and an `@everyone`/`@here` from an author without
 `MENTION_EVERYONE`, resolve to nothing and stay plain text — clients must
 highlight from these fields rather than re-parsing the content. DMs never carry
@@ -765,7 +780,10 @@ re-adding an already-counted mention cannot double-count it.
 }
 ```
 
-Moderators with `MANAGE_MESSAGES` can delete others' messages (non-DM channels only).
+The author can delete their own message with `READ_MESSAGES` alone: losing
+`SEND_MESSAGES` on the channel does not stop them removing what they wrote, and
+neither does a timeout. A denied `READ_MESSAGES` does. Moderators with
+`MANAGE_MESSAGES` can delete others' messages (non-DM channels only).
 
 ### chat_deleted (Server -> Client, broadcast)
 
@@ -838,6 +856,12 @@ pins. Sequenced and replayable like `chat_edited`; `pinned` is the new state.
 ```
 
 Rate limited at 5/sec. Requires `ADD_REACTIONS` permission (or DM participant).
+
+A message holds at most **20 different emoji**. A `reaction_add` with a new
+emoji on a message that already has 20 is refused with `REACTION_LIMIT` and no
+`reaction_update` is sent. Adding to an emoji already on the message, and
+removing, still work, so a message that already held more than 20 keeps them.
+The cap applies in DMs too.
 
 `emoji` is a free-form string, not a fixed enum: it is a unicode emoji, or the
 literal `:shortcode:` of a custom emoji (see api.md). It must be non-empty, at
@@ -2341,6 +2365,7 @@ warm resume served by replay never waits for a permit.
 | `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                                                     |
 | `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
+| `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                                                          |
 | `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                                   |
 | `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |

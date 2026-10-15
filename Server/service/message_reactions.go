@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -110,6 +111,9 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	action := "add"
 	if add {
 		if err := s.st.AddReaction(ctx, msgID, userID, emoji); err != nil {
+			if errors.Is(err, db.ErrReactionLimit) {
+				return nil, fmt.Errorf("%w: %w: at most %d different reactions per message", ErrBadRequest, ErrReactionLimit, db.MaxDistinctReactions)
+			}
 			slog.Warn("MessageService.AddReaction", "err", err, "msg_id", msgID, "user_id", userID)
 			return nil, fmt.Errorf("%w: reaction already exists", ErrConflict)
 		}

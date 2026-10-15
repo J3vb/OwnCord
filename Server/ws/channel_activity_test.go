@@ -751,3 +751,49 @@ func TestChannelActivity_FocusInWindowSuppresses(t *testing.T) {
 		t.Errorf("b opened the channel in the window but got %+v", got)
 	}
 }
+
+func TestChatSend_ReplyPingReachesMentionsAndActivity(t *testing.T) {
+	f := newActivityFixture(t)
+	parentAuthor := f.user(t, "parent", permissions.MemberRoleID)
+	parentID, err := f.db.CreateMessage(context.Background(), f.textID, parentAuthor.ID, "the parent", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	// The parent author is connected without the channel focused, so only the
+	// channel_activity path can reach them.
+	parentSend := f.connect(parentAuthor, 0)
+
+	res := handleChatSendV2(context.Background(),
+		ChatSendCmd{ChannelID: f.textID, Content: "agreed", ReplyTo: &parentID, ReplyPing: true},
+		ClientInfo{UserID: f.author.ID, Username: f.author.Username, RoleName: "owner"},
+		ChatDeps{Limiter: f.hub.limiter, MessageSvc: f.svc.Messages, LiveStatus: f.hub.LiveStatus})
+	if res.Error != nil {
+		t.Fatalf("chat_send: %v", res.Error)
+	}
+	f.hub.EmitEvents(context.Background(), res.Events)
+	f.flush()
+
+	// The chat_message frame is the channel event the handler returned.
+	var mentions []int64
+	for _, ev := range res.Events {
+		if ev.EventType() != MsgTypeChatMessage {
+			continue
+		}
+		var env struct {
+			Payload struct {
+				Mentions []int64 `json:"mentions"`
+			} `json:"payload"`
+		}
+		ce, ok := ev.(ChannelEvent)
+		if !ok || json.Unmarshal(ce.Payload(), &env) != nil {
+			t.Fatalf("chat_message event %T has no readable payload", ev)
+		}
+		mentions = env.Payload.Mentions
+	}
+	if len(mentions) != 1 || mentions[0] != parentAuthor.ID {
+		t.Errorf("chat_message.mentions = %v, want [%d]", mentions, parentAuthor.ID)
+	}
+	if e := wantOneEntry(t, "parent author", activityFrames(parentSend)); !e.MentionsYou {
+		t.Errorf("parent author entry = %+v, want mentions_you", e)
+	}
+}

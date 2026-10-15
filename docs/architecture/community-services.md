@@ -27,7 +27,9 @@ here. **Amended 2026-10-08:** `058_revoke_trust_for_blocked_pairs.sql` only dele
 existing `trusted_senders` rows for currently blocked pairs, so it adds no data
 class here. **Amended 2026-10-10:** `059_gif_favorites.sql` adds a private,
 per-user list of GIF provider URLs that no other user or service reads and that
-is erased with the account, so it adds no data class here. Other
+is erased with the account, so it adds no data class here. **Amended 2026-10-15:**
+`060_message_mentions_reply_ping.sql` only adds a `reply_ping` flag to the
+existing `message_mentions` row, so it adds no data class here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
