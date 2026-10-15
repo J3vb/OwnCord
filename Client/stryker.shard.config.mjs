@@ -110,6 +110,8 @@ export const shards = {
     "src/lib/disposable.ts",
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
+    "src/features/messaging/shortcodes.ts",
+    "src/features/messaging/discordTimestamp.ts",
     "src/lib/formatting.ts",
     "src/lib/gifProvider.ts",
     "src/lib/icons.ts",
