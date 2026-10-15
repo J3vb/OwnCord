@@ -1788,13 +1788,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
-    // The delete action is disabled while the socket is down (CLI-08); flip the
-    // gate on the rendered buttons in place, without a rebuild.
+    // Delete (CLI-08) and reactions are disabled while the socket is down; flip
+    // the gates on the rendered controls in place, without a rebuild.
     unsubscribers.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
         () => {
-          if (contentContainer !== null) refreshConnectionControls(contentContainer);
+          if (contentContainer === null) return;
+          refreshConnectionControls(contentContainer);
+          refreshReactionLocks(contentContainer);
         },
       ),
     );

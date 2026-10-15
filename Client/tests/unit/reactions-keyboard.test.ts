@@ -7,7 +7,7 @@
  * activatable the same way.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
@@ -19,9 +19,16 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
-import { renderReactions } from "../../src/components/message-list/reactions";
+import { refreshReactionLocks, renderReactions } from "../../src/components/message-list/reactions";
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 function makeMessage(): Message {
   return {
@@ -81,5 +88,28 @@ describe("reaction pill keyboard activation (OC-0186)", () => {
     expect(addBtn.getAttribute("role")).toBe("button");
     fireKey(addBtn, "Enter");
     expect(opts.onReactionClick).toHaveBeenCalledWith(1, "");
+  });
+});
+
+describe("reactions while offline (3A-3)", () => {
+  it("locks pills and the add chip while the socket is down, and unlocks on reconnect", () => {
+    setConnectionStatus("disconnected");
+    uiStore.flush();
+    const opts = reactionOptions();
+    const el = renderReactions(makeMessage(), opts, new AbortController().signal);
+    const chip = el.querySelector(".reaction-chip") as HTMLElement;
+    const add = el.querySelector(".add-reaction") as HTMLElement;
+    expect(chip.getAttribute("aria-disabled")).toBe("true");
+    expect(chip.title).toBe("Not connected");
+    chip.click();
+    fireKey(add, "Enter");
+    expect(opts.onReactionClick).not.toHaveBeenCalled();
+
+    setConnectionStatus("connected");
+    uiStore.flush();
+    refreshReactionLocks(el);
+    expect(chip.hasAttribute("aria-disabled")).toBe(false);
+    chip.click();
+    expect(opts.onReactionClick).toHaveBeenCalledWith(1, "🔥");
   });
 });
