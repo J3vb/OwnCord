@@ -63,6 +63,7 @@ type Hub struct {
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
+	timeoutView    timeoutViewState // member_timeouts delivery; lock order in member_timeouts_delivery.go
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 	queueDrops     queueDropState   // SRV-03 (hub_stats.go)

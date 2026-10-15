@@ -58,6 +58,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
 - A custom status can clear itself: `presence_update` takes an optional `custom_status_expires_in` (60 seconds to 7 days), the server clears the status at that moment and tells everyone with a `presence` whose `custom_status` is `null`, and an expired status no longer comes back when you reconnect. Your own `auth_ok.user` and `/users/me` carry `custom_status_expires_at`; nobody else sees it. The desktop app's "Clear after" picker follows in a later change.
+- Moderators can see who is timed out: `ready` gains `member_timeouts` and a new `member_timeouts` frame is sent when a timeout is issued, lifted or runs out, to everyone who can moderate members and to the timed-out member (their own entry only). Other members are not told. The desktop app's timeout icon follows in a later change.
 
 **Messaging**
 

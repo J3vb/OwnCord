@@ -35,7 +35,8 @@ func buildModAction(id int64, kind, reason string, expiresAt *time.Time) []byte 
 // warning on next connect (ready's notices) or the timeout on their next
 // attempted send (the predicates), so a missed frame here costs nothing.
 //
-// A timeout issued or lifted also re-sends the target's per-channel can_send
+// A timeout issued or lifted also re-publishes the member_timeouts view
+// (publishMemberTimeouts) and re-sends the target's per-channel can_send
 // (RefreshUserChannels), and an issued one schedules the same refresh for
 // just after it expires — nothing else announces a natural expiry. The
 // timer re-resolves live, so one outliving a lift or a superseding timeout
@@ -45,6 +46,7 @@ func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expir
 	if kind != "timeout" {
 		return
 	}
+	h.publishMemberTimeouts(userID)
 	h.RefreshUserChannels(userID)
 	if expiresAt != nil {
 		h.scheduleTimeoutExpiryRefresh(userID, *expiresAt)
@@ -64,6 +66,7 @@ func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
 			return
 		default:
 		}
+		h.publishMemberTimeouts(userID)
 		h.RefreshUserChannels(userID)
 	})
 }

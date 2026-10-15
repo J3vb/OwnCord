@@ -141,6 +141,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
 	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
+	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
 	MsgTypeChannelActivity:     false, // ids and flags only (2B-2); the author id is withheld from an unacknowledged reader of a labelled channel

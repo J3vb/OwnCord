@@ -430,6 +430,11 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
 	}
 
+	timeouts, err := h.readyMemberTimeouts(ctx, userID, sub)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
 	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
@@ -466,6 +471,8 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,
+
+			MemberTimeouts: timeouts.entries,
 		},
 		tail: readyTail{
 			MOTD:        motd,
@@ -474,8 +481,9 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			ServerName:  serverName,
 			VoiceStates: voiceStates,
 		},
-		roster:   roster,
-		viewerID: userID,
+		roster:       roster,
+		viewerID:     userID,
+		timeoutsFull: timeouts.full,
 	}, nil
 }
 
@@ -586,7 +594,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// resync owed (P5-S03). Cleared before the build, so a drop after it
 	// marks the user again; restored if the ready never reaches the client.
 	owedResync := h.takeOwedResync(c)
-	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
+	ready, readyErr := h.buildFreshReady(ctx, database, c, userRole)
 	release() // the write below is the peer's pace, not the database's
 	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
 		return err

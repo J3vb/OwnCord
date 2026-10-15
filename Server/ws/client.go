@@ -102,6 +102,7 @@ type Client struct {
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
 	sendLow       chan []byte    // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
+	timeouts      heldTimeouts   // which member_timeouts list this client holds (member_timeouts_delivery.go)
 	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	cseq          cseqState      // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
