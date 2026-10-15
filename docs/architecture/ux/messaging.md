@@ -410,9 +410,11 @@ styled spans — a URL's own `_` and `*` are treated as address, not markup.
 
 **Composer:** Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in `**`, `*` and
 `__` (and unwrap it when it is already wrapped); with an empty selection the
-markers are inserted around the caret. The composer stops propagation on those
-keys, so Ctrl+U formats while typing and only opens the file picker when the
-message box does not have focus.
+markers are inserted around the caret. Ctrl+U is only Underline; the file
+picker is Ctrl+Shift+U, Ctrl+E and Ctrl+G open the emoji and GIF pickers, Page
+Up / Page Down scroll the chat, and typing with nothing focused starts a
+message. Escape cancels an edit or reply first; with nothing to cancel it marks
+the channel read (Shift+Escape the server).
 
 ---
 
