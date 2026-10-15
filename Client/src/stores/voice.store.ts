@@ -134,6 +134,12 @@ export interface VoiceState {
    *  always sets it; optional only so the many inline VoiceState test fixtures
    *  need not restate it. */
   readonly peerVerifications?: ReadonlyMap<number, PeerVerification>;
+  /** Video codecs each peer reported decoding in its `voice_e2ee_announce`,
+   *  keyed by userId; no entry means the baseline (VP8, H.264). Written only
+   *  from the dispatcher's announce handler, and deliberately not cleared with
+   *  peerVerifications (that runs at key setup, after a list may have arrived).
+   *  Reset at session end. Optional for the same fixture reason. */
+  readonly peerVideoDecode?: ReadonlyMap<number, readonly string[]>;
   /** Fingerprint of the local user's own ephemeral session key (OC-0003), so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
@@ -163,6 +169,7 @@ const INITIAL_STATE: VoiceState = {
   voiceStatus: "idle",
   encryptionDegraded: false,
   peerVerifications: new Map(),
+  peerVideoDecode: new Map(),
   localGateSpeaking: null,
 };
 
@@ -211,6 +218,7 @@ export function resetVoiceStore(): void {
     voiceStatus: "idle",
     encryptionDegraded: false,
     peerVerifications: new Map(),
+    peerVideoDecode: new Map(),
   }));
 }
 
@@ -422,6 +430,7 @@ export function leaveVoiceChannel(): void {
       localServerDeafened: false,
       encryptionDegraded: false,
       shareDenied: false,
+      peerVideoDecode: new Map<number, readonly string[]>(),
     };
     const channelId = prev.currentChannelId;
     const voiceUsers = withoutRings(prev.voiceUsers, channelId);
@@ -716,6 +725,24 @@ export function setLocalSessionFingerprint(fingerprint: string | null): void {
       ? prev
       : { ...prev, localSessionFingerprint: fingerprint },
   );
+}
+
+/** Record a peer's reported video decode list; `undefined` (an announce
+ *  without the field) deletes the entry. Single writer: the dispatcher's
+ *  voice_e2ee_announce handler. */
+export function setPeerVideoDecode(userId: number, list: readonly string[] | undefined): void {
+  voiceStore.setState((prev) => {
+    const current = prev.peerVideoDecode;
+    if (list === undefined) {
+      if (!current?.has(userId)) return prev;
+      const next = new Map(current);
+      next.delete(userId);
+      return { ...prev, peerVideoDecode: next };
+    }
+    const next = new Map(current);
+    next.set(userId, [...list]);
+    return { ...prev, peerVideoDecode: next };
+  });
 }
 
 /** Drop all peer verifications (on voice leave). */

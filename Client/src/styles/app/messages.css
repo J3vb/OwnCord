@@ -174,6 +174,7 @@
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   display: none;
 }
 .message.grouped:hover .msg-hover-time {
@@ -968,6 +969,10 @@ ul.md-list-nested {
 .image-lightbox.dragging {
   cursor: grabbing;
 }
+/* An image's right-click menu opens over the lightbox. */
+.context-menu.image-context-menu {
+  z-index: 610;
+}
 .image-lightbox-wrap {
   display: flex;
   align-items: center;
@@ -1070,16 +1075,22 @@ ul.md-list-nested {
 }
 
 /* Inline video attachment — shares the .msg-image box so a video is capped to
-   the same max width/height as an image and never widens the message column. */
+   the same max width/height as an image and never widens the message column.
+   The box hugs the player, which renderVideoAttachment sizes to the clip's own
+   shape, so a small or portrait video has no black bars beside it. */
 .msg-video {
+  width: fit-content;
+  max-width: min(100%, 550px);
   cursor: default;
-  background: #000; /* letterbox bars: true black in every theme */
+  background: #000; /* behind the player while it loads: true black in every theme */
 }
 .msg-video video {
   display: block;
+  width: 400px; /* placeholder until the real size is known */
   max-width: 100%;
-  max-height: 300px;
-  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {
@@ -1351,6 +1362,26 @@ ul.md-list-nested {
 }
 .reply-bar-inner strong {
   color: var(--text-normal);
+}
+.reply-bar .reply-ping {
+  margin-left: auto;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-link);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.reply-bar .reply-ping.off {
+  color: var(--text-muted);
+}
+.reply-bar .reply-ping:hover {
+  background: var(--scrim-hover);
+}
+.reply-bar .reply-ping:not([hidden]) + .reply-close {
+  margin-left: 0;
 }
 .reply-bar .reply-close {
   width: 24px;

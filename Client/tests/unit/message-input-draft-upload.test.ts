@@ -109,7 +109,13 @@ describe("MessageInput upload in flight across a channel switch", () => {
     await vi.waitFor(() => expect(chip.classList.contains("uploading")).toBe(false));
     (container.querySelector(".msg-textarea") as HTMLTextAreaElement).value = "done";
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("done", null, ["srv-7"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "done",
+      null,
+      ["srv-7"],
+      [expect.objectContaining({ id: "srv-7" })],
+      false,
+    );
     next.destroy?.();
   });
 
@@ -131,7 +137,13 @@ describe("MessageInput upload in flight across a channel switch", () => {
     next.restoreDraft(draft);
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-9"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-9"],
+      [expect.objectContaining({ id: "srv-9" })],
+      false,
+    );
     next.destroy?.();
   });
 
@@ -222,7 +234,13 @@ describe("MessageInput upload in flight across a channel switch", () => {
       await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
       vi.setSystemTime(Date.now() + 1000);
       send(container);
-      expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-3"]);
+      expect(opts.onSend).toHaveBeenCalledWith(
+        "",
+        null,
+        ["srv-3"],
+        [expect.objectContaining({ id: "srv-3" })],
+        false,
+      );
       next.destroy?.();
     } finally {
       vi.useRealTimers();

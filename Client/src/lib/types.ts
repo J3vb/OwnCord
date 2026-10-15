@@ -72,6 +72,10 @@ export type WsErrorCode =
   // request: refused at once, the ring is never delivered (D-03).
   | "CALL_REQUIRES_ACCEPTANCE"
   | "CONFLICT"
+  // A files-only chat_send none of whose uploads could be attached (2A-3).
+  | "ATTACHMENTS_UNAVAILABLE"
+  // A reaction_add of a new emoji on a message that already has 20 (3A-12).
+  | "REACTION_LIMIT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
@@ -478,6 +482,8 @@ export interface ChatSendOkPayload {
   readonly deduplicated?: boolean;
   readonly message_id: number;
   readonly timestamp: string;
+  /** Requested uploads the server did not attach (2A-3); absent from older servers. */
+  readonly skipped_attachment_ids?: readonly string[];
 }
 
 export interface ChatEditedPayload {
@@ -660,6 +666,9 @@ export interface VoiceE2EEAnnouncePayload {
   /** Sender's identity-key signature over the ephemeral key (F3 TOFU).
    *  Omitted for legacy clients that have not published an identity key. */
   readonly signature?: string;
+  /** Video codecs the sender decodes (lowercase MIME subtypes). Absent from an
+   *  old client or server: the receiver assumes VP8 and H.264. */
+  readonly video_decode?: readonly string[];
 }
 
 /** Server→Client relay of an encrypted room key from the key holder. */
@@ -883,6 +892,8 @@ export interface ChatSendPayload {
   readonly channel_id: number;
   readonly content: string;
   readonly reply_to: number | null;
+  /** With reply_to, whether the reply mentions the parent's author (3A-12). */
+  readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
 }
 
@@ -1053,7 +1064,7 @@ export type ClientMessage =
   | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
   | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
-  | (WsEnvelope<{ public_key: string; signature?: string }> & {
+  | (WsEnvelope<{ public_key: string; signature?: string; video_decode?: readonly string[] }> & {
       readonly type: "voice_e2ee_announce";
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {

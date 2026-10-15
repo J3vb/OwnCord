@@ -26,6 +26,7 @@ import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
 import { messageStatusText } from "../../i18n/messageStatus";
+import type { ImageMenuTarget } from "./image-menu";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -281,6 +282,7 @@ export function clearAttachmentCaches(): void {
   inFlight.clear();
   mediaCache.clear();
   mediaInFlight.clear();
+  videoDims.clear();
 }
 
 /** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */
@@ -720,6 +722,11 @@ const mediaCache = new ObjectUrlCache(MEDIA_CACHE_MAX_BYTES, MEDIA_CACHE_MAX);
 /** In-flight media fetches, deduplicated the same way images are. */
 const mediaInFlight = new Map<string, Promise<string | null>>();
 
+/** Real video sizes learnt on play, so a row rebuilt by the virtual list keeps
+ *  the clip's shape instead of falling back to the 16:9 placeholder. */
+const videoDims = new Map<string, readonly [number, number]>();
+const VIDEO_DIMS_CAP = 500;
+
 /**
  * Fetch a video/audio attachment through the same authenticated,
  * cert-pinned path images use (fetchServerFile attaches the session bearer
@@ -1042,15 +1049,42 @@ function swapKeepingFocus(wrap: HTMLElement, next: HTMLElement): void {
   if (hadFocus) next.querySelector<HTMLElement>(".msg-file-download")?.focus();
 }
 
-/** Inline <video> player. Sized by the same .msg-image box as images so a
- *  video never blows the message column out; the source arrives on play
- *  because it needs the session token attached. A clip the engine cannot
+/** Largest box an inline video is drawn in, in CSS pixels: the cap an inline
+ *  image is shown at (400 wide by the reserved box, 300 tall by CSS). */
+const VIDEO_MAX_W = 400;
+const VIDEO_MAX_H = 300;
+/** Narrowest player, so the play and download buttons and the native controls
+ *  still fit a tiny or very tall clip. */
+const VIDEO_MIN_W = 120;
+
+/** Size the player to the clip's own shape, scaled down to the video box, so
+ *  a small or portrait video gets no black bars. Below VIDEO_MIN_W the player
+ *  is widened, and a box that would then pass VIDEO_MAX_H is letterboxed. The
+ *  width is a ceiling: a narrow column still shrinks it, keeping the ratio. */
+function sizeVideo(video: HTMLVideoElement, w: number, h: number): void {
+  const scale = Math.min(1, VIDEO_MAX_W / w, VIDEO_MAX_H / h);
+  const scaled = Math.round(w * scale);
+  const width = Math.max(VIDEO_MIN_W, scaled);
+  const fits = scaled >= VIDEO_MIN_W || (width * h) / w <= VIDEO_MAX_H;
+  video.style.width = `${width}px`;
+  video.style.aspectRatio = fits ? `${w} / ${h}` : `${width} / ${VIDEO_MAX_H}`;
+}
+
+/** Inline <video> player, capped to the same box as an image and sized to the
+ *  clip's real shape once it is known (server dimensions, an earlier play, or
+ *  the metadata on play); until then a 16:9 placeholder. The source arrives on
+ *  play because it needs the session token attached. A clip the engine cannot
  *  decode becomes the download chip, never a broken player. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
   const video = createElement("video", { preload: "metadata" });
   video.setAttribute("aria-label", att.filename);
+  const known =
+    att.width != null && att.height != null && att.width > 0 && att.height > 0
+      ? ([att.width, att.height] as const)
+      : videoDims.get(att.id);
+  if (known !== undefined) sizeVideo(video, known[0], known[1]);
   const unplayable = (): void => {
     const chip = renderFileChip(att, resolvedUrl);
     const note = createElement("div", { class: "msg-file-note", role: "status" });
@@ -1060,8 +1094,13 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
   };
   video.addEventListener("error", unplayable, { once: true });
   video.addEventListener("loadedmetadata", () => {
-    if (video.videoWidth > 0) {
-      video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      sizeVideo(video, video.videoWidth, video.videoHeight);
+      if (!videoDims.has(att.id) && videoDims.size >= VIDEO_DIMS_CAP) {
+        const oldest = videoDims.keys().next().value;
+        if (oldest !== undefined) videoDims.delete(oldest);
+      }
+      videoDims.set(att.id, [video.videoWidth, video.videoHeight]);
       return;
     }
     // No picture (audio-only, or a codec the engine lacks): keep playing as audio.
@@ -1158,6 +1197,19 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     }
 
     function attachLightbox(img: HTMLImageElement): void {
+      // Keyboard-operable like an inline image (B9-9): focus it and Enter or
+      // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
+      img.tabIndex = 0;
+      img.setAttribute("role", "button");
+      img.setAttribute(
+        "aria-label",
+        messageStatusText("file.openImage", { filename: att.filename }),
+      );
+      img.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        img.click();
+      });
       img.addEventListener("click", () => {
         openImageLightbox(img.src, att.filename, { url: resolvedUrl });
       });
@@ -1185,6 +1237,13 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       });
       recoverEvictedImage(img, { url: inlineUrl });
       attachLightbox(img);
+      bindImageMenu({
+        img,
+        link: null,
+        // The row may show a thumbnail or a frozen GIF frame; copy the file.
+        full: () => fetchImageAsObjectUrl(resolvedUrl),
+        save: () => downloadFile(resolvedUrl, att.filename),
+      });
       img.addEventListener(
         "load",
         () => {
@@ -1265,6 +1324,54 @@ async function downloadFile(url: string, filename: string): Promise<void> {
   }
 }
 
+// -- Image menu ---------------------------------------------------------------
+
+type ImageMenuModule = typeof import("./image-menu");
+/** Set once the lazy menu module has loaded, so teardown can close its menu. */
+let imageMenuModule: ImageMenuModule | null = null;
+
+function loadImageMenu(): Promise<ImageMenuModule> {
+  return import("./image-menu").then((m) => {
+    imageMenuModule = m;
+    return m;
+  });
+}
+
+/** Save an image whose bytes are already in the webview. */
+export function saveImageBytes(src: string, url: string): Promise<void> {
+  return loadImageMenu().then((m) => m.saveImageBytes(src, url));
+}
+
+/**
+ * Open the image menu (Copy Image, Copy Link, Open Link, Save Image) on
+ * right-click of `target.img`, or on the Menu key / Shift+F10 when the image
+ * has focus (they fire `contextmenu` with no pointer position). `signal`, when
+ * given, closes the menu with its owner (the lightbox).
+ */
+export function bindImageMenu(target: ImageMenuTarget, signal?: AbortSignal): void {
+  const { img } = target;
+  img.addEventListener(
+    "contextmenu",
+    (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // A hidden image is still loading or refused: nothing to copy.
+      if (img.hidden || !img.hasAttribute("src")) return;
+      let { clientX: x, clientY: y } = e;
+      if (x === 0 && y === 0) {
+        const rect = img.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      }
+      loadImageMenu().then(
+        (m) => m.openImageMenu(x, y, target, signal),
+        (err: unknown) => log.warn("Image menu failed to load", { error: String(err) }),
+      );
+    },
+    signal !== undefined ? { signal } : undefined,
+  );
+}
+
 // -- Lightbox -----------------------------------------------------------------
 
 // Store the cleanup function for the active lightbox so rapid reopens
@@ -1276,6 +1383,7 @@ let activeLightboxClose: (() => void) | null = null;
  *  document listeners and a revoked blob URL. */
 export function closeActiveLightbox(): void {
   activeLightboxClose?.();
+  imageMenuModule?.closeImageMenu();
 }
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
@@ -1380,6 +1488,8 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   let clickStartY = 0;
 
   img.addEventListener("mousedown", (e) => {
+    // A right-click opens the image menu; only the primary button pans.
+    if (e.button !== 0) return;
     e.preventDefault();
     clickStartX = e.clientX;
     clickStartY = e.clientY;
@@ -1421,6 +1531,31 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
+  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
+  bindImageMenu(
+    {
+      img,
+      link: sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null,
+      // img may still show the thumbnail or a frozen GIF frame it opened with.
+      full:
+        sourceUrl === null
+          ? undefined
+          : isServerUrl(sourceUrl)
+            ? () => fetchImageAsObjectUrl(sourceUrl)
+            : () => fetchExternalImage({ url: sourceUrl }),
+      save: () => {
+        if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, alt);
+        if (sourceUrl === null) return saveImageBytes(img.src, "");
+        // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
+        // shows a one-frame preview.
+        return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
+          saveImageBytes(bytes ?? img.src, sourceUrl),
+        );
+      },
+    },
+    disposable.signal,
+  );
+
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     close();
@@ -1432,6 +1567,12 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
+    // Focus stays on the close button, so the Menu key / Shift+F10 open the
+    // image's menu from there, centred on the image.
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    }
     if (e.key === "Tab") {
       // Contain focus in the dialog: its close button is the only Tab stop.
       e.preventDefault();

@@ -907,8 +907,30 @@ describe("enableScreenshare", () => {
     expect(videoOpts).toMatchObject({
       simulcast: false,
       screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
+      // M-2: lower the resolution a little before halving the frame rate.
+      degradationPreference: "balanced",
     });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("publishes 30 and 60 fps shares keeping their resolution", async () => {
+    for (const fps of [30, 60]) {
+      loadPref.mockImplementation((key: string) =>
+        key === "screenShareQuality" ? "high" : key === "screenShareFps" ? fps : "",
+      );
+      const rig = fakeRoom();
+      const audio = fakeAudioTrack();
+      createLocalScreenTracks.mockResolvedValue([fakeVideoTrack(), audio]);
+
+      // oxlint-disable-next-line no-await-in-loop -- one frame rate at a time
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+      expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+        degradationPreference: "maintain-resolution",
+      });
+      const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+      expect(audioOpts).not.toHaveProperty("degradationPreference");
+    }
   });
 
   it("keeps the source share as a single full-resolution layer", async () => {
@@ -1611,6 +1633,46 @@ describe("video codec", () => {
     });
   });
 
+  /** A channel whose one other member reports it decodes VP8 only. */
+  function withVp8OnlyPeer(): () => void {
+    const before = voiceStore.getState();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 4,
+      voiceUsers: new Map([[4, new Map([[2, { userId: 2, username: "peer" } as never]])]]),
+      peerVideoDecode: new Map([[2, ["vp8"]]]),
+    }));
+    return () => voiceStore.setState(() => before);
+  }
+
+  it("downgrades a saved H.264 camera to VP8 for a VP8-only channel peer", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+      await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+      expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
+    } finally {
+      restore();
+    }
+  });
+
+  it("downgrades a saved H.264 share to VP8 for a VP8-only channel peer", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      const video = fakeVideoTrack();
+      createLocalScreenTracks.mockResolvedValue([video, fakeAudioTrack()]);
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+      const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+      expect(videoOpts).toMatchObject({ videoCodec: "vp8" });
+    } finally {
+      restore();
+    }
+  });
+
   it("publishes the camera with the saved codec", async () => {
     prefs({ videoCodec: "h264" });
     const rig = fakeRoom();
@@ -1678,6 +1740,21 @@ describe("video codec", () => {
       }),
     });
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
+  });
+
+  it("at 120 fps a saved VP8 follows Auto's hardware rule (M-2)", async () => {
+    prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([capturedVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(encodingInfo).toHaveBeenCalledTimes(1);
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      videoCodec: "h264",
+      degradationPreference: "balanced",
+    });
   });
 
   it("does not publish a camera turned off while Auto's probe is pending", async () => {

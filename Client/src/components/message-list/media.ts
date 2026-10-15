@@ -10,6 +10,7 @@ import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@lib/preferences";
 import {
+  bindImageMenu,
   clearExternalImageCache,
   fetchExternalImage,
   isSafeUrl,
@@ -18,6 +19,7 @@ import {
   previewExternal,
   recoverEvictedImage,
   renderFailureStatus,
+  saveImageBytes,
 } from "./attachments";
 import {
   admitDerived,
@@ -436,6 +438,15 @@ export function renderInlineImage(url: string): HTMLDivElement {
   });
   img.addEventListener("click", () => {
     openImageLightbox(img.src, contentText("image.alt", { host }), { url });
+  });
+  // Save asks the broker for the bytes again rather than reading img.src: a
+  // frozen GIF shows a one-frame data: URL there, and the save keeps the
+  // animation.
+  bindImageMenu({
+    img,
+    link: url,
+    full: () => fetchExternalImage({ url }),
+    save: () => fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url)),
   });
 
   function load(): void {

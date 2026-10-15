@@ -32,18 +32,6 @@ func CaptureSetupLimiter(h func(*auth.RateLimiter)) (restore func()) {
 	return func() { setupLimiterHook = prev }
 }
 
-// SetSetupLimiterReapTiming overrides the interval the setup endpoint's
-// rate-limiter reaper uses, so tests don't wait on the real 5-minute
-// interval. Cleanup no longer takes a separate max-window (item 6, round 3
-// review) — each entry retires on its own window.
-func SetSetupLimiterReapTiming(interval time.Duration) (restore func()) {
-	prev := setupLimiterReapInterval
-	setupLimiterReapInterval = interval
-	return func() {
-		setupLimiterReapInterval = prev
-	}
-}
-
 // SetBackupBaseDir overrides backupBaseDir so tests can point backup handlers
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }

@@ -1598,10 +1598,10 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 }
 
 // hubTestSchema is the minimal schema needed for hub tests.
-// hubTestSchema ends with the real member-generation migration, so the ready
+// hubTestSchema ends with the real member-generation migrations (057, 061), so the ready
 // path's shared member read (serve_ready_members_cache.go) runs against the
 // same triggers production does.
-var hubTestSchema = append([]byte(`
+var hubTestSchema = slices.Concat([]byte(`
 CREATE TABLE IF NOT EXISTS roles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
@@ -1834,7 +1834,7 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`), mustMigration("057_member_generation.sql")...)
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {

@@ -54,6 +54,7 @@ describe("E2EEIdentity", () => {
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
       signature: "sig",
+      video_decode: ["vp8", "h264"],
     });
     expect(getOrCreateIdentityKeyPair).toHaveBeenCalledWith("chat.example", 7);
     expect(signEphemeralKey).toHaveBeenCalledWith("priv", 7, new Uint8Array([1, 2, 3]));
@@ -63,6 +64,7 @@ describe("E2EEIdentity", () => {
     const { identity } = setup(null);
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -72,6 +74,7 @@ describe("E2EEIdentity", () => {
     const { identity } = setup();
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -107,7 +110,10 @@ describe("E2EEIdentity", () => {
     const pending = identity.buildAnnouncePayload(EPHEMERAL);
     identity.clearIdentityKeyPair();
     load.release(PAIR);
-    await expect(pending).resolves.toEqual({ public_key: EPHEMERAL });
+    await expect(pending).resolves.toEqual({
+      public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
+    });
     // The stale pair was not cached: the next announce loads again.
     await identity.buildAnnouncePayload(EPHEMERAL);
     expect(getOrCreateIdentityKeyPair).toHaveBeenCalledTimes(2);
@@ -123,7 +129,10 @@ describe("E2EEIdentity", () => {
       if (change === "host") setHost("other.example");
       else auth.user = { id: 8 };
       load.release(PAIR);
-      await expect(pending).resolves.toEqual({ public_key: EPHEMERAL });
+      await expect(pending).resolves.toEqual({
+        public_key: EPHEMERAL,
+        video_decode: ["vp8", "h264"],
+      });
       expect(signEphemeralKey).not.toHaveBeenCalled();
     },
   );
@@ -133,6 +142,7 @@ describe("E2EEIdentity", () => {
     const { identity } = setup();
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
     });
   });
 });

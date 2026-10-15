@@ -587,7 +587,7 @@ describe("composer integration", () => {
     press("Escape");
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("hey @al", null, []);
+    expect(onSend).toHaveBeenCalledWith("hey @al", null, [], [], false);
   });
 
   it("navigates with the arrow keys before inserting", () => {
@@ -622,7 +622,7 @@ describe("composer integration", () => {
 
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("@ali", null, []);
+    expect(onSend).toHaveBeenCalledWith("@ali", null, [], [], false);
   });
 
   // The caret-move resync must skip the keys the popup owns: a real browser
@@ -635,7 +635,7 @@ describe("composer integration", () => {
 
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("hey @al", null, []);
+    expect(onSend).toHaveBeenCalledWith("hey @al", null, [], [], false);
   });
 
   // Likewise for the arrows: setQuery resets the highlight to row 0, so a

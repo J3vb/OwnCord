@@ -44,6 +44,7 @@ import {
 } from "../features/voice/shareSenderStats";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
+import { channelPeerDecode } from "../features/voice/peerDecode";
 import { resolveVideoCodec } from "../features/voice/videoCodec";
 import {
   getScreenSourcePicker,
@@ -189,6 +190,14 @@ export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number):
     return quality === "low" ? 5 : 30;
   }
   return fps;
+}
+
+/** How WebRTC gives way when the encoder or link cannot keep up. At 120 fps
+ *  it lowers the resolution a little before it halves the frame rate (a
+ *  120 fps share is chosen for motion); otherwise text stays sharp and the
+ *  frame rate gives. Always explicit, so an SDK default cannot move 30/60. */
+export function screenShareDegradation(effectiveFps: number): RTCDegradationPreference {
+  return effectiveFps >= 120 ? "balanced" : "maintain-resolution";
 }
 
 /** High frame rates need proportionally more bitrate to stay sharp. */
@@ -451,6 +460,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       videoTrack.mediaStreamTrack,
       maxFramerate,
       CAMERA_PUBLISH_BITRATES[quality],
+      channelPeerDecode,
     );
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
@@ -711,7 +721,12 @@ export async function enableScreenshare(
     const videoCodec =
       videoTrack === undefined
         ? "vp8"
-        : await resolveVideoCodec(videoTrack.mediaStreamTrack, effectiveFps, maxBitrate);
+        : await resolveVideoCodec(
+            videoTrack.mediaStreamTrack,
+            effectiveFps,
+            maxBitrate,
+            channelPeerDecode,
+          );
     if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
       // A disableScreenshare (or the OS stop-sharing button) ran to
       // completion while Auto's probe was pending: it already stopped these
@@ -736,6 +751,7 @@ export async function enableScreenshare(
                 maxFramerate: effectiveFps,
               },
               videoCodec,
+              degradationPreference: screenShareDegradation(effectiveFps),
             }
           : {}),
         ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
