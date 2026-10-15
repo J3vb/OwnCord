@@ -74,6 +74,8 @@ export type WsErrorCode =
   | "CONFLICT"
   // A files-only chat_send none of whose uploads could be attached (2A-3).
   | "ATTACHMENTS_UNAVAILABLE"
+  // A reaction_add of a new emoji on a message that already has 20 (3A-12).
+  | "REACTION_LIMIT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
@@ -887,6 +889,8 @@ export interface ChatSendPayload {
   readonly channel_id: number;
   readonly content: string;
   readonly reply_to: number | null;
+  /** With reply_to, whether the reply mentions the parent's author (3A-12). */
+  readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
 }
 

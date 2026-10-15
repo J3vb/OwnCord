@@ -70,6 +70,7 @@ describe("MessageInput unsent attachments (2A-3)", () => {
       null,
       ["fresh"],
       [expect.objectContaining({ id: "fresh" })],
+      false,
     );
     comp.destroy?.();
   });
