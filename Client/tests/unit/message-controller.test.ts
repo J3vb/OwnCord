@@ -14,6 +14,7 @@ const {
   mockGetChannelMessages,
   mockSetChannelLoading,
   mockSetChannelLoadError,
+  mockSetOlderLoadFailed,
   mockIsWindowDetached,
 } = vi.hoisted(() => ({
   mockSetMessages: vi.fn(),
@@ -25,6 +26,7 @@ const {
   mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string }> => []),
   mockSetChannelLoading: vi.fn(),
   mockSetChannelLoadError: vi.fn(),
+  mockSetOlderLoadFailed: vi.fn(),
   mockIsWindowDetached: vi.fn((): boolean => false),
 }));
 
@@ -47,6 +49,7 @@ vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setChannelLoading: mockSetChannelLoading,
   setChannelLoadError: mockSetChannelLoadError,
+  setOlderLoadFailed: mockSetOlderLoadFailed,
   isWindowDetached: mockIsWindowDetached,
 }));
 
@@ -404,7 +407,7 @@ describe("createMessageController", () => {
       expect(api.getMessages).not.toHaveBeenCalled();
     });
 
-    it("shows error on fetch failure", async () => {
+    it("flags the channel's older page as failed on fetch failure, without a toast", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
       const api = makeApi({
         getMessages: vi.fn().mockRejectedValue(new Error("fail")),
@@ -413,7 +416,40 @@ describe("createMessageController", () => {
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 
-      expect(showError).toHaveBeenCalledWith("Failed to load older messages");
+      expect(mockSetOlderLoadFailed).toHaveBeenCalledWith(42, true);
+      expect(showError).not.toHaveBeenCalled();
+    });
+
+    it("clears the failed flag when a later older page succeeds (a Retry)", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
+      const api = makeApi();
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadOlderMessages(42, makeAbort().signal);
+
+      expect(mockSetOlderLoadFailed).toHaveBeenCalledWith(42, false);
+      expect(mockSetOlderLoadFailed).not.toHaveBeenCalledWith(42, true);
+    });
+
+    it("sets no flag when the failed fetch was aborted", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
+      const { signal, abort } = makeAbort();
+      abort();
+      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("aborted")) });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadOlderMessages(42, signal);
+
+      expect(mockSetOlderLoadFailed).not.toHaveBeenCalled();
+    });
+
+    it("mounting a channel clears an older-page failure left by an earlier visit", async () => {
+      mockIsChannelLoaded.mockReturnValue(true);
+      const ctrl = createMessageController({ api: makeApi(), showError });
+
+      await ctrl.loadMessages(42, makeAbort().signal);
+
+      expect(mockSetOlderLoadFailed).toHaveBeenCalledWith(42, false);
     });
 
     it("does not show error when aborted before failure", async () => {

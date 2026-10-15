@@ -281,6 +281,32 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
     clearChildren(scrollArea);
 
+    // A failed load says so, with a way to try again, above whatever Recent
+    // and Server emoji are already showing.
+    if (loadFailed && emojiCatalog() === null) {
+      const failure = createElement("div", {
+        class: "ep-load-failed",
+        role: "alert",
+        "data-testid": "emoji-load-failed",
+      });
+      const retry = createElement(
+        "button",
+        { class: "ep-retry", type: "button", "data-testid": "emoji-retry" },
+        messagingText("retry"),
+      );
+      retry.addEventListener(
+        "click",
+        () => {
+          loadFailed = false;
+          renderAll();
+          startCatalogLoad();
+        },
+        { signal },
+      );
+      failure.append(createElement("span", {}, messagingText("emoji.loadFailed")), retry);
+      scrollArea.appendChild(failure);
+    }
+
     // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
     const raw = searchQuery.toLowerCase();
     const q = raw.replace(/\s+/g, "_");
@@ -346,8 +372,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   // Initial render: Recent and Server straight away, the Unicode set when its
   // lazy chunk lands (at once, if an earlier picker or popup loaded it).
   let loadFailed = false;
-  renderAll();
-  if (emojiCatalog() === null) {
+  function startCatalogLoad(): void {
     void loadEmojiCatalog().then(
       () => {
         if (!signal.aborted) renderAll();
@@ -358,6 +383,8 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       },
     );
   }
+  renderAll();
+  if (emojiCatalog() === null) startCatalogLoad();
 
   toneSelect.addEventListener(
     "change",

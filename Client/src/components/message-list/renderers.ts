@@ -52,7 +52,13 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatClockTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import {
+  formatClockTime,
+  formatFullDate,
+  formatMessageTimestamp,
+  parseTimestamp,
+} from "@lib/formatting";
+import { formatDiscordTimestamp } from "../../features/messaging/discordTimestamp";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
@@ -70,6 +76,11 @@ import {
 } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
+
+/** Weekday, date and time for a tooltip, in Discord's "F" style. */
+function fullDateTimeTitle(iso: string): string {
+  return formatDiscordTimestamp(Math.floor(parseTimestamp(iso).getTime() / 1000), "F").title;
+}
 
 export function renderDayDivider(iso: string): HTMLDivElement {
   const divider = createElement("div", { class: "msg-day-divider" });
@@ -357,7 +368,7 @@ export function renderMessage(
       "div",
       {
         class: "msg-hover-time",
-        title: formatFullDate(msg.timestamp),
+        title: fullDateTimeTitle(msg.timestamp),
       },
       // The header's clock time without its "Today at" (F24): the full form
       // wrapped onto three lines over the avatar column. The title has the date.
@@ -390,7 +401,7 @@ export function renderMessage(
   );
   const time = createElement(
     "span",
-    { class: "msg-time", title: formatFullDate(msg.timestamp) },
+    { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
   appendChildren(header, authorEl, time);
@@ -412,7 +423,11 @@ export function renderMessage(
     el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
     if (msg.editedAt !== null) {
       el.appendChild(
-        createElement("span", { class: "msg-edited" }, messagingText("message.edited")),
+        createElement(
+          "span",
+          { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
+          messagingText("message.edited"),
+        ),
       );
     }
 

@@ -96,6 +96,7 @@ describe("INITIAL_STATE", () => {
       "loadWatermark",
       "loadedChannels",
       "messagesByChannel",
+      "olderLoadFailed",
       "pendingReactions",
       "pendingSends",
     ]);

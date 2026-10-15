@@ -77,6 +77,10 @@ and only when it changes something a contributor or fork holder must do
 - The desktop app's message box, as in Discord: the + button takes several files at once, dragging a file over the chat shows **Upload to #channel**, and a draft's text and reply are kept when you restart the app (per server and account; attachments are not).
 - A character counter appears when 200 characters are left and turns red past 4,000, and pasting text that would go past the limit attaches it as `message.txt` instead.
 - Clearing an edit and pressing Enter now asks whether to delete the message, instead of doing nothing.
+- Hovering a message's time, or its follow-up time beside it, now shows the weekday, date and time (for example "Tuesday, October 7, 2026 at 2:34 PM"), and "(edited)" now shows when the message was edited on hover.
+- Three people typing are now named ("Ana, Ben, and Cy are typing..."), with the names in bold. Four or more still read "Several people are typing...".
+- The delete confirmation now shows who wrote the message and the start of its text, and tells you that holding Shift when you click Delete skips the question.
+- A channel with slow mode now says so under the message box, with the interval ("Slow mode is on: one message every 5s"), before you send anything. Moderators, who are not limited, do not see it.
 
 ### Changed
 
@@ -113,6 +117,9 @@ and only when it changes something a contributor or fork holder must do
 - Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.
 - Editing a message showed you as typing to everyone in the channel. Editing no longer does.
 - Delete, Pin and React now follow the channel's permissions. A channel that grants or removes them for you now shows or hides those buttons, instead of the buttons following your role alone.
+- Messages from the same person now group when sent up to 7 minutes apart, as in Discord, instead of 5.
+- When the emoji list could not load, the picker said "No emoji found". It now says it could not load emoji and has a Retry button.
+- When older messages failed to load as you scrolled up, a brief pop-up came and went. A "Couldn't load messages" row with Retry now stays at the top of the chat until it works.
 
 **Voice and video**
 

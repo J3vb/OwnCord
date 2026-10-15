@@ -11,6 +11,7 @@ import {
   messagesStore,
   getChannelMessages,
   hasMoreMessages,
+  hasOlderLoadFailed,
   getHistoryLoadState,
   isWindowDetached,
 } from "@stores/messages.store";
@@ -1365,6 +1366,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     loadingOlder = value;
     if (!value) olderLoadingRow?.remove();
     else if (olderLoadingRow !== null) root?.appendChild(olderLoadingRow);
+    updateOlderFailedRow();
+  }
+  /** "Couldn't load messages" + Retry over the top of the history after a failed
+   *  older-page fetch. Overlays the region like the spinner, so no row moves. */
+  let olderFailedRow: HTMLDivElement | null = null;
+  function updateOlderFailedRow(): void {
+    if (olderFailedRow === null) return;
+    olderFailedRow.hidden = loadingOlder || !hasOlderLoadFailed(options.channelId);
+  }
+  /** An explicit Retry click: goes at once, past the automatic-retry cooldown. */
+  function retryOlder(): void {
+    if (loadingOlder) return;
+    olderRetryAt = 0;
+    fireOlderLoad();
   }
   // The oldest loaded message's id, not the count: a live tail append also
   // changes the count while a history fetch is still in flight, and
@@ -1392,6 +1407,24 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return getChannelMessages(options.channelId).findLast((m) => m.id > 0)?.id ?? 0;
   }
 
+  function fireOlderLoad(): void {
+    setLoadingOlder(true);
+    const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
+    // A failed fetch never changes the message count, so the subscriber
+    // above (which only reacts to a count change) would leave loadingOlder
+    // latched forever. Clear it once the load settles either way — the
+    // subscriber's reset still applies to the success path but is now just
+    // belt-and-braces.
+    void Promise.resolve(options.onScrollTop()).finally(() => {
+      setLoadingOlder(false);
+      // Nothing was prepended: hold off so continued scrolling in the zone
+      // does not send one failing request after another.
+      if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
+        olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
+      }
+    });
+  }
+
   let scrollRafId = 0;
   let resizeRafId = 0;
   let resizeObserver: ResizeObserver | null = null;
@@ -1410,21 +1443,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       performance.now() >= olderRetryAt &&
       hasMoreMessages(options.channelId)
     ) {
-      setLoadingOlder(true);
-      const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
-      // A failed fetch never changes the message count, so the subscriber
-      // below (which only reacts to a count change) would leave loadingOlder
-      // latched forever. Clear it once the load settles either way — the
-      // subscriber's reset still applies to the success path but is now just
-      // belt-and-braces.
-      void Promise.resolve(options.onScrollTop()).finally(() => {
-        setLoadingOlder(false);
-        // Nothing was prepended: hold off so continued scrolling in the zone
-        // does not send one failing request after another.
-        if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
-          olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
-        }
-      });
+      fireOlderLoad();
     }
 
     // A detached window pages DOWN toward the present as the reader nears its
@@ -1521,6 +1540,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     });
     olderLoadingRow.appendChild(createElement("div", { class: "spinner" }));
 
+    olderFailedRow = createElement("div", {
+      class: "messages-older-failed",
+      role: "alert",
+      "data-testid": "messages-older-failed",
+    });
+    olderFailedRow.appendChild(
+      createElement("span", { class: "messages-load-error-text" }, messagingText("loadFailed")),
+    );
+    const olderRetryBtn = createElement(
+      "button",
+      { class: "messages-retry-btn", type: "button", "data-testid": "messages-older-retry" },
+      messagingText("retry"),
+    );
+    olderRetryBtn.addEventListener("click", retryOlder, { signal: disposable.signal });
+    olderFailedRow.appendChild(olderRetryBtn);
+    updateOlderFailedRow();
+
     scrollToBottomBtn = createElement("button", {
       class: "scroll-to-bottom-btn",
       "aria-label": messagingText("scrollToBottom"),
@@ -1563,6 +1599,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
     region.appendChild(root);
+    region.appendChild(olderFailedRow);
     region.appendChild(scrollToBottomBtn);
     region.appendChild(jumpToPresentPill);
     region.appendChild(unreadBar);
@@ -1732,6 +1769,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (virtualItems.length === 0 || (newDividerDeferred && !patchRows())) renderAll();
           settleUnreadNav();
         },
+      ),
+    );
+
+    unsubscribers.push(
+      messagesStore.subscribeSelector(
+        (s) => s.olderLoadFailed?.has(options.channelId) ?? false,
+        () => updateOlderFailedRow(),
       ),
     );
 
@@ -2010,6 +2054,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     newBelowCount = 0;
     jumpToPresentPill = null;
     olderLoadingRow = null;
+    olderFailedRow = null;
   }
 
   /** Scroll so row `idx` sits `offset` px below the top of the view and

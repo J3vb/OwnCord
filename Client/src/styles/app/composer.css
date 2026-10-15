@@ -289,6 +289,17 @@
   display: none;
 }
 
+/* Slow mode, said up front under the composer. */
+.composer-slow-note {
+  margin-top: 6px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.composer-slow-note[hidden] {
+  display: none;
+}
+
 /* "Upload to #channel" while a file is dragged over the chat. Fixed to the
    chat area's box (set on show) and ignores the pointer, so the drop lands on
    the slot underneath. */

@@ -224,7 +224,7 @@ describe("renderers", () => {
       const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
       const curr = makeMessage({
         id: 2,
-        timestamp: "2025-01-15T12:06:00Z",
+        timestamp: "2025-01-15T12:08:00Z",
       });
       expect(shouldGroup(prev, curr)).toBe(false);
     });
@@ -477,6 +477,26 @@ describe("renderers", () => {
       const edited = container.querySelector(".msg-edited");
       expect(edited).not.toBeNull();
       expect(edited!.textContent).toBe("(edited)");
+
+      ac.abort();
+    });
+
+    it("gives the header time and (edited) a weekday, date and time tooltip", () => {
+      const msg = makeMessage({
+        timestamp: "2025-01-15T12:00:00Z",
+        editedAt: "2025-01-16T13:05:00Z",
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+
+      const full = /^\w+day, \w+ \d{1,2}, \d{4}( at |, )\d{1,2}:\d{2}\s?(AM|PM)$/;
+      const timeTitle = container.querySelector(".msg-time")?.getAttribute("title") ?? "";
+      const editedTitle = container.querySelector(".msg-edited")?.getAttribute("title") ?? "";
+      expect(timeTitle).toMatch(full);
+      expect(timeTitle).toMatch(/Wednesday, January 15, 2025|Wednesday, January 1[45], 2025/);
+      expect(editedTitle).toMatch(full);
+      expect(editedTitle).toMatch(/Thursday, January 1[67], 2025/);
+      expect(editedTitle).not.toBe(timeTitle);
 
       ac.abort();
     });

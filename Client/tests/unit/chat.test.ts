@@ -139,7 +139,7 @@ describe("MessageList", () => {
   });
 
   describe("message grouping", () => {
-    it("groups consecutive messages from same user within 5 minutes", () => {
+    it("groups consecutive messages from same user within 7 minutes", () => {
       setMessages(
         1,
         [
@@ -199,7 +199,7 @@ describe("MessageList", () => {
       list.destroy?.();
     });
 
-    it("breaks group when gap exceeds 5 minutes", () => {
+    it("breaks group when gap exceeds 7 minutes", () => {
       setMessages(
         1,
         [
@@ -504,6 +504,7 @@ describe("TypingIndicator", () => {
       { id: 1, username: "Alice", avatar: null, role: "member", status: "online" },
       { id: 2, username: "Bob", avatar: null, role: "member", status: "online" },
       { id: 3, username: "Charlie", avatar: null, role: "member", status: "online" },
+      { id: 4, username: "Dana", avatar: null, role: "member", status: "online" },
       { id: 10, username: "Me", avatar: null, role: "member", status: "online" },
     ]);
     container = document.createElement("div");
@@ -551,13 +552,30 @@ describe("TypingIndicator", () => {
     indicator.destroy?.();
   });
 
-  it("shows 'Several people' for 3+ users", () => {
+  it("names all three users when exactly three are typing", () => {
     const indicator = createTypingIndicator({ channelId: 1, currentUserId: 10 });
     indicator.mount(container);
 
     setTyping(1, 1);
     setTyping(1, 2);
     setTyping(1, 3);
+    membersStore.flush();
+
+    const root = container.querySelector(".typing-bar");
+    expect(root?.querySelectorAll("strong").length).toBe(3);
+    expect(root?.textContent).toMatch(/\S+, \S+, and \S+ are typing\.\.\./);
+    expect(root?.textContent).not.toContain("Several people");
+    indicator.destroy?.();
+  });
+
+  it("shows 'Several people' for 4+ users", () => {
+    const indicator = createTypingIndicator({ channelId: 1, currentUserId: 10 });
+    indicator.mount(container);
+
+    setTyping(1, 1);
+    setTyping(1, 2);
+    setTyping(1, 3);
+    setTyping(1, 4);
     membersStore.flush();
 
     const root = container.querySelector(".typing-bar");

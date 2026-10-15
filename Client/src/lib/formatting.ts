@@ -13,7 +13,7 @@ import { messageStatusText } from "../i18n/messageStatus";
 
 // -- Constants ----------------------------------------------------------------
 
-export const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
+export const GROUP_THRESHOLD_MS = 7 * 60 * 1000;
 
 // -- Timestamp helpers --------------------------------------------------------
 

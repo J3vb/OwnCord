@@ -48,8 +48,8 @@ function makeMessage(id: number): Message {
     pinned: false,
     editedAt: null,
     deleted: false,
-    // Spaced far enough apart that grouping never merges rows.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 5)).toISOString(),
+    // Spaced past the 7-minute group window, so grouping never merges rows.
+    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 10)).toISOString(),
     status: "sent",
     correlationId: null,
     errorCode: null,
@@ -276,7 +276,7 @@ describe("MessageList — new-messages divider", () => {
         content: `Message ${id}`,
         reply_to: null,
         attachments: [],
-        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 5)).toISOString(),
+        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 10)).toISOString(),
       });
     }
     messagesStore.flush();
