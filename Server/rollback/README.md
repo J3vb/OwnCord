@@ -74,7 +74,9 @@ usually is not. Each file explains its own cost in a comment. These are the
 ones to know before you start. The list is not complete, so read the comment
 at the top of each file before you run it.
 
-| Reversal                             | What it costs                                                                                                                                                                                                                                                                                                                       |
+| Reversal | What it costs |
+
+| `061_member_generation_about`        | Nothing is lost: the member-generation trigger goes back to not watching About Me, which an older binary does not read in the member list.                                                                                                                                                                                          |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `060_message_mentions_reply_ping`    | Reply pings are forgotten: the replied-to author's row stays as an ordinary mention, but a later edit drops it and a delete after that edit no longer takes back the ping's badge.                                                                                                                                                  |
 | `059_gif_favorites`                  | Every user loses their saved GIF favorites; they are provider URLs only, but the list cannot be reconstructed.                                                                                                                                                                                                                      |

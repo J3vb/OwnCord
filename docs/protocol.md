@@ -531,7 +531,7 @@ carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
 `status` is per-viewer. Two rules apply, in this order, so a client never has
 to reconstruct them:
@@ -1330,6 +1330,8 @@ reconnect before the unban).
       "avatar": null,
       "role": "member",
       "display_name": "New User",
+      "about": "Hello there",
+      "created_at": "2026-10-15T13:04:05Z",
       "identity_public_key": "base64-identity-pubkey"
     },
     "status": "online"
@@ -1338,7 +1340,10 @@ reconnect before the unban).
 ```
 
 `display_name` is the nickname to render instead of `username`; omitted when
-unset. `identity_public_key` is the user's long-term E2EE identity public key
+unset. `about` is the About Me bio (`null` when unset) and `created_at` the
+account creation instant (RFC 3339 UTC); both match the same fields of
+`ready.members[]`, and neither appears on `chat_message.user`.
+`identity_public_key` is the user's long-term E2EE identity public key
 (see voice E2EE TOFU); omitted when the user has not published one. The
 top-level `status` is the viewer-safe presence the user comes online as (an
 invisible connector reports `"offline"` here) — clients must render presence
