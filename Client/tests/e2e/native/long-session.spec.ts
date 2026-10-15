@@ -49,10 +49,15 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
     await input.press("Enter");
     await expect(edited).toHaveCount(1, { timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
-  await edited.hover();
-  await edited.locator("[data-testid^='msg-react-']").click();
   const picker = page.locator(".reaction-picker-wrap .emoji-picker.open");
-  await expect(picker).toBeVisible();
+  // The hover bar pops in on hover, and the edit's re-render can move the row
+  // under the pointer; on WebView2 a single click then waited 30 s for a
+  // stable target. Hover and click again until the picker opens.
+  await expect(async () => {
+    await edited.hover();
+    await edited.locator("[data-testid^='msg-react-']").click({ timeout: 3_000 });
+    await expect(picker).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await picker.locator(".ep-emoji").first().click();
   await expect(edited.locator(".reaction-chip.me")).toHaveCount(1);
   await edited.locator(".reaction-chip.me").click();

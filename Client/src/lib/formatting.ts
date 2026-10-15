@@ -86,6 +86,12 @@ export function formatFullDate(iso: string): string {
   return FULL_DATE_FORMAT.format(parseTimestamp(iso));
 }
 
+/** The clock time alone ("2:34 PM", or "14:34" in 24-hour mode), as the
+ *  message header writes it. */
+export function formatClockTime(iso: string): string {
+  return clockTimeFormat().format(parseTimestamp(iso));
+}
+
 /** Discord-style relative timestamp: "Today at 2:34 PM", "Yesterday at 2:34 PM",
  *  or "MM/DD/YYYY H:MM AM/PM" for older dates. */
 export function formatMessageTimestamp(iso: string): string {

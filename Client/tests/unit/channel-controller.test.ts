@@ -32,7 +32,7 @@ const {
     (): Array<{
       id: number;
       content?: string;
-      user?: { id: number; username: string };
+      user?: { id: number; username: string; display_name?: string | null };
       deleted?: boolean;
       status?: string;
       correlationId?: string;
@@ -1594,7 +1594,21 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onReplyClick(5);
 
-      expect(mockSetReplyTo).toHaveBeenCalledWith(5, "alice");
+      expect(mockSetReplyTo).toHaveBeenCalledWith(5, "alice", { self: false });
+    });
+
+    it("onReplyClick shows the display name and marks a reply to yourself (3A-12)", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "hi", user: { id: 2, username: "alice", display_name: "Alice B" } },
+        { id: 6, content: "mine", user: { id: 1, username: "me" } },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onReplyClick(5);
+      expect(mockSetReplyTo).toHaveBeenLastCalledWith(5, "Alice B", { self: false });
+      capturedMessageListOpts!.onReplyClick(6);
+      expect(mockSetReplyTo).toHaveBeenLastCalledWith(6, "me", { self: true });
     });
 
     it("onReplyClick uses empty string for unknown message", () => {
@@ -1740,6 +1754,7 @@ describe("createChannelController", () => {
         10,
         ["file1.png"],
         [{ id: "file1.png", filename: "file1.png" }],
+        true,
       );
 
       expect(opts.ws.send).toHaveBeenCalledWith({
@@ -1748,9 +1763,49 @@ describe("createChannelController", () => {
           channel_id: 42,
           content: "hello",
           reply_to: 10,
+          reply_ping: true,
           attachments: ["file1.png"],
         },
       });
+    });
+
+    it("sends reply_ping false with a reply and leaves it out without one (3A-12)", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("off", 10, [], [], false);
+      capturedMessageInputOpts.onSend("plain", null, [], [], true);
+
+      const payloads = vi
+        .mocked(opts.ws.send)
+        .mock.calls.filter(([f]) => f.type === "chat_send")
+        .map(([f]) => f.payload as Record<string, unknown>);
+      expect(payloads[0]).toMatchObject({ reply_to: 10, reply_ping: false });
+      expect(payloads[1]).not.toHaveProperty("reply_ping");
+    });
+
+    it("a retry resends the same reply_ping (3A-12)", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hey", 7, [], [], false);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: 7, reply_ping: false }),
+        }),
+      );
+      mockGetChannelMessages.mockReturnValue([]);
     });
   });
 
@@ -3560,7 +3615,7 @@ describe("unsent attachments (2A-3)", () => {
 
   function sendFiles(opts: ChannelControllerOptions, replyTo: number | null = null): void {
     vi.mocked(opts.ws.send).mockReturnValue("cid-1");
-    capturedMessageInputOpts.onSend("", replyTo, ["u1", "u2"], [report, scan]);
+    capturedMessageInputOpts.onSend("", replyTo, ["u1", "u2"], [report, scan], replyTo !== null);
   }
 
   it("puts only the skipped files back into the composer", () => {
@@ -3676,6 +3731,8 @@ describe("unsent attachments (2A-3)", () => {
     expect(mockRestoreUnsent).toHaveBeenCalledWith([report, scan], "unavailable", {
       messageId: 9,
       username: "ana",
+      self: false,
+      ping: true,
     });
     // No Retry with the same ids: the send's draft is gone.
     vi.mocked(opts.ws.send).mockClear();

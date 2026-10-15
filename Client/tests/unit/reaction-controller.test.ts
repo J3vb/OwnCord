@@ -119,6 +119,51 @@ describe("createReactionController", () => {
     document.querySelectorAll("[data-testid]").forEach((el) => el.remove());
   });
 
+  describe("20 different emoji per message (3A-12)", () => {
+    const full = Array.from({ length: 20 }, (_, i) => ({ emoji: `e${i}`, me: false }));
+
+    it("refuses a new emoji on a message that already has 20, without sending", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "👍");
+
+      expect(opts.ws.send).not.toHaveBeenCalled();
+      expect(opts.reactionsLimiter.tryConsume).not.toHaveBeenCalled();
+      expect(opts.showError).toHaveBeenCalledWith(
+        "This message has reached the reaction limit (20)",
+      );
+    });
+
+    it("still toggles an emoji that is already on the message", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "e3");
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "reaction_add",
+        payload: { message_id: 1, emoji: "e3" },
+      });
+    });
+
+    it("does not open the picker on a full message", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", "msg-react-1");
+      document.body.appendChild(btn);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "");
+
+      expect(mockCreateEmojiPicker).not.toHaveBeenCalled();
+      expect(opts.showError).toHaveBeenCalledOnce();
+    });
+  });
+
   describe("direct emoji toggle", () => {
     it("sends reaction_add for a new emoji", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);

@@ -185,7 +185,7 @@ describe("composer: #channel autocomplete", () => {
     press("Escape");
     expect(popup()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("#gen", null, [], []);
+    expect(onSend).toHaveBeenCalledWith("#gen", null, [], [], false);
   });
 
   it("turns a typed :joy: into the emoji when sending an edit", () => {
@@ -208,7 +208,7 @@ describe("composer: #channel autocomplete", () => {
   it("turns a typed :joy: into the emoji when sending", () => {
     type("hi :joy:");
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("hi 😂", null, [], []);
+    expect(onSend).toHaveBeenCalledWith("hi 😂", null, [], [], false);
   });
 });
 

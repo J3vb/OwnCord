@@ -51,7 +51,7 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { formatClockTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
@@ -353,9 +353,9 @@ export function renderMessage(
         class: "msg-hover-time",
         title: formatFullDate(msg.timestamp),
       },
-      // Same "Today at 2:34 PM" format the header uses, not a bare 24h HH:MM
-      // that disagreed with it (F24).
-      formatMessageTimestamp(msg.timestamp),
+      // The header's clock time without its "Today at" (F24): the full form
+      // wrapped onto three lines over the avatar column. The title has the date.
+      formatClockTime(msg.timestamp),
     );
     el.appendChild(hoverTime);
   }
