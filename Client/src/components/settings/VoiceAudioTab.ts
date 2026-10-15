@@ -12,6 +12,7 @@ import {
   switchVideoDevice,
   setVoiceSensitivity,
   applyInputMode,
+  onNativeInputLevel,
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
@@ -156,11 +157,10 @@ function buildVoiceAudioTabInner(
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
-  // its capture path exposes no gain or level hook, so the input volume and
-  // sensitivity controls below would be dead there. They are built as usual and
-  // removed at the end, with one note in their place; the prefs keep being
-  // written so another platform's profile is untouched. Output volume works:
-  // the engine's playout mixer applies it with each user's volume.
+  // its capture takes the input volume, sensitivity and automatic sensitivity
+  // like the web processor, and reports its level while a call runs, which
+  // drives the meter. The webview's microphone is not the engine's, so the
+  // meter opens none there.
   const nativeAudio = isLinuxDesktop();
 
   // Five cards: when you transmit, what you speak into, what you hear, what
@@ -257,9 +257,8 @@ function buildVoiceAudioTabInner(
   micCard.appendChild(sensitivityHeader);
 
   // Automatic sensitivity: the gate finds its own threshold above the room's
-  // noise, and the meter shows the level without a handle. The native engine
-  // gates on the saved slider alone, so it keeps the handle and no toggle.
-  let autoSensitivity = !nativeAudio && autoInputSensitivity();
+  // noise, and the meter shows the level without a handle.
+  let autoSensitivity = autoInputSensitivity();
   const autoRow = createElement("div", {
     class: "setting-row",
     "data-testid": "auto-sensitivity",
@@ -280,7 +279,7 @@ function buildVoiceAudioTabInner(
     createElement("div", { class: "setting-label" }, t("voiceAudio.autoSensitivity")),
     autoToggle,
   );
-  if (!nativeAudio) micCard.appendChild(autoRow);
+  micCard.appendChild(autoRow);
 
   // Real-time mic level bar with embedded draggable threshold handle
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
@@ -305,6 +304,30 @@ function buildVoiceAudioTabInner(
   });
   meterWrap.append(meterBar, sensitivityValue);
   micCard.appendChild(meterWrap);
+  if (nativeAudio) {
+    // The engine's capture runs only in a call (the mic test is LP-3's).
+    micCard.appendChild(
+      createElement(
+        "p",
+        { class: "setting-desc", "data-testid": "native-audio-note" },
+        t("voiceAudio.nativeNote"),
+      ),
+    );
+  }
+
+  // The bar on the threshold handle's axis, green while the gate is open, and
+  // the pill saying whether the mic picks anything up, whatever the
+  // sensitivity, held between syllables so it does not flicker.
+  let lastHeardAt = Number.NEGATIVE_INFINITY;
+  function paintMeter(level: number, gateOpen: boolean): void {
+    // Same axis as the handle, whose position is threshold / max.
+    const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
+    meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
+    meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
+    const now = performance.now();
+    if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
+    showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
+  }
 
   // ── Mic test: plays the meter's processed microphone, after the voice gate,
   // through the chosen output, so you hear what a call would send. The native
@@ -1099,12 +1122,16 @@ function buildVoiceAudioTabInner(
   // what the meter shows is what the gate does. Opening the microphone with
   // other settings would also fight the call for the device: the browser can
   // hand the call this stream's processing instead of its own.
-  // The meter previews the webview's microphone; on the native engine the
-  // saved device id is the engine's, so it does not run there.
+  // On the native engine the saved device id is the engine's, so the meter
+  // shows the call capture's own level reports instead (startNativeMeter).
   function startMicMeter(): void {
-    if (nativeAudio || signal.aborted) return;
+    if (signal.aborted) return;
     const thisRequest = ++micRequestId;
     stopMic();
+    if (nativeAudio) {
+      startNativeMeter();
+      return;
+    }
     void (async () => {
       try {
         const captureOptions = micCaptureOptions();
@@ -1145,18 +1172,8 @@ function buildVoiceAudioTabInner(
         let gateOpen = true;
         meterGated = false;
         let level = 0;
-        let lastHeardAt = Number.NEGATIVE_INFINITY;
-        const paint = (): void => {
-          // Same axis as the handle, whose position is threshold / max.
-          const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
-          meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
-          meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
-          // The pill says whether the mic picks anything up, whatever the
-          // sensitivity, and holds between syllables so it does not flicker.
-          const now = performance.now();
-          if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
-          showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
-        };
+        lastHeardAt = Number.NEGATIVE_INFINITY;
+        const paint = (): void => paintMeter(level, gateOpen);
         const detector = startVadDetector(
           processor.context,
           processor.analyser!,
@@ -1194,6 +1211,25 @@ function buildVoiceAudioTabInner(
         setText(micStatusWord, t("voiceAudio.mic.noAccess"));
       }
     })();
+  }
+  /** The native engine's meter: the call capture's level reports, after its
+   *  input volume and with its gate's verdict, so the bar shows what the gate
+   *  does. Outside a call none arrive and the bar stays empty. */
+  function startNativeMeter(): void {
+    lastHeardAt = Number.NEGATIVE_INFINITY;
+    registerMic(
+      onNativeInputLevel((level, gateOpen) => {
+        if (level !== null) {
+          paintMeter(level, gateOpen);
+          return;
+        }
+        // The capture stopped (mute or leave): back to the empty bar.
+        meterLevel.style.width = "0%";
+        lastHeardAt = Number.NEGATIVE_INFINITY;
+        micHeard = null;
+        micStatus.hidden = true;
+      }),
+    );
   }
   startMicMeter();
 
@@ -1275,18 +1311,6 @@ function buildVoiceAudioTabInner(
     // Enhanced noise suppression builds on noise suppression: nest it.
     if (item.key === "enhancedNoiseSuppression") row.classList.add("nested");
     processingCard.appendChild(row);
-  }
-
-  if (nativeAudio) {
-    // The sensitivity slider stays: the engine's capture gates on it. Its
-    // bar shows no level, as the meter reads only the webview's microphone.
-    for (const control of [inputVolumeHeader, inputVolumeRow]) control.remove();
-    const note = createElement(
-      "p",
-      { class: "setting-desc", "data-testid": "native-audio-note" },
-      t("voiceAudio.nativeNote"),
-    );
-    inputSelect.after(note);
   }
 
   return section;

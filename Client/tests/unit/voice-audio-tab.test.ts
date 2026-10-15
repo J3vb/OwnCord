@@ -5,6 +5,11 @@ const mockSwitchOutputDevice = vi.fn().mockResolvedValue(undefined);
 const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
+/** The native engine's level reports: the meter's listener and its release. */
+let nativeLevelListener: ((rms: number | null, open: boolean) => void) | null = null;
+const mockUnsubscribeNativeLevel = vi.fn(() => {
+  nativeLevelListener = null;
+});
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
@@ -29,6 +34,10 @@ vi.mock("@lib/livekitSession", () => ({
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
   applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
+  onNativeInputLevel: (listener: (rms: number | null, open: boolean) => void) => {
+    nativeLevelListener = listener;
+    return mockUnsubscribeNativeLevel;
+  },
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
   reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
@@ -1853,16 +1862,21 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(headings).toContain("Screen Share FPS");
   });
 
-  it("hides the input volume control and explains why", async () => {
+  // The engine's capture applies the input volume, as the web processor does.
+  it("keeps the input volume control and applies it to the call", async () => {
+    mockSetInputVolume.mockClear();
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
-    expect(headings).not.toContain("Input Volume");
     // The engine's playout mixer applies output volume.
     expect(headings).toEqual(
-      expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
+      expect.arrayContaining(["Input Device", "Input Volume", "Output Device", "Output Volume"]),
     );
+    const slider = tab.element.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+    slider.value = "150";
+    slider.dispatchEvent(new Event("input"));
+    expect(mockSetInputVolume).toHaveBeenLastCalledWith(150);
     const labels = [...tab.element.querySelectorAll(".setting-label")].map((l) => l.textContent);
     // RNNoise runs on the engine's own capture path.
     expect(labels).toEqual(
@@ -1873,9 +1887,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         "Enhanced Noise Suppression",
       ]),
     );
+    // The capture, and so the meter, runs only in a call until the mic test.
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
-    expect(note?.textContent).toContain("system mixer");
-    expect(note?.textContent).not.toMatch(/sensitivity/i);
+    expect(note?.textContent).toContain("while you are in a voice channel");
     // The native engine acquires no audio through the webview. The camera
     // preview may still call getUserMedia (video only) since voice #22 starts
     // it on the default device; no audio request may occur.
@@ -1885,22 +1899,64 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   // The engine's capture runs the sensitivity gate on the web path's scale;
-  // there is no webview microphone to meter, so the bar shows no level.
+  // with no level report yet (no call), the bar shows no level.
   it("shows the input sensitivity slider and applies it to the call", async () => {
     mockSetVoiceSensitivity.mockClear();
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
     expect(headings).toContain("Input Sensitivity");
-    // The engine gates on the saved slider alone: no automatic toggle.
-    expect(tab.element.querySelector("[data-testid='auto-sensitivity']")).toBeNull();
     const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
     expect(handle.hidden).toBe(false);
     handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
     expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("45");
     expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
+  });
+
+  // The engine runs the web path's noise-floor estimate on its own capture.
+  it("offers automatic sensitivity, saved and applied to the call", async () => {
+    mockApplyInputMode.mockClear();
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
+    const tab = await mount();
+    const row = tab.element.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!;
+    expect(row.textContent).toContain("Automatically determine input sensitivity");
+    const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    expect(handle.hidden).toBe(false);
+    row.querySelector<HTMLElement>("[role='switch'], input, button")!.click();
+    expect(localStorage.getItem("owncord:settings:autoInputSensitivity")).toBe("true");
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(handle.hidden).toBe(true);
+  });
+
+  // The bar shows the call capture's level reports, after its input volume
+  // and with its gate's verdict, on the handle's axis.
+  it("drives the meter from the engine's level reports", async () => {
+    mockUnsubscribeNativeLevel.mockClear();
+    const ac = new AbortController();
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    expect(nativeLevelListener).not.toBeNull();
+    const level = element.querySelector<HTMLElement>(".mic-meter-level")!;
+    nativeLevelListener!(vadThreshold(50), true);
+    expect(level.style.width).toBe("50%");
+    expect(level.style.background).toBe("var(--green)");
+    nativeLevelListener!(vadThreshold(75), false);
+    expect(level.style.width).toBe("25%");
+    expect(level.style.background).toBe("var(--yellow)");
+    expect(element.textContent).toContain("Hearing you");
+    // Mute or leave: the capture stopped, so the bar and its status clear.
+    nativeLevelListener!(null, false);
+    expect(level.style.width).toBe("0%");
+    expect(element.querySelector<HTMLElement>('[data-testid="mic-status"]')!.hidden).toBe(true);
+    nativeLevelListener!(vadThreshold(50), true);
+    expect(level.style.width).toBe("50%");
+    expect(element.textContent).toContain("Hearing you");
+    ac.abort();
+    expect(mockUnsubscribeNativeLevel).toHaveBeenCalled();
   });
 
   it("offers no mic test: the engine's capture never reaches the webview", async () => {

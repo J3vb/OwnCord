@@ -33,8 +33,21 @@ export const nativeVoice: NativeVoice = {
   setMicrophone: (session, enabled, bitrate) =>
     invoke<void>("native_voice_set_microphone", { session, enabled, bitrate }),
   setPttGated: (session, gated) => invoke<void>("native_voice_set_ptt_gated", { session, gated }),
-  setVoiceGate: (session, threshold) =>
-    invoke<void>("native_voice_set_voice_gate", { session, threshold }),
+  async setVoiceGate(session, threshold, retune) {
+    try {
+      await invoke<void>("native_voice_set_voice_gate", { session, threshold, retune });
+    } catch (err) {
+      // The host rejects with its reason as a string; callers log it.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+  async setInputGain(session, percent) {
+    try {
+      await invoke<void>("native_voice_set_input_gain", { session, percent });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
   setVideoView: (session, identity, sid, enabled, quality) =>
