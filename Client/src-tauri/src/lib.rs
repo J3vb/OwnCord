@@ -29,6 +29,8 @@ mod livekit_proxy;
 mod message_notification;
 #[cfg(target_os = "linux")]
 mod mouse_buttons;
+#[cfg(target_os = "linux")]
+mod notification_bus;
 #[cfg(desktop)]
 mod popout;
 // Public: `examples/native_voice_interop.rs` drives the same session code.

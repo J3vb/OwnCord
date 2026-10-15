@@ -131,10 +131,11 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
-# Message notifications that open their message on click (message_notification.rs).
-# The notification plugin's desktop backend drops the click/action callback, so
-# this calls notify-rust — already in the tree as the plugin's own desktop
-# backend — directly to wait for the activation.
+# Message notifications that open their message on click on macOS
+# (message_notification.rs). The notification plugin's desktop backend drops
+# the click/action callback, so this calls notify-rust — already in the tree as
+# the plugin's own desktop backend — directly to wait for the activation. Linux
+# uses the session bus directly (notification_bus.rs, the `dbus` crate below).
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
@@ -177,7 +178,9 @@ x11-dl = "2.21"
 # crash. Already in the tree under most of the dependency graph.
 libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
-# IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
+# IdleMonitor and the freedesktop ScreenSaver interface; also the launcher
+# count (unread_badge.rs) and message notifications (notification_bus.rs).
+# Already in the tree
 # as keyring's sync-secret-service transport, same libdbus, no new build.
 dbus = "0.9"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
