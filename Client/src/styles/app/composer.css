@@ -68,7 +68,8 @@
 .attachment-preview-item.uploading {
   opacity: 0.6;
 }
-.attachment-preview-item.expired {
+.attachment-preview-item.expired,
+.attachment-preview-item.unsent {
   opacity: 0.5;
   outline: 2px solid var(--red);
   outline-offset: -2px;

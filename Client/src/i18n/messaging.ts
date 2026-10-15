@@ -48,6 +48,9 @@ export const messagingText = defineCatalog("messaging", {
   "error.draftAttachmentExpired": "An attachment in your draft expired — please attach it again",
   "error.attachmentExpired": "An attachment expired — remove it and attach the file again",
   "error.attachmentRefreshing": "Refreshing an older attachment — send again when it's done",
+  "error.attachmentsNotSent": "Some files weren't sent — send again to attach them, or remove them",
+  "error.attachmentsUnavailable":
+    "Your files were no longer available, so nothing was sent — send again to attach them, or remove them",
   "edit.editing": "Editing message",
   "edit.cancel": "Cancel editing",
   "attach.label": "Attach file",
@@ -55,6 +58,7 @@ export const messagingText = defineCatalog("messaging", {
   "attach.serverDisabled": "Uploads are disabled on this server",
   "attach.remove": "Remove attachment {filename}",
   "attach.expired": "Expired — attach the file again",
+  "attach.notSent": "Not sent — attach the file again",
   "emoji.label": "Emoji",
   "gif.button": "GIF",
   "gif.ariaWithReason": "GIF — {reason}",

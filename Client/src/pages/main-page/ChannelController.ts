@@ -18,7 +18,11 @@ import { setInlineImageDecorator } from "@components/message-list/media";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
-import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
+import type {
+  ComposerDraft,
+  MessageInputComponent,
+  SentAttachment,
+} from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
@@ -202,13 +206,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     {
       content: string;
       replyTo: number | null;
-      attachments: readonly string[];
+      // Each file with its name (and picked File, when there is one), so a
+      // file the server did not attach can go back into the composer (2A-3).
+      attachments: readonly SentAttachment[];
       // Which channel this cid was actually sent to. chat_send_ok and the
       // SLOW_MODE error are global ws.on subscriptions with no channel_id of
       // their own (OC-0059) — a late frame for a send made in a channel the
       // user has since left must not be attributed to whatever channel is
       // mounted when it arrives.
       channelId: number;
+      // The account that sent it: a frame for another account's send is ignored.
+      userId: number;
       clientMessageId?: string;
       // When the client handed this message to the socket (epoch ms): a late
       // ack's cooldown starts here, not when the ack is finally received.
@@ -300,6 +308,37 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     sendTimers.delete(id);
     window.clearTimeout(owned.timer);
     owned.release?.();
+  }
+
+  /** 2A-3: give files a send did not carry back to the composer of the
+   *  channel it went to, mounted or stashed, with the send's reply target
+   *  when given and that composer has none of its own. */
+  function putBackUnsent(
+    sentTo: number,
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo: number | null = null,
+  ): void {
+    const target =
+      replyTo === null
+        ? undefined
+        : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
+    const reply =
+      target === undefined ? null : { messageId: target.id, username: target.user.username };
+    if (sentTo === currentChannelId && messageInput !== null) {
+      messageInput.restoreUnsent(files, reason, reply);
+      return;
+    }
+    const stashed = draftByChannel.get(sentTo);
+    draftByChannel.set(sentTo, {
+      content: stashed?.content ?? "",
+      replyTo: stashed?.replyTo ?? reply,
+      attachments: [
+        ...(stashed?.attachments ?? []),
+        ...files.map((f) => ({ ...f, uploadedAt: 0, unsent: true })),
+      ],
+      ...(stashed?.uploads === undefined ? {} : { uploads: stashed.uploads }),
+    });
   }
 
   function destroyChannel(): void {
@@ -454,9 +493,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     function performSend(
       content: string,
       replyTo: number | null,
-      attachments: readonly string[],
+      files: readonly SentAttachment[],
       existingClientMessageId?: string,
     ): void {
+      const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
       if (user === null || !ownsSession()) return;
       // Sending while viewing a detached history window jumps to present: the
@@ -520,8 +560,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -560,8 +601,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -610,8 +652,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         (recovered
           ? {
               ...recovered,
+              userId: owner.userId,
               replyTo: null,
-              attachments: [] as readonly string[],
+              attachments: [] as readonly SentAttachment[],
             }
           : undefined);
       if (draft === undefined || draft.channelId !== channelId) return;
@@ -992,14 +1035,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelId,
       channelName,
       gifApi: api,
-      onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
+      onSend: (
+        content: string,
+        replyTo: number | null,
+        _attachments: readonly string[],
+        files: readonly SentAttachment[],
+      ) => {
         // A reply whose target was deleted while composing sends as a plain
         // message.
         const target =
           replyTo === null
             ? undefined
             : getChannelMessages(channelId).find((m) => m.id === replyTo);
-        performSend(content, target?.deleted === true ? null : replyTo, attachments);
+        performSend(content, target?.deleted === true ? null : replyTo, files);
       },
       onUploadFile: async (
         file: File,
@@ -1359,7 +1407,34 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
   }
 
+  // 2A-3 at controller scope, not per mount: an ack or refusal can land while
+  // no channel is mounted (an NSFW gate, a cleared selection), and its files
+  // still go back to the channel they were sent to. Registered before any
+  // mount, so these run before a mount's own listeners drop the draft.
+  const unsentUnsubs = [
+    ws.on("chat_send_ok", (payload, correlationId) => {
+      const draft = correlationId ? draftByCorrelation.get(correlationId) : undefined;
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // The message went without these files. Ids the send did not carry are ignored.
+      const skipped = new Set(payload.skipped_attachment_ids ?? []);
+      const unsent = draft.attachments.filter((a) => skipped.has(a.id));
+      if (unsent.length > 0) putBackUnsent(draft.channelId, unsent, "skipped");
+    }),
+    ws.on("error", (payload, correlationId) => {
+      if (payload.code !== "ATTACHMENTS_UNAVAILABLE" || !correlationId) return;
+      const draft = draftByCorrelation.get(correlationId);
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // A files-only send none of whose files could be attached: the
+      // dispatcher drops its row (nothing was stored), and a Retry with the
+      // same ids would fail the same way.
+      draftByCorrelation.delete(correlationId);
+      clearSendTimer(correlationId);
+      putBackUnsent(draft.channelId, draft.attachments, "unavailable", draft.replyTo);
+    }),
+  ];
+
   function destroy(): void {
+    for (const off of unsentUnsubs) off();
     destroyChannel();
     for (const draft of draftByChannel.values()) {
       for (const upload of draft.uploads ?? []) upload.owner.destroy();
