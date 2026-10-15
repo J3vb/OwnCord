@@ -167,6 +167,23 @@ describe("composer: #channel autocomplete", () => {
     expect(onSend).toHaveBeenCalledWith("#gen", null, []);
   });
 
+  it("turns a typed :joy: into the emoji when sending an edit", () => {
+    const onEditMessage = vi.fn<MessageInputOptions["onEditMessage"]>();
+    input.destroy?.();
+    input = createMessageInput({
+      channelId: 1,
+      channelName: "general",
+      onSend,
+      onTyping: vi.fn(),
+      onEditMessage,
+    });
+    input.mount(container);
+    input.startEdit(7, "old");
+    type("new :joy:");
+    press("Enter");
+    expect(onEditMessage).toHaveBeenCalledWith(7, "new 😂");
+  });
+
   it("turns a typed :joy: into the emoji when sending", () => {
     type("hi :joy:");
     press("Enter");
@@ -185,6 +202,30 @@ describe("replaceEmojiShortcodes", () => {
       "`:joy:` and\n```\n:joy:\n```",
     );
     expect(replaceEmojiShortcodes("\\:joy:")).toBe("\\:joy:");
+  });
+
+  it("swaps shortcodes that touch each other or punctuation", () => {
+    expect(replaceEmojiShortcodes(":joy::joy:!")).toBe("😂😂!");
+    expect(replaceEmojiShortcodes("(:joy:)")).toBe("(😂)");
+  });
+
+  it("leaves colon pairs inside words, numbers, addresses and links alone", () => {
+    for (const text of [
+      "https://ex.com/a:joy:b",
+      "<https://ex.com/w:cool:x>",
+      "[docs](https://ex.com/a:joy:b)",
+      "MAC 00:1A:2B:AB:CD:EF",
+      "fe80::ab:cd",
+      "status:OK:done",
+      "ratio 1:100:1",
+      "score 3:+1:2",
+      "a:joy:b",
+      "10:30:45",
+      ":JOY:",
+      "`a\n:joy:`",
+    ]) {
+      expect(replaceEmojiShortcodes(text)).toBe(text);
+    }
   });
 
   it("keeps a server's custom emoji as its shortcode", () => {
@@ -244,6 +285,8 @@ describe("<t:…> timestamps", () => {
     const now = (1000 + 3 * 86400) * 1000;
     expect(formatDiscordTimestamp(1000, "R", now).text).toBe("3 days ago");
     expect(formatDiscordTimestamp(1000 + 3 * 86400 + 7200, "R", now).text).toBe("in 2 hours");
+    expect(formatDiscordTimestamp(1000 + 3 * 86400 - 7140, "R", now).text).toBe("2 hours ago");
+    expect(formatDiscordTimestamp(1000 + 3 * 86400, "R", now).text).toBe("now");
   });
 
   it("stays text inside code", () => {

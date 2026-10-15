@@ -34,18 +34,21 @@ const RELATIVE_UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
 ];
 
 let relativeFormat: Intl.RelativeTimeFormat | null = null;
+let nowFormat: Intl.RelativeTimeFormat | null = null;
 
 /** "3 days ago" / "in 2 hours" for `unix` seen at `nowMs`. */
 function formatRelative(unix: number, nowMs: number): string {
   relativeFormat ??= new Intl.RelativeTimeFormat(TEXT_LOCALE, { numeric: "always" });
   const diff = unix - Math.round(nowMs / 1000);
   const abs = Math.abs(diff);
-  for (const [unit, size] of RELATIVE_UNITS) {
-    if (abs >= size || unit === "second") {
-      return relativeFormat.format(Math.trunc(diff / size), unit);
-    }
+  if (abs < 1) {
+    nowFormat ??= new Intl.RelativeTimeFormat(TEXT_LOCALE, { numeric: "auto" });
+    return nowFormat.format(0, "second");
   }
-  return relativeFormat.format(0, "second");
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (abs >= size) return relativeFormat.format(Math.round(diff / size), unit);
+  }
+  return relativeFormat.format(diff, "second");
 }
 
 /**
