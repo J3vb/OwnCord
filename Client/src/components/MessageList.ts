@@ -35,7 +35,11 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { clearContentParseCache, resyncMentions } from "./message-list/content-parser";
+import {
+  clearContentParseCache,
+  relabelInlineTimestamps,
+  resyncMentions,
+} from "./message-list/content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
@@ -1908,6 +1912,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
         el.textContent = text;
       }
+      relabelInlineTimestamps(children[i]!);
     }
   }
 

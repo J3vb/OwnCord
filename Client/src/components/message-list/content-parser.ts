@@ -23,7 +23,10 @@ import {
 } from "@lib/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
-import { formatDiscordTimestamp } from "@lib/discordTimestamp";
+import {
+  formatDiscordTimestamp,
+  type TimestampStyle,
+} from "../../features/messaging/discordTimestamp";
 import { messagingText } from "../../i18n/messaging";
 import {
   parseInline,
@@ -213,6 +216,7 @@ function appendInline(parent: Node, nodes: readonly InlineNode[], info?: Mention
           class: "md-timestamp",
           datetime: new Date(node.unix * 1000).toISOString(),
           title,
+          "data-style": node.style,
         });
         setText(time, text);
         parent.appendChild(time);
@@ -812,4 +816,19 @@ export function renderMessageContent(
   }
 
   return fragment;
+}
+
+/**
+ * Rewrite the `<t:…>` timestamps under `root` in the current clock preference
+ * and relative to now, for a 12h/24h switch or a passing midnight.
+ */
+export function relabelInlineTimestamps(root: ParentNode): void {
+  for (const el of root.querySelectorAll<HTMLTimeElement>("time.md-timestamp")) {
+    const ms = Date.parse(el.dateTime);
+    if (Number.isNaN(ms)) continue;
+    const style = (el.dataset["style"] ?? "f") as TimestampStyle;
+    const { text, title } = formatDiscordTimestamp(ms / 1000, style);
+    el.textContent = text;
+    el.title = title;
+  }
 }

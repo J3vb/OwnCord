@@ -20,10 +20,14 @@ import {
   MAX_CHANNEL_SUGGESTIONS,
 } from "../../src/components/ChannelAutocomplete";
 import { createMessageInput, type MessageInputOptions } from "../../src/components/MessageInput";
-import { renderMessageContent } from "../../src/components/message-list/content-parser";
+import {
+  relabelInlineTimestamps,
+  renderMessageContent,
+} from "../../src/components/message-list/content-parser";
 import { extractUrls } from "../../src/components/message-list/media";
 import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/markdown";
-import { formatDiscordTimestamp } from "../../src/lib/discordTimestamp";
+import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";
+import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/timeFormat";
 import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
@@ -207,6 +211,12 @@ describe("replaceEmojiShortcodes", () => {
   it("swaps shortcodes that touch each other or punctuation", () => {
     expect(replaceEmojiShortcodes(":joy::joy:!")).toBe("😂😂!");
     expect(replaceEmojiShortcodes("(:joy:)")).toBe("(😂)");
+    expect(replaceEmojiShortcodes(":notanemoji::joy:")).toBe(":notanemoji:😂");
+  });
+
+  it("leaves a masked link whole when its target holds parentheses", () => {
+    const text = "[docs](https://ex.com/a_(b):joy:) :joy:";
+    expect(replaceEmojiShortcodes(text)).toBe("[docs](https://ex.com/a_(b):joy:) 😂");
   });
 
   it("leaves colon pairs inside words, numbers, addresses and links alone", () => {
@@ -232,6 +242,7 @@ describe("replaceEmojiShortcodes", () => {
     setCustomEmoji([{ id: 1, shortcode: "joy", url: "/api/v1/emoji/1/image" }]);
     emojiStore.flush();
     expect(replaceEmojiShortcodes(":joy:")).toBe(":joy:");
+    expect(replaceEmojiShortcodes(":joy::thumbsup:")).toBe(":joy:👍");
   });
 });
 
@@ -287,6 +298,19 @@ describe("<t:…> timestamps", () => {
     expect(formatDiscordTimestamp(1000 + 3 * 86400 + 7200, "R", now).text).toBe("in 2 hours");
     expect(formatDiscordTimestamp(1000 + 3 * 86400 - 7140, "R", now).text).toBe("2 hours ago");
     expect(formatDiscordTimestamp(1000 + 3 * 86400, "R", now).text).toBe("now");
+  });
+
+  it("follows a 12h/24h switch when relabelled", () => {
+    saveTimeFormat("12h");
+    const el = renderMessageContent("<t:1700000000:t>");
+    const time = el.querySelector("time.md-timestamp")!;
+    expect(time.textContent).toMatch(/AM|PM/i);
+    saveTimeFormat("24h");
+    relabelInlineTimestamps(el);
+    expect(time.textContent).not.toMatch(/AM|PM/i);
+    expect(time.getAttribute("datetime")).toBe("2023-11-14T22:13:20.000Z");
+    localStorage.clear();
+    refreshTimeFormat();
   });
 
   it("stays text inside code", () => {

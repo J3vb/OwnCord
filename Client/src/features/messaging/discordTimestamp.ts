@@ -2,7 +2,7 @@
  * Discord's `<t:unix:style>` message timestamps, written in the reader's own
  * time zone and clock preference. Pure: the renderer decides the element.
  */
-import { TEXT_LOCALE, formatDate } from "../i18n/format";
+import { TEXT_LOCALE, formatDate } from "../../i18n/format";
 
 /** Discord's timestamp styles; `f` is the default. */
 export type TimestampStyle = "t" | "T" | "d" | "D" | "f" | "F" | "R";
