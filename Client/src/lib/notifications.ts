@@ -18,6 +18,7 @@ import { mentionsCurrentUser } from "./mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
 import { playNotificationSound } from "./notificationSound";
+import { soundSwitchOn } from "./soundPrefs";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
@@ -81,6 +82,16 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
     name: channel?.name ?? connectText("notifications.channelFallback", { id: String(channelId) }),
     isDm: false,
   };
+}
+
+/** The chime's preference gate (WP M-8): the "Notification Sounds" group switch
+ *  AND the switch of the sound that would play, a mention's or a plain
+ *  message's. Do Not Disturb is the caller's. */
+function chimeEnabled(mentioned: boolean): boolean {
+  return (
+    loadPref<boolean>("notificationSounds", true) &&
+    soundSwitchOn(mentioned ? "mention" : "message")
+  );
 }
 
 /**
@@ -159,7 +170,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
   const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
 
   // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
@@ -242,7 +253,7 @@ export function notifyMention(channelId: number): void {
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
   const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  const chime = !dnd && chimeEnabled(true);
 
   if (showPopup) {
     const title = sanitizeNotif(
@@ -295,7 +306,7 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
   const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
 
   if (shouldCoalesce(entry.channel_id, mentioned, Date.now())) return;
