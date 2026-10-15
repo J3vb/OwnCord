@@ -10,6 +10,7 @@
  */
 
 import { loadPref } from "../../lib/preferences";
+import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";
 
 export type VideoCodecPref = "vp8" | "h264" | "auto";
@@ -58,11 +59,25 @@ export function gpuRenderer(): string | null {
  *  encode 1080p at 120 fps and drops to about 60 (M-2). */
 export const HARDWARE_CODEC_FPS = 120;
 
-/** The codec for one publish of `track` at `fps` and `bitrate`. Auto probes
- *  at the captured size, since a hardware encoder can take 1080p30 and refuse
- *  1080p120. A saved VP8 is probed the same way at 120 fps; a saved H.264
- *  never is. */
+/** The codec for one publish: the preferred one when every channel peer
+ *  decodes it, else VP8 (E2EE leaves no backup codec). `peers` is read after
+ *  the preferred codec resolves, so it reflects the roster at publish time.
+ *  It is a parameter, not a store read, to keep this module (which the
+ *  settings UI imports) free of the voice store. Omitted means no peers. */
 export async function resolveVideoCodec(
+  track: MediaStreamTrack,
+  fps: number,
+  bitrate: number,
+  peers: () => PeerDecodeLists = () => [],
+): Promise<PublishCodec> {
+  return pickCommonCodec(await resolvePreferredCodec(track, fps, bitrate), peers());
+}
+
+/** The codec for one publish of `track` at `fps` and `bitrate`, before peers
+ *  are considered. Auto probes at the captured size, since a hardware encoder
+ *  can take 1080p30 and refuse 1080p120. A saved VP8 is probed the same way at
+ *  120 fps; a saved H.264 never is. */
+async function resolvePreferredCodec(
   track: MediaStreamTrack,
   fps: number,
   bitrate: number,

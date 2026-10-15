@@ -27,7 +27,7 @@ const mockVoiceState = vi.hoisted(() => ({
   voiceConfigs: new Map<number, { bitrate: number }>(),
   // The server still holds our membership, so the reconnect loop reuses the
   // token rather than rejoining.
-  voiceUsers: { get: () => ({ has: () => true }) },
+  voiceUsers: { get: () => ({ has: () => true, keys: () => [].values() }) },
 }));
 
 vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({

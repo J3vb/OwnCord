@@ -7,6 +7,9 @@ vi.mock("./native/platform", () => ({
 
 const { getVideoCodecPref, gpuRenderer, pickAutoCodec, resolveVideoCodec } =
   await import("./videoCodec");
+const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
+const { channelPeerDecode } = await import("./peerDecode");
+const { authStore } = await import("../../stores/auth.store");
 
 const encodingInfo = vi.fn();
 const NVIDIA = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
@@ -250,5 +253,68 @@ describe("resolveVideoCodec", () => {
       await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
       expect(encodingInfo).not.toHaveBeenCalled();
     });
+  });
+});
+
+function inChannel(peers: Record<number, readonly string[] | undefined>): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    user: { id: 1, username: "me", avatar: null, role: "member" },
+  }));
+  const users = new Map(
+    [1, ...Object.keys(peers).map(Number)].map((userId) => [
+      userId,
+      { userId, username: `u${userId}` } as never,
+    ]),
+  );
+  const decode = new Map(
+    Object.entries(peers).flatMap(([id, list]) => (list ? [[Number(id), list] as const] : [])),
+  );
+  voiceStore.setState((prev) => ({
+    ...prev,
+    currentChannelId: 4,
+    voiceUsers: new Map([[4, users]]),
+    peerVideoDecode: decode,
+  }));
+}
+
+describe("resolveVideoCodec with channel peers", () => {
+  beforeEach(() => resetVoiceStore());
+
+  it("downgrades a saved H.264 to VP8 for a VP8-only peer", async () => {
+    savePref("h264");
+    inChannel({ 2: ["vp8"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
+  });
+
+  it("keeps H.264 for a peer whose list is unknown", async () => {
+    savePref("h264");
+    inChannel({ 2: undefined });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("keeps H.264 when every peer decodes it", async () => {
+    savePref("h264");
+    inChannel({ 2: ["vp8", "h264"], 3: ["vp8", "h264", "vp9"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("ignores its own entry", async () => {
+    savePref("h264");
+    inChannel({ 1: ["vp8"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("still gives VP8 on the Linux native engine", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    savePref("h264");
+    inChannel({ 2: ["vp8", "h264"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
   });
 });

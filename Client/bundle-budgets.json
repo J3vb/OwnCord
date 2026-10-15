@@ -37,9 +37,9 @@
       "note": "B7-7 follow-up (2026-10-08): measured 3,069 B at dev 49b850f8. Ratchet rule: measured + 1,000 B rounded up to the next 500 B = 4,500 B."
     },
     "screenShare": {
-      "budget": 4500,
+      "budget": 6000,
       "lazy": true,
-      "note": "B7-7 follow-up (2026-10-08): measured 3,052 B at dev 49b850f8. Ratchet rule: measured + 1,000 B rounded up to the next 500 B = 4,500 B."
+      "note": "WP M-4 (2026-10-15): measured 4,668 B with the peer codec pick (camera and share both resolve through it). Ratchet rule: measured + 1,000 B rounded up to the next 500 B = 6,000 B. Was 4,500 B (B7-7 follow-up, 3,052 B at 49b850f8)."
     }
   },
   "forbidEmbeddedWasm": {

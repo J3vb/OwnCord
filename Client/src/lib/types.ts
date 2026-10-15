@@ -666,6 +666,9 @@ export interface VoiceE2EEAnnouncePayload {
   /** Sender's identity-key signature over the ephemeral key (F3 TOFU).
    *  Omitted for legacy clients that have not published an identity key. */
   readonly signature?: string;
+  /** Video codecs the sender decodes (lowercase MIME subtypes). Absent from an
+   *  old client or server: the receiver assumes VP8 and H.264. */
+  readonly video_decode?: readonly string[];
 }
 
 /** Server→Client relay of an encrypted room key from the key holder. */
@@ -1061,7 +1064,7 @@ export type ClientMessage =
   | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
   | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
-  | (WsEnvelope<{ public_key: string; signature?: string }> & {
+  | (WsEnvelope<{ public_key: string; signature?: string; video_decode?: readonly string[] }> & {
       readonly type: "voice_e2ee_announce";
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
