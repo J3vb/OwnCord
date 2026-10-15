@@ -31,6 +31,11 @@ var (
 	ErrConflict       = errors.New("conflict")
 	ErrBlocked        = errors.New("blocked")
 	ErrDeletedMessage = errors.New("message is deleted")
+	// ErrAttachmentsUnavailable means a send had no text and none of its
+	// requested attachments could be linked (swept, foreign, already linked or
+	// missing). It is always wrapped together with ErrBadRequest, which it
+	// refines into the ATTACHMENTS_UNAVAILABLE wire code.
+	ErrAttachmentsUnavailable = errors.New("attachments unavailable")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
 	// timeout row (B5-9) and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM
@@ -62,11 +67,15 @@ type ReferencedMessage = db.ReferencedMessage
 // SendMessageResult contains the output of a successful message send.
 type SendMessageResult struct {
 	Duplicate bool // retry acknowledgment only, no repeated broadcasts or effects
-	MessageID int64
-	Timestamp string
-	Content   string // sanitized content
-	IsDM      bool
-	Channel   *db.Channel
+	// SkippedAttachmentIDs are requested uploads the send did not attach, in
+	// request order, de-duplicated; nil when none. A duplicate ack derives it
+	// from the message's attachment rows (replaySkipped).
+	SkippedAttachmentIDs []string
+	MessageID            int64
+	Timestamp            string
+	Content              string // sanitized content
+	IsDM                 bool
+	Channel              *db.Channel
 
 	// DM-specific fields populated when IsDM is true.
 	ParticipantIDs []int64

@@ -421,7 +421,7 @@ type disconnectAfterLinkStore struct {
 	cancel context.CancelFunc
 }
 
-func (s disconnectAfterLinkStore) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+func (s disconnectAfterLinkStore) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	n, err := s.Store.LinkAttachmentsToMessage(ctx, messageID, uploaderID, attachmentIDs)
 	s.cancel()
 	return n, err

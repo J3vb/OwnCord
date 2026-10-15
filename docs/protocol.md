@@ -620,10 +620,27 @@ Direct response to sender (no seq):
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "message_id": 1042,
-    "timestamp": "2026-03-14T10:30:00Z"
+    "timestamp": "2026-03-14T10:30:00Z",
+    "client_message_id": "1773484200000:3f2b8a52-6d1c-4a0e-9f4b-0c7d5e1a2b34",
+    "skipped_attachment_ids": ["9f1c0b6e-2d4a-4c1b-8e53-7a1f0d9c4b21"]
   }
 }
 ```
+
+`client_message_id` is echoed when the send carried one, and `deduplicated:
+true` marks an ack answered from a receipt (a retry). Both are omitted
+otherwise.
+
+`skipped_attachment_ids` is optional and present only when the send named
+uploads it did not attach, listed in request order without repeats. The message
+was stored and broadcast without those files. An id lands here when it was
+swept as an unlinked upload, belongs to another user, is already attached to a
+message, is a live avatar, or does not exist; the server gives no reason per
+id, and the list only ever contains ids the sender sent. A deduplicated ack
+carries the same list as the original ack, derived from the message's stored
+attachments. When every requested id is skipped and the send has no text, no
+message is stored and the server answers with the `ATTACHMENTS_UNAVAILABLE`
+error instead (see Error Codes). Clients that do not know the field ignore it.
 
 ### chat_message (Server -> Client, broadcast)
 
@@ -2324,6 +2341,7 @@ warm resume served by replay never waits for a permit.
 | `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                                                     |
 | `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
+| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                                   |
 | `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |

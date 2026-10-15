@@ -33,8 +33,8 @@ func TestAdminDeleteChannel_UnlinksAttachmentsForReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-cascade-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-cascade-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	// Precondition: the attachment is linked, so the sweep must not touch it.

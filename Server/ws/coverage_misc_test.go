@@ -376,14 +376,7 @@ func TestBuildPresenceMsg_ValidJSON(t *testing.T) {
 }
 
 func TestBuildChatSendOK_ValidJSON(t *testing.T) {
-	msg := ws.BuildJSONForTest(map[string]any{
-		"type": "chat_send_ok",
-		"id":   "req-1",
-		"payload": map[string]any{
-			"message_id": 1,
-			"timestamp":  "2024-01-01T00:00:00Z",
-		},
-	})
+	msg := ws.BuildChatSendOKForTest("req-1", 1, "2024-01-01T00:00:00Z", "", false, nil)
 	if !json.Valid(msg) {
 		t.Error("buildChatSendOK output is not valid JSON")
 	}
