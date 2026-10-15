@@ -45,6 +45,10 @@ func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string
 	return visible, tag
 }
 
+// customStatusExpiredLookupHook runs between CustomStatusExpired's client
+// lookup and presenceMu. Test-only (always nil in production).
+var customStatusExpiredLookupHook func(*Hub)
+
 // CustomStatusExpired is the expirer's hook (service.CustomStatusNotifier): the
 // custom status of userID that carried expiresAt was just cleared in the
 // database. A connection still showing that status drops it and everyone is
@@ -55,7 +59,9 @@ func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string
 // whose drop is unconditional: a stale tag must leave a queued connect
 // presence alone.
 //
-// Lock order: presenceMu, then the client's atomic presence pointer, then
+// Lock order: presenceMu, then h.mu (read, to confirm c is still the
+// registered client; nothing takes presenceMu while holding h.mu), then the
+// client's atomic presence pointer, then
 // Client.mu (sendPresenceMsg, for the self half of an invisible split), then
 // the presenceResyncMu/presenceRepair leaf. Nothing takes presenceMu while
 // holding Client.mu (sendPresenceMsg releases c.mu before presenceDropped), and
@@ -70,8 +76,16 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	if c == nil {
 		return
 	}
+	if customStatusExpiredLookupHook != nil {
+		customStatusExpiredLookupHook(h)
+	}
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
+	// A same-account reconnect may have replaced c since the lookup; the
+	// replacement carries its own presence, so leave it to its own tag.
+	if h.GetClient(userID) != c {
+		return
+	}
 	cur := c.presence.Load()
 	if cur == nil || cur.customStatus == nil || cur.customStatusExpiresAt != expiresAt {
 		// Not the status that expired: no frame, and the queued connect

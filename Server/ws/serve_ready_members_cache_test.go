@@ -287,3 +287,28 @@ func TestReadyMembers_LiveNilCustomStatusBlanksStaleRowText(t *testing.T) {
 		t.Errorf("custom_status = %v, want null (live presence has none)", got)
 	}
 }
+
+// A live custom status past its expiry is not shown in a fresh ready, even in
+// the second before the expirer clears it.
+func TestReadyMembers_LiveExpiredCustomStatusIsBlanked(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+	ctx := context.Background()
+	viewer := seedOwnerUser(t, database, "viewer")
+	u := seedOwnerUser(t, database, "live-expired-u")
+	reader := &countingReader{DB: database}
+
+	if err := database.UpdateUserPresence(ctx, u.ID, db.StatusOnline, new("old text"), new("2020-01-01T00:00:00Z")); err != nil {
+		t.Fatalf("UpdateUserPresence: %v", err)
+	}
+	uc := ws.NewTestClientWithUser(hub, u, 0, make(chan []byte, 16))
+	hub.Register(uc)
+	waitRegistered(t, hub, uc)
+	ws.SetLivePresenceForTest(uc, db.StatusOnline, new("old text"), "2020-01-01T00:00:00Z")
+
+	m := buildReadyMembers(t, hub, reader, viewer.ID)[u.ID]
+	if got := m["custom_status"]; got != nil {
+		t.Errorf("custom_status = %v, want null (live status expired)", got)
+	}
+}

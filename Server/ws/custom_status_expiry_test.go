@@ -237,3 +237,27 @@ func TestCustomStatusExpired_RaceWithPresenceUpdate(t *testing.T) {
 		}
 	}
 }
+
+// A same-account reconnect that replaces the client between the expirer's
+// lookup and presenceMu must not let the detached client's matching tag send a
+// null over the replacement's own status.
+func TestCustomStatusExpired_ReplacedClientIsNoop(t *testing.T) {
+	old := newExpiryClient(db.StatusOnline, "old", "2026-10-15T12:00:00Z")
+	h := newExpiryHub(old)
+	replacement := newExpiryClient(db.StatusOnline, "new", "")
+	customStatusExpiredLookupHook = func(h *Hub) {
+		h.mu.Lock()
+		h.clients[7] = replacement
+		h.mu.Unlock()
+	}
+	t.Cleanup(func() { customStatusExpiredLookupHook = nil })
+
+	h.CustomStatusExpired(7, "2026-10-15T12:00:00Z")
+
+	if frames := drainBroadcast(h); len(frames) != 0 {
+		t.Fatalf("a replaced client sent %d frames, want none", len(frames))
+	}
+	if p := replacement.livePresence(); p.customStatus == nil || *p.customStatus != "new" {
+		t.Fatalf("replacement presence = %+v, want untouched", p)
+	}
+}

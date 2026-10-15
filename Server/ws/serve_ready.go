@@ -86,7 +86,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     with no custom status, the row's text is stale (a reconnect, resume or
 //     bare status flip cleared it live up to a second before the expirer
 //     clears the row, and the expirer then sends no null frame because the
-//     live text is already nil), so it is blanked here.
+//     live text is already nil), so it is blanked here. A live status past
+//     its expiry is blanked too, for the second before the expirer clears it.
 //  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
@@ -97,11 +98,12 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 // ready payloads: each element is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
 	live := h.livePresences()
+	now := time.Now()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
 			if lp := live[m.ID]; lp.status != "" {
 				m.Status = lp.status
-				if lp.customStatus == nil {
+				if visibleCustomStatus(lp.customStatus, lp.customStatusExpiresAt, now) == nil {
 					// Only ever to nil: the splice contract, and the shared
 					// encoded roster is untouched (m is this iteration's copy).
 					m.CustomStatus = nil
