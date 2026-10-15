@@ -1075,16 +1075,22 @@ ul.md-list-nested {
 }
 
 /* Inline video attachment — shares the .msg-image box so a video is capped to
-   the same max width/height as an image and never widens the message column. */
+   the same max width/height as an image and never widens the message column.
+   The box hugs the player, which renderVideoAttachment sizes to the clip's own
+   shape, so a small or portrait video has no black bars beside it. */
 .msg-video {
+  width: fit-content;
+  max-width: min(100%, 550px);
   cursor: default;
-  background: #000; /* letterbox bars: true black in every theme */
+  background: #000; /* behind the player while it loads: true black in every theme */
 }
 .msg-video video {
   display: block;
+  width: 400px; /* placeholder until the real size is known */
   max-width: 100%;
-  max-height: 300px;
-  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {
