@@ -78,6 +78,10 @@ and only when it changes something a contributor or fork holder must do
 - A character counter appears when 200 characters are left and turns red past 4,000, and pasting text that would go past the limit attaches it as `message.txt` instead.
 - Clearing an edit and pressing Enter now asks whether to delete the message, instead of doing nothing.
 
+**Voice and video**
+
+- A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
+
 ### Changed
 
 **Login & connection**
