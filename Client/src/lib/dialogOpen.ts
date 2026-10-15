@@ -3,12 +3,12 @@
 export function dialogOpen(): boolean {
   return Array.from(
     document.querySelectorAll<HTMLElement>('.modal-overlay, [aria-modal="true"]'),
-  ).some(isShown);
+  ).some(isDisplayed);
 }
 
 /** A mounted-but-hidden dialog (the Settings panel inside its closed
  *  overlay) is not open: every ancestor must be displayed too. */
-function isShown(el: HTMLElement): boolean {
+export function isDisplayed(el: HTMLElement): boolean {
   for (let n: HTMLElement | null = el; n !== null; n = n.parentElement) {
     if (n.hidden || getComputedStyle(n).display === "none") return false;
   }

@@ -303,6 +303,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && isOpen()) {
+          e.preventDefault();
           closeDropdown();
           dotEl?.focus();
         }

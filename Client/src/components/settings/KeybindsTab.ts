@@ -50,6 +50,9 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     [t("keybinds.action.nextChannel"), t("keybinds.key.altArrow")],
     [t("keybinds.action.nextUnreadChannel"), t("keybinds.key.altShiftArrow")],
     [t("keybinds.action.closeOverlay"), t("keybinds.key.escape")],
+    [t("keybinds.action.markChannelRead"), t("keybinds.key.escape")],
+    [t("keybinds.action.markServerRead"), t("keybinds.key.shiftEscape")],
+    [t("keybinds.action.scrollChat"), t("keybinds.key.pageUpDown")],
   ];
   for (const [label, shortcut] of navBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -265,7 +268,9 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(msgHeader);
 
   const msgBinds: [string, string][] = [
-    [t("keybinds.action.uploadFile"), t("keybinds.key.ctrlU")],
+    [t("keybinds.action.uploadFile"), t("keybinds.key.ctrlShiftU")],
+    [t("keybinds.action.emojiPicker"), t("keybinds.key.ctrlE")],
+    [t("keybinds.action.gifPicker"), t("keybinds.key.ctrlG")],
     [t("keybinds.action.editLastMessage"), t("keybinds.key.arrowUp")],
     [t("keybinds.action.bold"), t("keybinds.key.ctrlB")],
     [t("keybinds.action.italic"), t("keybinds.key.ctrlI")],

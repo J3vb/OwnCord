@@ -758,6 +758,26 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("an Escape that cancels an edit or reply is used up; one with nothing to cancel is not", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    const escape = (): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      textarea.dispatchEvent(e);
+      return e;
+    };
+
+    comp.startEdit(88, "editing");
+    expect(escape().defaultPrevented).toBe(true);
+    comp.setReplyTo(44, "replyuser");
+    expect(escape().defaultPrevented).toBe(true);
+    // Nothing left to cancel: the app-wide Escape (mark read) may have it.
+    expect(escape().defaultPrevented).toBe(false);
+
+    comp.destroy?.();
+  });
+
   // ── ArrowUp on empty textarea dispatches edit-last-message ──
 
   it("ArrowUp on empty textarea dispatches edit-last-message custom event", () => {
@@ -1923,6 +1943,34 @@ describe("MessageInput", () => {
     // Emoji should be inserted at cursor position
     expect(textarea.value).toBe("Hello 🎉 world");
 
+    comp.destroy?.();
+  });
+
+  it("togglePicker opens and closes the emoji and GIF pickers like their buttons", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+
+    comp.togglePicker("emoji");
+    expect(container.querySelector(".emoji-picker")).not.toBeNull();
+    comp.togglePicker("gif");
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    expect(container.querySelector(".gif-picker")).not.toBeNull();
+    comp.togglePicker("gif");
+    expect(container.querySelector(".gif-picker")).toBeNull();
+
+    comp.destroy?.();
+  });
+
+  it("togglePicker does nothing while the composer is disabled", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    comp.setDisabled("No permission");
+
+    comp.togglePicker("emoji");
+    comp.togglePicker("gif");
+
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    expect(container.querySelector(".gif-picker")).toBeNull();
     comp.destroy?.();
   });
 

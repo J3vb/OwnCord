@@ -123,11 +123,18 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
   return {
     ctrl: {
       currentChannelId: channelId,
-      messageList: { scrollToMessage, mount: vi.fn(), destroy: vi.fn() },
+      messageList: {
+        scrollToMessage,
+        mount: vi.fn(),
+        destroy: vi.fn(),
+        markReadAndJumpToPresent: vi.fn(),
+        scrollPage: vi.fn(),
+      },
       mountChannel: vi.fn(),
       destroyChannel: vi.fn(),
       destroy: vi.fn(),
       openFilePicker: vi.fn(),
+      togglePicker: vi.fn(),
     },
     scrollToMessage,
   };

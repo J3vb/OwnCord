@@ -102,6 +102,11 @@ describe("shortcut conflict", () => {
     expect(shortcutConflict(0x56, "deafen", current)).toBe("reserved");
   });
 
+  it("rejects the in-app upload shortcut (Ctrl+Shift+U)", () => {
+    expect(shortcutConflict(0x55, "mute", current)).toBe("reserved");
+    expect(shortcutConflict(0x55, "deafen", current)).toBe("reserved");
+  });
+
   it("allows a free key, including the action's own current binding", () => {
     expect(shortcutConflict(0x4b, "mute", current)).toBeNull();
     expect(shortcutConflict(0x4d, "mute", current)).toBeNull();
