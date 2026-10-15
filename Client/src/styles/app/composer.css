@@ -272,3 +272,51 @@
 .msg-send-discard:hover {
   background: color-mix(in srgb, var(--red) 15%, transparent);
 }
+
+/* Characters left, shown near the message limit; red past it. */
+.char-counter {
+  align-self: center;
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.char-counter.over {
+  color: var(--text-danger);
+}
+.char-counter[hidden] {
+  display: none;
+}
+
+/* "Upload to #channel" while a file is dragged over the chat. Fixed to the
+   chat area's box (set on show) and ignores the pointer, so the drop lands on
+   the slot underneath. */
+.drop-overlay {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-overlay);
+  pointer-events: none;
+}
+.drop-overlay[hidden] {
+  display: none;
+}
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+  padding: 24px 32px;
+  border: 2px dashed var(--on-accent);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  text-align: center;
+}
+.drop-overlay-card strong {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
