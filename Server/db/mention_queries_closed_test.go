@@ -18,11 +18,12 @@ func TestMentionQueries_ReportClosedDatabaseErrors(t *testing.T) {
 
 	calls := map[string]func() error{
 		"CreateMessageWithMentions": func() error {
-			_, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, []int64{2}, false)
+			_, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, []int64{2}, 0, false)
 			return err
 		},
 		"ReplaceMessageMentions": func() error {
-			return database.ReplaceMessageMentions(ctx, 1, []int64{2}, true)
+			_, err := database.ReplaceMessageMentions(ctx, 1, []int64{2}, true)
+			return err
 		},
 		"GetMentionsByMessageIDs": func() error {
 			_, err := database.GetMentionsByMessageIDs(ctx, []int64{1})

@@ -31,11 +31,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 			t.Fatalf("%s: %v", query, err)
 		}
 	}
-	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, false)
+	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, false)
+	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(other): %v", err)
 	}

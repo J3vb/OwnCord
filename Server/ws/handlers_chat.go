@@ -30,6 +30,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		RoleName:        info.RoleName,
 		Content:         sendCmd.Content,
 		ReplyTo:         sendCmd.ReplyTo,
+		ReplyPing:       sendCmd.ReplyPing,
 		AttachmentIDs:   sendCmd.Attachments(),
 	})
 	if err != nil {
@@ -209,6 +210,8 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeSlowMode, Message: err.Error()}}
 	case errors.Is(err, service.ErrAttachmentsUnavailable):
 		return Result{Error: ClientError{Code: ErrCodeAttachmentsUnavailable, Message: err.Error()}}
+	case errors.Is(err, service.ErrReactionLimit):
+		return Result{Error: ClientError{Code: ErrCodeReactionLimit, Message: err.Error()}}
 	case errors.Is(err, service.ErrBadRequest):
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: err.Error()}}
 	case errors.Is(err, service.ErrNotFound):

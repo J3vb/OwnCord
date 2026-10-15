@@ -36,7 +36,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if delivery != nil {
 		delivery.Content = content
 	}
-	if err := s.checkReplyTarget(ctx, p); err != nil {
+	replyRef, err := s.checkReplyTarget(ctx, p)
+	if err != nil {
 		return nil, err
 	}
 	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
@@ -46,7 +47,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// Resolve mentions against the sanitized content, before the insert, so the
 	// row and its mention set are written together. Unknown @words and an
 	// unauthorized @everyone resolve to nothing and stay plain text.
-	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM)
+	// A reply_ping adds the replied-to author on top of the capped content
+	// mentions, without taking a content slot; everything downstream reads the
+	// one set.
+	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM).
+		withReplyPing(replyPingTarget(p, replyRef))
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
@@ -466,9 +471,13 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// and "only the original insert can raise a badge" is the simplest rule that
 	// is always correct.
 	mentions := s.resolveMentions(ctx, content, userID, msg.ChannelID, isDM)
-	if mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone); mErr != nil {
+	// A reply_ping row is kept by the replace and handed back so the broadcast
+	// keeps the replied-to author highlighted.
+	replyPingID, mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone)
+	if mErr != nil {
 		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
 	}
+	mentions = mentions.withReplyPing(replyPingID)
 
 	result := &EditMessageResult{
 		MessageID:        msgID,
@@ -532,29 +541,20 @@ func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int6
 }
 
 // deleteAuthz decides whether userID may delete msg and whether the delete
-// runs as a moderation action (isMod).
-func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, isDM bool) (bool, error) {
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
-		if dmErr != nil || !ok {
-			return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
-		}
-		return false, nil
-	}
-	// Require READ_MESSAGES alongside MANAGE_MESSAGES (and alongside
-	// SEND_MESSAGES on the author path) so a role explicitly denied access to
-	// a channel cannot delete messages in it. Mirrors handleReaction and
-	// checkSendPermission, which both require ReadMessages for non-DM channels.
-	isMsgOwner := msg.UserID == userID
-	canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.ManageMessages)
-	canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.SendMessages))
-	if !canDelete {
+// runs as a moderation action (isMod). The rule is permissions.CanDeleteMessage;
+// any refusal, or a failure to resolve the subject, is one opaque ErrForbidden.
+func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, ch *db.Channel) (bool, error) {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if err != nil {
 		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 	// db.DeleteMessage skips the ownership check when ismod is true, so the
-	// moderation flag must reuse the decision made above rather than
-	// re-checking MANAGE_MESSAGES without READ_MESSAGES.
-	return canManage, nil
+	// moderation flag is the predicate's own verdict, never a second check.
+	isMod, verdict := permissions.CanDeleteMessage(sub, msg.UserID == userID)
+	if verdict != nil {
+		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	return isMod, nil
 }
 
 // DeleteMessage validates and soft-deletes a message.
@@ -617,7 +617,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		return nil, err
 	}
 
-	isMod, err := s.deleteAuthz(ctx, userID, msg, isDM)
+	isMod, err := s.deleteAuthz(ctx, userID, msg, ch)
 	if err != nil {
 		return nil, err
 	}

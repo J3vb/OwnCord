@@ -18,9 +18,9 @@ type replyTargetStore struct {
 	lookupErr error
 }
 
-func (s replyTargetStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
+func (s replyTargetStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*db.Message, error) {
 	*s.inserts++
-	return s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+	return s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, replyPingUserID, mentionsEveryone)
 }
 
 func (s replyTargetStore) GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error) {

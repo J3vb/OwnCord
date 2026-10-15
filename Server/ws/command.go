@@ -33,7 +33,9 @@ type ChatSendCmd struct {
 	ChannelID       int64
 	Content         string
 	ReplyTo         *int64
-	attachments     []string
+	// ReplyPing is true only when the client sent reply_ping=true on a reply.
+	ReplyPing   bool
+	attachments []string
 }
 
 func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
@@ -351,6 +353,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			ChannelID       json.Number `json:"channel_id"`
 			Content         string      `json:"content"`
 			ReplyTo         *int64      `json:"reply_to"`
+			ReplyPing       *bool       `json:"reply_ping"`
 			Attachments     []string    `json:"attachments"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -385,6 +388,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			ChannelID:       chID,
 			Content:         p.Content,
 			ReplyTo:         p.ReplyTo,
+			ReplyPing:       p.ReplyTo != nil && p.ReplyPing != nil && *p.ReplyPing,
 			attachments:     attachments,
 		}, nil
 	},

@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -54,7 +56,9 @@ type MentionTarget struct {
 // is still half-written. mentionedUserIDs is truncated to
 // maxMentionsPerMessage and duplicates are ignored. The same transaction
 // advances the author's read state past the message (advanceAuthorReadState).
-func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*Message, error) {
+// replyPingUserID (0 = none) is the replied-to author a reply_ping adds on top
+// of the capped content mentions; see insertMentionRows.
+func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*Message, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions begin tx: %w", err)
@@ -77,7 +81,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	m.Pinned = pinned != 0
 	m.MentionsEveryone = everyone != 0
 
-	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs); err != nil {
+	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs, replyPingUserID); err != nil {
 		return nil, err
 	}
 	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
@@ -87,18 +91,21 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	return &m, nil
 }
 
-// ReplaceMessageMentions rewrites a message's mention set and its
-// mentions_everyone flag in one writer transaction. Used by edits, which
-// re-resolve mentions from the new content.
-func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error {
+// ReplaceMessageMentions rewrites a message's content-derived mention set and
+// its mentions_everyone flag in one writer transaction. Used by edits, which
+// re-resolve mentions from the new content. A row flagged reply_ping is not
+// content-derived: it survives the rewrite (a content mention of the same user
+// leaves it in place) and its user id is returned, 0 when the message holds
+// none, so the edit broadcast keeps the highlight.
+func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM message_mentions WHERE message_id = ?`, messageID); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions delete: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM message_mentions WHERE message_id = ? AND reply_ping = 0`, messageID); err != nil {
+		return 0, fmt.Errorf("ReplaceMessageMentions delete: %w", err)
 	}
 	// Guarded so an edit that does not change the flag skips the write — an
 	// UPDATE on messages re-indexes the row through the messages_fts triggers.
@@ -106,21 +113,38 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 		`UPDATE messages SET mentions_everyone = ? WHERE id = ? AND mentions_everyone != ?`,
 		b2i64(mentionsEveryone), messageID, b2i64(mentionsEveryone),
 	); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions flag: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions flag: %w", err)
 	}
-	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs); err != nil {
-		return err
+	var replyPingUserID int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT mentioned_user_id FROM message_mentions WHERE message_id = ? AND reply_ping = 1`, messageID,
+	).Scan(&replyPingUserID); {
+	case errors.Is(err, sql.ErrNoRows):
+		replyPingUserID = 0
+	case err != nil:
+		return 0, fmt.Errorf("ReplaceMessageMentions reply row: %w", err)
+	}
+	// Passing the kept target lets the content cap skip it, the same as on send.
+	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs, replyPingUserID); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions commit: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions commit: %w", err)
 	}
-	return nil
+	return replyPingUserID, nil
 }
 
 // insertMentionRows writes the mention rows for one message inside tx.
 // Self-mentions are stored like any other: the fan-out, not storage, is what
-// excludes the author.
-func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, mentionedUserIDs []int64) error {
+// excludes the author. The content ids are capped at maxMentionsPerMessage
+// after the reply-ping user is removed from them, then the reply-ping row is
+// upserted on top, so the target is never displaced and a message holds at
+// most maxMentionsPerMessage+1 rows. When the content also names the target
+// the one row ends up flagged reply_ping = 1.
+func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, mentionedUserIDs []int64, replyPingUserID int64) error {
+	if replyPingUserID != 0 {
+		mentionedUserIDs = slices.DeleteFunc(slices.Clone(mentionedUserIDs), func(id int64) bool { return id == replyPingUserID })
+	}
 	if len(mentionedUserIDs) > maxMentionsPerMessage {
 		mentionedUserIDs = mentionedUserIDs[:maxMentionsPerMessage]
 	}
@@ -130,6 +154,15 @@ func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, m
 			messageID, uid,
 		); err != nil {
 			return fmt.Errorf("insertMentionRows: %w", err)
+		}
+	}
+	if replyPingUserID != 0 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO message_mentions (message_id, mentioned_user_id, reply_ping) VALUES (?, ?, 1)
+			 ON CONFLICT(message_id, mentioned_user_id) DO UPDATE SET reply_ping = 1`,
+			messageID, replyPingUserID,
+		); err != nil {
+			return fmt.Errorf("insertMentionRows reply ping: %w", err)
 		}
 	}
 	return nil

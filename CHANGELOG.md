@@ -55,6 +55,8 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. The desktop app's reply toggle follows in a later change.
+- A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone.
 - Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
 - Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
@@ -88,6 +90,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
 
 **Voice and video**

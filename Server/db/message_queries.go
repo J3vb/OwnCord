@@ -422,18 +422,6 @@ func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int6
 	return nil
 }
 
-// AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).
-func (d *DB) AddReaction(ctx context.Context, messageID, userID int64, emoji string) error {
-	if err := d.q.AddReaction(ctx, dbgen.AddReactionParams{
-		MessageID: messageID,
-		UserID:    userID,
-		Emoji:     emoji,
-	}); err != nil {
-		return fmt.Errorf("AddReaction: %w", err)
-	}
-	return nil
-}
-
 // RemoveReaction deletes a reaction. Returns an error if it does not exist.
 func (d *DB) RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error {
 	res, err := d.q.RemoveReaction(ctx, dbgen.RemoveReactionParams{

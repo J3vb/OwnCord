@@ -38,8 +38,9 @@ const (
 
 // mentionSet is the resolved mention state of one message.
 type mentionSet struct {
-	// UserIDs is ordered by first appearance in the content, deduplicated and
-	// capped at maxMentionsPerMessage. Never nil.
+	// UserIDs is ordered by first appearance in the content, deduplicated and,
+	// once withReplyPing has run, capped at maxMentionsPerMessage content ids
+	// plus the reply-ping target. Never nil.
 	UserIDs []int64
 	// Everyone reports an @everyone or @here that cleared the MENTION_EVERYONE
 	// gate. Without the bit the token keeps no mention semantics at all.
@@ -47,6 +48,39 @@ type mentionSet struct {
 	// HereOnly narrows an Everyone fan-out to users who are not offline. It is
 	// set when @here matched and @everyone did not.
 	HereOnly bool
+	// ReplyPingUserID is the replied-to author a reply_ping added to UserIDs,
+	// 0 for none. UserIDs holds at most maxMentionsPerMessage content mentions
+	// plus this one, and the target is never displaced by the cap.
+	ReplyPingUserID int64
+}
+
+// withReplyPing finalizes the set: the content mentions are capped at
+// maxMentionsPerMessage without counting targetID, then targetID (when
+// non-zero) is added if the content did not already name it. resolveMentions
+// keeps one spare id so a target among the content mentions never costs
+// another user their slot. Every caller passes the set through here, with 0
+// when there is no reply ping.
+func (m mentionSet) withReplyPing(targetID int64) mentionSet {
+	m.ReplyPingUserID = targetID
+	ids := make([]int64, 0, len(m.UserIDs)+1)
+	content, named := 0, false
+	for _, id := range m.UserIDs {
+		if targetID != 0 && id == targetID {
+			named = true
+			ids = append(ids, id)
+			continue
+		}
+		if content == maxMentionsPerMessage {
+			continue
+		}
+		content++
+		ids = append(ids, id)
+	}
+	if targetID != 0 && !named {
+		ids = append(ids, targetID)
+	}
+	m.UserIDs = ids
+	return m
 }
 
 // mentionCandidate is one @token and the username spellings it may resolve to,
@@ -103,6 +137,9 @@ func parseMentionTokens(content string) (tokens []mentionCandidate, everyone, he
 //
 // Resolution failures are logged and treated as "no mentions": a message must
 // not be rejected because its mention lookup failed.
+//
+// UserIDs may hold one id past maxMentionsPerMessage, for a reply-ping target
+// among them; withReplyPing applies the cap.
 func (s *MessageService) resolveMentions(ctx context.Context, content string, authorID, channelID int64, isDM bool) mentionSet {
 	set := mentionSet{UserIDs: []int64{}}
 
@@ -139,7 +176,7 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 			}
 			break
 		}
-		if len(set.UserIDs) >= maxMentionsPerMessage {
+		if len(set.UserIDs) > maxMentionsPerMessage {
 			break
 		}
 	}

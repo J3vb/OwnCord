@@ -238,3 +238,38 @@ func TestSubjectHas(t *testing.T) {
 		t.Fatal("Administrator bypasses overrides")
 	}
 }
+
+func TestCanDeleteMessage(t *testing.T) {
+	cases := []struct {
+		name     string
+		s        Subject
+		isAuthor bool
+		wantMod  bool
+		want     error
+	}{
+		{"author with READ only deletes", Subject{RolePerms: ReadMessages, Channel: text(false)}, true, false, nil},
+		{"author without SEND deletes", Subject{RolePerms: memberBits, Override: deny(SendMessages), Channel: text(false)}, true, false, nil},
+		{"timed-out author deletes", Subject{RolePerms: memberBits, Channel: text(false), TimedOut: true}, true, false, nil},
+		{"author denied READ refused", Subject{RolePerms: memberBits, Override: deny(ReadMessages), Channel: text(false)}, true, false, ErrPermissionDenied},
+		{"member cannot delete others", Subject{RolePerms: memberBits, Channel: text(false)}, false, false, ErrPermissionDenied},
+		{"moderator deletes others as moderation", Subject{RolePerms: modBits, Channel: text(false)}, false, true, nil},
+		{"moderator deleting own is still moderation", Subject{RolePerms: modBits, Channel: text(false)}, true, true, nil},
+		{"MANAGE without READ refused", Subject{RolePerms: ManageMessages, Channel: text(false)}, false, false, ErrPermissionDenied},
+		{"channel deny MANAGE leaves author path", Subject{RolePerms: modBits, Override: deny(ManageMessages), Channel: text(false)}, true, false, nil},
+		{"admin bypasses deny", Subject{RolePerms: Administrator, Override: deny(ReadMessages), Channel: text(false)}, false, true, nil},
+		{"dm participant deletes, never as moderation", Subject{RolePerms: Administrator, Channel: dm(), DMParticipant: true}, false, false, nil},
+		{"dm non-participant refused, even admin", Subject{RolePerms: Administrator, Channel: dm()}, true, false, ErrNotDMParticipant},
+	}
+	for _, c := range cases {
+		gotMod, err := CanDeleteMessage(c.s, c.isAuthor)
+		if c.want == nil && err != nil {
+			t.Errorf("%s: want allowed, got %v", c.name, err)
+		}
+		if c.want != nil && !errors.Is(err, c.want) {
+			t.Errorf("%s: want %v, got %v", c.name, c.want, err)
+		}
+		if gotMod != c.wantMod {
+			t.Errorf("%s: asModerator = %v, want %v", c.name, gotMod, c.wantMod)
+		}
+	}
+}

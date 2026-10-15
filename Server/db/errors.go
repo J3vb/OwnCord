@@ -9,6 +9,9 @@ import (
 var (
 	// ErrNotFound indicates the requested resource does not exist.
 	ErrNotFound = errors.New("not found")
+	// ErrReactionLimit means a new emoji was refused because the message already
+	// holds MaxDistinctReactions different ones.
+	ErrReactionLimit = errors.New("reaction limit reached")
 
 	// ErrForbidden indicates the caller lacks permission for the operation.
 	ErrForbidden = errors.New("forbidden")

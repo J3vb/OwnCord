@@ -28,7 +28,7 @@ func TestCreateMessageWithMentions_AdvancesAuthorReadState(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, false)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestCreateMessageDelivery_AdvancesAuthorReadStateOnlyOnInsert(t *testing.T)
 
 	// The author reads past a later message; a duplicate retry of the first
 	// send must not drag the read state back to it.
-	later, err := database.CreateMessageWithMentions(ctx, channel, other, "later", nil, nil, false)
+	later, err := database.CreateMessageWithMentions(ctx, channel, other, "later", nil, nil, 0, false)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}

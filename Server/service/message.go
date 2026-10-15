@@ -36,6 +36,10 @@ var (
 	// missing). It is always wrapped together with ErrBadRequest, which it
 	// refines into the ATTACHMENTS_UNAVAILABLE wire code.
 	ErrAttachmentsUnavailable = errors.New("attachments unavailable")
+	// ErrReactionLimit means a new emoji was refused because the message already
+	// holds db.MaxDistinctReactions different ones. It is always wrapped together
+	// with ErrBadRequest, which it refines into the REACTION_LIMIT wire code.
+	ErrReactionLimit = errors.New("reaction limit reached")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
 	// timeout row (B5-9) and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM
@@ -57,7 +61,10 @@ type SendMessageParams struct {
 	RoleName        string
 	Content         string // raw, will be sanitized
 	ReplyTo         *int64
-	AttachmentIDs   []string
+	// ReplyPing adds the replied-to author to the mention set. It is ignored
+	// without ReplyTo and for a reply to your own message.
+	ReplyPing     bool
+	AttachmentIDs []string
 }
 
 // ReferencedMessage is the reply-parent snippet a chat_message frame carries.
