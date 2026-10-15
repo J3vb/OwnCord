@@ -12,6 +12,7 @@
  */
 
 import { loadPref } from "./preferences";
+import { loadAppSoundsGain, soundSwitchOn } from "./soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
 import { isVoiceDeafened } from "./voiceDeafened";
 import { createLogger } from "./logger";
@@ -20,6 +21,10 @@ import { Disposable } from "./disposable";
 const log = createLogger("notifications");
 
 let notifAudioCtx: AudioContext | null = null;
+/** The master gain every sound routes through (WP M-8): the "App sounds
+ *  volume" slider scales it, 100% being a gain of 1, i.e. the notes below
+ *  exactly as they are. Lives and dies with `notifAudioCtx`. */
+let masterGain: GainNode | null = null;
 /** The output id currently applied to `notifAudioCtx`, so a play does not
  *  re-issue `setSinkId` for an unchanged device. Empty string means the system
  *  default. Reset with the context, and cleared again if an apply fails so the
@@ -31,6 +36,7 @@ export function cleanupNotificationAudio(): void {
   stopRingback();
   stopRingChime();
   appliedSink = "";
+  masterGain = null;
   if (notifAudioCtx !== null) {
     notifAudioCtx.close().catch((err) => {
       log.warn("Failed to close notification AudioContext", err);
@@ -50,17 +56,19 @@ let ringtoneOscs: OscillatorNode[] = [];
 /** Start the repeating incoming-call chime. Idempotent. */
 export function startRingChime(): void {
   if (ringInterval !== null) return;
+  // DND silences a call chime for the same reason it silences a message one:
+  // the settings panel promises no notification sounds, and a ringing phone is
+  // the loudest possible violation of that. The banner still appears.
+  // D2(b): the call sound has its own toggle, so muting message sounds does
+  // not silence a ringing phone; the ring has its own switch too (WP M-8).
+  // A ring that will not sound pre-empts nothing: the outgoing ringback goes on.
+  if (loadUserStatus() === "dnd") return;
+  if (!loadPref<boolean>("callSounds", true)) return;
+  if (!soundSwitchOn("ring")) return;
   // A client is either calling or being called; an incoming ring pre-empts the
   // outgoing ringback (DP-25 acceptance). The outgoing call keeps wanting its
   // ringback, so it resumes when this chime ends.
   silenceRingback();
-  // DND silences a call chime for the same reason it silences a message one:
-  // the settings panel promises no notification sounds, and a ringing phone is
-  // the loudest possible violation of that. The banner still appears.
-  if (loadUserStatus() === "dnd") return;
-  // D2(b): the call sound has its own toggle, so muting message sounds does
-  // not silence a ringing phone.
-  if (!loadPref<boolean>("callSounds", true)) return;
   playRingtone();
   ringInterval = setInterval(() => playRingtone(), 2000);
 }
@@ -68,9 +76,10 @@ export function startRingChime(): void {
 /** Stop the repeating incoming-call chime. Idempotent. */
 export function stopRingChime(): void {
   stopRingtoneBurst();
-  if (ringInterval === null) return;
-  clearInterval(ringInterval);
-  ringInterval = null;
+  if (ringInterval !== null) {
+    clearInterval(ringInterval);
+    ringInterval = null;
+  }
   // The incoming ring ended: an outgoing ring that was pre-empted resumes.
   syncRingback();
 }
@@ -120,7 +129,9 @@ function watchRingbackInputs(): void {
     "owncord:pref-change",
     (e: Event) => {
       const key = (e as CustomEvent<{ key?: string }>).detail?.key;
-      if (key === USER_STATUS_PREF_KEY || key === "callSounds") syncRingback();
+      if (key === USER_STATUS_PREF_KEY || key === "callSounds" || key === "soundRingback") {
+        syncRingback();
+      }
     },
     { signal: owner.signal },
   );
@@ -137,7 +148,8 @@ function syncRingback(): void {
     ringbackWanted &&
     ringInterval === null &&
     loadUserStatus() !== "dnd" &&
-    loadPref<boolean>("callSounds", true);
+    loadPref<boolean>("callSounds", true) &&
+    soundSwitchOn("ringback");
   if (!shouldPlay) {
     silenceRingback();
     return;
@@ -179,6 +191,18 @@ function audioContext(): AudioContext {
   return notifAudioCtx;
 }
 
+/** The node every sound connects to: the master gain, set to the saved volume.
+ *  Re-read on each play (a cheap synchronous pref read, like the sink) so a
+ *  slider move applies to the next sound without a window-lifetime listener. */
+function output(ctx: AudioContext): AudioNode {
+  if (masterGain === null) {
+    masterGain = ctx.createGain();
+    masterGain.connect(ctx.destination);
+  }
+  masterGain.gain.value = loadAppSoundsGain();
+  return masterGain;
+}
+
 /** Point the context at the saved output device. Re-read each time rather
  *  than listening for `owncord:pref-change`: the pref is a cheap synchronous
  *  localStorage read, and this keeps the module free of a window-lifetime
@@ -203,6 +227,7 @@ function syncSink(): void {
 function playRingtone(): void {
   try {
     const ctx = audioContext();
+    const out = output(ctx);
     const oscs: OscillatorNode[] = [];
     for (const [hz, at] of [
       [660, 0],
@@ -211,7 +236,7 @@ function playRingtone(): void {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(out);
       const start = ctx.currentTime + at;
       osc.frequency.setValueAtTime(hz, start);
       gain.gain.setValueAtTime(0.25, start);
@@ -234,10 +259,11 @@ function playRingback(): void {
   if (deafened()) return;
   try {
     const ctx = audioContext();
+    const out = output(ctx);
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(out);
     const start = ctx.currentTime;
     osc.frequency.setValueAtTime(440, start);
     gain.gain.setValueAtTime(0.12, start);
@@ -255,10 +281,11 @@ export function playNotificationSound(): void {
   if (deafened()) return;
   try {
     const ctx = audioContext();
+    const out = output(ctx);
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(out);
 
     osc.frequency.setValueAtTime(800, ctx.currentTime);
     osc.frequency.setValueAtTime(600, ctx.currentTime + 0.1);
@@ -322,11 +349,12 @@ const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number,
 export function playVoiceSound(kind: VoiceSound): void {
   try {
     const ctx = audioContext();
+    const out = output(ctx);
     for (const [hz, at] of VOICE_SOUND_NOTES[kind]) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(out);
       const start = ctx.currentTime + at;
       osc.frequency.setValueAtTime(hz, start);
       gain.gain.setValueAtTime(0.2, start);

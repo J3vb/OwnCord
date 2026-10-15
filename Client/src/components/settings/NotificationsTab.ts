@@ -3,7 +3,14 @@
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
-import { appendToggleRows } from "./helpers";
+import { appendToggleRows, savePref } from "./helpers";
+import { playNotificationSound } from "@lib/notificationSound";
+import {
+  APP_SOUNDS_VOLUME_KEY,
+  SOUND_SWITCH_KEYS,
+  loadAppSoundsGain,
+  type SoundSwitch,
+} from "@lib/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
 import { getChannelMutesHost, listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
 import {
@@ -136,6 +143,110 @@ function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
   return row;
 }
 
+/** Label and description of each per-sound switch (WP M-8). */
+const SOUND_SWITCH_TEXT: Readonly<
+  Record<SoundSwitch, { label: () => string; desc: () => string }>
+> = {
+  message: {
+    label: () => t("notifications.sound.message.label"),
+    desc: () => t("notifications.sound.message.desc"),
+  },
+  mention: {
+    label: () => t("notifications.sound.mention.label"),
+    desc: () => t("notifications.sound.mention.desc"),
+  },
+  ring: {
+    label: () => t("notifications.sound.ring.label"),
+    desc: () => t("notifications.sound.ring.desc"),
+  },
+  ringback: {
+    label: () => t("notifications.sound.ringback.label"),
+    desc: () => t("notifications.sound.ringback.desc"),
+  },
+  joinLeave: {
+    label: () => t("notifications.sound.joinLeave.label"),
+    desc: () => t("notifications.sound.joinLeave.desc"),
+  },
+  muteDeafen: {
+    label: () => t("notifications.sound.muteDeafen.label"),
+    desc: () => t("notifications.sound.muteDeafen.desc"),
+  },
+  stream: {
+    label: () => t("notifications.sound.stream.label"),
+    desc: () => t("notifications.sound.stream.desc"),
+  },
+};
+
+/** A group switch (its pref key unchanged) followed by its nested per-sound
+ *  switches. A sound plays only when both the group and its own switch are on. */
+function appendSoundGroup(
+  section: HTMLElement,
+  group: { key: string; label: string; desc: string },
+  sounds: ReadonlyArray<SoundSwitch>,
+  signal: AbortSignal,
+): void {
+  appendToggleRows(section, [{ ...group, fallback: true }], signal);
+  const rows = appendToggleRows(
+    section,
+    sounds.map((sound) => ({
+      key: SOUND_SWITCH_KEYS[sound],
+      label: SOUND_SWITCH_TEXT[sound].label(),
+      desc: SOUND_SWITCH_TEXT[sound].desc(),
+      fallback: true,
+    })),
+    signal,
+  );
+  for (const row of rows) row.classList.add("nested");
+}
+
+/** The slider's value as spoken and shown: a percent. */
+function valueText(percent: number): string {
+  return t("notifications.volume.value", { percent });
+}
+
+/**
+ * The "App sounds volume" slider (WP M-8): scales the master gain every app
+ * sound shares. 100% is today's level, 0% is silent. The value is saved on
+ * every move (the player re-reads it on its next sound); letting go of the
+ * thumb plays the message chime once so the level can be judged.
+ */
+function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row", style: "display:block;" });
+  appendChildren(
+    row,
+    createElement("div", { class: "setting-label" }, t("notifications.volume.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.volume.desc")),
+  );
+  const saved = Math.round(loadAppSoundsGain() * 100);
+  const slider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "100",
+    step: "1",
+    value: String(saved),
+    "aria-label": t("notifications.volume.label"),
+    "aria-valuetext": valueText(saved),
+    "data-testid": "app-sounds-volume",
+  });
+  const readout = createElement("span", { class: "slider-val" }, valueText(saved));
+  slider.addEventListener(
+    "input",
+    () => {
+      const percent = Number(slider.value);
+      savePref(APP_SOUNDS_VOLUME_KEY, percent);
+      slider.setAttribute("aria-valuetext", valueText(percent));
+      setText(readout, valueText(percent));
+    },
+    { signal },
+  );
+  slider.addEventListener("change", () => playNotificationSound(), { signal });
+  const control = createElement("div", { class: "slider-row" });
+  appendChildren(control, slider, readout);
+  row.appendChild(control);
+  return row;
+}
+
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
@@ -175,27 +286,43 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
       desc: t("notifications.suppress.desc"),
       fallback: false,
     },
+  ];
+
+  const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];
+
+  section.appendChild(buildSoundsVolumeRow(signal));
+
+  // Each group switch keeps its pref key; its own sounds follow it, nested.
+  appendSoundGroup(
+    section,
     {
       key: "notificationSounds",
       label: t("notifications.sounds.label"),
       desc: t("notifications.sounds.desc"),
-      fallback: true,
     },
+    ["message", "mention"],
+    signal,
+  );
+  appendSoundGroup(
+    section,
     {
       key: "callSounds",
       label: t("notifications.callSound.label"),
       desc: t("notifications.callSound.desc"),
-      fallback: true,
     },
+    ["ring", "ringback"],
+    signal,
+  );
+  appendSoundGroup(
+    section,
     {
       key: "voiceSounds",
       label: t("notifications.voiceSounds.label"),
       desc: t("notifications.voiceSounds.desc"),
-      fallback: true,
     },
-  ];
-
-  const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];
+    ["joinLeave", "muteDeafen", "stream"],
+    signal,
+  );
   const blockedReason = createElement(
     "div",
     { class: "setting-desc setting-blocked-reason" },
