@@ -12,9 +12,11 @@ import { emojiCatalog, emojiForShortcode, skinTone, withSkinTone } from "./emoji
 
 /** Parts never touched besides code spans and masked links: code blocks,
  * `<https://…>` and bare URLs. */
-const PROTECTED = /```[\s\S]*?```|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/y;
-/** A shortcode with no letter, digit, `_` or backslash right before or after it. */
-const SHORTCODE = /(?<![\\\p{L}\p{N}_]):([a-z0-9_+-]{2,32}):(?![\p{L}\p{N}_])/gu;
+const PROTECTED = /```[\s\S]*?```|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/iy;
+/** A shortcode with no letter, digit or `_` right before or after it, and not
+ * escaped by an odd run of backslashes. */
+const SHORTCODE =
+  /(?<![\p{L}\p{N}_])(?<!(?:^|[^\\])\\(?:\\\\)*):([a-z0-9_+-]{2,32}):(?![\p{L}\p{N}_])/gu;
 
 /** Index of the `close` that balances the `open` at `start` on the same line,
  * skipping escaped characters as the markdown parser does, or -1. */

@@ -45,15 +45,21 @@ function byPosition(
 /**
  * Server channels for `query`, prefix matches before substring matches, each
  * group in sidebar order. DMs are not channels here, and a name the `#token`
- * grammar cannot express is left out: inserting it would not link.
+ * grammar cannot express is left out: inserting it would not link. Of
+ * channels sharing a name (in any case) only the one a `#name` link opens is
+ * offered, the first in store order (lib/channel-navigation findChannelByName).
  */
 export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
   const q = query.toLowerCase();
   const prefix: { s: ChannelSuggestion; position: number; id: number }[] = [];
   const substring: { s: ChannelSuggestion; position: number; id: number }[] = [];
+  const seen = new Set<string>();
   for (const ch of channelsStore.getState().channels.values()) {
-    if (ch.type === "dm" || !CHANNEL_NAME.test(ch.name)) continue;
+    if (ch.type === "dm") continue;
     const lower = ch.name.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    if (!CHANNEL_NAME.test(ch.name)) continue;
     if (q !== "" && !lower.includes(q)) continue;
     const detail =
       ch.category ?? (ch.type === "voice" ? messagingText("channelMention.voice") : "");

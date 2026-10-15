@@ -77,6 +77,14 @@ describe("filterChannelSuggestions", () => {
     ]);
   });
 
+  it("offers a shared name once, as the channel its link opens", () => {
+    setChannels([
+      { id: 1, name: "general", type: "text", category: "Text", position: 0 },
+      { id: 2, name: "General", type: "voice", category: "Voice", position: 1 },
+    ]);
+    expect(filterChannelSuggestions("gen").map((s) => s.id)).toEqual([1]);
+  });
+
   it("orders channels that share a position by id, as the sidebar does", () => {
     setChannels([
       { id: 9, name: "chat-a", type: "text", category: null, position: 0 },
@@ -215,6 +223,7 @@ describe("replaceEmojiShortcodes", () => {
       "`:joy:` and\n```\n:joy:\n```",
     );
     expect(replaceEmojiShortcodes("\\:joy:")).toBe("\\:joy:");
+    expect(replaceEmojiShortcodes("\\\\:joy:")).toBe("\\\\😂");
   });
 
   it("swaps shortcodes that touch each other or punctuation", () => {
@@ -235,6 +244,7 @@ describe("replaceEmojiShortcodes", () => {
     for (const text of [
       "https://ex.com/a:joy:b",
       "<https://ex.com/w:cool:x>",
+      "<HTTPS://ex.com/:joy:>",
       "[docs](https://ex.com/a:joy:b)",
       "MAC 00:1A:2B:AB:CD:EF",
       "fe80::ab:cd",
