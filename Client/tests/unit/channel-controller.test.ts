@@ -20,6 +20,7 @@ const {
   mockSetSendGate,
   mockGetDraft,
   mockRestoreDraft,
+  mockRestoreUnsent,
 } = vi.hoisted(() => ({
   mockMessageListMount: vi.fn(),
   mockMessageListDestroy: vi.fn(),
@@ -53,6 +54,7 @@ const {
     }
   >(() => ({ content: "", replyTo: null, attachments: [] })),
   mockRestoreDraft: vi.fn(),
+  mockRestoreUnsent: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -115,6 +117,7 @@ vi.mock("@components/MessageInput", () => ({
       setSendGate: mockSetSendGate,
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
+      restoreUnsent: mockRestoreUnsent,
     };
   }),
 }));
@@ -902,7 +905,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("private text", null, []);
+      capturedMessageInputOpts.onSend("private text", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       const logicalId = mockAddOptimistic.mock.calls[0]![0].clientMessageId;
       const callback = vi
@@ -939,7 +942,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("send once", null, []);
+      capturedMessageInputOpts.onSend("send once", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       const first = vi
         .mocked(opts.ws.send)
@@ -1048,7 +1051,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("private text", null, []);
+      capturedMessageInputOpts.onSend("private text", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       activatePendingMessages(owner, user, false);
       capturedMessageListOpts.onRetry("cid-2");
@@ -1088,10 +1091,10 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // "A" is plain text and takes the persisted async path.
-      capturedMessageInputOpts.onSend("A", null, []);
+      capturedMessageInputOpts.onSend("A", null, [], []);
       // "B" carries a reply, submitted right after A while A's persist IPC
       // is still in flight — it must not be sent to the socket before A.
-      capturedMessageInputOpts.onSend("B", 7, []);
+      capturedMessageInputOpts.onSend("B", 7, [], []);
 
       await vi.waitFor(() => expect(sentContents).toHaveLength(2));
       expect(sentContents).toEqual(["A", "B"]);
@@ -1105,7 +1108,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       current = false;
-      capturedMessageInputOpts.onSend("belongs to the old server", null, []);
+      capturedMessageInputOpts.onSend("belongs to the old server", null, [], []);
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
     });
 
@@ -1128,10 +1131,10 @@ describe("createChannelController", () => {
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
         for (let i = 0; i < 100; i++) {
-          capturedMessageInputOpts.onSend("hello", null, []);
+          capturedMessageInputOpts.onSend("hello", null, [], []);
           const callback = vi
             .mocked(opts.ws.on)
-            .mock.calls.find(([event]) => event === "chat_send_ok")![1];
+            .mock.calls.findLast(([event]) => event === "chat_send_ok")![1];
           (callback as (payload: object, id: string) => void)({}, `cid-${next}`);
         }
         expect(cleanups.size).toBe(0);
@@ -1148,7 +1151,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_send",
@@ -1167,7 +1170,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1183,7 +1186,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1203,7 +1206,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
       (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       expect(mockReattachToPresent).toHaveBeenCalledWith(42);
       // Reattach clears "loaded", so the live tail is refetched.
@@ -1222,7 +1225,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       // No socket send is attempted; the row is shown as failed with retry.
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
@@ -1252,7 +1255,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("lost text", null, []);
+      capturedMessageInputOpts.onSend("lost text", null, [], []);
 
       expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
       await vi.waitFor(() =>
@@ -1352,7 +1355,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       expect(mockAddOptimistic).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
       );
@@ -1373,7 +1376,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       mockGetChannelMessages.mockReturnValue([]);
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
         { id: -1, correlationId: "cid-2", status: "failed", errorCode: "BAD_REQUEST" },
       ]);
@@ -1395,7 +1398,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       mockGetChannelMessages.mockReturnValue([]);
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
         { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
       ]);
@@ -1417,7 +1420,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       const sendCalls = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
 
       capturedMessageListOpts.onDeleteDraft("cid-2");
@@ -1437,7 +1440,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       expect(mockAddOptimistic).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
       );
@@ -1464,9 +1467,9 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
-      const ackCall = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      const ackCall = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.findLast(
         (c: unknown[]) => c[0] === "chat_send_ok",
       );
       const onAck = ackCall![1] as (payload: unknown, id?: string) => void;
@@ -1732,7 +1735,12 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 10, ["file1.png"]);
+      capturedMessageInputOpts.onSend(
+        "hello",
+        10,
+        ["file1.png"],
+        [{ id: "file1.png", filename: "file1.png" }],
+      );
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_send",
@@ -2151,7 +2159,7 @@ describe("createChannelController", () => {
     /** Pull a ws.on handler registered by the controller. */
     function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
       const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      const entry = calls.find((c) => c[0] === event);
+      const entry = calls.findLast((c) => c[0] === event);
       expect(entry).toBeDefined();
       return entry![1] as (payload: never) => void;
     }
@@ -2287,7 +2295,7 @@ describe("createChannelController", () => {
 
       // cid-1 is channel_focus; the chat_send in A gets cid-2. The ack for it
       // does not arrive before the user switches away.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       // Switch to channel B before A's ack arrives.
       setActiveChannel(43);
@@ -2463,7 +2471,7 @@ describe("createChannelController", () => {
         ctrl.mountChannel(42, "general");
         // cid-1 is channel_focus; the send in channel 42 gets cid-2 and is
         // not acknowledged before the user switches away.
-        capturedMessageInputOpts.onSend("hello", null, []);
+        capturedMessageInputOpts.onSend("hello", null, [], []);
         switchTo(ctrl, 43);
 
         (wsHandler(opts, "chat_send_ok") as (payload: unknown, id?: string) => void)({}, "cid-2");
@@ -2487,7 +2495,7 @@ describe("createChannelController", () => {
         (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
-        capturedMessageInputOpts.onSend("hello", null, []);
+        capturedMessageInputOpts.onSend("hello", null, [], []);
         switchTo(ctrl, 43);
 
         // The ack only arrives 20 s later (a paused renderer, say).
@@ -3240,7 +3248,7 @@ describe("createChannelController", () => {
       opts: ChannelControllerOptions,
     ): (payload: { code: string; message: string }, id?: string) => void {
       const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      const entry = calls.find((c) => c[0] === "error");
+      const entry = calls.findLast((c) => c[0] === "error");
       expect(entry).toBeDefined();
       return entry![1] as (payload: { code: string; message: string }, id?: string) => void;
     }
@@ -3523,5 +3531,157 @@ describe("createChannelController", () => {
       expect(mockStartEdit).not.toHaveBeenCalled();
       ctrl.destroyChannel();
     });
+  });
+});
+
+describe("unsent attachments (2A-3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsIdle.mockReturnValue(true);
+    mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+    setConnectionStatus("connected");
+  });
+
+  /** Deliver a frame to every live ws.on listener for `event`, in order. */
+  function wsHandler(opts: ChannelControllerOptions, event: string) {
+    const on = opts.ws.on as ReturnType<typeof vi.fn>;
+    return (payload: unknown, correlationId?: string): void => {
+      on.mock.calls.forEach((c, i) => {
+        const off = on.mock.results[i]!.value as ReturnType<typeof vi.fn>;
+        if (c[0] === event && off.mock.calls.length === 0) {
+          (c[1] as (p: unknown, id?: string) => void)(payload, correlationId);
+        }
+      });
+    };
+  }
+
+  const report = { id: "u1", filename: "report.pdf" };
+  const scan = { id: "u2", filename: "scan.png" };
+
+  function sendFiles(opts: ChannelControllerOptions, replyTo: number | null = null): void {
+    vi.mocked(opts.ws.send).mockReturnValue("cid-1");
+    capturedMessageInputOpts.onSend("", replyTo, ["u1", "u2"], [report, scan]);
+  }
+
+  it("puts only the skipped files back into the composer", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u2", "not-mine"] },
+      "cid-1",
+    );
+
+    expect(mockRestoreUnsent).toHaveBeenCalledTimes(1);
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([scan], "skipped", null);
+    expect(mockRemoveOptimistic).not.toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("puts skipped files back on a deduplicated retry's ack too", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", deduplicated: true, skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([report], "skipped", null);
+    ctrl.destroyChannel();
+  });
+
+  it("stashes the files when the refusal lands with no channel mounted", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.destroyChannel();
+
+    wsHandler(opts, "error")({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "cid-1");
+
+    ctrl.mountChannel(42, "general", "text");
+    expect(mockRestoreDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({ id: "u1", unsent: true }),
+          expect.objectContaining({ id: "u2", unsent: true }),
+        ],
+      }),
+    );
+    ctrl.destroy();
+  });
+
+  it("stops listening once the controller is destroyed", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.destroy();
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+  });
+
+  it("leaves the composer alone when an older server sends no skipped list", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")({ message_id: 7, timestamp: "" }, "cid-1");
+
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("stashes skipped files for a channel the user has left", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.mountChannel(43, "random", "text");
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(42, "general", "text");
+    expect(mockRestoreDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [expect.objectContaining({ id: "u1", unsent: true })],
+      }),
+    );
+    ctrl.destroyChannel();
+  });
+
+  it("drops the row and returns every file and the reply on ATTACHMENTS_UNAVAILABLE", () => {
+    mockGetChannelMessages.mockReturnValue([{ id: 9, user: { id: 2, username: "ana" } }]);
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts, 9);
+
+    wsHandler(opts, "error")({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "cid-1");
+
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([report, scan], "unavailable", {
+      messageId: 9,
+      username: "ana",
+    });
+    // No Retry with the same ids: the send's draft is gone.
+    vi.mocked(opts.ws.send).mockClear();
+    capturedMessageListOpts.onRetry("cid-1");
+    expect(opts.ws.send).not.toHaveBeenCalled();
+    mockGetChannelMessages.mockReturnValue([]);
+    ctrl.destroyChannel();
   });
 });
