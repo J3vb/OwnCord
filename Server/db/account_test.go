@@ -425,8 +425,8 @@ func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed attachment: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, alice, []string{"att-survivor-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, alice, []string{"att-survivor-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	if err := eraseAccount(ctx, database, bob); err != nil {
@@ -481,8 +481,8 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 		); err != nil {
 			t.Fatalf("seed attachment: %v", err)
 		}
-		if n, err := database.LinkAttachmentsToMessage(ctx, msgID, uploader, []string{attID}); err != nil || n != 1 {
-			t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+		if n, err := database.LinkAttachmentsToMessage(ctx, msgID, uploader, []string{attID}); err != nil || len(n) != 1 {
+			t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 		}
 	}
 	seedLinked(userA, "att-dm-a", "stored-a.png")

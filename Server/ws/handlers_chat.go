@@ -35,7 +35,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
-	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID, result.Duplicate)
+	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID, result.Duplicate, result.SkippedAttachmentIDs)
 	if result.Duplicate {
 		return Result{Reply: reply}
 	}
@@ -207,6 +207,8 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: err.Error()}}
 	case errors.Is(err, service.ErrSlowMode):
 		return Result{Error: ClientError{Code: ErrCodeSlowMode, Message: err.Error()}}
+	case errors.Is(err, service.ErrAttachmentsUnavailable):
+		return Result{Error: ClientError{Code: ErrCodeAttachmentsUnavailable, Message: err.Error()}}
 	case errors.Is(err, service.ErrBadRequest):
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: err.Error()}}
 	case errors.Is(err, service.ErrNotFound):

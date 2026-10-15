@@ -236,8 +236,8 @@ func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
 		Content:       "",
 		AttachmentIDs: []string{"att-foreign", "att-missing"},
 	})
-	if !errors.Is(err, ErrBadRequest) {
-		t.Fatalf("err = %v, want ErrBadRequest", err)
+	if !errors.Is(err, ErrBadRequest) || !errors.Is(err, ErrAttachmentsUnavailable) {
+		t.Fatalf("err = %v, want ErrBadRequest and ErrAttachmentsUnavailable", err)
 	}
 	if result != nil {
 		t.Fatalf("result = %v, want nil", result)

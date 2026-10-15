@@ -79,7 +79,10 @@ func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParam
 		return nil, nil, messageDeliveryError(err)
 	}
 	if previous != nil {
-		return nil, &SendMessageResult{MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true}, nil
+		return nil, &SendMessageResult{
+			MessageID: previous.Message.ID, Timestamp: previous.Message.Timestamp, Duplicate: true,
+			SkippedAttachmentIDs: s.replaySkipped(ctx, p, previous.Message.ID),
+		}, nil
 	}
 	return delivery, nil, nil
 }
@@ -96,6 +99,59 @@ func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
 	return nil
 }
 
+// errAllAttachmentsSkipped is the error for a send with no text whose every
+// attachment was skipped. It satisfies errors.Is for both ErrBadRequest (older
+// callers) and ErrAttachmentsUnavailable (the precise wire code).
+func errAllAttachmentsSkipped() error {
+	return fmt.Errorf("%w: %w: none of the attachments could be sent", ErrBadRequest, ErrAttachmentsUnavailable)
+}
+
+// skippedAttachmentIDs returns the requested ids that are not in linked, in
+// request order, first occurrence only. It returns nil when nothing was skipped.
+func skippedAttachmentIDs(requested, linked []string) []string {
+	if len(requested) == 0 {
+		return nil
+	}
+	got := make(map[string]struct{}, len(linked))
+	for _, id := range linked {
+		got[id] = struct{}{}
+	}
+	var skipped []string
+	seen := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, ok := got[id]; !ok {
+			skipped = append(skipped, id)
+		}
+	}
+	return skipped
+}
+
+// replaySkipped derives the skipped ids for a retry answered from a receipt.
+// Receipts do not store them: the payload hash binds the retry to the same
+// ordered id list, and a live message's attachment rows are never unlinked
+// while its receipt still answers, so requested minus linked is exact. A read
+// failure logs and returns nil, so the ack is the plain ack and never a false
+// "skipped" that would make the client re-attach files that did send.
+func (s *MessageService) replaySkipped(ctx context.Context, p SendMessageParams, msgID int64) []string {
+	if len(p.AttachmentIDs) == 0 {
+		return nil
+	}
+	rows, err := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{msgID})
+	if err != nil {
+		slog.Error("message delivery replay attachments lookup", "err", err, "msg_id", msgID)
+		return nil
+	}
+	linked := make([]string, 0, len(rows[msgID]))
+	for _, a := range rows[msgID] {
+		linked = append(linked, a.ID)
+	}
+	return skippedAttachmentIDs(p.AttachmentIDs, linked)
+}
+
 func messageDeliveryError(err error) error {
 	switch {
 	case err == nil:
@@ -105,7 +161,7 @@ func messageDeliveryError(err error) error {
 	case errors.Is(err, db.ErrMessageDeliveryDeleted):
 		return ErrDeletedMessage
 	case errors.Is(err, db.ErrMessageDeliveryEmpty):
-		return fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		return errAllAttachmentsSkipped()
 	case errors.Is(err, db.ErrMessageDeliveryExpired):
 		return fmt.Errorf("%w: client_message_id expired", ErrBadRequest)
 	case errors.Is(err, db.ErrMessageDeliveryBeforeRestore):
@@ -118,22 +174,22 @@ func messageDeliveryError(err error) error {
 // persistMessage preserves the older send path for clients without a key.
 // Keyed sends commit attachment links with the receipt so a retry never sees
 // an accepted receipt for a message whose attachment ownership later fails.
-func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, bool, error) {
+func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
 	if delivery == nil {
 		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.Everyone)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("%w: failed to save message: %w", ErrInternal, err)
+			return nil, nil, nil, false, fmt.Errorf("%w: failed to save message: %w", ErrInternal, err)
 		}
-		attachments, err := s.sendMessageLinkAttachments(ctx, p, msg.ID, content)
-		return msg, attachments, false, err
+		attachments, skipped, err := s.sendMessageLinkAttachments(ctx, p, msg.ID, content)
+		return msg, attachments, skipped, false, err
 	}
 	delivery.MentionedUserIDs, delivery.MentionsEveryone = mentions.UserIDs, mentions.Everyone
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
-		return nil, nil, false, messageDeliveryError(err)
+		return nil, nil, nil, false, messageDeliveryError(err)
 	}
 	if saved.Duplicate || len(p.AttachmentIDs) == 0 {
-		return saved.Message, nil, saved.Duplicate, nil
+		return saved.Message, nil, nil, saved.Duplicate, nil
 	}
 	// The write is committed. A disconnect must not erase attachment metadata
 	// from the broadcast we still owe the channel.
@@ -141,7 +197,7 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	if err != nil {
 		slog.Error("message delivery attachments lookup", "err", err, "msg_id", saved.Message.ID)
 	}
-	return saved.Message, attachments[saved.Message.ID], false, nil
+	return saved.Message, attachments[saved.Message.ID], skippedAttachmentIDs(p.AttachmentIDs, saved.LinkedAttachmentIDs), false, nil
 }
 
 // checkMessageSlowMode is charged only for a new send. A matching receipt

@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -62,8 +64,8 @@ func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage(nil): %v", err)
 	}
-	if n != 0 {
-		t.Errorf("expected 0 rows affected, got %d", n)
+	if len(n) != 0 {
+		t.Errorf("expected 0 linked, got %v", n)
 	}
 }
 
@@ -89,8 +91,8 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("expected 2 rows affected, got %d", n)
+	if len(n) != 2 {
+		t.Errorf("expected 2 linked, got %v", n)
 	}
 
 	// Verify linkage.
@@ -118,8 +120,8 @@ func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("expected 0 rows (already linked), got %d", n)
+	if len(n) != 0 {
+		t.Errorf("expected 0 rows (already linked), got %v", n)
 	}
 }
 
@@ -153,8 +155,8 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("expected 2 linked (owned + legacy), got %d", n)
+	if len(n) != 2 {
+		t.Errorf("expected 2 linked (owned + legacy), got %v", n)
 	}
 	if att, _ := database.GetAttachmentByID(context.Background(), "att-owned"); att.MessageID == nil || *att.MessageID != msgID {
 		t.Error("owner's unlinked attachment should link")
@@ -193,11 +195,48 @@ func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("expected 0 rows linked (live avatar must be skipped), got %d", n)
+	if len(n) != 0 {
+		t.Errorf("expected 0 rows linked (live avatar must be skipped), got %v", n)
 	}
 	if att, _ := database.GetAttachmentByID(context.Background(), "att-avatar"); att.MessageID != nil {
 		t.Error("live avatar attachment must never link to a message (OC-0216)")
+	}
+}
+
+// TestLinkAttachmentsToMessage_ReturnsLinkedIDs locks the 2A-3 contract: the
+// returned ids are exactly the rows the UPDATE linked.
+func TestLinkAttachmentsToMessage_ReturnsLinkedIDs(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	owner := seedUser(t, database, "ret-owner")
+	other := seedUser(t, database, "ret-other")
+	chID := seedChannel(t, database, "ret-ch")
+	msg1, _ := database.CreateMessage(ctx, chID, owner, "m1", nil)
+	msg2, _ := database.CreateMessage(ctx, chID, owner, "m2", nil)
+
+	for id, up := range map[string]int64{"r-owned": owner, "r-foreign": other, "r-avatar": owner, "r-linked": owner} {
+		if err := database.CreateAttachment(ctx, id, up, "f.txt", "s-"+id, "text/plain", 1, nil, nil); err != nil {
+			t.Fatalf("CreateAttachment %s: %v", id, err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, filename, stored_as, mime_type, size) VALUES ('r-legacy', 'l.txt', 's-l', 'text/plain', 1)`); err != nil {
+		t.Fatalf("legacy insert: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE attachments SET message_id = ? WHERE id = 'r-linked'`, msg1); err != nil {
+		t.Fatalf("pre-link: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE users SET avatar = '/api/v1/files/r-avatar' WHERE id = ?`, owner); err != nil {
+		t.Fatalf("avatar: %v", err)
+	}
+
+	got, err := database.LinkAttachmentsToMessage(ctx, msg2, owner,
+		[]string{"r-owned", "r-foreign", "r-legacy", "r-linked", "r-avatar", "r-missing", "r-owned"})
+	if err != nil {
+		t.Fatalf("LinkAttachmentsToMessage: %v", err)
+	}
+	sort.Strings(got)
+	if want := []string{"r-legacy", "r-owned"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("linked = %v, want %v (duplicated id must appear once)", got, want)
 	}
 }
 

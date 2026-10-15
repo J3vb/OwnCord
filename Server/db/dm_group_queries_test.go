@@ -146,8 +146,8 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed attachment: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, 1, []string{"att-leave-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, 1, []string{"att-leave-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	for _, uid := range []int64{1, 2, 3} {

@@ -47,6 +47,9 @@ type MessageDeliveryParams struct {
 type MessageDelivery struct {
 	Message   *Message
 	Duplicate bool
+	// LinkedAttachmentIDs are the requested uploads this send attached, set
+	// only on a fresh commit (a duplicate does not re-link).
+	LinkedAttachmentIDs []string
 }
 
 // FindMessageDelivery answers a retry from the sender's own receipt. The
@@ -118,7 +121,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err != nil {
 		return nil, err
 	}
-	if p.Content == "" && linked == 0 {
+	if p.Content == "" && len(linked) == 0 {
 		return nil, ErrMessageDeliveryEmpty
 	}
 	if err := q.InsertMessageDeliveryReceipt(ctx, dbgen.InsertMessageDeliveryReceiptParams{
@@ -131,7 +134,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}
-	return &MessageDelivery{Message: messageFromGen(r)}, nil
+	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked}, nil
 }
 
 // DeleteExpiredMessageDeliveryReceipts is the periodic maintenance sweep.
