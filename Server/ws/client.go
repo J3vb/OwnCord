@@ -179,6 +179,11 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
+	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// of customStatus, "" when it has none. It is the tag the expirer's
+	// CustomStatusExpired compares: only a connection still showing the status
+	// that expired is cleared.
+	customStatusExpiresAt string
 }
 
 // livePresence returns the connection's live presence, a zero value (status
@@ -191,8 +196,8 @@ func (c *Client) livePresence() livePresence {
 }
 
 // setLivePresence records the presence this connection just stamped or chose.
-func (c *Client) setLivePresence(status string, customStatus *string) {
-	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
+func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
+	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.

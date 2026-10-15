@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -28,6 +29,15 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 
 	serverName, motd := h.getCachedSettings(ctx)
 
+	// Only the user's own auth_ok carries the expiry instant; everyone else is
+	// told the status went to null. Both fields are guarded together, so an
+	// expired status the expirer has not cleared yet is not handed back.
+	customStatus, expiresAt := storedCustomStatus(user.CustomStatus, user.CustomStatusExpiresAt, time.Now())
+	var expiresAtVal any
+	if expiresAt != "" {
+		expiresAtVal = expiresAt
+	}
+
 	return buildJSON(map[string]any{
 		"type": MsgTypeAuthOK,
 		"payload": map[string]any{
@@ -41,7 +51,9 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				// is what the "edit my profile" form pre-fills from.
 				"display_name":  user.DisplayName,
 				"about":         user.About,
-				"custom_status": user.CustomStatus,
+				"custom_status": customStatus,
+				// RFC 3339 instant the custom status clears itself, or null.
+				"custom_status_expires_at": expiresAtVal,
 				// The user's own true status — invisible included. Only their
 				// own auth_ok ever carries it, which is the whole point: the
 				// picker has to render what they chose, while every other

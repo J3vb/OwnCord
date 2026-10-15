@@ -99,12 +99,22 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	userID := info.UserID
 	status := presenceCmd.Status
 
-	customStatus, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus, d.Limiter)
+	res, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus, presenceCmd.ExpiresIn, d.Limiter)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
 
-	return Result{Events: presenceEvents(userID, status, customStatus), SetPresence: &livePresence{status: status, customStatus: customStatus}}
+	// The text may predate its own clear (a bare flip reads the stored row),
+	// so it is published only while its expiry has not passed. The live
+	// presence is stored before the events are emitted (handleMessageApply),
+	// so CustomStatusExpired either finds this tag and clears it, or finds a
+	// newer one and leaves it.
+	customStatus := visibleCustomStatus(res.CustomStatus, res.ExpiresAt, time.Now())
+	live := &livePresence{status: status, customStatus: customStatus}
+	if customStatus != nil {
+		live.customStatusExpiresAt = res.ExpiresAt
+	}
+	return Result{Events: presenceEvents(userID, status, customStatus), SetPresence: live}
 }
 
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.
