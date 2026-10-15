@@ -254,7 +254,7 @@ export {
 const HEIGHT_PREF = "dmCallHeight";
 /** Keep these in step with the clamp on `.dm-call-panel--expanded`. */
 const MIN_HEIGHT = 160;
-const CHAT_MIN_HEIGHT = 160;
+const CHAT_MIN_HEIGHT = 280;
 const KEY_STEP = 24;
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
@@ -771,30 +771,42 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   function applyHeight(): void {
     const expanded = root.classList.contains("dm-call-panel--expanded");
     resizer.hidden = !expanded;
-    if (expanded && savedHeight > 0) {
-      root.style.setProperty("--dcp-height", `${String(savedHeight)}px`);
-      resizer.setAttribute("aria-valuenow", String(savedHeight));
-    } else {
+    if (!expanded) {
+      endDrag();
       root.style.removeProperty("--dcp-height");
-      resizer.removeAttribute("aria-valuenow");
+      return;
     }
+    if (savedHeight > 0) root.style.setProperty("--dcp-height", `${String(savedHeight)}px`);
+    else root.style.removeProperty("--dcp-height");
+    resizer.setAttribute("aria-valuemax", String(maxHeight()));
+    resizer.setAttribute("aria-valuenow", String(drawnHeight()));
   }
 
-  /** The tallest the panel may be: the chat column less room for the chat. */
+  function drawnHeight(): number {
+    return Math.round(root.getBoundingClientRect().height);
+  }
+
+  /** The tallest the panel may be: the chat column less the header, composer
+   *  and a few messages. */
   function maxHeight(): number {
     let column = root.parentElement;
     while (column !== null && getComputedStyle(column).display === "contents") {
       column = column.parentElement;
     }
     const available = column === null ? 0 : column.getBoundingClientRect().height;
-    const max = Math.max(MIN_HEIGHT, available - CHAT_MIN_HEIGHT);
-    resizer.setAttribute("aria-valuemax", String(max));
-    return max;
+    return Math.max(MIN_HEIGHT, Math.round(available - CHAT_MIN_HEIGHT));
   }
 
+  /** Saves what is actually drawn: an audio-only panel never goes below its
+   *  content (min-height: fit-content), so the saved height cannot sit under it. */
   function setHeight(height: number, max: number): void {
     savedHeight = Math.round(Math.max(MIN_HEIGHT, Math.min(height, max)));
     applyHeight();
+    const drawn = drawnHeight();
+    if (drawn > 0 && drawn !== savedHeight) {
+      savedHeight = drawn;
+      applyHeight();
+    }
   }
 
   function endDrag(): void {
