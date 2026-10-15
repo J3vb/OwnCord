@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -266,5 +267,26 @@ func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
 	}
 	if len(info.Recipients) != 0 {
 		t.Errorf("expected no recipients, got %d", len(info.Recipients))
+	}
+}
+
+// NewDMChannelInfo does not read read_states, so the pointer stays nil and the
+// field is omitted from the JSON rather than reported as 0. The
+// dm_channel_open frame is built the same way.
+func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
+	info := db.NewDMChannelInfo(7, "", false, []db.DMUser{{ID: 1}, {ID: 2}}, 1)
+	if info.LastReadMessageID != nil {
+		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)
+	}
+	raw, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, present := m["last_read_message_id"]; present {
+		t.Errorf("last_read_message_id must be omitted when unset: %s", raw)
 	}
 }

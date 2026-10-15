@@ -91,7 +91,9 @@ SELECT c.id,
                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
          LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
-                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
 WHERE c.type IN ('text', 'announcement')
    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
@@ -102,6 +104,7 @@ type GetChannelUnreadCountsParams struct {
 	UserID   int64 `json:"userId"`
 	UserID_2 int64 `json:"userId2"`
 	UserID_3 int64 `json:"userId3"`
+	UserID_4 int64 `json:"userId4"`
 }
 
 type GetChannelUnreadCountsRow struct {
@@ -109,10 +112,16 @@ type GetChannelUnreadCountsRow struct {
 	LastMsgID interface{} `json:"lastMsgId"`
 	Unread    int64       `json:"unread"`
 	Mentions  interface{} `json:"mentions"`
+	LastRead  interface{} `json:"lastRead"`
 }
 
 func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, arg.UserID, arg.UserID_2, arg.UserID_3)
+	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts,
+		arg.UserID,
+		arg.UserID_2,
+		arg.UserID_3,
+		arg.UserID_4,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +134,7 @@ func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnre
 			&i.LastMsgID,
 			&i.Unread,
 			&i.Mentions,
+			&i.LastRead,
 		); err != nil {
 			return nil, err
 		}

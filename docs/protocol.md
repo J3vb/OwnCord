@@ -479,7 +479,13 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+
+`last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
+the newest message id they have read, or `0` when they have no read state for the
+channel. It is not `last_message_id`, which is the newest live message in the
+channel. A client can place its NEW line after the pointer. It is plain data with
+no capability flag; an older server omits it.
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -533,7 +539,10 @@ as `99+`. The cap bounds the per-channel count on every connect — a channel wi
 thousands of never-read messages does not scan every row — so a client must not
 read `100` as an exact total.
 
-**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`
+**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`, `last_read_message_id`
+
+A DM's `last_read_message_id` is the caller's own read pointer for the DM, `0` when
+they have never read it. The same value is returned by `GET /api/v1/dms`.
 
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
@@ -2129,6 +2138,10 @@ The payload is the same shape as one entry of the `ready` payload's
 parse. It is built **per viewer**: `recipient` and `recipients` are both defined
 relative to who is reading them, and the reader never appears in their own
 `recipients`.
+
+The one exception to "same shape" is `last_read_message_id`: it comes from the
+read-state lookup behind `ready` and `GET /api/v1/dms`, which this event does not
+run, so it is **absent** here rather than reported as `0`.
 
 ```json
 {

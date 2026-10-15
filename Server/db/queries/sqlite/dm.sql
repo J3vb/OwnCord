@@ -72,7 +72,9 @@ SELECT
       LIMIT 100)
     ) AS unread_count,
     CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
-               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count,
+    CAST(COALESCE((SELECT rs.last_message_id FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS last_read_message_id
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (

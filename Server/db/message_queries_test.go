@@ -1611,3 +1611,52 @@ func TestGetMessagesAfterForAPI_AscendingAfterCursor(t *testing.T) {
 		t.Errorf("page after the newest = %d rows, want 0", len(none))
 	}
 }
+
+// LastReadMessageID is the caller's own read pointer, distinct from the
+// channel's newest message, and 0 for a channel with no read_states row.
+func TestGetChannelUnreadCounts_LastReadMessageID(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	reader := seedUser(t, database, "pointerreader")
+	other := seedUser(t, database, "pointerother")
+	read := seedChannel(t, database, "pointer-read")
+	untouched := seedChannel(t, database, "pointer-untouched")
+
+	first, err := database.CreateMessage(ctx, read, reader, "one", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	last, err := database.CreateMessage(ctx, read, reader, "two", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, untouched, reader, "x", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.UpdateReadState(ctx, reader, read, first); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	counts, err := database.GetChannelUnreadCounts(ctx, reader)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	if got := counts[read].LastReadMessageID; got != first {
+		t.Errorf("LastReadMessageID = %d, want %d", got, first)
+	}
+	if got := counts[read].LastMessageID; got != last {
+		t.Errorf("LastMessageID = %d, want newest message %d", got, last)
+	}
+	if got := counts[untouched].LastReadMessageID; got != 0 {
+		t.Errorf("channel with no read row: LastReadMessageID = %d, want 0", got)
+	}
+
+	// Another user's pointer must not leak into this user's answer.
+	otherCounts, err := database.GetChannelUnreadCounts(ctx, other)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts(other): %v", err)
+	}
+	if got := otherCounts[read].LastReadMessageID; got != 0 {
+		t.Errorf("other user LastReadMessageID = %d, want 0", got)
+	}
+}

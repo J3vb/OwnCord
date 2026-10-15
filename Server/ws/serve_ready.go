@@ -294,10 +294,12 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
 				entry["mention_count"] = u.MentionCount
+				entry["last_read_message_id"] = u.LastReadMessageID
 			} else {
 				entry["unread_count"] = 0
 				entry["last_message_id"] = 0
 				entry["mention_count"] = 0
+				entry["last_read_message_id"] = 0
 			}
 		}
 		channelPayloads = append(channelPayloads, entry)
