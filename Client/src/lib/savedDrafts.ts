@@ -60,9 +60,13 @@ function readAll(key: string, now: number): Map<string, StoredDraft> {
     if (raw === null) return out;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return out;
-    for (const [channel, draft] of Object.entries(parsed)) {
-      if (isStoredDraft(draft) && now - draft.savedAt < MAX_AGE_MS) out.set(channel, draft);
-    }
+    // Object keys that look like numbers come back in numeric order, so the
+    // save order is rebuilt from savedAt: oldest first, for the trim in saveDraft.
+    const live = Object.entries(parsed).filter(
+      (e): e is [string, StoredDraft] => isStoredDraft(e[1]) && now - e[1].savedAt < MAX_AGE_MS,
+    );
+    live.sort((a, b) => a[1].savedAt - b[1].savedAt);
+    for (const [channel, draft] of live) out.set(channel, draft);
   } catch {
     // Unavailable or corrupt storage reads as no drafts.
   }

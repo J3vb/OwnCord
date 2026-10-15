@@ -264,6 +264,21 @@ describe("composer polish (3A-3)", () => {
       comp.destroy?.();
     });
 
+    it("reports formatting applied from the keyboard", () => {
+      const onDraftChange = vi.fn();
+      const comp = createMessageInput(makeOptions({ onDraftChange }));
+      comp.mount(container);
+      textarea().value = "bold";
+      textarea().setSelectionRange(0, 4);
+      textarea().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
+      );
+      expect(textarea().value).toBe("**bold**");
+      expect(onDraftChange).toHaveBeenCalled();
+      expect(comp.peekDraft().content).toBe("**bold**");
+      comp.destroy?.();
+    });
+
     it("peeks the draft an edit displaced, not the edit text", () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);

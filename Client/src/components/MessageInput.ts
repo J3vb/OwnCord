@@ -709,10 +709,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
     updateCounter();
+    options.onDraftChange?.();
   }
 
-  /** Characters left near the limit, red past it. Every programmatic change to
-   *  the text goes through autoResize(), so the counter is refreshed there. */
+  /** Characters left near the limit, red past it. Every change to the text,
+   *  typed or programmatic (formatting, completions), goes through
+   *  autoResize(), so the counter and the draft hook are driven from there. */
   function updateCounter(): void {
     if (charCounter === null || textarea === null) return;
     const left = MAX_MESSAGE_LEN - [...textarea.value.trim()].length;
@@ -948,7 +950,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     autoResize();
     textarea.focus();
     clearUploadError();
-    options.onDraftChange?.();
   }
 
   /** A paste that would take the message past the limit goes up as
@@ -1532,7 +1533,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         syncAutocomplete();
         // An edit is the user acting on the refusal, so the line goes away.
         clearUploadError();
-        options.onDraftChange?.();
       },
       { signal },
     );

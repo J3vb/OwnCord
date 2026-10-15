@@ -47,6 +47,19 @@ describe("saved drafts (3A-3)", () => {
     expect(loadSavedDraft("a.example", 1, 10)).toBeNull();
   });
 
+  it("trims by save time, not by channel id", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let ch = 100; ch >= 51; ch--) {
+      saveDraft("a.example", 1, ch, { content: `c${ch}`, replyTo: null });
+      vi.setSystemTime(Date.now() + 1000);
+    }
+    // Channel 51 is the newest of the 50; a 51st draft evicts the oldest, 100.
+    saveDraft("a.example", 1, 1, { content: "c1", replyTo: null });
+    expect(loadSavedDraft("a.example", 1, 51)?.content).toBe("c51");
+    expect(loadSavedDraft("a.example", 1, 100)).toBeNull();
+    expect(loadSavedDraft("a.example", 1, 1)?.content).toBe("c1");
+  });
+
   it("drops a draft untouched for 30 days", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     saveDraft("a.example", 1, 10, { content: "old", replyTo: null });
