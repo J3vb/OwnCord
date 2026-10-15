@@ -1357,6 +1357,26 @@ ul.md-list-nested {
 .reply-bar-inner strong {
   color: var(--text-normal);
 }
+.reply-bar .reply-ping {
+  margin-left: auto;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-link);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.reply-bar .reply-ping.off {
+  color: var(--text-muted);
+}
+.reply-bar .reply-ping:hover {
+  background: var(--scrim-hover);
+}
+.reply-bar .reply-ping:not([hidden]) + .reply-close {
+  margin-left: 0;
+}
 .reply-bar .reply-close {
   width: 24px;
   height: 24px;

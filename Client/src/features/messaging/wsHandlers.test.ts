@@ -14,6 +14,7 @@ import {
   addMessage,
   setMessagePinned,
   addOptimisticMessage,
+  addOptimisticReaction,
   markSendFailed,
   resetMessagesStore,
 } from "../../stores/messages.store";
@@ -260,6 +261,23 @@ describe("handleMessagingError", () => {
         .messagesByChannel.get(1)
         ?.some((m) => m.correlationId === "corr-1"),
     ).toBe(false);
+  });
+
+  it("rolls back a refused reaction and names the 20-emoji limit (3A-12)", () => {
+    addMessage(chat(77, "2026-03-15T10:00:00Z"));
+    addOptimisticReaction("react-1", { channelId: 1, messageId: 77, emoji: "🎉", action: "add" });
+
+    expect(handleMessagingError({ code: "REACTION_LIMIT", message: "" }, "react-1")).toBe(true);
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.find((m) => m.id === 77)?.reactions,
+    ).toEqual([]);
+    expect(showToast).toHaveBeenCalledWith(
+      "This message has reached the reaction limit (20)",
+      "error",
+    );
   });
 
   it("leaves an error with no matching send or reaction to the rest of the chain", () => {

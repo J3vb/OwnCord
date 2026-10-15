@@ -524,6 +524,8 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
   // A failed optimistic reaction toggle: the pill reverting is the
   // feedback the spec asks for (ux/messaging §5) — no toast on top.
   if (id !== undefined && rollbackReaction(id)) {
+    // 3A-12: the cap is not visible from the pill alone, so say why it reverted.
+    if (payload.code === "REACTION_LIMIT") showToast(connectText("app.reactionLimit"), "error");
     return true;
   }
   return false;
