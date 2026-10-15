@@ -209,4 +209,46 @@ describe("resolveVideoCodec", () => {
     }
     expect(encodingInfo).not.toHaveBeenCalled();
   });
+
+  describe("at 120 fps (M-2)", () => {
+    it("uses Auto's hardware rule when the saved choice is VP8", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          video: expect.objectContaining({ width: 1920, height: 1080, framerate: 120 }),
+        }),
+      );
+    });
+
+    it("keeps VP8 on Intel graphics", async () => {
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps VP8 when the hardware cannot take 120 fps", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps a saved H.264 without probing", async () => {
+      savePref("h264");
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("does not probe a saved VP8 at 60 fps", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 3_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("stays VP8 on the Linux native path", async () => {
+      isLinuxDesktop.mockReturnValue(true);
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+  });
 });
