@@ -353,6 +353,15 @@ pub struct AudioOptions {
     pub enhanced_noise_suppression: bool,
 }
 
+/// Keep `old` until nothing but this list holds it. A lagging audio
+/// callback can still hold an older generation after a second rebuild, so
+/// drop only the entries every follower has let go of, here on the caller's
+/// thread.
+fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+    retired.retain(|r| Arc::strong_count(r) > 1);
+    retired.extend(old);
+}
+
 /// What a request to change the audio processing asks of a session.
 #[derive(Debug, PartialEq, Eq)]
 enum ProcessingChange {
@@ -627,9 +636,10 @@ pub struct NativeSession {
     /// The options `apm` was built from, or the latest asked for before
     /// `enable_audio` ran.
     audio: Option<AudioOptions>,
-    /// The processing a rebuild replaced, kept until the next rebuild or the
-    /// session's end so its last reference is never dropped on an audio thread.
-    retired: Option<Arc<Apm>>,
+    /// Processing that rebuilds replaced, each kept until the capture and
+    /// playout have both moved past it, so its last reference is never
+    /// dropped on an audio thread.
+    retired: Vec<Arc<Apm>>,
     /// The published microphone track — not its publication: a full
     /// reconnect republishes the same track under a new publication and
     /// detaches the old one, so muting through a stored publication would
@@ -746,7 +756,7 @@ impl NativeSession {
             room,
             key_provider,
             apm: None,
-            retired: None,
+            retired: Vec::new(),
             audio: None,
             mic: None,
             mic_source: None,
@@ -860,7 +870,7 @@ impl NativeSession {
                 self.playout.set_reference(apm.clone());
                 self.capture
                     .set_processing(apm.clone(), audio.enhanced_noise_suppression);
-                self.retired = self.apm.replace(apm);
+                retire(&mut self.retired, self.apm.replace(apm));
                 self.audio = Some(audio);
             }
         }
@@ -1547,6 +1557,19 @@ mod tests {
     use super::*;
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
     use livekit_protocol as proto;
+
+    #[test]
+    fn retire_keeps_every_generation_a_follower_still_holds() {
+        let mut retired = Vec::new();
+        let first = Arc::new(1);
+        let held_by_lagging_callback = first.clone();
+        retire(&mut retired, Some(first));
+        retire(&mut retired, Some(Arc::new(2)));
+        assert_eq!(retired.len(), 2, "the first generation is still held");
+        drop(held_by_lagging_callback);
+        retire(&mut retired, None);
+        assert!(retired.is_empty(), "unheld generations are freed here");
+    }
 
     fn permission(
         can_publish: bool,
