@@ -662,6 +662,7 @@ describe("global keybinds", () => {
         localStorage.removeItem("owncord:settings:inputMode");
         localStorage.removeItem("owncord:settings:pttVk");
       });
+      mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
       const h = makeHandlers();
       detach = attachGlobalKeybinds(h);
       const box = composer();
@@ -673,6 +674,24 @@ describe("global keybinds", () => {
 
       keyOn(document.body, "h", { keyCode: 0x48 });
       expect(document.activeElement).toBe(box);
+
+      // Outside a call the key is just a letter.
+      mockVoiceGetState.mockReturnValue({ currentChannelId: null });
+      box.blur();
+      keyOn(document.body, "v", { keyCode: 0x56 });
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("a character typed with AltGr (Ctrl+Alt on Windows) starts a message", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+      box.blur();
+
+      keyOn(document.body, "@", { ctrlKey: true, altKey: true, modifierAltGraph: true });
+
+      expect(document.activeElement).toBe(box);
+      expect(h.onSearch).not.toHaveBeenCalled();
     });
 
     it("Ctrl+E and Ctrl+G toggle the emoji and GIF pickers, also from the message box", () => {

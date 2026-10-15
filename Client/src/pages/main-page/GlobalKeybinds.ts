@@ -70,7 +70,10 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   const handler = (e: KeyboardEvent): void => {
     if (handlers.isSuspended?.() === true) return;
 
-    if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+    // AltGr arrives as Ctrl+Alt on Windows; a character typed with it (@ on
+    // AZERTY) is plain typing, not a shortcut.
+    const altGrChar = e.key.length === 1 && e.getModifierState("AltGraph");
+    if ((!e.ctrlKey && !e.metaKey && !e.altKey) || altGrChar) {
       handlePlainKey(e);
       return;
     }
@@ -223,10 +226,10 @@ function inPicker(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(".emoji-picker, .gif-picker") !== null;
 }
 
-/** The bound push-to-talk key, while Push to Talk is the input mode. `keyCode`
+/** The bound push-to-talk key, in a call with Push to Talk as the input mode. `keyCode`
  *  is the Windows VK the native poller uses, on every platform for these keys. */
 function isPttKey(e: KeyboardEvent): boolean {
-  if (inputMode() !== "ptt") return false;
+  if (!inVoice() || inputMode() !== "ptt") return false;
   const vk = loadPref<number>("pttVk", 0);
   return vk !== 0 && e.keyCode === vk;
 }
