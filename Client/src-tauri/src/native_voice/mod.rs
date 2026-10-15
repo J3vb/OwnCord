@@ -330,18 +330,38 @@ pub async fn native_voice_set_ptt_gated(
 
 /// Set the input-sensitivity gate on `session`'s microphone: the RMS level
 /// (web path's `vadThreshold` scale) that counts as speech, 0 for no gate.
+/// `retune` moves the level without restarting the detector, for automatic
+/// sensitivity's steps.
 #[tauri::command]
 pub async fn native_voice_set_voice_gate(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
     threshold: f32,
+    retune: Option<bool>,
 ) -> Result<(), String> {
     state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_voice_gate(threshold);
+        .set_voice_gate(threshold, retune.unwrap_or(false));
+    Ok(())
+}
+
+/// Set `session`'s input volume, 0-200 % as the web path's `inputVolume`
+/// pref: a linear gain on the processed microphone, before the voice gate.
+#[tauri::command]
+pub async fn native_voice_set_input_gain(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    percent: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_input_gain(percent / 100.0);
     Ok(())
 }
 

@@ -15,7 +15,9 @@ export const nativeVoice: NativeVoice = {
   setMicrophone: async (session, enabled, bitrate) =>
     (await service()).setMicrophone(session, enabled, bitrate),
   setPttGated: async (session, gated) => (await service()).setPttGated(session, gated),
-  setVoiceGate: async (session, threshold) => (await service()).setVoiceGate(session, threshold),
+  setVoiceGate: async (session, threshold, retune) =>
+    (await service()).setVoiceGate(session, threshold, retune),
+  setInputGain: async (session, percent) => (await service()).setInputGain(session, percent),
   setSubscribed: async (session, identity, sid, subscribed) =>
     (await service()).setSubscribed(session, identity, sid, subscribed),
   setVideoView: async (session, identity, sid, enabled, quality) =>

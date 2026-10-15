@@ -979,6 +979,12 @@ export class LiveKitSession {
     this._media.setInputVolume(volume);
   }
 
+  /** Hear the call capture's level reports where the room captures on its
+   *  own (Linux native engine). Returns the unsubscribe. */
+  onNativeInputLevel(listener: (rms: number | null, open: boolean) => void): () => void {
+    return this._audioPipeline.onRoomInputLevel(listener);
+  }
+
   setOutputVolume(volume: number): void {
     this._media.setOutputVolume(volume);
   }
@@ -1161,6 +1167,7 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setUserLocalMute = session.setUserLocalMute.bind(session);
 export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
+export const onNativeInputLevel = session.onNativeInputLevel.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const applyInputMode = session.applyInputMode.bind(session);
