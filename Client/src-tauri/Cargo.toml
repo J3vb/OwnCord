@@ -169,8 +169,7 @@ zeroize = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
 # XInput2 pointer query for Mouse 4/5 push to talk (mouse_buttons.rs):
-# device_query's core XQueryPointer stops at Button5. Also the startup
-# dialog's check that $DISPLAY opens (lib.rs). Loads Xlib and libXi at
+# device_query's core XQueryPointer stops at Button5. Loads Xlib and libXi at
 # runtime; already in the tree under tao, so no new crate or build.
 x11-dl = "2.21"
 # sigaction/prctl/dlsym for crash_log.rs, the last log line of a native
@@ -224,6 +223,10 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# The startup error dialog (lib.rs): shown with GTK directly on the main
+# thread, since rfd's GTK dialog never appears once tao has started GTK. Same
+# 0.18 line tao, wry and webkit2gtk already build, so no new crate.
+gtk = "0.18"
 # Native Linux camera capture (native_voice/camera.rs). WebKitGTK freezes a
 # hidden page's <video> element and stops requestVideoFrameCallback, so the
 # webview camera pump (features/voice/native/cameraUplink.ts) stalls whenever

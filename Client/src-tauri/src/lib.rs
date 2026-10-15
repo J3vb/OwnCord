@@ -292,9 +292,8 @@ pub fn run() {
         ])
         .setup(|app| {
             // A setup error makes Tauri panic inside run(), past the Err arm
-            // below, so it gets the same dialog here first. Setup runs on
-            // the event loop, so the display is already open.
-            setup_app(app).inspect_err(|e| show_startup_failure(&e.to_string(), true))
+            // below, so it gets the same dialog here first.
+            setup_app(app).inspect_err(|e| show_startup_failure(&e.to_string()))
         })
         .build(tauri::generate_context!())
     {
@@ -324,7 +323,7 @@ pub fn run() {
             });
         }
         Err(e) => {
-            show_startup_failure(&e.to_string(), false);
+            show_startup_failure(&e.to_string());
             std::process::exit(1);
         }
     }
@@ -420,240 +419,87 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Logs a fatal startup error and shows it in a dialog. On Linux the dialog
-/// needs a display that opens: with none (a headless run) or a stale one (an
-/// ended SSH session, a dead Wayland socket) the dialog toolkit cannot start
-/// and its caller would wait forever, so the stderr line stands alone.
-/// `display_open` says the app already holds an open display, so no probe is
-/// needed.
-fn show_startup_failure(error: &str, display_open: bool) {
+/// Logs a fatal startup error and shows it in a dialog.
+fn show_startup_failure(error: &str) {
     eprintln!("Fatal startup error: {error}");
     log::error!("[exit] fatal startup error: {error}");
     #[cfg(target_os = "linux")]
-    exit_watch::note_exit("startup failed");
-    #[cfg(target_os = "linux")]
-    let show_dialog = display_open || display_opens();
+    {
+        exit_watch::note_exit("startup failed");
+        show_linux_startup_dialog(error);
+    }
     #[cfg(not(target_os = "linux"))]
-    let show_dialog = {
-        let _ = display_open;
-        true
-    };
-    if show_dialog {
-        rfd::MessageDialog::new()
-            .set_title(text::STARTUP_DIALOG_TITLE)
-            .set_description(text::startup_dialog_body(error))
-            .set_level(rfd::MessageLevel::Error)
-            .show();
-    }
+    rfd::MessageDialog::new()
+        .set_title(text::STARTUP_DIALOG_TITLE)
+        .set_description(text::startup_dialog_body(error))
+        .set_level(rfd::MessageLevel::Error)
+        .show();
 }
 
-/// Whether a display GTK is allowed to use actually accepts a connection.
-/// `GDK_BACKEND` limits GTK to the backends it names, so a live display of
-/// another kind does not count.
+/// The startup error dialog on Linux, run on this (the GTK main) thread.
+/// rfd's GTK dialog runs on a thread of its own and never appears once tao
+/// has started GTK here, which it does before anything can fail, so the
+/// process would wait on it forever. GTK is started here only if it is not
+/// running yet; with no display that fails at once and stderr stands alone.
 #[cfg(target_os = "linux")]
-fn display_opens() -> bool {
-    let allowed = gdk_backends(std::env::var_os("GDK_BACKEND").as_deref());
-    // A compositor can hand over a connected socket in WAYLAND_SOCKET instead
-    // of naming one; it is consumed when GTK starts, so while it is still set
-    // it is live.
-    let wayland = || {
-        std::env::var_os("WAYLAND_SOCKET").is_some_and(|fd| !fd.is_empty())
-            || wayland_socket(
-                std::env::var_os("WAYLAND_DISPLAY"),
-                std::env::var_os("XDG_RUNTIME_DIR"),
-            )
-            .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
-    };
-    let x11 = || {
-        std::env::var_os("DISPLAY")
-            .is_some_and(|display| x11_display_opens_within(display, X11_PROBE_TIMEOUT))
-    };
-    (allowed.wayland && wayland()) || (allowed.x11 && x11())
-}
-
-/// How long the startup check waits for an X server to answer. A forwarded
-/// display that drops packets can hold XOpenDisplay for minutes.
-#[cfg(target_os = "linux")]
-const X11_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// `x11_display_opens` on a helper thread, given up after `timeout`. The
-/// process exits right after a startup failure, so a probe still stuck in
-/// XOpenDisplay is left behind rather than joined.
-#[cfg(target_os = "linux")]
-fn x11_display_opens_within(name: std::ffi::OsString, timeout: std::time::Duration) -> bool {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("x11-display-probe".into())
-        .spawn(move || {
-            let _ = tx.send(x11_display_opens(&name));
-        });
-    spawned.is_ok() && rx.recv_timeout(timeout).unwrap_or(false)
-}
-
-/// The display backends GTK may try under `GDK_BACKEND`: both when it is
-/// unset, empty or holds `*`, otherwise only those it lists.
-#[cfg(target_os = "linux")]
-#[derive(Debug, PartialEq, Eq)]
-struct GdkBackends {
-    wayland: bool,
-    x11: bool,
-}
-
-#[cfg(target_os = "linux")]
-fn gdk_backends(value: Option<&std::ffi::OsStr>) -> GdkBackends {
-    let value = value.map(|v| v.to_string_lossy()).unwrap_or_default();
-    let names: Vec<&str> = value
-        .split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect();
-    if names.is_empty() || names.contains(&"*") {
-        return GdkBackends {
-            wayland: true,
-            x11: true,
-        };
+fn show_linux_startup_dialog(error: &str) {
+    use gtk::prelude::*;
+    if !gtk::is_initialized_main_thread() && gtk::init().is_err() {
+        return;
     }
-    GdkBackends {
-        wayland: names.contains(&"wayland"),
-        x11: names.contains(&"x11"),
-    }
-}
-
-/// The Wayland socket `WAYLAND_DISPLAY` names: an absolute path as is, a bare
-/// name under `XDG_RUNTIME_DIR`.
-#[cfg(target_os = "linux")]
-fn wayland_socket(
-    wayland_display: Option<std::ffi::OsString>,
-    runtime_dir: Option<std::ffi::OsString>,
-) -> Option<std::path::PathBuf> {
-    let name = std::path::PathBuf::from(wayland_display.filter(|v| !v.is_empty())?);
-    if name.is_absolute() {
-        return Some(name);
-    }
-    let dir = runtime_dir.filter(|v| !v.is_empty())?;
-    Some(std::path::Path::new(&dir).join(name))
-}
-
-/// Opens and closes the X display `name` through Xlib, loaded at runtime.
-#[cfg(target_os = "linux")]
-fn x11_display_opens(name: &std::ffi::OsStr) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(name) = std::ffi::CString::new(name.as_bytes()) else {
-        return false;
-    };
-    if name.is_empty() {
-        return false;
-    }
-    let Ok(xlib) = x11_dl::xlib::Xlib::open() else {
-        return false;
-    };
-    // SAFETY: name is a valid C string; a non-null result is closed once.
-    unsafe {
-        let display = (xlib.XOpenDisplay)(name.as_ptr());
-        if display.is_null() {
-            return false;
-        }
-        (xlib.XCloseDisplay)(display);
-    }
-    true
+    let dialog = gtk::MessageDialog::new(
+        None::<&gtk::Window>,
+        gtk::DialogFlags::MODAL,
+        gtk::MessageType::Error,
+        gtk::ButtonsType::Ok,
+        &text::startup_dialog_body(error),
+    );
+    dialog.set_title(text::STARTUP_DIALOG_TITLE);
+    dialog.run();
+    // SAFETY: the dialog is ours alone and not used after this.
+    unsafe { dialog.destroy() };
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod startup_dialog_tests {
-    use super::{gdk_backends, wayland_socket, GdkBackends};
-    use std::ffi::{OsStr, OsString};
-    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    #[test]
-    fn a_bare_wayland_name_lives_in_the_runtime_dir() {
-        assert_eq!(
-            wayland_socket(
-                Some(OsString::from("wayland-0")),
-                Some(OsString::from("/run/user/1000"))
-            ),
-            Some(PathBuf::from("/run/user/1000/wayland-0"))
-        );
-        assert_eq!(
-            wayland_socket(Some(OsString::from("/tmp/wl")), None),
-            Some(PathBuf::from("/tmp/wl"))
-        );
-    }
-
-    #[test]
-    fn gdk_backend_limits_which_displays_count() {
-        let both = GdkBackends {
-            wayland: true,
-            x11: true,
-        };
-        assert_eq!(gdk_backends(None), both);
-        assert_eq!(gdk_backends(Some(OsStr::new(""))), both);
-        assert_eq!(gdk_backends(Some(OsStr::new("*"))), both);
-        assert_eq!(gdk_backends(Some(OsStr::new("wayland,*"))), both);
-        assert_eq!(
-            gdk_backends(Some(OsStr::new("x11"))),
-            GdkBackends {
-                wayland: false,
-                x11: true
-            }
-        );
-        assert_eq!(
-            gdk_backends(Some(OsStr::new("wayland"))),
-            GdkBackends {
-                wayland: true,
-                x11: false
-            }
-        );
-        assert_eq!(
-            gdk_backends(Some(OsStr::new("broadway"))),
-            GdkBackends {
-                wayland: false,
-                x11: false
-            }
-        );
-    }
-
-    #[test]
-    fn no_wayland_name_or_runtime_dir_means_no_socket() {
-        assert_eq!(wayland_socket(None, Some(OsString::from("/run"))), None);
-        assert_eq!(
-            wayland_socket(Some(OsString::new()), Some(OsString::from("/run"))),
-            None
-        );
-        assert_eq!(
-            wayland_socket(Some(OsString::from("wayland-0")), None),
-            None
-        );
-    }
-
-    /// Needs a display: `xvfb-run cargo test -- --ignored x11`.
+    /// Needs a display of its own, `xvfb-run cargo test -- --ignored
+    /// gtk_startup` (not with the `x11` tests, which count windows). GTK is
+    /// started first, as tao does before anything can fail, and the dialog
+    /// must still appear; a check on GTK's own loop answers it once mapped.
     #[test]
     #[ignore = "needs an X display (xvfb-run)"]
-    fn x11_a_live_display_opens_and_a_stale_one_does_not() {
-        let live = std::env::var_os("DISPLAY").expect("xvfb-run sets DISPLAY");
-        assert!(super::x11_display_opens(&live));
-        assert!(!super::x11_display_opens(&OsString::from(":97")));
-        assert!(!super::x11_display_opens(&OsString::new()));
-    }
-
-    /// An X server that takes the connection but never answers must not hold
-    /// the startup-error path.
-    #[test]
-    fn an_unanswering_x_server_is_given_up_on() {
-        let (listener, display) = (50..100)
-            .find_map(|n| {
-                std::net::TcpListener::bind(("127.0.0.1", 6000 + n))
-                    .ok()
-                    .map(|l| (l, format!("127.0.0.1:{n}")))
-            })
-            .expect("a free X display port");
-        let started = std::time::Instant::now();
-        let opened = super::x11_display_opens_within(
-            OsString::from(display),
-            std::time::Duration::from_millis(300),
-        );
-        assert!(!opened);
-        assert!(started.elapsed() < std::time::Duration::from_secs(2));
-        drop(listener);
+    fn gtk_startup_dialog_appears_after_gtk_started() {
+        use gtk::prelude::*;
+        gtk::init().expect("xvfb-run provides a display");
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(10));
+            eprintln!("the startup dialog never appeared");
+            std::process::exit(1);
+        });
+        let seen = Arc::new(AtomicBool::new(false));
+        let seen_by_check = Arc::clone(&seen);
+        gtk::glib::timeout_add(Duration::from_millis(100), move || {
+            let dialog = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk::MessageDialog>().ok())
+                .find(|d| {
+                    d.is_mapped() && d.title().as_deref() == Some(super::text::STARTUP_DIALOG_TITLE)
+                });
+            match dialog {
+                Some(dialog) => {
+                    seen_by_check.store(true, Ordering::SeqCst);
+                    dialog.response(gtk::ResponseType::Ok);
+                    gtk::glib::ControlFlow::Break
+                }
+                None => gtk::glib::ControlFlow::Continue,
+            }
+        });
+        super::show_linux_startup_dialog("test failure");
+        assert!(seen.load(Ordering::SeqCst));
     }
 }
 
