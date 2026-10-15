@@ -2031,7 +2031,8 @@ published identity key but the signature is missing/invalid → reject).
   "type": "voice_e2ee_announce",
   "payload": {
     "public_key": "base64-ecdh-pubkey",
-    "signature": "base64-ecdsa-signature"
+    "signature": "base64-ecdsa-signature",
+    "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
@@ -2040,11 +2041,21 @@ The server validates `signature` like `public_key` (standard-alphabet base64,
 max 128 chars) and stores it alongside the key, but never verifies it — only
 clients hold the pinned identity keys.
 
+`video_decode` is optional: the video codecs this participant can decode, as
+lowercase MIME subtypes (`vp8`, `h264`, `vp9`, `h265`, `av1`), so a screen
+sharer can pick a codec every viewer can decrypt and render. The server treats
+the values as opaque but accepts at most 8 entries, each 1-16 characters of
+`[a-z0-9]`. If the list breaks that rule the server drops the whole field and
+still accepts the announce — a bad list never affects the key. Each announce
+replaces the stored list; an announce without the field clears it. Receivers
+treat an absent or empty list as `["vp8", "h264"]`.
+
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
 Relayed to the other participants with the sender's user ID attached. Also
-replayed to late joiners from the stored key+signature. `signature` is
-omitted when the announcing client did not send one:
+replayed to late joiners (and to a resumed socket) from the stored
+key+signature+list. `signature` and `video_decode` are omitted when the
+announcing client did not send them (or sent an invalid `video_decode`):
 
 ```json
 {
@@ -2052,7 +2063,8 @@ omitted when the announcing client did not send one:
   "payload": {
     "user_id": 1,
     "public_key": "base64-ecdh-pubkey",
-    "signature": "base64-ecdsa-signature"
+    "signature": "base64-ecdsa-signature",
+    "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```

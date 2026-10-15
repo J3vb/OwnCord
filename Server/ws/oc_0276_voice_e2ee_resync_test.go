@@ -42,7 +42,7 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	peerSend := make(chan []byte, 8)
 	peer := &Client{userID: peerID, send: peerSend, sendHigh: peerSend, sendLow: peerSend}
 	peer.voiceChID = chanID
-	peer.e2eePubKey = "peer-pub-key-b64"
+	peer.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
 	hub.clients[peerID] = peer
 	hub.mu.Unlock()
@@ -84,7 +84,7 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 		if err := json.Unmarshal(msg, &env); err != nil {
 			t.Fatalf("unmarshal message sent to resumed client: %v (raw=%s)", err, msg)
 		}
-		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == peerID && env.Payload.PublicKey == peer.e2eePubKey {
+		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == peerID && env.Payload.PublicKey == peer.e2ee.key {
 			gotAnnounce = true
 		}
 	}

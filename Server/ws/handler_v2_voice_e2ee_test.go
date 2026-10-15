@@ -23,11 +23,11 @@ func TestVoiceE2EEAnnounceV2_HappyPath(t *testing.T) {
 	}
 
 	// Should set the E2EE public key on the client via Result.
-	if result.SetE2EEPubKey == nil {
-		t.Fatal("expected SetE2EEPubKey to be set")
+	if result.SetE2EEAnnounce == nil {
+		t.Fatal("expected SetE2EEAnnounce to be set")
 	}
-	if *result.SetE2EEPubKey != validB64Key {
-		t.Errorf("expected SetE2EEPubKey %q, got %q", validB64Key, *result.SetE2EEPubKey)
+	if result.SetE2EEAnnounce.key != validB64Key {
+		t.Errorf("expected SetE2EEAnnounce key %q, got %q", validB64Key, result.SetE2EEAnnounce.key)
 	}
 
 	// Should emit a VoiceE2EEAnnounceEvent to the voice channel.
@@ -154,11 +154,11 @@ func TestVoiceE2EEAnnounceV2_SignatureStored(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
-	if result.SetE2EEPubKey == nil || *result.SetE2EEPubKey != validB64Key {
-		t.Fatalf("SetE2EEPubKey = %v, want %q", result.SetE2EEPubKey, validB64Key)
+	if result.SetE2EEAnnounce == nil || result.SetE2EEAnnounce.key != validB64Key {
+		t.Fatalf("SetE2EEAnnounce = %+v, want key %q", result.SetE2EEAnnounce, validB64Key)
 	}
-	if result.SetE2EESignature == nil || *result.SetE2EESignature != validB64Sig {
-		t.Fatalf("SetE2EESignature = %v, want %q", result.SetE2EESignature, validB64Sig)
+	if result.SetE2EEAnnounce.sig != validB64Sig {
+		t.Fatalf("SetE2EEAnnounce sig = %q, want %q", result.SetE2EEAnnounce.sig, validB64Sig)
 	}
 	// The relayed payload must carry the signature.
 	if len(result.Events) != 1 {
@@ -180,8 +180,8 @@ func TestVoiceE2EEAnnounceV2_NoSignature_LegacyAccepted(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("legacy announce without signature must be accepted, got: %v", result.Error)
 	}
-	if result.SetE2EESignature != nil {
-		t.Errorf("SetE2EESignature = %q, want nil for legacy announce", *result.SetE2EESignature)
+	if result.SetE2EEAnnounce == nil || result.SetE2EEAnnounce.sig != "" {
+		t.Errorf("SetE2EEAnnounce = %+v, want key set and empty sig for legacy announce", result.SetE2EEAnnounce)
 	}
 	evt := result.Events[0].(VoiceChannelEvent)
 	if strings.Contains(string(evt.Payload()), "signature") {
@@ -207,7 +207,7 @@ func TestVoiceE2EEAnnounceV2_SignatureInvalidBase64(t *testing.T) {
 	if ce.Code != ErrCodeBadPayload {
 		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
 	}
-	if result.SetE2EEPubKey != nil {
+	if result.SetE2EEAnnounce != nil {
 		t.Error("invalid signature must not store the public key")
 	}
 }

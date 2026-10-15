@@ -42,14 +42,11 @@ type Result struct {
 	// ready or snapshot built after the presence frame was queued cannot miss
 	// the change.
 	SetPresence *livePresence
-	// SetE2EEPubKey, if non-nil, stores the ECDH public key on the client.
-	// Used by voice_e2ee_announce to persist the key for later retrieval.
-	SetE2EEPubKey *string
-	// SetE2EESignature, if non-nil, stores the identity-key signature over
-	// the announced ephemeral key (F3 TOFU) alongside SetE2EEPubKey, so the
-	// late-joiner replay path relays it. Only meaningful when SetE2EEPubKey
-	// is also set; nil for legacy announces without a signature.
-	SetE2EESignature *string
+	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE
+	// announce (ECDH key, F3 TOFU signature, WP M-4 video decode list) so the
+	// late-joiner replay, resume and grace-window paths relay it. nil means
+	// no change.
+	SetE2EEAnnounce *e2eeAnnounce
 	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client.
 	// Used by voice_token_refresh when falling back to the DB for the token.
 	SetVoiceJoinToken *string

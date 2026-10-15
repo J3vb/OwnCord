@@ -247,6 +247,9 @@ type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
 	Signature string `json:"signature,omitempty"`
+	// VideoDecode is the sender's sanitized decodable video codec list
+	// (WP M-4), omitted when absent so legacy announces serialize unchanged.
+	VideoDecode []string `json:"video_decode,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -707,14 +710,15 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 }
 
 // buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
-// signature may be "" (legacy announce) — the field is then omitted.
-func buildVoiceE2EEAnnounce(userID int64, publicKey, signature string) []byte {
+// An empty signature (legacy announce) or video decode list is omitted.
+func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
 		Payload: voiceE2EEAnnounceBroadcast{
-			UserID:    userID,
-			PublicKey: publicKey,
-			Signature: signature,
+			UserID:      userID,
+			PublicKey:   a.key,
+			Signature:   a.sig,
+			VideoDecode: a.videoDecode,
 		},
 	})
 }
