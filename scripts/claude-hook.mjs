@@ -30,8 +30,8 @@ const NVM = "/opt/nvm/nvm.sh";
 // warning: the session must start even with no network.
 function cloudToolchain() {
   let bin = "";
-  if (Number(process.versions.node.split(".")[0]) >= NODE_MAJOR) {
-    // already new enough: only node_modules may be missing
+  if (Number(process.versions.node.split(".")[0]) === NODE_MAJOR) {
+    // the major both package.json engines pin: only node_modules may be missing
   } else if (existsSync(NVM)) {
     try {
       bin = execFileSync(
@@ -57,7 +57,7 @@ function cloudToolchain() {
     }
   } else {
     console.log(
-      `WARNING: Node ${process.versions.node} is older than ${NODE_MAJOR} and nvm is not at ${NVM}.`,
+      `WARNING: Node ${process.versions.node} is not ${NODE_MAJOR} and nvm is not at ${NVM}.`,
     );
     return;
   }
