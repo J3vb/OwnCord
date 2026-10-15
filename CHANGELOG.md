@@ -57,6 +57,7 @@ and only when it changes something a contributor or fork holder must do
 **Profiles**
 
 - The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
+- A custom status can clear itself: `presence_update` takes an optional `custom_status_expires_in` (60 seconds to 7 days), the server clears the status at that moment and tells everyone with a `presence` whose `custom_status` is `null`, and an expired status no longer comes back when you reconnect. Your own `auth_ok.user` and `/users/me` carry `custom_status_expires_at`; nobody else sees it. The desktop app's "Clear after" picker follows in a later change.
 
 **Messaging**
 
@@ -105,6 +106,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
 - Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
 - Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.

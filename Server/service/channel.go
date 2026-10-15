@@ -18,6 +18,10 @@ type ChannelService struct {
 	st    Store
 	perms *PermissionService
 	batch *ConnWrites
+	// wakeExpiry nudges the custom status expirer after a status with an
+	// expiry commits; nil when none is installed.
+	wakeExpiry func()
+	now        func() time.Time
 }
 
 // NewChannelService creates a ChannelService.
@@ -25,8 +29,14 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	return &ChannelService{
 		st:    st,
 		perms: perms,
+		now:   time.Now,
 	}
 }
+
+// SetExpiryWake installs the callback a committed custom status with an
+// expiry calls so the expirer re-reads its deadline. Call once at startup,
+// before the service is shared.
+func (s *ChannelService) SetExpiryWake(wake func()) { s.wakeExpiry = wake }
 
 // SetConnWrites installs the batch whose pending connect stamp a committed
 // presence_update drops. Call once at startup, before the service is shared.
@@ -148,26 +158,46 @@ func (s *ChannelService) GetDMParticipantIDs(ctx context.Context, channelID int6
 	return s.st.GetDMParticipantIDs(ctx, channelID)
 }
 
+// PresenceResult is what a committed presence_update leaves on the wire.
+type PresenceResult struct {
+	// CustomStatus is the sanitized line to publish (nil = none).
+	CustomStatus *string
+	// ExpiresAt is the stored expiry of CustomStatus in
+	// db.CustomStatusExpiryLayout, "" when it has none. For a bare status flip
+	// it is the expiry already stored with the text it carries.
+	ExpiresAt string
+}
+
 // HandlePresenceUpdate validates and persists a presence status change, and
 // (when customStatus is non-nil) the custom status line that came with it.
+//
+// expiresIn, in seconds (MinCustomStatusExpirySeconds to
+// MaxCustomStatusExpirySeconds), makes the line clear itself; it is valid only
+// with a non-empty customStatus. A new line without it has no expiry and
+// replaces any old one, a bare flip leaves text and expiry alone, and an empty
+// line clears both.
 //
 // The status is stored as chosen, invisible included; collapsing invisible to
 // offline is a broadcast-time concern (db.BroadcastStatus), not a storage one —
 // the server has to be able to tell "chose to look offline" from "is gone" on
 // the next connect. Returns the sanitized custom status the caller should put
 // on the wire, so the broadcast and the row can never disagree.
-func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, customStatus *string, limiter interface {
+func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, customStatus *string, expiresIn *int64, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
-) (*string, error) {
+) (PresenceResult, error) {
 	// Rate limit.
 	ratKey := auth.Key("presence", userID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 10*time.Second) {
-		return nil, ErrRateLimited
+		return PresenceResult{}, ErrRateLimited
 	}
 
 	if !db.ValidStatuses[status] {
-		return nil, fmt.Errorf("%w: invalid status", ErrBadRequest)
+		return PresenceResult{}, fmt.Errorf("%w: invalid status", ErrBadRequest)
+	}
+	if expiresIn != nil && (*expiresIn < MinCustomStatusExpirySeconds || *expiresIn > MaxCustomStatusExpirySeconds) {
+		return PresenceResult{}, fmt.Errorf("%w: custom_status_expires_in must be %d to %d seconds",
+			ErrBadRequest, MinCustomStatusExpirySeconds, MaxCustomStatusExpirySeconds)
 	}
 
 	var cleaned *string
@@ -179,48 +209,72 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		// reaches the equivalent guard on SetCustomStatus/UpdateProfile.
 		text, err := cleanTextBounded(*customStatus, MaxCustomStatusLen, "custom_status")
 		if err != nil {
-			return nil, err
+			return PresenceResult{}, err
 		}
 		cleaned = nullable(text)
+	}
+	if expiresIn != nil && cleaned == nil {
+		return PresenceResult{}, fmt.Errorf("%w: custom_status_expires_in needs a non-empty custom_status", ErrBadRequest)
 	}
 	// A custom status line is the user's own text shown to every member, so
 	// a timeout refuses setting one; a plain status change or clearing the
 	// line publishes nothing of theirs and stays allowed.
 	if cleaned != nil {
 		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-			return nil, err
+			return PresenceResult{}, err
 		}
 	}
 
 	if customStatus == nil {
-		// A bare status flip: the stored text rides along on the broadcast, so
-		// a plain online -> idle flip does not blank everyone else's copy.
-		// Read it BEFORE writing: custom_status is *string with no omitempty
-		// on the wire (see presencePayload), so a nil for a value we merely
-		// failed to read would be wire-identical to "the user cleared it", and
-		// reading first means a read failure aborts before anything commits.
-		current, readErr := s.st.GetUserByID(ctx, userID)
-		if readErr != nil || current == nil {
-			slog.Error("ChannelService.HandlePresenceUpdate: could not read stored custom status",
-				"err", readErr, "user_id", userID)
-			return nil, fmt.Errorf("%w: failed to read current custom status", ErrInternal)
-		}
-		if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
-			slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
-			return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
-		}
-		s.dropConnectStamp(userID)
-		return current.CustomStatus, nil
+		return s.flipStatus(ctx, userID, status)
 	}
 
+	var expiresAt *string
+	if expiresIn != nil {
+		at := s.now().UTC().Add(time.Duration(*expiresIn) * time.Second).Format(db.CustomStatusExpiryLayout)
+		expiresAt = &at
+	}
 	// Status and text commit together in one writer transaction (P5-O08), so
 	// a failure leaves both as they were and there is nothing to broadcast.
-	if err := s.st.UpdateUserPresence(ctx, userID, status, cleaned); err != nil {
+	if err := s.st.UpdateUserPresence(ctx, userID, status, cleaned, expiresAt); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
-		return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
+		return PresenceResult{}, fmt.Errorf("%w: failed to update status", ErrInternal)
 	}
 	s.dropConnectStamp(userID)
-	return cleaned, nil
+	res := PresenceResult{CustomStatus: cleaned}
+	if expiresAt != nil {
+		res.ExpiresAt = *expiresAt
+		if s.wakeExpiry != nil {
+			s.wakeExpiry()
+		}
+	}
+	return res, nil
+}
+
+// flipStatus is HandlePresenceUpdate's bare status flip (no custom_status
+// field): the stored text and expiry ride along on the broadcast, so a plain
+// online -> idle flip does not blank everyone else's copy.
+func (s *ChannelService) flipStatus(ctx context.Context, userID int64, status string) (PresenceResult, error) {
+	// Read it BEFORE writing: custom_status is *string with no omitempty
+	// on the wire (see presencePayload), so a nil for a value we merely
+	// failed to read would be wire-identical to "the user cleared it", and
+	// reading first means a read failure aborts before anything commits.
+	current, readErr := s.st.GetUserByID(ctx, userID)
+	if readErr != nil || current == nil {
+		slog.Error("ChannelService.HandlePresenceUpdate: could not read stored custom status",
+			"err", readErr, "user_id", userID)
+		return PresenceResult{}, fmt.Errorf("%w: failed to read current custom status", ErrInternal)
+	}
+	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
+		return PresenceResult{}, fmt.Errorf("%w: failed to update status", ErrInternal)
+	}
+	s.dropConnectStamp(userID)
+	res := PresenceResult{CustomStatus: current.CustomStatus}
+	if current.CustomStatusExpiresAt != nil {
+		res.ExpiresAt = *current.CustomStatusExpiresAt
+	}
+	return res, nil
 }
 
 // dropConnectStamp keeps a pending batched connect stamp from overwriting the
