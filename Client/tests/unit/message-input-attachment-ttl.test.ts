@@ -92,7 +92,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     vi.setSystemTime(Date.now() + 1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("here it is", null, ["srv-2"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "here it is",
+      null,
+      ["srv-2"],
+      [expect.objectContaining({ id: "srv-2" })],
+    );
     comp.destroy?.();
   });
 
@@ -125,7 +130,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     vi.setSystemTime(Date.now() + 1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-3"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-3"],
+      [expect.objectContaining({ id: "srv-3" })],
+    );
     comp.destroy?.();
   });
 
@@ -141,7 +151,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     vi.setSystemTime(Date.now() + 49 * MIN);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-1"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-1"],
+      [expect.objectContaining({ id: "srv-1" })],
+    );
     expect(onUploadFile).toHaveBeenCalledTimes(1);
     comp.destroy?.();
   });
@@ -171,7 +186,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     await vi.advanceTimersByTimeAsync(1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-2"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-2"],
+      [expect.objectContaining({ id: "srv-2" })],
+    );
     comp.destroy?.();
   });
 
@@ -199,7 +219,7 @@ describe("MessageInput staged attachment age limit", () => {
     (chip.querySelector(".attachment-preview-remove") as HTMLButtonElement).click();
     await vi.advanceTimersByTimeAsync(1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("with file", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("with file", null, [], []);
     comp.destroy?.();
   });
 
@@ -251,7 +271,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     vi.setSystemTime(Date.now() + 1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-2"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-2"],
+      [expect.objectContaining({ id: "srv-2" })],
+    );
     comp.destroy?.();
   });
 
@@ -276,7 +301,12 @@ describe("MessageInput staged attachment age limit", () => {
 
     vi.setSystemTime(Date.now() + 1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-2"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-2"],
+      [expect.objectContaining({ id: "srv-2" })],
+    );
     comp.destroy?.();
   });
 

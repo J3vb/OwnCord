@@ -32,6 +32,7 @@ import {
   getCameraQuality,
   getScreenShareQuality,
   isScreenShareSimulcast,
+  screenShareDegradation,
   SCREENSHARE_PRESETS,
   SCREENSHARE_SIMULCAST_LAYERS,
   SCREENSHARE_PUBLISH_BITRATES,
@@ -155,6 +156,15 @@ describe("screen share FPS", () => {
     it("scales bitrate up for 60 and 120 fps", () => {
       expect(getScreenShareMaxBitrate("high", 60)).toBe(SCREENSHARE_PUBLISH_BITRATES.high * 1.5);
       expect(getScreenShareMaxBitrate("source", 120)).toBe(SCREENSHARE_PUBLISH_BITRATES.source * 2);
+    });
+  });
+
+  describe("screenShareDegradation", () => {
+    it("is balanced only at 120 fps", () => {
+      expect(screenShareDegradation(120)).toBe("balanced");
+      for (const fps of [5, 30, 60]) {
+        expect(screenShareDegradation(fps)).toBe("maintain-resolution");
+      }
     });
   });
 

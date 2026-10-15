@@ -293,6 +293,45 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toEqual({ source: "os", quality: "source", fps: 60 });
   });
 
+  it("on Windows says what 120 fps needs, only while 120 is chosen (M-2)", async () => {
+    const picking = showScreenSharePicker({
+      sources: [],
+      portal: false,
+      osPicker: true,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    const hint = root.querySelector<HTMLElement>('[data-testid="ssp-fps120-hint"]')!;
+    expect(hint.textContent).toBe(
+      "120 fps needs a 120 Hz or faster monitor. It uses H.264 on your graphics card where it can, even if you picked VP8.",
+    );
+    expect(hint.hidden).toBe(true);
+    const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+    fps.value = "120";
+    fps.dispatchEvent(new Event("change"));
+    expect(hint.hidden).toBe(false);
+    expect(fps.getAttribute("aria-describedby")).toBe(hint.id);
+    fps.value = "60";
+    fps.dispatchEvent(new Event("change"));
+    expect(hint.hidden).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
+  });
+
+  it("has no 120 fps hint outside the Windows picker", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "source",
+      defaultFps: 120,
+    });
+    const root = await mounted();
+    expect(root.querySelector('[data-testid="ssp-fps120-hint"]')).toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
+  });
+
   it("says so when there is nothing to share", async () => {
     const picking = showScreenSharePicker({
       sources: [],

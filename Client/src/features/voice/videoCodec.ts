@@ -54,9 +54,14 @@ export function gpuRenderer(): string | null {
   }
 }
 
+/** At this rate a saved VP8 follows Auto's rule too: software VP8 cannot
+ *  encode 1080p at 120 fps and drops to about 60 (M-2). */
+export const HARDWARE_CODEC_FPS = 120;
+
 /** The codec for one publish of `track` at `fps` and `bitrate`. Auto probes
  *  at the captured size, since a hardware encoder can take 1080p30 and refuse
- *  1080p120. */
+ *  1080p120. A saved VP8 is probed the same way at 120 fps; a saved H.264
+ *  never is. */
 export async function resolveVideoCodec(
   track: MediaStreamTrack,
   fps: number,
@@ -64,16 +69,18 @@ export async function resolveVideoCodec(
 ): Promise<PublishCodec> {
   if (isLinuxDesktop()) return "vp8";
   const pref = getVideoCodecPref();
-  if (pref !== "auto") return pref;
-  const { width, height } = track.getSettings();
+  if (pref === "h264") return pref;
+  if (pref === "vp8" && fps < HARDWARE_CODEC_FPS) return pref;
   try {
+    const { width, height } = track.getSettings();
     const probe = await navigator.mediaCapabilities.encodingInfo({
       type: "webrtc",
       video: { contentType: "video/H264", width, height, bitrate, framerate: fps },
     } as MediaEncodingConfiguration);
     return pickAutoCodec(probe, gpuRenderer());
   } catch {
-    // No MediaCapabilities, or a configuration the browser rejects.
+    // No MediaCapabilities, a configuration the browser rejects, or a track
+    // that cannot report its size.
     return pickAutoCodec(null, null);
   }
 }

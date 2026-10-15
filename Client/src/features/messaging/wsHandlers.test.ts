@@ -14,6 +14,7 @@ import {
   addMessage,
   setMessagePinned,
   addOptimisticMessage,
+  markSendFailed,
   resetMessagesStore,
 } from "../../stores/messages.store";
 import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.store";
@@ -229,6 +230,36 @@ describe("handleMessagingError", () => {
     } finally {
       deactivatePendingMessages();
     }
+  });
+
+  it("drops the row of a send whose files were all unavailable (2A-3)", () => {
+    pendingSend("corr-1");
+
+    expect(handleMessagingError({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "corr-1")).toBe(
+      true,
+    );
+    expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.some((m) => m.correlationId === "corr-1"),
+    ).toBe(false);
+  });
+
+  it("drops the row even after it already failed as unconfirmed (2A-3)", () => {
+    pendingSend("corr-1");
+    markSendFailed("corr-1", "UNCONFIRMED");
+
+    expect(handleMessagingError({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "corr-1")).toBe(
+      true,
+    );
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.some((m) => m.correlationId === "corr-1"),
+    ).toBe(false);
   });
 
   it("leaves an error with no matching send or reaction to the rest of the chain", () => {

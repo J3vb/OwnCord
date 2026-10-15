@@ -15,9 +15,12 @@
 //!   approach below cannot do this: its `Activated` handler only fires while
 //!   the banner is on screen, so a later Action Center click merely raised the
 //!   window.)
-//! * **macOS / Linux** — `notify-rust` directly (the same crate the plugin's
-//!   desktop backend uses), which waits for the activation on a dedicated
-//!   thread, then focuses the window and emits `notification-click`.
+//! * **Linux** — the freedesktop notification D-Bus API through one shared
+//!   connection and listener (`notification_bus.rs`), which focuses the window
+//!   and emits `notification-click`.
+//! * **macOS** — `notify-rust` directly (the same crate the plugin's desktop
+//!   backend uses), which waits for the activation on a dedicated thread, then
+//!   focuses the window and emits `notification-click`.
 //!
 //! The renderer turns either signal into `jumpToMessage`, and the host in the
 //! target keeps a click from another server from opening the wrong message.
@@ -25,39 +28,41 @@
 //! Only message notifications go through here; the plain `show` path (a
 //! notification with no target) stays on the plugin.
 //!
-//! A ringing call's Windows toast is tagged by its channel, and
-//! `clear_call_notification` removes it from Action Center when the ring ends
-//! (D-13). Elsewhere that command is a no-op.
+//! A ringing call's notification is tagged by its channel, and
+//! `clear_call_notification` removes it when the ring ends (D-13): from Action
+//! Center on Windows, from the notification server on Linux. On macOS that
+//! command is a no-op.
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use notify_rust::NotificationResponse;
 
-// Only the notify-rust path emits an event; the Windows protocol activation is
-// delivered by the OS through the deep-link plugin instead.
-#[cfg(not(windows))]
+// Only the notify-rust path emits an event here; the Windows protocol
+// activation is delivered by the OS through the deep-link plugin instead, and
+// Linux emits from `notification_bus`.
+#[cfg(not(any(windows, target_os = "linux")))]
 use tauri::Emitter;
 
-// ponytail: at most 16 notifications wait for a click at once; past that a
-// popup is shown without a click action. Reuse one handle per channel if
-// dropping the click on a busy day matters. Windows needs none of this — a
-// protocol activation is delivered by the OS, not by a thread we hold.
-#[cfg(not(windows))]
+// macOS: at most 16 notifications wait for a click at once; past that a popup
+// is shown without a click action. Windows needs none of this — a protocol
+// activation is delivered by the OS, not by a thread we hold — and Linux
+// listens for every click on one connection (`notification_bus.rs`).
+#[cfg(not(any(windows, target_os = "linux")))]
 const MAX_WAITERS: usize = 16;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 static LIVE_WAITERS: AtomicUsize = AtomicUsize::new(0);
 
 /// One live click waiter, counted in its `AtomicUsize` until dropped.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 struct WaiterSlot<'a>(&'a AtomicUsize);
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 impl<'a> WaiterSlot<'a> {
     /// Take a slot, or `None` when `MAX_WAITERS` are already live.
     fn reserve(live: &'a AtomicUsize) -> Option<Self> {
@@ -69,7 +74,7 @@ impl<'a> WaiterSlot<'a> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 impl Drop for WaiterSlot<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
@@ -278,17 +283,44 @@ fn clear_call_toast<R: Runtime>(app: &AppHandle<R>, channel_id: i64) -> Result<(
         .map_err(|e| format!("remove call toast: {e}"))
 }
 
-/// shortcut: off Windows the ring's notification is left to the notification
-/// server; withdrawing it needs the `notify-rust` handle kept past its waiter
-/// thread, if a desktop is found to keep stale ring notifications too.
-#[cfg(not(windows))]
+/// Linux: close the ring's popup on the notification server.
+#[cfg(target_os = "linux")]
+fn clear_call_toast<R: Runtime>(_app: &AppHandle<R>, channel_id: i64) -> Result<(), String> {
+    crate::notification_bus::close(call_toast_tag(channel_id));
+    Ok(())
+}
+
+/// Linux: show through the shared notification connection, which hears the
+/// click and opens the target.
+#[cfg(target_os = "linux")]
+fn show_message_notification<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    body: &str,
+    target: MessageTarget,
+    tag: Option<String>,
+) -> Result<(), String> {
+    crate::notification_bus::show(
+        app,
+        crate::notification_bus::Popup {
+            title: title.to_string(),
+            body: body.to_string(),
+            target,
+            tag,
+            app_name: app.package_info().name.clone(),
+        },
+    )
+}
+
+/// macOS: the ring's notification is left to the notification centre.
+#[cfg(not(any(windows, target_os = "linux")))]
 fn clear_call_toast<R: Runtime>(_app: &AppHandle<R>, _channel_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// macOS / Linux: show through `notify-rust` and wait for the activation on a
+/// macOS: show through `notify-rust` and wait for the activation on a
 /// dedicated thread, then focus the window and emit `notification-click`.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn show_message_notification<R: Runtime>(
     app: &AppHandle<R>,
     title: &str,
@@ -316,7 +348,7 @@ fn show_message_notification<R: Runtime>(
     // declaring it keeps the signal available on every desktop. Without a
     // waiter slot nothing would observe the click, so none is offered.
     if slot.is_some() {
-        notification.action("default", "Open");
+        notification.action("default", crate::text::NOTIFICATION_OPEN);
     }
     let handle = notification
         .show()
@@ -347,7 +379,7 @@ fn show_message_notification<R: Runtime>(
 /// `Default` is a body click on every desktop, and `Action("default")` is the
 /// declared "Open" button where the platform shows it as one. A dismissal or
 /// any other action is not this command's.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn is_activation(response: &NotificationResponse) -> bool {
     match response {
         NotificationResponse::Default => true,
@@ -372,7 +404,7 @@ mod tests {
 
     // The notify-rust activation decision and its waiter cap exist only off
     // Windows; Windows activates through the OS protocol handler instead.
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     #[test]
     fn a_body_click_or_the_open_button_is_an_activation() {
         assert!(is_activation(&NotificationResponse::Default));
@@ -386,7 +418,7 @@ mod tests {
         )));
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     #[test]
     fn waiter_slots_stop_at_the_cap_and_free_on_drop() {
         let live = AtomicUsize::new(0);
