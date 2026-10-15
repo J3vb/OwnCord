@@ -50,7 +50,7 @@ import {
   setOnError as setVoiceOnError,
   enableCamera,
   getRemoteVideoStats,
-  getLocalScreenshareFps,
+  getLocalScreenshareStats,
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
@@ -1475,7 +1475,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
-      getLocalShareFps: () => getLocalScreenshareFps(),
+      getLocalShareStats: () => getLocalScreenshareStats(),
       onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
