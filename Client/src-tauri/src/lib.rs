@@ -464,8 +464,30 @@ fn display_opens() -> bool {
             )
             .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
     };
-    let x11 = || std::env::var_os("DISPLAY").is_some_and(|display| x11_display_opens(&display));
+    let x11 = || {
+        std::env::var_os("DISPLAY")
+            .is_some_and(|display| x11_display_opens_within(display, X11_PROBE_TIMEOUT))
+    };
     (allowed.wayland && wayland()) || (allowed.x11 && x11())
+}
+
+/// How long the startup check waits for an X server to answer. A forwarded
+/// display that drops packets can hold XOpenDisplay for minutes.
+#[cfg(target_os = "linux")]
+const X11_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `x11_display_opens` on a helper thread, given up after `timeout`. The
+/// process exits right after a startup failure, so a probe still stuck in
+/// XOpenDisplay is left behind rather than joined.
+#[cfg(target_os = "linux")]
+fn x11_display_opens_within(name: std::ffi::OsString, timeout: std::time::Duration) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("x11-display-probe".into())
+        .spawn(move || {
+            let _ = tx.send(x11_display_opens(&name));
+        });
+    spawned.is_ok() && rx.recv_timeout(timeout).unwrap_or(false)
 }
 
 /// The display backends GTK may try under `GDK_BACKEND`: both when it is
@@ -611,6 +633,27 @@ mod startup_dialog_tests {
         assert!(super::x11_display_opens(&live));
         assert!(!super::x11_display_opens(&OsString::from(":97")));
         assert!(!super::x11_display_opens(&OsString::new()));
+    }
+
+    /// An X server that takes the connection but never answers must not hold
+    /// the startup-error path.
+    #[test]
+    fn an_unanswering_x_server_is_given_up_on() {
+        let (listener, display) = (50..100)
+            .find_map(|n| {
+                std::net::TcpListener::bind(("127.0.0.1", 6000 + n))
+                    .ok()
+                    .map(|l| (l, format!("127.0.0.1:{n}")))
+            })
+            .expect("a free X display port");
+        let started = std::time::Instant::now();
+        let opened = super::x11_display_opens_within(
+            OsString::from(display),
+            std::time::Duration::from_millis(300),
+        );
+        assert!(!opened);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        drop(listener);
     }
 }
 
