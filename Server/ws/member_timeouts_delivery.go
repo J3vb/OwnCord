@@ -2,7 +2,6 @@ package ws
 
 import (
 	"context"
-	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -21,10 +20,9 @@ import (
 // queues.
 type timeoutViewState struct {
 	mu syncutil.Mutex
-	// gen counts role refreshes. refreshTimeoutViewsAfterRoleChange bumps it
-	// under mu before resolving anything, and every caller of
-	// RefreshAllChannelVisibility has already invalidated the permission
-	// cache by then (the cache's own generation drops any population that
+	// gen counts role refreshes. RefreshAllChannelVisibility bumps it under
+	// mu on entry, and every caller of RefreshAllChannelVisibility has
+	// already invalidated the permission cache by then (the cache's own generation drops any population that
 	// raced the invalidation). So a verdict resolved after reading gen sees
 	// every role change whose refresh has bumped it; a delivery that finds gen
 	// moved resolves again.
@@ -45,9 +43,9 @@ type heldTimeouts struct {
 	frameSent bool
 }
 
-// timeoutViewAttempts bounds how often one delivery resolves verdicts again
-// because a role refresh moved timeoutView.gen while it was resolving.
-const timeoutViewAttempts = 4
+// timeoutVerdictBudget bounds one resolveTimeoutVerdicts pass; a lookup that
+// runs past it fails, which is a false verdict.
+const timeoutVerdictBudget = 5 * time.Second
 
 // timeoutViewResolvedHook, when non-nil, runs after a delivery resolved its
 // verdicts and before it takes timeoutView.mu, so a test can land a role
@@ -77,6 +75,8 @@ func (h *Hub) bumpTimeoutViewGen() {
 // connected user, outside every lock. Every user it returns was evaluated; a
 // lookup failure is a false verdict (the narrow list).
 func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
+	ctx, cancel := context.WithTimeout(ctx, timeoutVerdictBudget)
+	defer cancel()
 	h.mu.RLock()
 	ids := make([]int64, 0, len(h.clients))
 	for uid := range h.clients {
@@ -96,30 +96,26 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 // view when wants says so. wants runs under timeoutView.mu.
 //
 // When a role refresh moves timeoutView.gen while the verdicts are being
-// resolved, they may predate that role change, so they are resolved again.
-// After timeoutViewAttempts the delivery treats nobody as a moderator: every
-// client holding the full list, and every client wants picks, gets its
-// own-only list. The role refresh that moved gen re-sends the full list to
-// moderators. It returns false when the timeout mirror is not loaded and
-// nothing was sent.
+// resolved, they may predate that role change, so they are resolved again
+// until gen holds still across one resolution. There is no cap: a narrowed
+// fallback could strip a current moderator's list with nothing left to
+// repair it, and each extra pass needs another role refresh to land inside
+// one resolution, so the loop ends as soon as role changes pause. It returns
+// false when the timeout mirror is not loaded and nothing was sent.
 func (h *Hub) deliverTimeoutViews(ctx context.Context, wants func(c *Client, isMod bool) bool) bool {
-	for attempt := 1; ; attempt++ {
+	for {
 		gen := h.timeoutViewGenNow()
 		verdicts := h.resolveTimeoutVerdicts(ctx)
 		if timeoutViewResolvedHook != nil {
 			timeoutViewResolvedHook()
 		}
 		h.timeoutView.mu.Lock()
-		current := h.timeoutView.gen == gen
-		if !current && attempt < timeoutViewAttempts {
+		if h.timeoutView.gen != gen {
 			h.timeoutView.mu.Unlock()
 			continue
 		}
-		ok := h.sendTimeoutViewsLocked(verdicts, current, wants)
+		ok := h.sendTimeoutViewsLocked(verdicts, wants)
 		h.timeoutView.mu.Unlock()
-		if !current {
-			slog.Warn("hub: member_timeouts verdicts kept moving, sent own-only lists", "attempts", attempt)
-		}
 		return ok
 	}
 }
@@ -128,7 +124,7 @@ func (h *Hub) deliverTimeoutViews(ctx context.Context, wants func(c *Client, isM
 // timeoutView.mu. Only users present in verdicts are considered, each through
 // its client as registered now, so a connection that replaced the evaluated
 // one gets the frame instead of the closed socket.
-func (h *Hub) sendTimeoutViewsLocked(verdicts map[int64]bool, current bool, wants func(c *Client, isMod bool) bool) bool {
+func (h *Hub) sendTimeoutViewsLocked(verdicts map[int64]bool, wants func(c *Client, isMod bool) bool) bool {
 	snap, ok := h.perms.TimeoutSnapshot()
 	if !ok {
 		return false
@@ -143,12 +139,8 @@ func (h *Hub) sendTimeoutViewsLocked(verdicts map[int64]bool, current bool, want
 	h.mu.RUnlock()
 	now := time.Now()
 	for _, c := range live {
-		isMod := current && verdicts[c.userID]
-		send := wants(c, isMod)
-		if !current && c.timeouts.full.Load() {
-			send = true
-		}
-		if send {
+		isMod := verdicts[c.userID]
+		if wants(c, isMod) {
 			h.sendTimeoutViewLocked(c, isMod, snap, now)
 		}
 	}
@@ -170,12 +162,13 @@ func (h *Hub) sendTimeoutViewLocked(c *Client, isMod bool, snap map[int64]time.T
 //
 //   - A frame already queued for c reaches the peer after ready, and its
 //     sender set the flag to match it: leave it.
-//   - gen moved: ready's verdict may predate a role change. Leave the flag
-//     true; the refresh that moved gen snapshots the clients after moving it,
-//     finds c (registered before gen was read) holding true and sends it a
-//     frame.
-//   - Otherwise ready's verdict is current and ready is the last list c
-//     receives so far: record it.
+//   - Otherwise ready is the last list c receives so far, and the flag
+//     records it. Recording it is safe even when ready's verdict predates a
+//     role change: the flag then describes what c holds, and that change's
+//     refresh (wants: moderator, or holding the full list) corrects c.
+//   - The gen guard (leave the flag true when a refresh started since gen
+//     was read) is belt-and-braces on top of that: a true flag costs at most
+//     one redundant own-only frame.
 func (h *Hub) commitReadyTimeouts(c *Client, gen uint64, full bool) {
 	if readyTimeoutsCommitHook != nil {
 		readyTimeoutsCommitHook()

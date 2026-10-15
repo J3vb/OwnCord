@@ -17,7 +17,7 @@ type readyFields struct {
 	roster   *memberRoster
 	viewerID int64
 	// timeoutsFull: the ready carries every active timeout (a moderator's
-	// view), not just the viewer's own; becomes Client.timeoutsFull.
+	// view), not just the viewer's own; becomes Client.timeouts.full.
 	timeoutsFull bool
 }
 

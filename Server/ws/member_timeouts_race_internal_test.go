@@ -73,7 +73,7 @@ func TestPublishMemberTimeouts_RevokeAfterResolve_SendsOwnOnly(t *testing.T) {
 		t.Fatalf("demoted moderator frames = %v, want the last one own-only (empty)", fr)
 	}
 	if f.hub.GetClient(f.modID).timeouts.full.Load() {
-		t.Error("timeoutsFull still set on the demoted moderator")
+		t.Error("timeouts.full still set on the demoted moderator")
 	}
 	// The remaining moderator still ends on the full list.
 	fr = timeoutFrames(t, drainChan(f.sends[f.adminID], 100*time.Millisecond))
@@ -105,30 +105,43 @@ func TestPublishMemberTimeouts_ReplacedClientGetsFrame(t *testing.T) {
 	}
 }
 
-// When role refreshes keep moving the counter past every attempt, the
-// delivery never sends a full list: whoever held one gets its own-only list.
-func TestPublishMemberTimeouts_UnsettledVerdicts_FallBackOwnOnly(t *testing.T) {
+// Role refreshes keep moving the counter across several resolutions, then a
+// refresh runs in the next window and sends moderators the full list: the
+// publish keeps resolving until the counter holds still and never narrows a
+// current moderator's list.
+func TestPublishMemberTimeouts_RepeatedRoleRefreshes_ModeratorsKeepFullList(t *testing.T) {
 	f := roleChangeFixture(t)
 	for _, id := range []int64{f.adminID, f.modID} {
 		f.hub.GetClient(id).timeouts.full.Store(true)
 	}
-	timeoutViewResolvedHook = f.hub.bumpTimeoutViewGen
+	var calls atomic.Int32
+	timeoutViewResolvedHook = func() {
+		switch n := calls.Add(1); {
+		case n <= 3:
+			f.hub.bumpTimeoutViewGen()
+		case n == 4:
+			f.hub.RefreshAllChannelVisibility() // its own resolution re-enters this hook
+		}
+	}
 	t.Cleanup(func() { timeoutViewResolvedHook = nil })
 
 	f.hub.publishMemberTimeouts(f.targetID)
 
 	for _, id := range []int64{f.adminID, f.modID} {
 		fr := timeoutFrames(t, drainChan(f.sends[id], 100*time.Millisecond))
-		if len(fr) != 1 || len(fr[0]) != 0 {
-			t.Errorf("moderator %d frames = %v, want one own-only (empty) list", id, fr)
+		if len(fr) == 0 || !reflect.DeepEqual(entryIDs(fr[len(fr)-1]), []int64{f.targetID}) {
+			t.Errorf("moderator %d frames = %v, want the last one to be the full list", id, fr)
 		}
-		if f.hub.GetClient(id).timeouts.full.Load() {
-			t.Errorf("moderator %d still flagged full after the fallback", id)
+		if !f.hub.GetClient(id).timeouts.full.Load() {
+			t.Errorf("moderator %d not flagged full", id)
 		}
 	}
 	fr := timeoutFrames(t, drainChan(f.sends[f.targetID], 100*time.Millisecond))
-	if len(fr) != 1 || !reflect.DeepEqual(entryIDs(fr[0]), []int64{f.targetID}) {
-		t.Errorf("target frames = %v, want its own entry", fr)
+	if len(fr) == 0 || !reflect.DeepEqual(entryIDs(fr[len(fr)-1]), []int64{f.targetID}) {
+		t.Errorf("target frames = %v, want its own entry last", fr)
+	}
+	if n := calls.Load(); n < 5 {
+		t.Errorf("hook ran %d times, want the publish to resolve again after the refresh", n)
 	}
 }
 
@@ -312,7 +325,7 @@ func TestFreshConnect_RevokeDuringReady_EndsOwnOnly(t *testing.T) {
 		t.Fatalf("demoted moderator ends holding %v (ok=%v), want its own-only (empty) list", held, ok)
 	}
 	if liveClient(t, d.hub, d.modID).timeouts.full.Load() {
-		t.Error("timeoutsFull set on a connection that is no longer a moderator")
+		t.Error("timeouts.full set on a connection that is no longer a moderator")
 	}
 }
 
@@ -329,7 +342,7 @@ func TestFreshConnect_GrantDuringReady_KeepsFullFlag(t *testing.T) {
 		t.Fatalf("promoted member ends holding %v (ok=%v), want the full list", held, ok)
 	}
 	if !liveClient(t, d.hub, d.byID).timeouts.full.Load() {
-		t.Fatal("timeoutsFull not set on the promoted connection")
+		t.Fatal("timeouts.full not set on the promoted connection")
 	}
 	changeRole(t, d.timeoutViewFixture, d.byID, 4)
 	if held, ok := heldTimeoutList(t, readUntilIdle(conn)); !ok || len(held) != 0 {

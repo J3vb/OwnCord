@@ -59,10 +59,12 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 // a user offline or mid-reconnect resumes onto a full ready (which carries
 // member_timeouts) instead of replaying past the change.
 //
-// deliverTimeoutViews resolves the audience outside every lock and re-checks
-// it against concurrent role refreshes; snapshot and sends then run under
-// timeoutView.mu, so the last frame any viewer receives always reflects the
-// newest mirror and a current verdict. With the mirror unloaded the publish
+// deliverTimeoutViews resolves the audience outside every lock and resolves
+// it again if a role refresh started meanwhile; snapshot and sends then run
+// under timeoutView.mu, so a concurrent issue and lift cannot leave a viewer
+// holding the older mirror. A role change whose refresh has not started yet
+// can still make a verdict stale; that refresh corrects it, because the flag
+// records which list each client holds. With the mirror unloaded the publish
 // is skipped and logged; the next ready repairs it.
 func (h *Hub) publishMemberTimeouts(targetID int64) {
 	h.MarkVisibilityChanged()
@@ -85,14 +87,14 @@ func (h *Hub) publishMemberTimeouts(targetID int64) {
 // but is no longer a moderator gets its own-only list, replacing it. Clients
 // holding their own-only list that stay non-moderators get nothing.
 //
-// It bumps timeoutView.gen first, so a publish or connect that resolved its
-// verdicts before this role change resolves them again, and the visibility
-// watermark, so a resume across it takes a full ready.
+// RefreshAllChannelVisibility bumps timeoutView.gen on entry, so a publish
+// that resolved its verdicts before this role change resolves them again;
+// this bumps the visibility watermark, so a resume across it takes a full
+// ready.
 func (h *Hub) refreshTimeoutViewsAfterRoleChange() {
 	if h.perms == nil {
 		return
 	}
-	h.bumpTimeoutViewGen()
 	h.MarkVisibilityChanged()
 	defer h.bumpVisibilityWatermark()
 	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {

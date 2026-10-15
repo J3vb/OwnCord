@@ -364,8 +364,10 @@ func (h *Hub) refreshChannelVisibilityAffordances(ctx context.Context, ch *db.Ch
 // channel-override handlers do, so the per-client lookups below repopulate from
 // post-change data.
 func (h *Hub) RefreshAllChannelVisibility() {
-	// Deferred so the member_timeouts views follow the role change even when
+	// member_timeouts: bumped first, so a publish resolving verdicts during
+	// the per-channel loop resolves again; the views are refreshed even when
 	// the channel list cannot be read.
+	h.bumpTimeoutViewGen()
 	defer h.refreshTimeoutViewsAfterRoleChange()
 	if h.db == nil {
 		return

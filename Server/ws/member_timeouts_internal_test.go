@@ -352,7 +352,7 @@ func TestRoleChange_GrantModerateSendsFullView(t *testing.T) {
 		t.Fatalf("new moderator frames = %v, want the full list", fr)
 	}
 	if !f.hub.GetClient(f.byID).timeouts.full.Load() {
-		t.Error("timeoutsFull not set after the grant")
+		t.Error("timeouts.full not set after the grant")
 	}
 	// A client that never was a moderator is left alone.
 	if got := timeoutFrames(t, drainChan(f.sends[f.targetID], 100*time.Millisecond)); len(got) != 0 {
@@ -375,7 +375,7 @@ func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 		t.Fatalf("ex-moderator frames = %v, want one own-only (empty) list", fr)
 	}
 	if f.hub.GetClient(f.modID).timeouts.full.Load() {
-		t.Error("timeoutsFull still set after the revoke")
+		t.Error("timeouts.full still set after the revoke")
 	}
 	// Second refresh: the flag is down, so nothing more is sent.
 	f.hub.RefreshAllChannelVisibility()
