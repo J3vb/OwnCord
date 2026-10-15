@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -71,9 +72,16 @@ func (h *Hub) bumpTimeoutViewGen() {
 	h.timeoutView.gen++
 }
 
+// timeoutVerdictLookupHook, when non-nil, can fail one user's verdict lookup
+// in resolveTimeoutVerdicts. Test-only (nil in production).
+var timeoutVerdictLookupHook func(userID int64) error
+
 // resolveTimeoutVerdicts resolves permissions.CanModerate for every
-// connected user, outside every lock. Every user it returns was evaluated; a
-// lookup failure is a false verdict (the narrow list).
+// connected user, outside every lock. The verdict is three-way: true
+// (moderator), false (not a moderator), or absent from the map (unknown: the
+// lookup failed or ran out of time). An unknown user is skipped by the
+// delivery, so a transient lookup failure neither narrows a moderator's list
+// nor widens anyone else's; the next delivery or ready settles it.
 func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 	ctx, cancel := context.WithTimeout(ctx, timeoutVerdictBudget)
 	defer cancel()
@@ -86,7 +94,14 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 	verdicts := make(map[int64]bool, len(ids))
 	for _, uid := range ids {
 		sub, err := h.subjectFor(ctx, uid, 0)
-		verdicts[uid] = err == nil && permissions.CanModerate(sub) == nil
+		if err == nil && timeoutVerdictLookupHook != nil {
+			err = timeoutVerdictLookupHook(uid)
+		}
+		if err != nil {
+			slog.Warn("hub: member_timeouts verdict unknown, user skipped", "user_id", uid, "err", err)
+			continue
+		}
+		verdicts[uid] = permissions.CanModerate(sub) == nil
 	}
 	return verdicts
 }
@@ -100,9 +115,13 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 // until gen holds still across one resolution. There is no cap: a narrowed
 // fallback could strip a current moderator's list with nothing left to
 // repair it, and each extra pass needs another role refresh to land inside
-// one resolution, so the loop ends as soon as role changes pause. It returns
-// false when the timeout mirror is not loaded and nothing was sent.
+// one resolution, so the loop ends as soon as role changes pause.
+//
+// When the timeout mirror is not loaded it reloads it once, outside
+// timeoutView.mu, and tries again; it returns false, having sent nothing,
+// only when that reload fails or the mirror is still unloaded.
 func (h *Hub) deliverTimeoutViews(ctx context.Context, wants func(c *Client, isMod bool) bool) bool {
+	reloaded := false
 	for {
 		gen := h.timeoutViewGenNow()
 		verdicts := h.resolveTimeoutVerdicts(ctx)
@@ -116,8 +135,22 @@ func (h *Hub) deliverTimeoutViews(ctx context.Context, wants func(c *Client, isM
 		}
 		ok := h.sendTimeoutViewsLocked(verdicts, wants)
 		h.timeoutView.mu.Unlock()
-		return ok
+		if ok || reloaded {
+			return ok
+		}
+		reloaded = true
+		if !h.reloadTimeoutMirror(ctx) {
+			return false
+		}
 	}
+}
+
+// reloadTimeoutMirror reloads the timeout mirror under timeoutVerdictBudget.
+// The caller holds no lock.
+func (h *Hub) reloadTimeoutMirror(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, timeoutVerdictBudget)
+	defer cancel()
+	return h.perms.RefreshTimeouts(ctx) == nil
 }
 
 // sendTimeoutViewsLocked is deliverTimeoutViews' send step. The caller holds

@@ -8,6 +8,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -142,6 +143,55 @@ func TestPublishMemberTimeouts_RepeatedRoleRefreshes_ModeratorsKeepFullList(t *t
 	}
 	if n := calls.Load(); n < 5 {
 		t.Errorf("hook ran %d times, want the publish to resolve again after the refresh", n)
+	}
+}
+
+// A moderator whose verdict lookup fails during a role refresh is skipped:
+// it keeps the full list it holds instead of being narrowed to its own entry.
+func TestRoleRefresh_VerdictLookupError_LeavesModeratorAlone(t *testing.T) {
+	f := roleChangeFixture(t)
+	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
+	timeoutVerdictLookupHook = func(userID int64) error {
+		if userID == f.modID {
+			return errors.New("injected lookup failure")
+		}
+		return nil
+	}
+	t.Cleanup(func() { timeoutVerdictLookupHook = nil })
+
+	changeRole(t, f, f.byID, 3) // an unrelated grant triggers the refresh
+
+	if fr := timeoutFrames(t, drainChan(f.sends[f.modID], 100*time.Millisecond)); len(fr) != 0 {
+		t.Errorf("moderator with an unknown verdict got %v, want nothing", fr)
+	}
+	if !f.hub.GetClient(f.modID).timeouts.full.Load() {
+		t.Error("timeouts.full cleared on a moderator whose verdict was unknown")
+	}
+	// The refresh still reached the user it could evaluate.
+	if fr := timeoutFrames(t, drainChan(f.sends[f.byID], 100*time.Millisecond)); len(fr) != 1 ||
+		!reflect.DeepEqual(entryIDs(fr[0]), []int64{f.targetID}) {
+		t.Errorf("newly granted moderator frames = %v, want the full list", fr)
+	}
+}
+
+// With the timeout mirror unloaded, the publish reloads it and delivers
+// instead of skipping.
+func TestPublishMemberTimeouts_UnloadedMirror_ReloadsAndSends(t *testing.T) {
+	f := roleChangeFixture(t)
+	// Verdict resolution itself loads the mirror, so swap in a service whose
+	// mirror is unloaded right before the send step reads it.
+	setTimeoutViewResolvedHook(t, func() {
+		f.hub.perms = service.NewPermissionService(f.database, permissions.NewChecker(f.database))
+		if _, ok := f.hub.perms.TimeoutSnapshot(); ok {
+			t.Error("precondition: a new PermissionService should start with the mirror unloaded")
+		}
+	})
+
+	f.hub.publishMemberTimeouts(f.targetID)
+
+	if fr := timeoutFrames(t, drainChan(f.sends[f.modID], 100*time.Millisecond)); len(fr) != 1 ||
+		!reflect.DeepEqual(entryIDs(fr[0]), []int64{f.targetID}) {
+		t.Errorf("moderator frames = %v, want the full list after the reload", fr)
 	}
 }
 

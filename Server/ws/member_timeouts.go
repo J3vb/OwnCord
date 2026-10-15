@@ -64,8 +64,9 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 // under timeoutView.mu, so a concurrent issue and lift cannot leave a viewer
 // holding the older mirror. A role change whose refresh has not started yet
 // can still make a verdict stale; that refresh corrects it, because the flag
-// records which list each client holds. With the mirror unloaded the publish
-// is skipped and logged; the next ready repairs it.
+// records which list each client holds. An unloaded mirror is reloaded once;
+// only if that reload fails is the publish skipped and logged, and the next
+// ready repairs it.
 func (h *Hub) publishMemberTimeouts(targetID int64) {
 	h.MarkVisibilityChanged()
 	defer h.bumpVisibilityWatermark()
