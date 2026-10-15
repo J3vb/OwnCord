@@ -55,8 +55,12 @@ func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string
 // whose drop is unconditional: a stale tag must leave a queued connect
 // presence alone.
 //
-// Lock order: presenceMu, then the client's atomic presence pointer, with no
-// I/O under either — the same as every presence emitter, so this adds no edge.
+// Lock order: presenceMu, then the client's atomic presence pointer, then
+// Client.mu (sendPresenceMsg, for the self half of an invisible split), then
+// the presenceResyncMu/presenceRepair leaf. Nothing takes presenceMu while
+// holding Client.mu (sendPresenceMsg releases c.mu before presenceDropped), and
+// there is no DB I/O under presenceMu — the same as every presence emitter, so
+// this adds no edge.
 // The compare-and-swap runs under presenceMu, and a presence_update stores its
 // live presence before it emits, so a racing set either swaps the pointer first
 // (the tag no longer matches and nothing is sent) or emits after this frame
@@ -86,8 +90,10 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 
 // enqueueExpiredPresence enqueues one half of an expired status's presence the
 // way emitEventsFrom does for the same event. CustomStatusExpired already holds
-// presenceMu and has the user's client, so nothing here takes another lock
-// beyond the non-blocking enqueues.
+// presenceMu and has the user's client, so the only further locks are the
+// non-blocking enqueues' own: for the self half, Client.mu in sendPresenceMsg
+// (released before it calls presenceDropped), then the presenceResyncMu/
+// presenceRepair leaf. See CustomStatusExpired for the full order.
 func (h *Hub) enqueueExpiredPresence(c *Client, ev Event) {
 	switch e := ev.(type) {
 	case PresenceEvent:

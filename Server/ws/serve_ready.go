@@ -81,7 +81,12 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     (readyMembers), which may predate that write, since users.status does
 //     not move the member generation. A connection that has not stamped one
 //     yet shows as offline, like no connection; its connect presence is
-//     announced after the stamp, so the viewer still converges.
+//     announced after the stamp, so the viewer still converges. The live
+//     custom status is a second guard: when the connection stamped a presence
+//     with no custom status, the row's text is stale (a reconnect, resume or
+//     bare status flip cleared it live up to a second before the expirer
+//     clears the row, and the expirer then sends no null frame because the
+//     live text is already nil), so it is blanked here.
 //  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
@@ -94,8 +99,13 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 	live := h.livePresences()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
-			if status := live[m.ID].status; status != "" {
-				m.Status = status
+			if lp := live[m.ID]; lp.status != "" {
+				m.Status = lp.status
+				if lp.customStatus == nil {
+					// Only ever to nil: the splice contract, and the shared
+					// encoded roster is untouched (m is this iteration's copy).
+					m.CustomStatus = nil
+				}
 			} else {
 				m.Status = db.StatusOffline
 				m.CustomStatus = nil

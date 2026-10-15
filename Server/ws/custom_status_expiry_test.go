@@ -163,6 +163,10 @@ func (h *Hub) queuePresenceNoTimer(userID int64, p pendingPresence) {
 // A set landing in the same instant as the old status's expiry: whichever side
 // wins, the observer's last frame for the user must be what the database
 // holds, never a null laid over the newer text.
+//
+// This only probabilistically catches a missing tag check (the interleaving has
+// to land); TestCustomStatusExpired_SupersededTagIsNoop is the deterministic
+// guard for it.
 func TestCustomStatusExpired_RaceWithPresenceUpdate(t *testing.T) {
 	database, err := db.Open(":memory:")
 	if err != nil {

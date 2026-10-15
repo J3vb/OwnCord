@@ -122,6 +122,10 @@ func (e *CustomStatusExpirer) Sweep(ctx context.Context) error {
 		// A full batch with progress may have more behind it; anything else
 		// is done. Rows that did not clear were changed by a concurrent set
 		// and are re-evaluated by the next read.
+		// Returning when a full batch clears nothing is correct, not a stall:
+		// every row in it was re-set with a future expiry between the list and
+		// the clear, so it no longer matches ListExpiredCustomStatuses, and the
+		// next nextSleep re-reads the soonest pending expiry.
 		if len(rows) < expirerBatch || cleared == 0 {
 			return nil
 		}
