@@ -467,7 +467,8 @@ mod startup_dialog_tests {
     use std::time::Duration;
 
     /// Needs a display of its own, `xvfb-run cargo test -- --ignored
-    /// gtk_startup` (not with the `x11` tests, which count windows). GTK is
+    /// gtk_startup`: its dialog is a real window, which
+    /// `x11_lists_sources_with_thumbnails_and_captures_one` would count. GTK is
     /// started first, as tao does before anything can fail, and the dialog
     /// must still appear; a check on GTK's own loop answers it once mapped.
     #[test]
@@ -475,12 +476,15 @@ mod startup_dialog_tests {
     fn gtk_startup_dialog_appears_after_gtk_started() {
         use gtk::prelude::*;
         gtk::init().expect("xvfb-run provides a display");
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(10));
-            eprintln!("the startup dialog never appeared");
-            std::process::exit(1);
-        });
         let seen = Arc::new(AtomicBool::new(false));
+        let seen_by_watchdog = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            if !seen_by_watchdog.load(Ordering::SeqCst) {
+                eprintln!("the startup dialog never appeared");
+                std::process::exit(1);
+            }
+        });
         let seen_by_check = Arc::clone(&seen);
         gtk::glib::timeout_add(Duration::from_millis(100), move || {
             let dialog = gtk::Window::list_toplevels()
