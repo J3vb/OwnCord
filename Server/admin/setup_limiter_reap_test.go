@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -21,68 +22,35 @@ import (
 // self-prunes on its next Allow() call, a one-shot caller never revisits its
 // key, so only a periodic sweep (RateLimiter.Cleanup) can ever evict it.
 func TestSetupLimiter_ReapsStaleEntries(t *testing.T) {
-	// Only the sweep INTERVAL is tunable now (item 6, round 3 review):
-	// Cleanup retires each entry on its own window, and POST /setup's is a
-	// real time.Minute (setup_handler.go), so the wait below cannot be
-	// shortened by injecting a smaller max-window the way it once could.
-	restoreTiming := admin.SetSetupLimiterReapTiming(5 * time.Millisecond)
-	defer restoreTiming()
+	// synctest's fake clock covers POST /setup's real one-minute window and
+	// the five-minute sweep without waiting for either; the ten minutes below
+	// assume the sweep interval stays at or under that.
+	synctest.Test(t, func(t *testing.T) {
+		var limiter *auth.RateLimiter
+		restoreHook := admin.CaptureSetupLimiter(func(rl *auth.RateLimiter) { limiter = rl })
+		defer restoreHook()
 
-	var limiter *auth.RateLimiter
-	restoreHook := admin.CaptureSetupLimiter(func(rl *auth.RateLimiter) { limiter = rl })
-	defer restoreHook()
+		database := openAdminTestDB(t)
+		handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-
-	if limiter == nil {
-		t.Fatal("setup limiter was not captured — CaptureSetupLimiter hook not wired into NewAdminAPI")
-	}
-
-	// Simulate 20 distinct source IPs each making one POST /setup request —
-	// each leaves its own windows[] entry that nothing but a reap can evict.
-	const n = 20
-	for i := range n {
-		req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(`{}`))
-		req.RemoteAddr = fmt.Sprintf("203.0.113.%d:1234", i)
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
-	}
-
-	if wins, _ := limiter.Len(); wins != n {
-		t.Fatalf("Len().windows = %d immediately after %d one-shot requests, want %d", wins, n, n)
-	}
-
-	// Wait for the sweep to evict every now-stale entry.
-	//
-	// The budget is a liveness bound, not a latency assertion. It must clear
-	// POST /setup's real time.Minute window (item 6, round 3 review: Cleanup
-	// retires an entry on its OWN window, and that one is not test-tunable
-	// the way the old shared max-window constant was) plus the margin the
-	// original comment already asked for: the reaper is a self-rescheduling
-	// time.AfterFunc chain, so this test can only observe it once the
-	// runtime schedules that callback — and under a full `go test ./...`,
-	// where every package's tests run at once, that can be delayed while the
-	// reaper is working perfectly. A budget that only covered the reap
-	// interval used to fail once under load and report "never reaped" for a
-	// reaper that had simply not run yet.
-	//
-	// Progress-tracking would not help: Cleanup evicts every stale entry in
-	// one pass, and all 20 were recorded together, so the count goes 20 -> 0
-	// in a single sweep with nothing in between to watch. The property this
-	// test owns is that the sweep is WIRED — with no reaper the count sits
-	// at n forever and this still fails, just later. A healthy run returns
-	// in about one minute (the real window) and pays none of the budget.
-	const reapBudget = 90 * time.Second
-	deadline := time.Now().Add(reapBudget)
-	for {
-		wins, _ := limiter.Len()
-		if wins == 0 {
-			return
+		if limiter == nil {
+			t.Fatal("setup limiter was not captured — CaptureSetupLimiter hook not wired into NewAdminAPI")
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("Len().windows = %d after %v, want 0 — setupLimiter is never reaped (OC-0076)", wins, reapBudget)
+
+		const n = 20
+		for i := range n {
+			req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(`{}`))
+			req.RemoteAddr = fmt.Sprintf("203.0.113.%d:1234", i)
+			handler.ServeHTTP(httptest.NewRecorder(), req)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		if wins, _ := limiter.Len(); wins != n {
+			t.Fatalf("Len().windows = %d immediately after %d one-shot requests, want %d", wins, n, n)
+		}
+
+		time.Sleep(10 * time.Minute)
+		synctest.Wait()
+		if wins, _ := limiter.Len(); wins != 0 {
+			t.Fatalf("Len().windows = %d ten minutes on, want 0 — setupLimiter is never reaped (OC-0076)", wins)
+		}
+	})
 }
