@@ -236,6 +236,11 @@ export interface NativeVoice {
   /** The input volume, 0-200 % as the `inputVolume` pref: a gain on the
    *  processed microphone, ahead of the voice gate and the level reports. */
   setInputGain(session: number, percent: number): Promise<void>;
+  /** Echo cancellation, noise suppression, automatic gain control and
+   *  Enhanced Noise Suppression for the running call: the capture and the
+   *  echo canceller's reference switch to them within a few frames, muted
+   *  or not. */
+  setAudioProcessing(session: number, audio: NativeVoiceAudioOptions): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */

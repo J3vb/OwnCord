@@ -1182,13 +1182,19 @@ describe("VoiceWidget", () => {
       widget.destroy?.();
     });
 
-    it("says the change applies on the next join on Linux native", () => {
-      mockIsLinuxDesktop.mockReturnValueOnce(true);
-      const { widget, btn } = mountWidget();
-      expect(btn.getAttribute("aria-label")).toBe(
-        "Enhanced Noise Suppression (applies the next time you join)",
-      );
+    it("labels the button the same on Linux native as elsewhere: it applies live", () => {
+      const { widget, btn: other } = mountWidget();
+      const label = other.getAttribute("aria-label");
       widget.destroy?.();
+      mockIsLinuxDesktop.mockReturnValue(true);
+      try {
+        const { widget: linux, btn } = mountWidget();
+        expect(btn.getAttribute("aria-label")).toBe(label);
+        expect(label).not.toMatch(/next time you join/);
+        linux.destroy?.();
+      } finally {
+        mockIsLinuxDesktop.mockReturnValue(false);
+      }
     });
 
     it("starts from the saved pref and follows a change made in Settings", () => {

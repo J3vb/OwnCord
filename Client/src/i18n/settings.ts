@@ -436,7 +436,6 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.enhanced.label": "Enhanced Noise Suppression",
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
-  "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
     "On Linux, the level bar shows your microphone while you are in a voice channel.",
 });

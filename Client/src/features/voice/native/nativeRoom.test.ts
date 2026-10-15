@@ -125,6 +125,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setInputGain", args]);
         return Promise.resolve();
       },
+      setAudioProcessing: (...args: unknown[]) => {
+        host.calls.push(["setAudioProcessing", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
@@ -599,6 +603,30 @@ describe("NativeRoom room surface", () => {
         emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: true } });
       }
       expect(host.calls).toEqual([]);
+    });
+  });
+
+  describe("audio processing", () => {
+    const changed = {
+      ...audio,
+      echoCancellation: !audio.echoCancellation,
+      enhancedNoiseSuppression: true,
+    };
+
+    it("sends a changed set to the running session", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+      room.setAudioProcessing(changed);
+      expect(host.calls).toEqual([["setAudioProcessing", [1, changed]]]);
+    });
+
+    it("before a connection sends nothing, and the connect carries the new options", async () => {
+      const room = createNativeRoom(audio);
+      room.setAudioProcessing(changed);
+      expect(host.calls).toEqual([]);
+      await room.connect("u", "t");
+      expect(host.calls[0]).toEqual(["connect", ["u", "t", changed]]);
     });
   });
 
