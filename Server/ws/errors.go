@@ -19,6 +19,9 @@ const (
 	// ErrCodeAttachmentsUnavailable refines BAD_REQUEST: a send with no text
 	// whose every attachment was skipped. Nothing was stored.
 	ErrCodeAttachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
+	// ErrCodeReactionLimit refines BAD_REQUEST: a new emoji on a message that
+	// already holds 20 different ones. No reaction_update is sent.
+	ErrCodeReactionLimit = "REACTION_LIMIT"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED

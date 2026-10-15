@@ -209,6 +209,7 @@ type MessageDeliveryReceipt struct {
 type MessageMention struct {
 	MessageID       int64 `json:"messageId"`
 	MentionedUserID int64 `json:"mentionedUserId"`
+	ReplyPing       int64 `json:"replyPing"`
 }
 
 type MessageRequest struct {

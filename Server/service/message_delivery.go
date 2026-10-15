@@ -49,7 +49,10 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		Content     string
 		ReplyTo     *int64
 		Attachments []string
-	}{p.ChannelID, p.Content, p.ReplyTo, attachments})
+		// omitempty keeps a false ping hashing exactly as the struct did before
+		// the field existed, so receipts written earlier still match.
+		ReplyPing bool `json:",omitempty"`
+	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
 	}
@@ -176,7 +179,7 @@ func messageDeliveryError(err error) error {
 // an accepted receipt for a message whose attachment ownership later fails.
 func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
 	if delivery == nil {
-		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.Everyone)
+		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone)
 		if err != nil {
 			return nil, nil, nil, false, fmt.Errorf("%w: failed to save message: %w", ErrInternal, err)
 		}
@@ -184,6 +187,7 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 		return msg, attachments, skipped, false, err
 	}
 	delivery.MentionedUserIDs, delivery.MentionsEveryone = mentions.UserIDs, mentions.Everyone
+	delivery.ReplyPingUserID = mentions.ReplyPingUserID
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
 		return nil, nil, nil, false, messageDeliveryError(err)

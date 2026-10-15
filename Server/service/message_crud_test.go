@@ -32,8 +32,8 @@ type disconnectAfterWriteStore struct {
 	cancel context.CancelFunc
 }
 
-func (s disconnectAfterWriteStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
-	msg, err := s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+func (s disconnectAfterWriteStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*db.Message, error) {
+	msg, err := s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, replyPingUserID, mentionsEveryone)
 	s.cancel()
 	return msg, err
 }
@@ -533,8 +533,8 @@ func (s *dmSendSpyStore) count(n *atomic.Int32) {
 	}
 }
 
-func (s *dmSendSpyStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
-	msg, err := s.DB.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+func (s *dmSendSpyStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*db.Message, error) {
+	msg, err := s.DB.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, replyPingUserID, mentionsEveryone)
 	s.armed.Store(true)
 	return msg, err
 }

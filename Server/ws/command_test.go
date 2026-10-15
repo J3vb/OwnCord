@@ -417,3 +417,38 @@ func TestCommandAttachmentsDefensiveCopy(t *testing.T) {
 		t.Error("Attachments() did not return a defensive copy")
 	}
 }
+
+func TestChatSend_ReplyPingParse(t *testing.T) {
+	ctor := commandConstructors[MsgTypeChatSend]
+	cases := []struct {
+		name     string
+		payload  string
+		wantPing bool
+		wantErr  bool
+	}{
+		{"true on a reply", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":true}`, true, false},
+		{"false on a reply", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":false}`, false, false},
+		{"absent on a reply does not ping", `{"channel_id":1,"content":"hi","reply_to":7}`, false, false},
+		{"null on a reply does not ping", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":null}`, false, false},
+		{"true without reply_to is ignored", `{"channel_id":1,"content":"hi","reply_ping":true}`, false, false},
+		{"non-bool string is a bad payload", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":"yes"}`, false, true},
+		{"non-bool number is a bad payload", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":1}`, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := ctor(1, "", json.RawMessage(tc.payload))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("payload %s parsed, want an error", tc.payload)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := cmd.(ChatSendCmd).ReplyPing; got != tc.wantPing {
+				t.Errorf("ReplyPing = %v, want %v", got, tc.wantPing)
+			}
+		})
+	}
+}

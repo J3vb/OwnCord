@@ -168,6 +168,10 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# XInput2 pointer query for Mouse 4/5 push to talk (mouse_buttons.rs):
+# device_query's core XQueryPointer stops at Button5. Loads Xlib and libXi at
+# runtime; already in the tree under tao, so no new crate or build.
+x11-dl = "2.21"
 # sigaction/prctl/dlsym for crash_log.rs, the last log line of a native
 # crash. Already in the tree under most of the dependency graph.
 libc = "0.2"

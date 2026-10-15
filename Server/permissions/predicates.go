@@ -176,6 +176,26 @@ func CanAddReaction(s Subject) error {
 	return nil
 }
 
+// CanDeleteMessage is the delete policy for one message. READ and MANAGE in
+// the channel delete anyone's message, as a moderation action (asModerator);
+// the author needs only READ, so a member whose SEND was taken away, or who is
+// timed out, can still remove what they wrote, while a denied READ blocks it.
+// In a DM membership is the whole rule and the delete is never a moderation
+// action, so the store's ownership check still applies. The archive gate is
+// the caller's shared write gate, not this predicate.
+func CanDeleteMessage(s Subject, isAuthor bool) (asModerator bool, err error) {
+	if s.Channel.Type == "dm" {
+		return false, dmMember(s)
+	}
+	if s.Has(ReadMessages | ManageMessages) {
+		return true, nil
+	}
+	if isAuthor && s.Has(ReadMessages) {
+		return false, nil
+	}
+	return false, missing(ManageMessages)
+}
+
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
 // membership, so this can only ever narrow), READ_MESSAGES for a non-DM
