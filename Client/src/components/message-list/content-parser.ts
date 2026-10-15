@@ -54,7 +54,7 @@ export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
  */
 export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
 /** `<https://…>` — a link its author asked to post without an embed. */
-export const ANGLE_URL_REGEX = /<https?:\/\/[^\s<>]+>/gi;
+export const ANGLE_URL_REGEX = /(?<!\\)<https?:\/\/[^\s<>]+>/gi;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
 

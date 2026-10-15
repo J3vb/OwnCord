@@ -16,11 +16,16 @@ const PROTECTED = /```[\s\S]*?```|<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>"']+/y;
 /** A shortcode with no letter, digit, `_` or backslash right before or after it. */
 const SHORTCODE = /(?<![\\\p{L}\p{N}_]):([a-z0-9_+-]{2,32}):(?![\p{L}\p{N}_])/gu;
 
-/** Index of the `close` that balances the `open` at `start` on the same line, or -1. */
+/** Index of the `close` that balances the `open` at `start` on the same line,
+ * skipping escaped characters as the markdown parser does, or -1. */
 function balanced(s: string, start: number, open: string, close: string): number {
   let depth = 0;
   for (let j = start; j < s.length; j++) {
     const c = s[j];
+    if (c === "\\") {
+      j++;
+      continue;
+    }
     if (c === "\n") return -1;
     if (c === open) depth++;
     else if (c === close && depth > 0 && --depth === 0) return j;

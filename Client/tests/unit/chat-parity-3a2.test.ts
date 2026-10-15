@@ -217,6 +217,8 @@ describe("replaceEmojiShortcodes", () => {
   it("leaves a masked link whole when its target holds parentheses", () => {
     const text = "[docs](https://ex.com/a_(b):joy:) :joy:";
     expect(replaceEmojiShortcodes(text)).toBe("[docs](https://ex.com/a_(b):joy:) 😂");
+    const escaped = "[docs](https://ex.com/a\\):joy:)";
+    expect(replaceEmojiShortcodes(escaped)).toBe(escaped);
   });
 
   it("leaves colon pairs inside words, numbers, addresses and links alone", () => {
@@ -260,6 +262,9 @@ describe("<url> posts a link with no embed", () => {
     expect(extractUrls("<https://a.example/x> https://b.example/y")).toEqual([
       "https://b.example/y",
     ]);
+  });
+  it("keeps the embed when the opening bracket is escaped", () => {
+    expect(extractUrls("\\<https://a.example/x>")).toEqual(["https://a.example/x"]);
   });
 
   it("needs an address with no spaces between the brackets", () => {
