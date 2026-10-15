@@ -223,47 +223,112 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   // active channel never alerts here: its own chat_message already does.
   // A channel_activity entry for the mention alerts with the author and the
   // message instead (WP 2B-2), so this alert waits a moment for one.
-  if (payload.count > previous) deferMentionAlert(payload.channel_id);
+  // A lowered total takes back the rises it reverses, pending alerts included.
+  if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
+  else if (payload.count < previous)
+    withdrawMentionAlert(payload.channel_id, previous - payload.count);
 }
 
 /**
  * How long a mention_count alert waits for a channel_activity entry that
- * carries the mention, and how long after such an entry a mention_count rise
- * counts as the same mention. The server flushes activity on a 1 s window and
+ * carries the mention, and how long a mention entry that came first waits for
+ * its rise. The server flushes activity on a 1 s window and
  * resolves a flush within 2 s.
  */
 export const MENTION_ALERT_GRACE_MS = 3000;
 
-/** Pending mention_count alerts, by channel. */
-const pendingMentionAlerts = new Map<number, ReturnType<typeof setTimeout>>();
-/** When a channel_activity mention entry last alerted, by channel. */
-const activityMentionAt = new Map<number, number>();
+/** A channel's mention_count rises still waiting for an activity entry. */
+interface PendingMentionAlert {
+  readonly timer: ReturnType<typeof setTimeout>;
+  /** Rises not yet matched by a mention entry. */
+  owed: number;
+}
+
+const pendingMentionAlerts = new Map<number, PendingMentionAlert>();
+/** Mention entries that arrived before their rise, with when, by channel. */
+const activityCredits = new Map<number, number[]>();
+
+/** Unexpired credits for `channelId`, oldest first. */
+function liveCredits(channelId: number): number[] {
+  const now = Date.now();
+  const live = (activityCredits.get(channelId) ?? []).filter(
+    (at) => now - at < MENTION_ALERT_GRACE_MS,
+  );
+  if (live.length === 0) activityCredits.delete(channelId);
+  else activityCredits.set(channelId, live);
+  return live;
+}
 
 /**
- * Alert for a mention_count rise unless channel_activity announces it. Per
- * channel, so a mention the frame did not carry (the server keeps only the
- * newest mentions of a busy window, a dropped frame, a server without the
- * frame) still alerts, one grace window late.
+ * Alert for `rises` mention_count rises unless channel_activity announces
+ * them. Each mention entry matches one rise, before or after it, so a second
+ * mention whose entry never came (the server keeps only a window's newest
+ * mentions, a dropped frame, a server without the frame) still alerts, one
+ * grace window late.
  */
-function deferMentionAlert(channelId: number): void {
-  const alertedAt = activityMentionAt.get(channelId);
-  if (alertedAt !== undefined && Date.now() - alertedAt < MENTION_ALERT_GRACE_MS) return;
-  if (pendingMentionAlerts.has(channelId)) return;
-  pendingMentionAlerts.set(
-    channelId,
-    setTimeout(() => {
+function deferMentionAlert(channelId: number, rises: number): void {
+  const credits = liveCredits(channelId);
+  const used = Math.min(credits.length, rises);
+  if (used > 0) {
+    credits.splice(0, used);
+    if (credits.length === 0) activityCredits.delete(channelId);
+  }
+  const owed = rises - used;
+  if (owed === 0) return;
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending !== undefined) {
+    pending.owed += owed;
+    return;
+  }
+  pendingMentionAlerts.set(channelId, {
+    owed,
+    timer: setTimeout(() => {
       pendingMentionAlerts.delete(channelId);
       notifyMention(channelId);
     }, MENTION_ALERT_GRACE_MS),
-  );
+  });
+}
+
+/** Take back `count` rises a lowered total reversed (a delete or purge). */
+function withdrawMentionAlert(channelId: number, count: number): void {
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending === undefined) return;
+  pending.owed -= count;
+  if (pending.owed <= 0) {
+    clearTimeout(pending.timer);
+    pendingMentionAlerts.delete(channelId);
+  }
+}
+
+/** A mention entry alerted: it answers one pending rise, or one still to come. */
+function matchMentionEntry(channelId: number): void {
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending === undefined) {
+    activityCredits.set(channelId, [...liveCredits(channelId), Date.now()]);
+    return;
+  }
+  pending.owed--;
+  if (pending.owed <= 0) {
+    clearTimeout(pending.timer);
+    pendingMentionAlerts.delete(channelId);
+  }
 }
 
 /** Drop pending mention alerts and what they were matched against. Run when
  *  the dispatcher is torn down. */
 export function resetChannelActivity(): void {
-  for (const timer of pendingMentionAlerts.values()) clearTimeout(timer);
+  for (const pending of pendingMentionAlerts.values()) clearTimeout(pending.timer);
   pendingMentionAlerts.clear();
-  activityMentionAt.clear();
+  activityCredits.clear();
+}
+
+/** The newest confirmed message loaded for a channel; a pending send has id 0. */
+function newestLoadedId(channelId: number): number {
+  const rows = getChannelMessages(channelId);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]!.id > 0) return rows[i]!.id;
+  }
+  return 0;
 }
 
 /**
@@ -278,17 +343,8 @@ export function resetChannelActivity(): void {
  * there), neither counts nor alerts.
  *
  * An entry that carries a mention alerts with its author and message, so it
- * replaces that channel's pending mention_count alert.
+ * stands in for one of that channel's mention_count rises.
  */
-/** The newest confirmed message loaded for a channel; a pending send has id 0. */
-function newestLoadedId(channelId: number): number {
-  const rows = getChannelMessages(channelId);
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i]!.id > 0) return rows[i]!.id;
-  }
-  return 0;
-}
-
 export function handleChannelActivity(payload: Payload<"channel_activity">): void {
   const activeId = channelsStore.getState().activeChannelId;
   for (const entry of payload.channels) {
@@ -298,11 +354,7 @@ export function handleChannelActivity(payload: Payload<"channel_activity">): voi
     if (ch.lastMessageId !== null && entry.message_id <= ch.lastMessageId) continue;
     if (entry.message_id <= newestLoadedId(entry.channel_id)) continue;
     noteChannelMessage(entry.channel_id, entry.message_id, false);
-    if (entry.mentions_you || entry.mentions_everyone) {
-      clearTimeout(pendingMentionAlerts.get(entry.channel_id));
-      pendingMentionAlerts.delete(entry.channel_id);
-      activityMentionAt.set(entry.channel_id, Date.now());
-    }
+    if (entry.mentions_you || entry.mentions_everyone) matchMentionEntry(entry.channel_id);
     notifyChannelActivity(entry);
   }
 }

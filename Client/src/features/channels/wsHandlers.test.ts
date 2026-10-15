@@ -533,6 +533,45 @@ describe("handleChannelActivity (WP 2B-2)", () => {
     expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(1);
   });
 
+  it("a second mention right after an announced one still alerts when its entry never comes", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 50, { mentions_you: true })] });
+    handleMentionCount({ channel_id: 3, count: 1 });
+
+    handleMentionCount({ channel_id: 3, count: 2 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a lowered total inside the grace window takes back the pending alert", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleMentionCount({ channel_id: 3, count: 0 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).not.toHaveBeenCalled();
+  });
+
+  it("a lowered total takes back only the rises it reverses", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleMentionCount({ channel_id: 3, count: 2 });
+    handleMentionCount({ channel_id: 3, count: 1 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+  });
+
+  it("a mention entry whose rise never comes stops matching after the grace window", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 50, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
   it("teardown drops a pending alert", () => {
     handleMentionCount({ channel_id: 3, count: 1 });
 
