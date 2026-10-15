@@ -2045,7 +2045,7 @@ clients hold the pinned identity keys.
 lowercase MIME subtypes (`vp8`, `h264`, `vp9`, `h265`, `av1`), so a screen
 sharer can pick a codec every viewer can decrypt and render. The server treats
 the values as opaque but accepts at most 8 entries, each 1-16 characters of
-`[a-z0-9]`. If the list breaks that rule the server drops the whole field and
+`[a-z0-9]`. If the list breaks that rule, or is not a list of strings, the server drops the whole field and
 still accepts the announce — a bad list never affects the key. Each announce
 replaces the stored list; an announce without the field clears it. Receivers
 treat an absent or empty list as `["vp8", "h264"]`.

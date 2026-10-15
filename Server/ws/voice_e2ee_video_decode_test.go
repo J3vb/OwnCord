@@ -100,6 +100,10 @@ func TestVoiceE2EEAnnounce_InvalidVideoDecodeDroppedKeyAccepted(t *testing.T) {
 		{"bad chars", []string{"vp8", "h.264"}},
 		{"empty string entry", []string{"vp8", ""}},
 		{"non-ascii", []string{"vp8é"}},
+		{"string not list", "vp8"},
+		{"number", 5},
+		{"list of numbers", []any{1, 2}},
+		{"object", map[string]any{"a": 1}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,6 +179,34 @@ func TestVoiceE2EEAnnounce_ReannounceWithoutFieldClears(t *testing.T) {
 	}
 	if _, present := payloadVideoDecode(t, rm); present {
 		t.Errorf("replay after a clearing re-announce must not carry a list: %s", rm)
+	}
+}
+
+func TestVoiceE2EEAnnounce_ReannounceWithInvalidListClears(t *testing.T) {
+	hub, database, chanID, c1, _, send2 := decodeRoom(t, "vd-clear-invalid")
+	key := validB64Key()
+
+	hub.HandleMessageForTest(c1, e2eeAnnounceMsgDecode(key, []string{"vp8", "av1"}))
+	if m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout); m == nil {
+		t.Fatal("first announce not relayed")
+	}
+	hub.HandleMessageForTest(c1, e2eeAnnounceMsgDecode(key, []string{"VP8"}))
+	if m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout); m == nil {
+		t.Fatal("second announce not relayed")
+	}
+
+	user3 := seedVoiceOwner(t, database, "vd-clear-invalid-user3")
+	send3 := make(chan []byte, 32)
+	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
+	hub.Register(c3)
+	waitRegistered(t, hub, c3)
+	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
+	rm := waitMsgOfType(send3, "voice_e2ee_announce", waitTimeout)
+	if rm == nil {
+		t.Fatal("late joiner should receive the replayed announce")
+	}
+	if _, present := payloadVideoDecode(t, rm); present {
+		t.Errorf("replay after an invalid-list re-announce must not carry the old list: %s", rm)
 	}
 }
 

@@ -632,14 +632,19 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 
 	MsgTypeVoiceE2EEAnnounce: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		var p struct {
-			PublicKey   string   `json:"public_key"`
-			Signature   string   `json:"signature"`
-			VideoDecode []string `json:"video_decode"`
+			PublicKey   string          `json:"public_key"`
+			Signature   string          `json:"signature"`
+			VideoDecode json.RawMessage `json:"video_decode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: p.VideoDecode}, nil
+		// A wrongly typed list is dropped like an invalid one; it must never cost the key.
+		var videoDecode []string
+		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
+			videoDecode = nil
+		}
+		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
