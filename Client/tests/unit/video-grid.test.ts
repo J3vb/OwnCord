@@ -41,6 +41,7 @@ import {
 } from "../../src/components/VideoGrid";
 import { RemoteTracks } from "../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
+import type { ShareSenderSample } from "../../src/features/voice/shareSenderStats";
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
@@ -1949,30 +1950,53 @@ describe("VideoGrid", () => {
           getVideoTracks: () => [track],
           getAudioTracks: () => [],
         } as unknown as MediaStream;
-        const getLocalShareFps = vi.fn(async (): Promise<number | null> => null);
-        grid.setCallbacks({ getLocalShareFps });
+        const getLocalShareStats = vi.fn(async (): Promise<ShareSenderSample | null> => ({}));
+        grid.setCallbacks({ getLocalShareStats });
         grid.addStream(1 + 1_000_000, "Your Screen", stream, {
           isSelf: true,
           audioUserId: 1,
           isScreenshare: true,
         });
         const detail = () => cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent;
+        const sender = () => cell(1 + 1_000_000).querySelector<HTMLElement>(".video-self-stats")!;
         // 1080p, not 1,080p; and never the requested 120 before a measurement.
         expect(detail()).toBe("1080p · No audio");
+        expect(sender().hidden).toBe(true);
 
-        getLocalShareFps.mockResolvedValue(58.4);
+        getLocalShareStats.mockResolvedValue({ sentFps: 58.4 });
         await vi.advanceTimersByTimeAsync(2000);
         expect(detail()).toBe("1080p · 58 fps · No audio");
+        expect(sender().hidden).toBe(true);
 
-        getLocalShareFps.mockResolvedValue(117);
+        // M-1: why the share sends what it does.
+        getLocalShareStats.mockResolvedValue({
+          sentFps: 61,
+          captureFps: 120,
+          limitation: "cpu",
+          codec: "video/VP8",
+          encoder: "libvpx",
+        });
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · 61 fps · No audio");
+        expect(sender().hidden).toBe(false);
+        expect(sender().textContent).toBe("Capture 120 fps · Limited by CPU · VP8 · libvpx");
+
+        getLocalShareStats.mockResolvedValue({ sentFps: 117, limitation: "none" });
         await vi.advanceTimersByTimeAsync(2000);
         expect(detail()).toBe("1080p · 117 fps · No audio");
+        expect(sender().textContent).toBe("Not limited");
+
+        // A share with no sender stats (the Linux native share) says so.
+        getLocalShareStats.mockResolvedValue(null);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · No audio");
+        expect(sender().textContent).toBe("Encoder details not available");
 
         // The poll goes with the tile.
         grid.removeStream(1 + 1_000_000);
-        const calls = getLocalShareFps.mock.calls.length;
+        const calls = getLocalShareStats.mock.calls.length;
         await vi.advanceTimersByTimeAsync(6000);
-        expect(getLocalShareFps).toHaveBeenCalledTimes(calls);
+        expect(getLocalShareStats).toHaveBeenCalledTimes(calls);
       } finally {
         vi.useRealTimers();
       }
