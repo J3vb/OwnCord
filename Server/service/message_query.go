@@ -296,10 +296,10 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 // permissions.CanPinMessage; this only maps its verdict onto the service's
 // error kinds, which are unchanged. A DM non-participant or a failed
 // participation lookup is an opaque ErrNotFound; a confirmed participant's
-// failed block lookup stays an internal error, as before. A block or timeout
-// keeps its own kind, and
-// every other refusal, or a failure to resolve the subject, is ErrForbidden
-// (the permission lookup fails closed to 403, never 500).
+// failed block lookup stays an internal error, as before; any other failure
+// to resolve a DM subject is ErrNotFound (fail closed). A block or timeout
+// keeps its own kind, and every other refusal, or a failure to resolve a
+// channel subject, is ErrForbidden (fails closed to 403, never 500).
 func (s *MessageService) pinAuthz(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if err != nil {

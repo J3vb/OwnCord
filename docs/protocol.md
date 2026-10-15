@@ -496,7 +496,8 @@ servers omit it.
 message affordances, always present on every non-DM channel and absent from
 `dm_channels` entries, which carry none of these affordance fields. Each is one
 predicate's verdict over the caller's role and both override layers, the same
-predicate the server enforces, so a control built on it is never refused:
+predicate the server enforces, so a control built on it is never refused for
+lack of permission:
 
 - `can_delete_others` is `permissions.CanDeleteMessage` answering "as a
   moderator" (`READ_MESSAGES | MANAGE_MESSAGES`), for deleting another member's
