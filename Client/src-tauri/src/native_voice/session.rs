@@ -360,6 +360,10 @@ enum ProcessingChange {
     Remember,
     /// The options are what the running processing already has.
     Unchanged,
+    /// Only Enhanced Noise Suppression changed: RNNoise runs outside
+    /// libwebrtc, so keep the processing (and the echo canceller's
+    /// adaptation) and only switch the denoiser.
+    Reroute,
     /// Build the processing again (libwebrtc's flags are fixed at
     /// construction) and swap it in.
     Rebuild,
@@ -374,6 +378,13 @@ fn processing_change(
         ProcessingChange::Remember
     } else if current == Some(next) {
         ProcessingChange::Unchanged
+    } else if current.is_some_and(|c| {
+        AudioOptions {
+            enhanced_noise_suppression: next.enhanced_noise_suppression,
+            ..c
+        } == next
+    }) {
+        ProcessingChange::Reroute
     } else {
         ProcessingChange::Rebuild
     }
@@ -616,6 +627,9 @@ pub struct NativeSession {
     /// The options `apm` was built from, or the latest asked for before
     /// `enable_audio` ran.
     audio: Option<AudioOptions>,
+    /// The processing a rebuild replaced, kept until the next rebuild or the
+    /// session's end so its last reference is never dropped on an audio thread.
+    retired: Option<Arc<Apm>>,
     /// The published microphone track — not its publication: a full
     /// reconnect republishes the same track under a new publication and
     /// detaches the old one, so muting through a stored publication would
@@ -732,6 +746,7 @@ impl NativeSession {
             room,
             key_provider,
             apm: None,
+            retired: None,
             audio: None,
             mic: None,
             mic_source: None,
@@ -833,12 +848,19 @@ impl NativeSession {
         match processing_change(self.apm.is_some(), self.audio, audio) {
             ProcessingChange::Unchanged => {}
             ProcessingChange::Remember => self.audio = Some(audio),
+            ProcessingChange::Reroute => {
+                if let Some(apm) = &self.apm {
+                    self.capture
+                        .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                }
+                self.audio = Some(audio);
+            }
             ProcessingChange::Rebuild => {
                 let apm = Apm::new(&audio);
                 self.playout.set_reference(apm.clone());
                 self.capture
                     .set_processing(apm.clone(), audio.enhanced_noise_suppression);
-                self.apm = Some(apm);
+                self.retired = self.apm.replace(apm);
                 self.audio = Some(audio);
             }
         }
@@ -1920,7 +1942,8 @@ mod tests {
     }
 
     /// A toggle that changes nothing must not replace the processing (and
-    /// reset the echo canceller's adaptation); a real change rebuilds it, and
+    /// reset the echo canceller's adaptation); an Enhanced Noise Suppression
+    /// change only switches the denoiser; any other change rebuilds it, and
     /// before audio is enabled it is only remembered.
     #[test]
     fn set_audio_processing_rebuilds_only_on_a_change() {
@@ -1935,6 +1958,10 @@ mod tests {
         );
         assert_eq!(
             processing_change(true, Some(on), audio(true, true)),
+            ProcessingChange::Reroute
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, true)),
             ProcessingChange::Rebuild
         );
         assert_eq!(
