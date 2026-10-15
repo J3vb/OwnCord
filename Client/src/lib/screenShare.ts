@@ -37,6 +37,11 @@ import {
   PORTAL_NOT_STARTED,
 } from "../features/voice/native/platform";
 import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
+import {
+  readSenderSample,
+  type SenderStatsTrack,
+  type ShareSenderSample,
+} from "../features/voice/shareSenderStats";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 import { resolveVideoCodec } from "../features/voice/videoCodec";
@@ -890,15 +895,11 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
   return null;
 }
 
-/** The frame rate your screen share's top layer is sending, or null before a
- *  layer reports one or where the track has no WebRTC sender (the Linux
- *  native track publishes in the backend). */
-export async function getLocalScreenshareFps(room: Room | null): Promise<number | null> {
+/** What your screen share is sending and why it falls short (its own tile's
+ *  readout, M-1), or null where the track has no sender stats (the Linux
+ *  native track publishes in the backend) or nothing is shared. */
+export function getLocalScreenshareStats(room: Room | null): Promise<ShareSenderSample | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
-    Partial<Pick<LocalVideoTrack, "getSenderStats">> | undefined;
-  if (typeof track?.getSenderStats !== "function") return null;
-  const rates = (await track.getSenderStats())
-    .map((s) => s.framesPerSecond as number | undefined)
-    .filter((fps): fps is number => fps !== undefined);
-  return rates.length > 0 ? Math.max(...rates) : null;
+    SenderStatsTrack | undefined;
+  return readSenderSample(track);
 }

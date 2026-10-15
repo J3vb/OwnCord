@@ -1006,6 +1006,37 @@ describe("LiveKitSession", () => {
       const info = session.getSessionDebugInfo();
       expect(info.outputVolumeMultiplier).toBe(0.4);
     });
+
+    it("[M-1] carries your share's sender stats while you share, and none after", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
+
+      const sample = { sentFps: 61, limitation: "cpu", encoder: "libvpx" };
+      mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
+        source === "screenShare"
+          ? {
+              track: {
+                mediaStreamTrack: {},
+                getSenderStats: async () => [
+                  {
+                    framesPerSecond: 61,
+                    qualityLimitationReason: "cpu",
+                    encoderImplementation: "libvpx",
+                  },
+                ],
+              },
+            }
+          : undefined,
+      );
+      // The share's tile polls; the bundle reports what the last poll read.
+      await session.getLocalScreenshareStats();
+      expect(session.getSessionDebugInfo().screenShareSender).toMatchObject(sample);
+
+      mockRoom.localParticipant.getTrackPublication.mockReturnValue(undefined);
+      expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
+    });
   });
 
   describe("handleVoiceToken", () => {

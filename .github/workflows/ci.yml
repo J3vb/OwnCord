@@ -21,10 +21,14 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-# Cancel in-progress runs for the same branch/PR, never on main
+# Cancel a superseded run of the same pull request. Pushes to dev and main are
+# never cancelled: each one is a merged tree that the next merge would
+# otherwise cancel before it finished, so the "green alone, red together" check
+# a dev push exists for rarely completed. Same-ref pushes still queue behind the
+# running one (GitHub keeps one pending run per group).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -67,6 +71,7 @@ jobs:
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
       permissions: ${{ steps.select.outputs.permissions }}
+      changelog: ${{ steps.select.outputs.changelog }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -167,16 +172,20 @@ jobs:
   # each 20-27 minute server leg, so a lint or invariant failure was found after
   # the race tests. This job is deliberately additive: it runs the same checks
   # early for fast feedback, and every step it mirrors stays in the required
-  # `Server Build & Test` legs, so no gating is moved off a required context and
-  # no required-check name changes. A lint or invariant failure now reports in
+  # `Server Build & Test` legs (for a changelog-only selection, the ubuntu
+  # leg's "Changelog gate" step), so no gating is moved off a required context
+  # and no required-check name changes. A lint or invariant failure now reports in
   # minutes instead of after the 20-minute race step.
   #
   # Gated on the `server` capability like the other server jobs, so a client-only
-  # PR does not pay for it.
+  # PR does not pay for it, and also on `changelog`: its document gates run
+  # TestBundledChangelog, the server's only reader of CHANGELOG.md, so a
+  # changelog line on a client PR is reported here early as well as in the
+  # required ubuntu leg.
   server-fast-checks:
     name: Server Lint & Invariants
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true' || needs.changes.outputs.changelog == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -322,8 +331,10 @@ jobs:
         shell: bash
         env:
           SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+          CHANGELOG: ${{ needs.changes.outputs.changelog == 'true' }}
         run: |
           echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          echo "RUN_CHANGELOG=${CHANGELOG:-true}" >> "$GITHUB_ENV"
           # Printed as well as written, so the decision is readable in the log of
           # each leg rather than only inferable from which steps ran.
           echo "server checks selected: ${SELECTED:-true}"
@@ -332,10 +343,19 @@ jobs:
           fi
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        if: env.RUN_SERVER != 'false'
+        if: env.RUN_SERVER != 'false' || (matrix.os == 'ubuntu-latest' && env.RUN_CHANGELOG != 'false')
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
+
+      # A CHANGELOG.md edit selects `changelog`, not `server` (ci-select.mjs), so
+      # a client PR's changelog line does not pay for the race legs. Its one
+      # server reader, TestBundledChangelog, still has to block the merge, so
+      # this required leg runs it alone when the full server checks are off.
+      # When they are on, "Run document gates" below runs it instead.
+      - name: Changelog gate (server checks not selected)
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER == 'false' && env.RUN_CHANGELOG != 'false'
+        run: go test -count=1 -run TestBundledChangelog ./admin/
 
       # scripts/coverage-floor.sh parses the floor file with node (the coverage
       # profile itself is still read by the same line-oriented awk pass). This
@@ -482,9 +502,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make docs-verify
 
+      # Coverage is profiled on the Linux leg only: the floor check below reads
+      # that leg alone, and coverage instrumentation slows the Windows leg,
+      # which is the longest job in the workflow, for a profile nothing reads.
       - name: Run tests with race detection and coverage
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+
+      - name: Run tests with race detection
+        if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        run: go test -race -timeout 20m ./...
 
       # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
       # upstream, so a YAML-only assertion cannot tell whether livekit-server
@@ -512,8 +539,11 @@ jobs:
           OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
         run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
 
+      # One leg is enough: -tags deadlock swaps syncutil's lock types and
+      # reports lock-order inversions, which do not depend on the OS. The race
+      # step above still runs every test on both legs.
       - name: Run tests with deadlock detection
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
@@ -577,7 +607,7 @@ jobs:
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-coverage-${{ matrix.os }}

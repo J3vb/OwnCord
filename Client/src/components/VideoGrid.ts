@@ -27,6 +27,7 @@ import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import {
   openPopout,
   openPopoutWindow,
@@ -90,8 +91,8 @@ export interface VideoGridCallbacks {
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
   readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
-  /** The frame rate your own screen share is sending, or null when unknown. */
-  readonly getLocalShareFps?: () => Promise<number | null>;
+  /** What your own screen share is sending, or null where nothing reports it. */
+  readonly getLocalShareStats?: () => Promise<ShareSenderSample | null>;
   /** What a remote tile shows now, so its stream sends only that. */
   readonly setStreamView?: (tileId: number, view: VideoView) => void;
   /** Opt-in watching: the viewer watches a remote stream, or stops. Nothing
@@ -1649,18 +1650,26 @@ export function createVideoGrid(): VideoGridComponent {
       detail.textContent = parts.join(" · ");
     };
     renderDetail(null);
-    const pollFps = async (): Promise<void> => {
-      let fps: number | null = null;
+    // Why the share sends what it does (M-1): the capture rate, what limits
+    // the encoder, and which encoder. Filled once the first poll is back.
+    const senderLine = createElement("div", { class: "video-self-stats" });
+    senderLine.hidden = true;
+    const pollSender = async (): Promise<void> => {
+      let sample: ShareSenderSample | null = null;
       try {
-        fps = (await callbacks.getLocalShareFps?.()) ?? null;
+        sample = (await callbacks.getLocalShareStats?.()) ?? null;
+        infoModule ??= await import("./video-grid/stream-info");
       } catch (err) {
         log.debug("Local share stats unavailable", { tileId, err });
       }
       if (signal.aborted) return;
-      renderDetail(fps);
-      setOwnedTimeout(signal, () => void pollFps(), STATS_POLL_MS);
+      renderDetail(sample?.sentFps ?? null);
+      const text = infoModule?.senderText(sample) ?? "";
+      senderLine.textContent = text;
+      senderLine.hidden = text === "";
+      setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
     };
-    setOwnedTimeout(signal, () => void pollFps(), STATS_POLL_MS);
+    setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
 
     const cover = createElement("div", { class: "video-self-cover" });
     const actions = createElement("div", { class: "video-self-actions" });
@@ -1687,6 +1696,7 @@ export function createVideoGrid(): VideoGridComponent {
       cover,
       createElement("div", { class: "video-self-title" }, title),
       detail,
+      senderLine,
       actions,
     );
     return cover;
