@@ -180,8 +180,8 @@ libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
 # IdleMonitor and the freedesktop ScreenSaver interface; also the launcher
 # count (unread_badge.rs) and message notifications (notification_bus.rs).
-# Already in the tree
-# as keyring's sync-secret-service transport, same libdbus, no new build.
+# Already in the tree as keyring's sync-secret-service transport, same
+# libdbus, no new build.
 dbus = "0.9"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
 # WebRTC (the system webview's RTCPeerConnection is undefined on every distro),

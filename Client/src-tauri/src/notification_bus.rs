@@ -12,7 +12,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dbus::arg::{PropMap, RefArg, Variant};
 use dbus::blocking::Connection;
@@ -46,6 +46,10 @@ enum Command {
     Show {
         popup: Popup,
         reply: Sender<Result<(), String>>,
+        /// The caller stops waiting here; a Show still queued past it is
+        /// dropped, so a slow server cannot pop it up after the renderer has
+        /// fallen back to its own notification.
+        deadline: Instant,
     },
     Close {
         tag: String,
@@ -58,11 +62,16 @@ static BUS: OnceLock<Sender<Command>> = OnceLock::new();
 /// `notification-click` with its target.
 pub fn show<R: Runtime>(app: &AppHandle<R>, popup: Popup) -> Result<(), String> {
     let (reply, answer) = mpsc::channel();
+    let wait = CALL_TIMEOUT + POLL;
     bus(app)
-        .send(Command::Show { popup, reply })
+        .send(Command::Show {
+            popup,
+            reply,
+            deadline: Instant::now() + wait,
+        })
         .map_err(|_| "notification thread stopped".to_string())?;
     answer
-        .recv_timeout(CALL_TIMEOUT + POLL)
+        .recv_timeout(wait)
         .map_err(|_| "notification server did not answer".to_string())?
 }
 
@@ -92,24 +101,102 @@ fn bus<R: Runtime>(app: &AppHandle<R>) -> &'static Sender<Command> {
     })
 }
 
-fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + 'static) {
-    let conn = match Connection::new_session() {
-        Ok(conn) => conn,
-        Err(e) => {
-            let error = format!("no session bus for notifications: {e}");
-            log::warn!("[notify] {error}");
-            for command in commands {
-                if let Command::Show { reply, .. } = command {
-                    let _ = reply.send(Err(error.clone()));
+/// How a session on one bus connection ended.
+enum Ended {
+    /// Every sender is gone: the app is exiting.
+    Closed,
+    /// The bus connection failed; the next command opens a new one.
+    BusLost,
+}
+
+/// Serve commands until the app exits. A session bus that cannot be reached
+/// or is lost is retried on the next command, so one bus restart does not end
+/// notifications for the rest of the run.
+fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + Sync + 'static) {
+    let on_click: Arc<dyn Fn(MessageTarget) + Send + Sync> = Arc::new(on_click);
+    while let Ok(first) = commands.recv() {
+        let conn = match Connection::new_session() {
+            Ok(conn) => conn,
+            Err(e) => {
+                let error = format!("no session bus for notifications: {e}");
+                log::warn!("[notify] {error}");
+                if let Command::Show { reply, .. } = first {
+                    let _ = reply.send(Err(error));
                 }
+                continue;
             }
-            return;
+        };
+        match serve(&conn, first, &commands, Arc::clone(&on_click)) {
+            Ended::Closed => return,
+            Ended::BusLost => {}
         }
-    };
+    }
+}
+
+fn serve(
+    conn: &Connection,
+    first: Command,
+    commands: &Receiver<Command>,
+    on_click: Arc<dyn Fn(MessageTarget) + Send + Sync>,
+) -> Ended {
     let popups: Arc<Mutex<Popups<MessageTarget>>> =
         Arc::new(Mutex::new(Popups::new(MAX_REMEMBERED)));
+    watch_signals(conn, &popups, on_click);
 
-    let clicked = Arc::clone(&popups);
+    let mut next = Some(first);
+    loop {
+        // Read queued signals before each command: a NotificationClosed for
+        // a dismissed ring must land before a redial reuses its id.
+        loop {
+            match conn.process(Duration::ZERO) {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(e) => {
+                    log::warn!("[notify] session bus lost: {e}");
+                    return Ended::BusLost;
+                }
+            }
+        }
+        match next.take() {
+            Some(Command::Show {
+                popup,
+                reply,
+                deadline,
+            }) => {
+                if Instant::now() < deadline {
+                    let _ = reply.send(send_popup(conn, &popups, popup));
+                }
+            }
+            Some(Command::Close { tag }) => {
+                let id = lock(&popups).take_tag(&tag);
+                if let Some(id) = id {
+                    let closed: Result<(), dbus::Error> = conn
+                        .with_proxy(BUS_NAME, OBJECT_PATH, CALL_TIMEOUT)
+                        .method_call(INTERFACE, "CloseNotification", (id,));
+                    if let Err(e) = closed {
+                        log::debug!("[notify] cannot close popup {id}: {e}");
+                    }
+                }
+            }
+            None => {}
+        }
+        match commands.recv_timeout(POLL) {
+            Ok(command) => next = Some(command),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Ended::Closed,
+        }
+    }
+}
+
+/// Clicks open their target, closed popups are forgotten, and a restarted
+/// notification server (which numbers its popups from 1 again) clears every
+/// remembered id.
+fn watch_signals(
+    conn: &Connection,
+    popups: &Arc<Mutex<Popups<MessageTarget>>>,
+    on_click: Arc<dyn Fn(MessageTarget) + Send + Sync>,
+) {
+    let clicked = Arc::clone(popups);
     let watched = conn.add_match(
         MatchRule::new_signal(INTERFACE, "ActionInvoked"),
         move |(id, action): (u32, String), _: &Connection, _: &dbus::Message| {
@@ -122,7 +209,7 @@ fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + 's
             true
         },
     );
-    let gone = Arc::clone(&popups);
+    let gone = Arc::clone(popups);
     let watched = watched.and_then(|_| {
         conn.add_match(
             MatchRule::new_signal(INTERFACE, "NotificationClosed"),
@@ -132,39 +219,22 @@ fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + 's
             },
         )
     });
+    let restarted = Arc::clone(popups);
+    let watched = watched.and_then(|_| {
+        conn.add_match(
+            MatchRule::new_signal("org.freedesktop.DBus", "NameOwnerChanged"),
+            move |(name, _old, _new): (String, String, String),
+                  _: &Connection,
+                  _: &dbus::Message| {
+                if name == BUS_NAME {
+                    lock(&restarted).clear();
+                }
+                true
+            },
+        )
+    });
     if let Err(e) = watched {
         log::warn!("[notify] cannot watch notification clicks: {e}");
-    }
-
-    loop {
-        match commands.recv_timeout(POLL) {
-            Ok(Command::Show { popup, reply }) => {
-                let _ = reply.send(send_popup(&conn, &popups, popup));
-            }
-            Ok(Command::Close { tag }) => {
-                let id = lock(&popups).take_tag(&tag);
-                if let Some(id) = id {
-                    let closed: Result<(), dbus::Error> = conn
-                        .with_proxy(BUS_NAME, OBJECT_PATH, CALL_TIMEOUT)
-                        .method_call(INTERFACE, "CloseNotification", (id,));
-                    if let Err(e) = closed {
-                        log::debug!("[notify] cannot close popup {id}: {e}");
-                    }
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
-        }
-        loop {
-            match conn.process(Duration::ZERO) {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(e) => {
-                    log::warn!("[notify] session bus lost: {e}");
-                    return;
-                }
-            }
-        }
     }
 }
 
@@ -223,23 +293,27 @@ fn popup_hints(desktop_entry: &str) -> PropMap {
 /// binary.
 fn notification_icon() -> String {
     let appdir = std::env::var_os("APPDIR").map(std::path::PathBuf::from);
-    let exe_stem = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.file_stem().map(|s| s.to_string_lossy().into_owned()))
-        .unwrap_or_default();
-    icon_for(appdir.as_deref(), |p| p.exists(), &exe_stem)
+    let exe = std::env::current_exe().unwrap_or_default();
+    icon_for(appdir.as_deref(), &exe, |p| p.exists())
 }
 
+/// `APPDIR` counts only when this binary runs from it: another AppImage that
+/// started this process leaves its own `APPDIR` behind.
 fn icon_for(
     appdir: Option<&std::path::Path>,
+    exe: &std::path::Path,
     exists: impl Fn(&std::path::Path) -> bool,
-    exe_stem: &str,
 ) -> String {
+    let exe_stem = exe
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     appdir
+        .filter(|dir| exe.starts_with(dir))
         .map(|dir| dir.join(".DirIcon"))
         .filter(|icon| exists(icon))
         .and_then(|icon| url::Url::from_file_path(icon).ok())
-        .map_or_else(|| exe_stem.to_string(), String::from)
+        .map_or(exe_stem, String::from)
 }
 
 /// The popups the thread still remembers: each one's click target, in the
@@ -291,6 +365,12 @@ impl<T> Popups<T> {
     fn closed(&mut self, id: u32) {
         self.order.retain(|&known| known != id);
         self.forget(id);
+    }
+
+    fn clear(&mut self) {
+        self.targets.clear();
+        self.order.clear();
+        self.tags.clear();
     }
 
     fn take_tag(&mut self, tag: &str) -> Option<u32> {
@@ -386,17 +466,37 @@ mod tests {
     #[test]
     fn an_appimage_uses_its_own_icon_file() {
         let dir = Path::new("/tmp/.mount_Own Cord");
+        let exe = Path::new("/tmp/.mount_Own Cord/usr/bin/owncord");
         assert_eq!(
-            icon_for(Some(dir), |_| true, "owncord"),
+            icon_for(Some(dir), exe, |_| true),
             "file:///tmp/.mount_Own%20Cord/.DirIcon"
         );
-        assert_eq!(icon_for(Some(dir), |_| false, "owncord"), "owncord");
-        assert_eq!(icon_for(None, |_| true, "owncord"), "owncord");
+        assert_eq!(icon_for(Some(dir), exe, |_| false), "owncord");
+        assert_eq!(icon_for(None, exe, |_| true), "owncord");
+    }
+
+    #[test]
+    fn another_appimages_appdir_is_not_ours() {
+        let deb = Path::new("/usr/bin/owncord");
+        assert_eq!(
+            icon_for(Some(Path::new("/tmp/.mount_Other")), deb, |_| true),
+            "owncord"
+        );
+    }
+
+    #[test]
+    fn a_restarted_server_clears_every_remembered_popup() {
+        let mut popups = Popups::new(8);
+        popups.shown(1, "a", Some("call-1".into()));
+        popups.clear();
+        assert_eq!(popups.activated(1), None);
+        assert_eq!(popups.replaces("call-1"), 0);
     }
 
     /// Needs a session bus: `dbus-run-session -- cargo test -- --ignored dbus`.
     /// A stand-in notification server answers `Notify`, records
-    /// `CloseNotification`, and sends the click back as a server would.
+    /// `CloseNotification`, and sends the click back only to the connection
+    /// that showed the popup, as GNOME Shell does.
     #[test]
     #[ignore = "needs a session bus (dbus-run-session)"]
     fn dbus_popups_click_and_ring_close_round_trip() {
@@ -413,6 +513,8 @@ mod tests {
         let closed = Arc::new(AtomicU32::new(0));
         let (ids, served) = (Arc::clone(&next_id), Arc::clone(&suppressed));
         let closes = Arc::clone(&closed);
+        let client = Arc::new(Mutex::new(None::<String>));
+        let notifier = Arc::clone(&client);
         server.start_receive(
             MatchRule::new_method_call(),
             Box::new(move |msg: Message, conn: &Connection| {
@@ -429,6 +531,7 @@ mod tests {
                             i32,
                         ) = msg.read_all().expect("Notify arguments");
                         assert_eq!(actions, ["default", text::NOTIFICATION_OPEN]);
+                        *lock(&notifier) = msg.sender().map(|s| s.to_string());
                         if prop_cast::<bool>(&hints, "suppress-sound") == Some(&true) {
                             served.store(true, Ordering::SeqCst);
                         }
@@ -479,6 +582,7 @@ mod tests {
                     app_name: "OwnCord".into(),
                 },
                 reply,
+                deadline: Instant::now() + Duration::from_secs(5),
             })
             .unwrap();
             answer.recv_timeout(Duration::from_secs(5)).unwrap()
@@ -489,9 +593,11 @@ mod tests {
         }
         assert!(suppressed.load(Ordering::SeqCst));
         // The 20th popup (id 60) still opens its target on click.
-        let click = Message::new_signal(OBJECT_PATH, INTERFACE, "ActionInvoked")
+        let mut click = Message::new_signal(OBJECT_PATH, INTERFACE, "ActionInvoked")
             .unwrap()
             .append2(60u32, "default");
+        let showed_by = lock(&client).clone().expect("Notify came from the client");
+        click.set_destination(Some(showed_by.into()));
         signal_tx.send(click).unwrap();
         let target = click_rx
             .recv_timeout(Duration::from_secs(5))
