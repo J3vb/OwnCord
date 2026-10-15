@@ -432,7 +432,7 @@ func TestPresenceBatch_ErasedUserLosesOnlyItsOwnEntry(t *testing.T) {
 
 func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 	h := &Hub{broadcast: make(chan broadcastMsg, 8)}
-	m := memberUserPayload{ID: 9, Username: "newcomer"}
+	m := memberJoinUser{ID: 9, Username: "newcomer"}
 	h.queuePresence(9, pendingPresence{status: db.StatusOnline, member: &m})
 	h.QueuePresence(9, db.StatusOnline, nil) // a later state keeps the member data
 	h.presenceMu.Lock()

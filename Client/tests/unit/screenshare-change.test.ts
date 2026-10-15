@@ -396,6 +396,19 @@ describe("setScreenshareQuality", () => {
     });
   });
 
+  it("a quality change on a 120 fps share keeps balanced degradation (M-2)", async () => {
+    const rig = setup(false);
+    rig.state.fps = 120;
+    rig.video.publishOptions = { ...rig.video.publishOptions, degradationPreference: "balanced" };
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.publishOptions).toMatchObject({
+      degradationPreference: "balanced",
+      screenShareEncoding: { maxFramerate: 120 },
+    });
+  });
+
   it("a refused size keeps the old quality and says so", async () => {
     const rig = setup(false);
     rig.video.mediaStreamTrack.applyConstraints.mockRejectedValueOnce(new Error("over"));

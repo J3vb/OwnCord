@@ -30,14 +30,16 @@ type presenceBatchEntry struct {
 
 // memberPayloadFor is the member_join user object: what a client's member
 // list needs to add the member.
-func memberPayloadFor(user *db.User, roleName string) memberUserPayload {
-	return memberUserPayload{
+func memberPayloadFor(user *db.User, roleName string) memberJoinUser {
+	return memberJoinUser{
 		ID:                user.ID,
 		Username:          user.Username,
 		Avatar:            user.Avatar,
 		Role:              roleName,
 		DisplayName:       user.DisplayName,
 		IdentityPublicKey: user.IdentityPublicKey,
+		About:             user.About,
+		CreatedAt:         db.FormatMemberCreatedAt(user.CreatedAt),
 	}
 }
 
@@ -124,7 +126,7 @@ func (s *presenceRepairState) marked(set *map[int64]struct{}, userID int64) bool
 type pendingPresence struct {
 	status       string
 	customStatus *string
-	member       *memberUserPayload
+	member       *memberJoinUser
 }
 
 // QueuePresence coalesces connect/disconnect presence: the latest state per

@@ -191,6 +191,14 @@ export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number):
   return fps;
 }
 
+/** How WebRTC gives way when the encoder or link cannot keep up. At 120 fps
+ *  it lowers the resolution a little before it halves the frame rate (a
+ *  120 fps share is chosen for motion); otherwise text stays sharp and the
+ *  frame rate gives. Always explicit, so an SDK default cannot move 30/60. */
+export function screenShareDegradation(effectiveFps: number): RTCDegradationPreference {
+  return effectiveFps >= 120 ? "balanced" : "maintain-resolution";
+}
+
 /** High frame rates need proportionally more bitrate to stay sharp. */
 const FPS_BITRATE_MULTIPLIER: Readonly<Record<number, number>> = { 60: 1.5, 120: 2 };
 
@@ -736,6 +744,7 @@ export async function enableScreenshare(
                 maxFramerate: effectiveFps,
               },
               videoCodec,
+              degradationPreference: screenShareDegradation(effectiveFps),
             }
           : {}),
         ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),

@@ -144,6 +144,9 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
+		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+			Delete("/avatar", handleDeleteAvatar(svc, broadcaster))
+
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
 				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))

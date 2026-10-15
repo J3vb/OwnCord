@@ -90,7 +90,9 @@
             "dm_channels": [],
             "members": [
               {
+                "about": "fixture profile text",
                 "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "created_at": "<ts:string>",
                 "custom_status": "fixture custom status",
                 "display_name": "Alice Fixture",
                 "id": "<id:number>",
@@ -100,7 +102,9 @@
                 "username": "alice"
               },
               {
+                "about": null,
                 "avatar": null,
+                "created_at": "<ts:string>",
                 "custom_status": null,
                 "display_name": null,
                 "id": "<id:number>",
@@ -158,7 +162,9 @@
           "payload": {
             "status": "online",
             "user": {
+              "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "created_at": "<ts:string>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
@@ -194,7 +200,9 @@
           "payload": {
             "status": "online",
             "user": {
+              "about": null,
               "avatar": null,
+              "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
               "username": "bob"
@@ -324,7 +332,9 @@
             "dm_channels": [],
             "members": [
               {
+                "about": "fixture profile text",
                 "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "created_at": "<ts:string>",
                 "custom_status": "fixture custom status",
                 "display_name": "Alice Fixture",
                 "id": "<id:number>",
@@ -334,7 +344,9 @@
                 "username": "alice"
               },
               {
+                "about": null,
                 "avatar": null,
+                "created_at": "<ts:string>",
                 "custom_status": null,
                 "display_name": null,
                 "id": "<id:number>",
@@ -392,7 +404,9 @@
           "payload": {
             "status": "online",
             "user": {
+              "about": null,
               "avatar": null,
+              "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
               "username": "bob"

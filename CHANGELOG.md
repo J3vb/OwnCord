@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 
+**Profiles**
+
+- The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
+
 **Messaging**
 
 - A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. In the desktop app, the reply bar now names the author by display name and has an **@ ON / @ OFF** toggle: it starts on for each reply, is hidden when you reply to yourself, and a retried send keeps the choice.

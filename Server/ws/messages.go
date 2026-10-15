@@ -53,8 +53,19 @@ type memberUserPayload struct {
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
+// memberJoinUser is the member_join user object: memberUserPayload plus the
+// profile fields the member list shows. It is its own struct because
+// memberUserPayload is also chat_message.user, which must not carry them.
+type memberJoinUser struct {
+	memberUserPayload
+	// About is the profile bio (About Me). Null when unset.
+	About *string `json:"about"`
+	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
+	CreatedAt string `json:"created_at"`
+}
+
 type memberJoinPayload struct {
-	User memberUserPayload `json:"user"`
+	User memberJoinUser `json:"user"`
 	// Status is the viewer-safe presence the connecting user comes online as
 	// (db.BroadcastStatus of the ConnectStatus-mapped value): an invisible
 	// connector reports "offline" here, never their true chosen status. This
