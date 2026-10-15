@@ -195,6 +195,75 @@ func TestSendMessage_ReplyPingTwentyContentMentionsKeepTarget(t *testing.T) {
 	})
 }
 
+// seedExtras adds n members named extra0..extra<n-1> (ids 100..) and returns
+// content mentioning each of them once.
+func seedExtras(t *testing.T, database *db.DB, n int) string {
+	t.Helper()
+	content := ""
+	for i := range n {
+		id := int64(100 + i)
+		seedUser(t, database, &db.User{ID: id, Username: fmt.Sprintf("extra%d", i), Status: "online"})
+		seedUserRole(t, database, id, permissions.MemberRoleID)
+		content += fmt.Sprintf(" @extra%d", i)
+	}
+	return content
+}
+
+// A reply target the content also names takes no content slot: @bob plus
+// twenty others keeps all twenty, on send and again on edit.
+func TestReplyPing_TargetNamedInContentTakesNoSlot(t *testing.T) {
+	eachSendPath(t, func(t *testing.T, keyed bool) {
+		svc, database, parent := replyPingFixture(t)
+		content := "@bob" + seedExtras(t, database, maxMentionsPerMessage)
+		last := int64(100 + maxMentionsPerMessage - 1)
+
+		res := replyAs(t, svc, keyed, 1, parent, true, content)
+		if len(res.Mentions) != maxMentionsPerMessage+1 || !slices.Contains(res.Mentions, 2) || !slices.Contains(res.Mentions, last) {
+			t.Errorf("send Mentions = %v, want %d ids including 2 and %d", res.Mentions, maxMentionsPerMessage+1, last)
+		}
+		if stored := storedMentions(t, database, res.MessageID); len(stored) != maxMentionsPerMessage+1 || !slices.Contains(stored, last) {
+			t.Errorf("send stored = %v, want %d ids including %d", stored, maxMentionsPerMessage+1, last)
+		}
+
+		edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, content+" (edited)")
+		if err != nil {
+			t.Fatalf("EditMessage: %v", err)
+		}
+		if len(edited.Mentions) != maxMentionsPerMessage+1 || !slices.Contains(edited.Mentions, last) {
+			t.Errorf("edit Mentions = %v, want %d ids including %d", edited.Mentions, maxMentionsPerMessage+1, last)
+		}
+		if stored := storedMentions(t, database, res.MessageID); len(stored) != maxMentionsPerMessage+1 || !slices.Contains(stored, last) {
+			t.Errorf("edit stored = %v, want %d ids including %d", stored, maxMentionsPerMessage+1, last)
+		}
+	})
+}
+
+// Without a reply ping the content cap is unchanged: the spare id
+// resolveMentions keeps never reaches the stored set.
+func TestSendMessage_NoReplyPingStillCapsAtTwenty(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	content := seedExtras(t, database, maxMentionsPerMessage+1)
+	res, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: content,
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(res.Mentions) != maxMentionsPerMessage {
+		t.Errorf("Mentions = %d ids, want %d", len(res.Mentions), maxMentionsPerMessage)
+	}
+	edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, content+" (edited)")
+	if err != nil {
+		t.Fatalf("EditMessage: %v", err)
+	}
+	if len(edited.Mentions) != maxMentionsPerMessage {
+		t.Errorf("edit Mentions = %d ids, want %d", len(edited.Mentions), maxMentionsPerMessage)
+	}
+	if stored := storedMentions(t, database, res.MessageID); len(stored) != maxMentionsPerMessage {
+		t.Errorf("stored = %d ids, want %d", len(stored), maxMentionsPerMessage)
+	}
+}
+
 func TestEditMessage_KeepsReplyPing(t *testing.T) {
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)

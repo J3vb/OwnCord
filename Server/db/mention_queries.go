@@ -115,9 +115,6 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 	); err != nil {
 		return 0, fmt.Errorf("ReplaceMessageMentions flag: %w", err)
 	}
-	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs, 0); err != nil {
-		return 0, err
-	}
 	var replyPingUserID int64
 	switch err := tx.QueryRowContext(ctx,
 		`SELECT mentioned_user_id FROM message_mentions WHERE message_id = ? AND reply_ping = 1`, messageID,
@@ -126,6 +123,10 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 		replyPingUserID = 0
 	case err != nil:
 		return 0, fmt.Errorf("ReplaceMessageMentions reply row: %w", err)
+	}
+	// Passing the kept target lets the content cap skip it, the same as on send.
+	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs, replyPingUserID); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("ReplaceMessageMentions commit: %w", err)
