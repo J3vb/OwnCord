@@ -745,9 +745,31 @@ type MemberSummary struct {
 	// DisplayName is the nickname to render instead of Username. Null when
 	// unset; clients fall back to Username.
 	DisplayName *string `json:"display_name"`
+	// About is the profile bio (About Me). Null when unset.
+	About *string `json:"about"`
+	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
+	CreatedAt string `json:"created_at"`
 	// CustomStatus is the free-text status line shown under the name. Null
-	// when unset.
+	// when unset. It must stay the LAST field: encodeRoster in package ws
+	// splices the per-viewer status and custom_status around it.
 	CustomStatus *string `json:"custom_status"`
+}
+
+// MemberCreatedAtLayout is the wire layout of a member's created_at: the same
+// shape ListMembers renders with strftime('%Y-%m-%dT%H:%M:%SZ', ...).
+const MemberCreatedAtLayout = "2006-01-02T15:04:05Z"
+
+// FormatMemberCreatedAt renders a users.created_at value (SQLite's
+// datetime('now') text, "2006-01-02 15:04:05", or an RFC 3339 instant) in the
+// member wire layout, so member_join and ready.members[] agree. A value it
+// cannot parse is returned unchanged.
+func FormatMemberCreatedAt(raw string) string {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339Nano} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC().Format(MemberCreatedAtLayout)
+		}
+	}
+	return raw
 }
 
 // ForViewer returns a copy of the summary as viewerID may see it: an invisible
@@ -785,6 +807,8 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 			Role:              r.Lower,
 			IdentityPublicKey: r.IdentityPublicKey,
 			DisplayName:       r.DisplayName,
+			About:             r.About,
+			CreatedAt:         r.CreatedAt,
 			CustomStatus:      r.CustomStatus,
 		})
 	}

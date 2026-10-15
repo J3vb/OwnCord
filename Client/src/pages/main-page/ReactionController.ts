@@ -9,6 +9,18 @@ import { addOptimisticReaction, getChannelMessages } from "@stores/messages.stor
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
 import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
+
+/** The server refuses a new emoji on a message that already has this many (3A-12). */
+export const MAX_DISTINCT_REACTIONS = 20;
+
+/** A new emoji would push the message past the cap; existing pills stay clickable. */
+function atReactionLimit(reactions: readonly { emoji: string }[], emoji: string | null): boolean {
+  return (
+    reactions.length >= MAX_DISTINCT_REACTIONS &&
+    (emoji === null || !reactions.some((r) => r.emoji === emoji))
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,13 +48,17 @@ export function createReactionController(opts: ReactionControllerOptions): React
   const { ws, reactionsLimiter, getChannelId, showError } = opts;
 
   function sendReaction(msgId: number, emoji: string): void {
+    const channelId = getChannelId();
+    const msgs = getChannelMessages(channelId);
+    const msg = msgs.find((m) => m.id === msgId);
+    if (msg !== undefined && atReactionLimit(msg.reactions, emoji)) {
+      showError(connectText("app.reactionLimit"));
+      return;
+    }
     if (!reactionsLimiter.tryConsume()) {
       showError(shellText("messages.reactionSlowDown"));
       return;
     }
-    const channelId = getChannelId();
-    const msgs = getChannelMessages(channelId);
-    const msg = msgs.find((m) => m.id === msgId);
     const existing = msg?.reactions.find((r) => r.emoji === emoji);
     const action = existing?.me ? ("remove" as const) : ("add" as const);
     const type = action === "remove" ? "reaction_remove" : "reaction_add";
@@ -74,6 +90,12 @@ export function createReactionController(opts: ReactionControllerOptions): React
       const sameMessage = existingWrap.getAttribute("data-message-id") === String(msgId);
       closePicker();
       if (sameMessage) return;
+    }
+
+    const msg = getChannelMessages(getChannelId()).find((m) => m.id === msgId);
+    if (msg !== undefined && atReactionLimit(msg.reactions, null)) {
+      showError(connectText("app.reactionLimit"));
+      return;
     }
 
     const wrap = createElement("div", { class: "reaction-picker-wrap" });

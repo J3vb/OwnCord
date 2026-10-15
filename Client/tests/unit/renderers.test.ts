@@ -21,6 +21,7 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { shellText } from "../../src/i18n/shell";
+import { formatClockTime } from "../../src/lib/formatting";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
@@ -1588,9 +1589,10 @@ describe("renderers", () => {
 
       const hoverTime = container.querySelector(".msg-hover-time");
       expect(hoverTime).not.toBeNull();
-      // Same format as the message header (F24): it carries a time, not a
-      // bare 24h HH:MM.
-      expect(hoverTime!.textContent).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)?/i);
+      // The header's clock time (F24), without "Today at", which wrapped
+      // over the avatar column.
+      expect(hoverTime!.textContent).toBe(formatClockTime(msg.timestamp));
+      expect(hoverTime!.textContent).not.toMatch(/today|yesterday/i);
 
       ac.abort();
     });

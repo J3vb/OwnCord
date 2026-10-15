@@ -114,6 +114,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
       null,
       ["srv-7"],
       [expect.objectContaining({ id: "srv-7" })],
+      false,
     );
     next.destroy?.();
   });
@@ -141,6 +142,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
       null,
       ["srv-9"],
       [expect.objectContaining({ id: "srv-9" })],
+      false,
     );
     next.destroy?.();
   });
@@ -237,6 +239,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
         null,
         ["srv-3"],
         [expect.objectContaining({ id: "srv-3" })],
+        false,
       );
       next.destroy?.();
     } finally {

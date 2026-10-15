@@ -51,14 +51,22 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
+
+**Profiles**
+
+- The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
 
 **Messaging**
 
-- A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. The desktop app's reply toggle follows in a later change.
-- A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone.
+- A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. In the desktop app, the reply bar now names the author by display name and has an **@ ON / @ OFF** toggle: it starts on for each reply, is hidden when you reply to yourself, and a retried send keeps the choice.
+- A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone. The desktop app refuses a 21st emoji straight away and says the message has reached the reaction limit.
 - Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
 - Typing `#` in the message box suggests channels to link, as `@` does for people.
+- Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
+- Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
+- Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
 - A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.

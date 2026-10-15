@@ -45,6 +45,8 @@ export interface MessageInputOptions {
     replyTo: number | null,
     attachments: readonly string[],
     files: readonly SentAttachment[],
+    /** Whether a reply mentions the author it answers (3A-12). False with no reply. */
+    replyPing: boolean,
   ) => void;
   readonly onUploadFile?: (
     file: File,
@@ -69,12 +71,22 @@ export interface SentAttachment {
   readonly file?: File;
 }
 
+/** The message a draft replies to. `username` is the name the bar shows (the
+ *  display name when there is one); `ping` is the bar's @ON/@OFF toggle,
+ *  absent meaning ON; `self` hides the toggle on a reply to your own message. */
+export interface ReplyTarget {
+  readonly messageId: number;
+  readonly username: string;
+  readonly ping?: boolean;
+  readonly self?: boolean;
+}
+
 /** A channel's unsent composer state, captured before a channel switch and
  *  restored when the user returns (UX-1). Uploads settled before the switch
  *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
-  readonly replyTo: { readonly messageId: number; readonly username: string } | null;
+  readonly replyTo: ReplyTarget | null;
   readonly attachments: readonly {
     readonly id: string;
     readonly filename: string;
@@ -110,7 +122,7 @@ export interface DraftUpload {
 }
 
 export type MessageInputComponent = MountableComponent & {
-  setReplyTo(messageId: number, username: string): void;
+  setReplyTo(messageId: number, username: string, opts?: Pick<ReplyTarget, "ping" | "self">): void;
   clearReply(): void;
   startEdit(messageId: number, content: string): void;
   cancelEdit(): void;
@@ -324,7 +336,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   const signal = disposable.signal;
   let root: HTMLDivElement | null = null;
   let state = {
-    replyTo: null as { messageId: number; username: string } | null,
+    replyTo: null as ReplyTarget | null,
     editing: null as { messageId: number } | null,
   };
   /** The ordinary draft (text + reply) displaced by an edit, so cancelling or
@@ -332,7 +344,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  attachments are untouched by an edit and read live from the composer. */
   let preEditDraft: {
     text: string;
-    replyTo: { messageId: number; username: string } | null;
+    replyTo: ReplyTarget | null;
   } | null = null;
   let lastTypingTime = 0;
   let lastSendTime = 0;
@@ -340,6 +352,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let textarea: HTMLTextAreaElement | null = null;
   let replyBar: HTMLDivElement | null = null;
   let replyText: HTMLSpanElement | null = null;
+  let replyPingBtn: HTMLButtonElement | null = null;
   let editBar: HTMLDivElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
   /** Slow-mode-style gate: refuses the send without freezing the composer. */
@@ -647,10 +660,24 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     syncEmojiPopup();
   }
 
-  function showReplyBar(username: string): void {
-    if (replyBar === null || replyText === null) return;
-    setText(replyText, messagingText("reply.replyingTo", { username }));
+  function showReplyBar(): void {
+    const reply = state.replyTo;
+    if (replyBar === null || replyText === null || reply === null) return;
+    setText(replyText, messagingText("reply.replyingTo", { username: reply.username }));
+    if (replyPingBtn !== null) {
+      const on = reply.ping !== false;
+      replyPingBtn.hidden = reply.self === true;
+      replyPingBtn.classList.toggle("off", !on);
+      replyPingBtn.setAttribute("aria-pressed", String(on));
+      setText(replyPingBtn, messagingText(on ? "reply.pingOn" : "reply.pingOff"));
+    }
     replyBar.classList.add("visible");
+  }
+
+  /** The reply's @ON/@OFF: false for no reply or a reply to yourself. */
+  function replyPing(): boolean {
+    const reply = state.replyTo;
+    return reply !== null && reply.self !== true && reply.ping !== false;
   }
 
   function hideReplyBar(): void {
@@ -876,6 +903,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       state.replyTo?.messageId ?? null,
       files.map((f) => f.id),
       files,
+      replyPing(),
     );
     clearReply();
     clearPendingAttachments();
@@ -1186,13 +1214,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function setReplyTo(messageId: number, username: string): void {
+  function setReplyTo(
+    messageId: number,
+    username: string,
+    opts: Pick<ReplyTarget, "ping" | "self"> = {},
+  ): void {
     // Leaving edit mode for reply mode discards the edit and gives back the
     // ordinary draft the edit displaced. Without this the stale edit text
     // survives into reply mode and Enter reposts it as a duplicate.
     if (state.editing !== null) cancelEdit();
-    state = { replyTo: { messageId, username }, editing: null };
-    showReplyBar(username);
+    state = { replyTo: { messageId, username, ...opts }, editing: null };
+    showReplyBar();
     textarea?.focus();
   }
 
@@ -1229,7 +1261,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = stashed.text;
       autoResize();
     }
-    if (stashed.replyTo !== null) showReplyBar(stashed.replyTo.username);
+    if (stashed.replyTo !== null) showReplyBar();
     else hideReplyBar();
   }
 
@@ -1253,6 +1285,24 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const replyInner = createElement("div", { class: "reply-bar-inner" });
     replyText = createElement("strong", {});
     replyInner.appendChild(replyText);
+    replyPingBtn = createElement("button", {
+      class: "reply-ping",
+      type: "button",
+      "data-testid": "reply-ping",
+      title: messagingText("reply.pingLabel"),
+      "aria-label": messagingText("reply.pingLabel"),
+    });
+    replyPingBtn.addEventListener(
+      "click",
+      () => {
+        if (state.replyTo === null) return;
+        state = { ...state, replyTo: { ...state.replyTo, ping: !replyPing() } };
+        showReplyBar();
+        textarea?.focus();
+      },
+      { signal },
+    );
+    replyInner.appendChild(replyPingBtn);
     const replyClose = createElement("button", {
       class: "reply-close",
       "aria-label": messagingText("reply.cancel"),
@@ -1603,7 +1653,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;
-              options.onSend(gifUrl, state.replyTo?.messageId ?? null, [], []);
+              options.onSend(gifUrl, state.replyTo?.messageId ?? null, [], [], replyPing());
               clearReply();
             }
           }
@@ -1677,6 +1727,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea = null;
     replyBar = null;
     replyText = null;
+    replyPingBtn = null;
     editBar = null;
     preEditDraft = null;
     attachmentPreviewBar = null;
@@ -1737,7 +1788,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = draft.content;
       autoResize();
     }
-    if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
+    if (draft.replyTo !== null) {
+      const { messageId, username, ...opts } = draft.replyTo;
+      setReplyTo(messageId, username, opts);
+    }
     const now = Date.now();
     const live = draft.attachments.filter(
       (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
@@ -1814,7 +1868,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   ): void {
     if (attachmentPreviewBar === null) return;
     if (replyTo != null && state.replyTo === null && state.editing === null) {
-      setReplyTo(replyTo.messageId, replyTo.username);
+      const { messageId, username, ...opts } = replyTo;
+      setReplyTo(messageId, username, opts);
     }
     const dropped = files.filter((f) => !addUnsentChip(f)).length;
     showUploadError(

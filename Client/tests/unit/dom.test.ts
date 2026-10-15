@@ -6,6 +6,7 @@ import {
   clearChildren,
   qs,
   setOwnedTimeout,
+  wantsNativeMenu,
 } from "../../src/lib/dom";
 
 describe("createElement", () => {
@@ -181,5 +182,29 @@ describe("setOwnedTimeout", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("wantsNativeMenu", () => {
+  it("keeps the webview menu in text fields", () => {
+    expect(wantsNativeMenu(document.createElement("textarea"))).toBe(true);
+    for (const type of ["text", "search", "password", "url"]) {
+      const input = document.createElement("input");
+      input.type = type;
+      expect(wantsNativeMenu(input)).toBe(true);
+    }
+    const editable = document.createElement("div");
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    expect(wantsNativeMenu(editable)).toBe(true);
+  });
+
+  it("suppresses it everywhere else", () => {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    expect(wantsNativeMenu(checkbox)).toBe(false);
+    expect(wantsNativeMenu(document.createElement("div"))).toBe(false);
+    expect(wantsNativeMenu(document.createElement("img"))).toBe(false);
+    expect(wantsNativeMenu(document)).toBe(false);
+    expect(wantsNativeMenu(null)).toBe(false);
   });
 });
