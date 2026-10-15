@@ -80,8 +80,8 @@ func newEvidenceFixture(t *testing.T, targetType string, labelled bool) *evidenc
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, authorID, []string{up.ID}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage = (%d, %v), want (1, nil)", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, authorID, []string{up.ID}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage = (%d, %v), want (1, nil)", len(n), err)
 	}
 
 	reporterID := mintUser(t, database, "ev-reporter")

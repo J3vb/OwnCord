@@ -465,8 +465,8 @@ func TestCreateAttachment_WithDimensions(t *testing.T) {
 		t.Fatal("expected attachment")
 	}
 
-	if n, linkErr := database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"att-dim"}); linkErr != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, linkErr)
+	if n, linkErr := database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"att-dim"}); linkErr != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), linkErr)
 	}
 
 	byMsg, err := database.GetAttachmentsByMessageIDs(context.Background(), []int64{msgID})

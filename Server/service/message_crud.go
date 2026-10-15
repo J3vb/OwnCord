@@ -50,25 +50,29 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
-	msg, attachments, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
+	msg, attachments, skipped, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
 	if err != nil {
 		return nil, err
 	}
 	if duplicate {
-		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
+		return &SendMessageResult{
+			MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true,
+			SkippedAttachmentIDs: s.replaySkipped(ctx, p, msg.ID),
+		}, nil
 	}
 	msgID := msg.ID
 
 	result := &SendMessageResult{
-		MessageID:        msgID,
-		Timestamp:        msg.Timestamp,
-		Content:          content,
-		IsDM:             isDM,
-		Channel:          ch,
-		Attachments:      attachments,
-		Mentions:         mentions.UserIDs,
-		MentionsEveryone: mentions.Everyone,
-		MentionsHere:     mentions.HereOnly,
+		MessageID:            msgID,
+		Timestamp:            msg.Timestamp,
+		Content:              content,
+		IsDM:                 isDM,
+		Channel:              ch,
+		Attachments:          attachments,
+		SkippedAttachmentIDs: skipped,
+		Mentions:             mentions.UserIDs,
+		MentionsEveryone:     mentions.Everyone,
+		MentionsHere:         mentions.HereOnly,
 	}
 	if p.ReplyTo != nil {
 		// The message is committed; a failed snippet read only costs the
@@ -173,9 +177,9 @@ func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageP
 // Nothing requested is a no-op. A failed link, or a link that attached nothing
 // to a message with no content of its own, compensates by soft-deleting the
 // row and returns the error the caller surfaces to the sender.
-func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendMessageParams, msgID int64, content string) ([]db.AttachmentInfo, error) {
+func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendMessageParams, msgID int64, content string) ([]db.AttachmentInfo, []string, error) {
 	if len(p.AttachmentIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Link attachments. Ownership is enforced atomically inside the link
@@ -191,13 +195,14 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
 			slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
 		}
-		return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
+		return nil, nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
 	}
-	if linked < int64(len(p.AttachmentIDs)) {
+	skipped := skippedAttachmentIDs(p.AttachmentIDs, linked)
+	if len(skipped) > 0 {
 		slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
-			"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
+			"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", len(linked))
 	}
-	if linked == 0 && content == "" {
+	if len(linked) == 0 && content == "" {
 		// sanitizeContent waived the empty-content check purely on the
 		// requested attachment count, before any link attempt. None of
 		// them actually linked (all missing, foreign, or already
@@ -208,9 +213,9 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
 			slog.Error("MessageService.SendMessage DeleteMessage (empty-after-link cleanup)", "err", delErr, "msg_id", msgID)
 		}
-		return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		return nil, nil, errAllAttachmentsSkipped()
 	}
-	if linked > 0 {
+	if len(linked) > 0 {
 		// Detached from ctx for the same reason as the compensating deletes
 		// above: the link already committed, so a request ctx canceled the
 		// instant it returns (sender disconnects right after) must not turn
@@ -222,7 +227,7 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 			attachments = attMap[msgID]
 		}
 	}
-	return attachments, nil
+	return attachments, skipped, nil
 }
 
 // sendMessageDMSideEffects fills in the DM-specific fields of result,

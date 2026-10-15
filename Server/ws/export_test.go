@@ -669,3 +669,8 @@ func (h *Hub) NoteChannelActivityForTest(channelID, msgID, authorID int64) {
 func (h *Hub) FlushChannelActivityNowForTest() {
 	h.flushChannelActivity(context.Background())
 }
+
+// BuildChatSendOKForTest exposes buildChatSendOK for external tests.
+func BuildChatSendOKForTest(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skipped []string) []byte {
+	return buildChatSendOK(requestID, msgID, timestamp, clientMessageID, duplicate, skipped)
+}
