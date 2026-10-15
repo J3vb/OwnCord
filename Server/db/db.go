@@ -55,6 +55,10 @@ type DB struct {
 	// lifecycle is still up; teardown steps read it through Closed.
 	closed atomic.Bool
 
+	// plainMemory is true for a private ":memory:" database, the only kind
+	// Migrate may fill from the cached migrated image (migrate_memory.go).
+	plainMemory bool
+
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
@@ -210,25 +214,14 @@ func openMemory(path string) (*DB, error) {
 	// and makes the Exec'd PRAGMAs below apply to every future statement.
 	sqlDB.SetMaxOpenConns(1)
 
-	// The same PRAGMA set as filePragmas, Exec'd because there is exactly one
-	// connection to configure. journal_mode is a no-op for :memory: (SQLite
-	// reports "memory") but is kept for symmetry with file mode.
-	for _, p := range []struct{ name, stmt string }{
-		{"enabling WAL mode", "PRAGMA journal_mode=WAL;"},
-		{"setting busy_timeout", "PRAGMA busy_timeout=5000;"},
-		{"enabling foreign keys", "PRAGMA foreign_keys=ON;"},
-		{"setting synchronous mode", "PRAGMA synchronous=NORMAL;"},
-		{"setting temp_store", "PRAGMA temp_store=MEMORY;"},
-		{"setting mmap_size", "PRAGMA mmap_size=268435456;"},
-		{"setting cache_size", "PRAGMA cache_size=-64000;"},
-	} {
-		if _, err := sqlDB.Exec(p.stmt); err != nil {
-			_ = sqlDB.Close()
-			return nil, fmt.Errorf("%s: %w", p.name, err)
-		}
+	if err := applyMemoryPragmas(sqlDB); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
 	}
 
-	return newDB(sqlDB, sqlDB), nil
+	d := newDB(sqlDB, sqlDB)
+	d.plainMemory = path == ":memory:"
+	return d, nil
 }
 
 // openFile opens the writer and reader pools for a file-backed database.
@@ -421,7 +414,17 @@ func hasKeywordPrefix(s, keyword string) bool {
 // lexicographic order, applying each file exactly once.  It delegates to
 // MigrateFS (defined in migrate.go) which maintains the schema_versions
 // tracking table.
+//
+// An empty in-memory database gets a copy of an already-migrated image
+// instead (migrate_memory.go); the result is the same database.
 func Migrate(database *DB) error {
+	if restoreFreshMemory(database) {
+		return nil
+	}
+	return migrateEmbedded(database)
+}
+
+func migrateEmbedded(database *DB) error {
 	applied, err := migrateFSCount(database, migrations.FS)
 	if err != nil {
 		return err
