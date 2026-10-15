@@ -41,10 +41,11 @@ test("a client change with a changelog line does not select the server legs", ()
   assert.equal(sel.changelog, true);
 });
 
-test("a release refresh of the bundled changelog still runs the server legs", () => {
-  const sel = picked(["M\tCHANGELOG.md", "M\tServer/admin/static/changelog.md"].join("\n"));
-  assert.equal(sel.server, true);
-  assert.equal(sel.changelog, true);
+test("a changelog-only diff is still a server gate under --all", () => {
+  // Every event that is not a pull request into dev selects --all, so the new
+  // capability must be part of it or the release run would skip the gate.
+  assert.equal(CAPABILITIES.includes("changelog"), true);
+  assert.equal(classify([]).changelog, true);
 });
 
 test("a prose change still leaves the two always-on jobs alone", () => {

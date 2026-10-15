@@ -168,15 +168,16 @@ jobs:
   # each 20-27 minute server leg, so a lint or invariant failure was found after
   # the race tests. This job is deliberately additive: it runs the same checks
   # early for fast feedback, and every step it mirrors stays in the required
-  # `Server Build & Test` legs, so no gating is moved off a required context and
-  # no required-check name changes. A lint or invariant failure now reports in
+  # `Server Build & Test` legs (for a changelog-only selection, the ubuntu
+  # leg's "Changelog gate" step), so no gating is moved off a required context
+  # and no required-check name changes. A lint or invariant failure now reports in
   # minutes instead of after the 20-minute race step.
   #
   # Gated on the `server` capability like the other server jobs, so a client-only
   # PR does not pay for it, and also on `changelog`: its document gates run
   # TestBundledChangelog, the server's only reader of CHANGELOG.md, so a
-  # changelog line on a client PR is checked here in minutes instead of
-  # selecting both race legs.
+  # changelog line on a client PR is reported here early as well as in the
+  # required ubuntu leg.
   server-fast-checks:
     name: Server Lint & Invariants
     needs: changes
@@ -326,8 +327,10 @@ jobs:
         shell: bash
         env:
           SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+          CHANGELOG: ${{ needs.changes.outputs.changelog == 'true' }}
         run: |
           echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          echo "RUN_CHANGELOG=${CHANGELOG:-true}" >> "$GITHUB_ENV"
           # Printed as well as written, so the decision is readable in the log of
           # each leg rather than only inferable from which steps ran.
           echo "server checks selected: ${SELECTED:-true}"
@@ -336,10 +339,19 @@ jobs:
           fi
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        if: env.RUN_SERVER != 'false'
+        if: env.RUN_SERVER != 'false' || (matrix.os == 'ubuntu-latest' && env.RUN_CHANGELOG != 'false')
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
+
+      # A CHANGELOG.md edit selects `changelog`, not `server` (ci-select.mjs), so
+      # a client PR's changelog line does not pay for the race legs. Its one
+      # server reader, TestBundledChangelog, still has to block the merge, so
+      # this required leg runs it alone when the full server checks are off.
+      # When they are on, "Run document gates" below runs it instead.
+      - name: Changelog gate (server checks not selected)
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER == 'false' && env.RUN_CHANGELOG != 'false'
+        run: go test -count=1 -run TestBundledChangelog ./admin/
 
       # scripts/coverage-floor.sh parses the floor file with node (the coverage
       # profile itself is still read by the same line-oriented awk pass). This

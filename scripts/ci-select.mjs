@@ -38,9 +38,8 @@
 //     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
 //     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
 //     CHANGELOG.md                             admin/changelog_bundle_test.go
-//                                              (the `changelog` capability: only
-//                                              Server Lint & Invariants, which
-//                                              runs that one test)
+//                                              (the `changelog` capability runs
+//                                              only that test; see CHANGELOG_PATH)
 //
 //   Client reads outside Client/:
 //     docs/api.md                              tests/contract/api-profile-route.test.ts
@@ -74,7 +73,7 @@ export const CAPABILITIES = [
   "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
   "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
-  "changelog", // Server Lint & Invariants only, for TestBundledChangelog (see CHANGELOG_PATH)
+  "changelog", // TestBundledChangelog alone, without the race legs (see CHANGELOG_PATH)
 ];
 
 /** Server paths outside the Client/Server pair that a Server test reads. */
@@ -103,10 +102,11 @@ const SERVER_READS_OUTSIDE = new Set([
  * The admin panel embeds a copy of CHANGELOG.md's released sections, and
  * TestBundledChangelog fails when a release moves notes under a version
  * heading without refreshing it. That one test is the server's only reader of
- * the file, and Server Lint & Invariants runs it in seconds, so a changelog
- * edit selects that job (`changelog`) rather than `server`. Almost every client
- * PR adds a changelog line, and `server` would put both 30-35 minute race legs
- * on each of them for a test that takes under a second.
+ * the file. A changelog edit selects `changelog` rather than `server`: the
+ * required ubuntu server leg then runs that one test alone (its "Changelog
+ * gate" step) and Server Lint & Invariants reports it early. Almost every
+ * client PR adds a changelog line, and `server` would put both 30-35 minute
+ * race legs on each of them for a test that takes under a second.
  */
 const CHANGELOG_PATH = "CHANGELOG.md";
 
