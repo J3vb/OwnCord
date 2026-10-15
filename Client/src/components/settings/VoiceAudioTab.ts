@@ -1213,7 +1213,19 @@ function buildVoiceAudioTabInner(
    *  does. Outside a call none arrive and the bar stays empty. */
   function startNativeMeter(): void {
     lastHeardAt = Number.NEGATIVE_INFINITY;
-    registerMic(onNativeInputLevel(paintMeter));
+    registerMic(
+      onNativeInputLevel((level, gateOpen) => {
+        if (level !== null) {
+          paintMeter(level, gateOpen);
+          return;
+        }
+        // The capture stopped (mute or leave): back to the empty bar.
+        meterLevel.style.width = "0%";
+        lastHeardAt = Number.NEGATIVE_INFINITY;
+        micHeard = null;
+        micStatus.hidden = true;
+      }),
+    );
   }
   startMicMeter();
 

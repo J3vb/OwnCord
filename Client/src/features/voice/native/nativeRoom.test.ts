@@ -553,6 +553,7 @@ describe("NativeRoom room surface", () => {
       vi.spyOn(performance, "now").mockImplementation(() => now);
       const room = createNativeRoom(audio);
       await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
       host.calls.length = 0;
       const steps: number[] = [];
       const verdicts: Array<boolean | null> = [];
@@ -591,6 +592,7 @@ describe("NativeRoom room surface", () => {
     it("a fixed threshold ignores the level reports", async () => {
       const room = createNativeRoom(audio);
       await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
       room.setVoiceGate(0.05, () => {});
       host.calls.length = 0;
       for (let i = 0; i < 100; i++) {
@@ -630,7 +632,8 @@ describe("NativeRoom room surface", () => {
     it("forwards the capture's level reports to the listener", async () => {
       const room = createNativeRoom(audio);
       await room.connect("u", "t");
-      const levels: Array<[number, boolean]> = [];
+      await room.localParticipant.setMicrophoneEnabled(true);
+      const levels: Array<[number | null, boolean]> = [];
       room.setInputLevelListener((rms, open) => levels.push([rms, open]));
       emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
       emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: false } });
@@ -640,6 +643,35 @@ describe("NativeRoom room surface", () => {
         [0.02, true],
         [0.001, false],
       ]);
+    });
+
+    // Neither a mute nor a leave reports a last level, so the meter would
+    // freeze on the last one: the room says the capture stopped, and a report
+    // still in flight is dropped.
+    it("tells the listener when the capture stops, and drops late reports", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const levels: Array<[number | null, boolean]> = [];
+      room.setInputLevelListener((rms, open) => levels.push([rms, open]));
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
+      await room.localParticipant.setMicrophoneEnabled(false);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.03, open: true } });
+      expect(levels).toEqual([
+        [0.02, true],
+        [null, false],
+      ]);
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.01, open: false } });
+      await room.disconnect();
+      expect(levels.slice(2)).toEqual([
+        [0.01, false],
+        [null, false],
+      ]);
+      // A second stop (leave after mute) says nothing more.
+      await room.disconnect();
+      expect(levels).toHaveLength(4);
     });
   });
 

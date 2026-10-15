@@ -6,7 +6,7 @@ const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
 /** The native engine's level reports: the meter's listener and its release. */
-let nativeLevelListener: ((rms: number, open: boolean) => void) | null = null;
+let nativeLevelListener: ((rms: number | null, open: boolean) => void) | null = null;
 const mockUnsubscribeNativeLevel = vi.fn(() => {
   nativeLevelListener = null;
 });
@@ -34,7 +34,7 @@ vi.mock("@lib/livekitSession", () => ({
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
   applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
-  onNativeInputLevel: (listener: (rms: number, open: boolean) => void) => {
+  onNativeInputLevel: (listener: (rms: number | null, open: boolean) => void) => {
     nativeLevelListener = listener;
     return mockUnsubscribeNativeLevel;
   },
@@ -1947,6 +1947,13 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     nativeLevelListener!(vadThreshold(75), false);
     expect(level.style.width).toBe("25%");
     expect(level.style.background).toBe("var(--yellow)");
+    expect(element.textContent).toContain("Hearing you");
+    // Mute or leave: the capture stopped, so the bar and its status clear.
+    nativeLevelListener!(null, false);
+    expect(level.style.width).toBe("0%");
+    expect(element.querySelector<HTMLElement>('[data-testid="mic-status"]')!.hidden).toBe(true);
+    nativeLevelListener!(vadThreshold(50), true);
+    expect(level.style.width).toBe("50%");
     expect(element.textContent).toContain("Hearing you");
     ac.abort();
     expect(mockUnsubscribeNativeLevel).toHaveBeenCalled();

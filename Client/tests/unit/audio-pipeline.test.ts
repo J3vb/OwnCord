@@ -435,7 +435,7 @@ describe("AudioPipeline", () => {
         setInputGain,
         setInputLevelListener,
       };
-      const levels: Array<[number, boolean]> = [];
+      const levels: Array<[number | null, boolean]> = [];
       const unsubscribe = pipeline.onRoomInputLevel((rms, open) => levels.push([rms, open]));
       pipeline.setRoom(room as never);
       expect(setInputGain).toHaveBeenLastCalledWith(150);
@@ -455,6 +455,23 @@ describe("AudioPipeline", () => {
       // A room left behind stops reporting into the pipeline.
       pipeline.setRoom(null);
       expect(setInputLevelListener).toHaveBeenLastCalledWith(null);
+    });
+
+    it("ends the meter when the room is let go before its capture says it stopped", () => {
+      const pipeline = new AudioPipeline();
+      const room = {
+        localParticipant: { getTrackPublication: () => undefined },
+        setVoiceGate: vi.fn(),
+        setInputGain: vi.fn(),
+        setInputLevelListener: vi.fn(),
+      };
+      const levels: Array<[number | null, boolean]> = [];
+      pipeline.onRoomInputLevel((rms, open) => levels.push([rms, open]));
+      pipeline.setRoom(null);
+      expect(levels).toEqual([]);
+      pipeline.setRoom(room as never);
+      pipeline.setRoom(null);
+      expect(levels).toEqual([[null, false]]);
     });
   });
 

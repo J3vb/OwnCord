@@ -247,6 +247,8 @@ export class NativeRoom {
       // so a first publish after a failed one is not left at the default.
       const bitrate = publishOptions?.audioPreset?.maxBitrate ?? this.micBitrate;
       this.micBitrate = bitrate;
+      if (enabled) this.capturing = true;
+      else this.stopInputLevels();
       if (bitrate === undefined) await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
       else await desktop.nativeVoice.setMicrophone(this.sessionId, enabled, bitrate);
     },
@@ -300,8 +302,12 @@ export class NativeRoom {
   private onAutoThreshold: (threshold: number) => void = () => {};
   /** The input volume (0-200 %); a new session starts at 100. */
   private inputGainPercent = 100;
-  /** Who hears the capture's level reports (the settings meter). */
-  private onInputLevel: ((rms: number, open: boolean) => void) | null = null;
+  /** Who hears the capture's level reports (the settings meter); null as
+   *  the level means the capture stopped. */
+  private onInputLevel: ((rms: number | null, open: boolean) => void) | null = null;
+  /** Whether the session's capture runs, so a report still in flight after a
+   *  mute or leave cannot repaint the meter. */
+  private capturing = false;
   /** The session's frame-socket base URL (token included); never logged. */
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
@@ -420,8 +426,14 @@ export class NativeRoom {
   }
   /** Hear the capture's level reports (null to stop): the settings meter's
    *  feed while the native capture runs. */
-  setInputLevelListener(listener: ((rms: number, open: boolean) => void) | null): void {
+  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void {
     this.onInputLevel = listener;
+  }
+  /** The capture stopped (mute, deafen, leave): no more reports will come. */
+  private stopInputLevels(): void {
+    if (!this.capturing) return;
+    this.capturing = false;
+    this.onInputLevel?.(null, false);
   }
   /** Native playout needs no autoplay gesture. */
   startAudio(): Promise<void> {
@@ -487,6 +499,7 @@ export class NativeRoom {
     this.pending = null;
     this.releaseVideo();
     this.clearDecryptTimers();
+    this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
     if (this.counted) nativeCounters.openRooms--;
@@ -930,6 +943,7 @@ export class NativeRoom {
         if (this.voiceThreshold > 0) this.onVoiceGate(event.open);
         break;
       case "inputLevel": {
+        if (!this.capturing) break;
         this.onInputLevel?.(event.rms, event.open);
         const next = this.autoFloor?.push(event.rms, performance.now()) ?? null;
         if (next !== null) this.retuneVoiceGate(next);

@@ -276,11 +276,12 @@ interface VoiceGatedRoom {
  *  (NativeRoom): the meter's feed where no web processor runs. */
 interface InputGainRoom {
   setInputGain(percent: number): void;
-  setInputLevelListener(listener: ((rms: number, open: boolean) => void) | null): void;
+  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void;
 }
 
 /** A capture level report: the detector's RMS and whether the gate is open. */
-export type InputLevelListener = (rms: number, open: boolean) => void;
+/** A level report; null as the level means the capture stopped. */
+export type InputLevelListener = (rms: number | null, open: boolean) => void;
 
 export class AudioPipeline {
   private room: Room | null = null;
@@ -317,7 +318,12 @@ export class AudioPipeline {
   onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
 
   setRoom(room: Room | null): void {
-    (this.room as Partial<InputGainRoom> | null)?.setInputLevelListener?.(null);
+    const previous = this.room as Partial<InputGainRoom> | null;
+    if (previous?.setInputLevelListener) {
+      previous.setInputLevelListener(null);
+      // Detached before its capture's own stop could arrive: end the meter here.
+      for (const listener of this.inputLevelListeners) listener(null, false);
+    }
     this.room = room;
     const gainRoom = room as Partial<InputGainRoom> | null;
     gainRoom?.setInputGain?.(Math.round(this.currentInputGain * 100));
