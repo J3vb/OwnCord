@@ -76,6 +76,7 @@ and only when it changes something a contributor or fork holder must do
   **Voice and video**
 
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
+- On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
 
 ## v2.3.0-beta.1
 

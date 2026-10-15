@@ -296,6 +296,10 @@ export const settingsText = defineCatalog("settings", {
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
     "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
+  "diagnostics.detail.micNativePresent":
+    "Your microphone is connected. On Linux it opens when you join a call; nothing was recorded.",
+  "diagnostics.detail.micNativeDefault":
+    "Your saved microphone is not connected, so calls will use the system default.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":
@@ -317,6 +321,8 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.kinds.audioAndVideo": "audio and video",
   "diagnostics.detail.mediaMissing":
     "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
+  "diagnostics.detail.mediaNative":
+    "Incoming media cannot be checked on Linux yet. Your call is connected.",
   "diagnostics.detail.mediaFailed":
     "Incoming media could not be inspected. Rejoin the call and retry.",
   "diagnostics.detail.connectionTimeout":

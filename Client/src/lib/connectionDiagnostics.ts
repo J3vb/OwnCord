@@ -4,6 +4,7 @@ import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/preferences";
 import { isMissingDeviceError } from "@lib/audioPipeline";
+import { nativeAudioDevices, type AudioDevice } from "../features/voice/native/devices";
 import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
@@ -33,6 +34,21 @@ export interface DiagnosticServices {
   ws: Pick<WsClient, "ping">;
   getRoom(): Room | null | Promise<Room | null>;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  /** The native backend's microphones on Linux, where the webview cannot
+   *  open the devices voice uses; null elsewhere. */
+  listNativeInputs(): Promise<AudioDevice[] | null>;
+}
+
+/** NativeRoom has no browser signaling socket; it reports its own. */
+interface NativeSignaling {
+  isSignalingConnected(): boolean;
+}
+
+function nativeSignaling(room: Room): NativeSignaling | null {
+  const candidate = room as unknown as Partial<NativeSignaling>;
+  return typeof candidate.isSignalingConnected === "function"
+    ? (candidate as NativeSignaling)
+    : null;
 }
 
 let configured: DiagnosticServices | null = null;
@@ -47,6 +63,7 @@ export function configureConnectionDiagnostics(api: ApiClient, ws: WsClient): vo
     ws,
     getRoom: async () => (await import("@lib/livekitSession")).getRoomForStats(),
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+    listNativeInputs: () => nativeAudioDevices("audioinput"),
   };
 }
 
@@ -208,6 +225,16 @@ export async function runConnectionDiagnostics(
       "microphone",
       async () => {
         const selected = loadPref<string>("audioInputDevice", "");
+        const nativeInputs = await services.listNativeInputs();
+        if (nativeInputs !== null) {
+          // Linux voice opens the device in the native backend only inside a
+          // call, so the check confirms the device it will use is present.
+          // i18n-exempt: internal guard mapped to the microphone failure catalog line
+          if (nativeInputs.length === 0) throw new Error("No native microphone.");
+          return selected === "" || nativeInputs.some((d) => d.deviceId === selected)
+            ? t("diagnostics.detail.micNativePresent")
+            : t("diagnostics.detail.micNativeDefault");
+        }
         // getUserMedia cannot cancel a permission prompt. Always stop the tracks
         // in its fulfillment handler, even after timeout, close or server switch.
         const audio = selected ? { deviceId: { exact: selected } } : {};
@@ -248,12 +275,20 @@ export async function runConnectionDiagnostics(
     emit("media", "not-tested", t("diagnostics.detail.joinCall"));
     return;
   }
-  if (room.state !== "connected" || room.engine.client.ws?.readyState !== WebSocket.OPEN) {
+  const native = nativeSignaling(room);
+  const signalingOpen = native
+    ? native.isSignalingConnected()
+    : room.engine.client.ws?.readyState === WebSocket.OPEN;
+  if (room.state !== "connected" || !signalingOpen) {
     emit("signaling", "failed", t("diagnostics.detail.signalingClosed"));
     emit("media", "not-tested", t("diagnostics.detail.restoreVoice"));
     return;
   }
   emit("signaling", "passed", t("diagnostics.detail.signalingOpen"));
+  if (native) {
+    emit("media", "not-tested", t("diagnostics.detail.mediaNative"));
+    return;
+  }
   if (room.remoteParticipants.size === 0) {
     emit("media", "not-tested", t("diagnostics.detail.noParticipant"));
     return;

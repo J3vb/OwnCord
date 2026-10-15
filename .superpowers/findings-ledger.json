@@ -1,5 +1,5 @@
 {
-  "nextId": 489,
+  "nextId": 490,
   "findings": [
     {
       "id": "OC-0001",
@@ -11314,6 +11314,30 @@
         "revertProof": "pass (before the fix the busy test got 200 instead of 409, and the load test found the -wal beside the restored file and 5 rows instead of 50)"
       },
       "note": "Roadmap phase 0, WP 0-3 (stop-gap). The staged restore is Phase 5."
+    },
+    {
+      "id": "OC-0489",
+      "title": "On Linux the connection diagnostics reported voice signaling as failed during a working call, and its microphone check opened a webview device instead of the one voice uses",
+      "file": "Client/src/lib/connectionDiagnostics.ts",
+      "line": 251,
+      "severity": "low",
+      "why": "Linux voice runs in the native backend through NativeRoom, which has no browser signaling socket (engine.client.ws is undefined), so the ws.readyState check always failed and the media step was skipped. The microphone step called the webview's getUserMedia with the saved native (cpal) device id, which the webview does not know.",
+      "repro": "Linux desktop client, join a voice channel, open Settings > Diagnostics and run the test: Voice signaling shows failed while the call works; the microphone step tests a different device from the one the call uses.",
+      "evidence": "connectionDiagnostics.ts read room.engine.client.ws?.readyState; NativeRoom sets engine = { pcManager: undefined, client: { ws: undefined } }. The mic step used getUserMedia({ deviceId: { exact: <native id> } }).",
+      "suggestedFix": "Ask the native room for its own signaling state, and check the saved microphone against the native device list on Linux.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-14",
+      "hunt": "roadmap-wp-lp-4-2026-10-15",
+      "lens": "platform-parity",
+      "finder": "phase-lp-audit",
+      "fixedDate": "2026-10-15",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/connection-diagnostics.test.ts (Linux native voice cases), Client/src/features/voice/native/nativeRoom.test.ts (maps native events onto livekit RoomEvents)",
+        "revertProof": "pass (before the fix the native signaling case reported failed and the native microphone cases called getUserMedia)"
+      },
+      "note": "Roadmap Phase LP, WP LP-4. Incoming media on Linux stays not-tested until LP-5 adds native stats."
     }
   ]
 }
