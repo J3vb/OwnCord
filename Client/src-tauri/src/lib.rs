@@ -419,67 +419,91 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Logs a fatal startup error and shows it in a dialog. A headless Linux run
-/// has nobody to answer the dialog and would block on it, so it keeps the
-/// stderr line alone.
+/// Logs a fatal startup error and shows it in a dialog.
 fn show_startup_failure(error: &str) {
     eprintln!("Fatal startup error: {error}");
     log::error!("[exit] fatal startup error: {error}");
     #[cfg(target_os = "linux")]
-    exit_watch::note_exit("startup failed");
-    #[cfg(target_os = "linux")]
-    let show_dialog = has_graphical_session(
-        std::env::var_os("DISPLAY"),
-        std::env::var_os("WAYLAND_DISPLAY"),
-    );
+    {
+        exit_watch::note_exit("startup failed");
+        show_linux_startup_dialog(error);
+    }
     #[cfg(not(target_os = "linux"))]
-    let show_dialog = true;
-    if show_dialog {
-        rfd::MessageDialog::new()
-            .set_title(text::STARTUP_DIALOG_TITLE)
-            .set_description(text::startup_dialog_body(error))
-            .set_level(rfd::MessageLevel::Error)
-            .show();
+    rfd::MessageDialog::new()
+        .set_title(text::STARTUP_DIALOG_TITLE)
+        .set_description(text::startup_dialog_body(error))
+        .set_level(rfd::MessageLevel::Error)
+        .show();
+}
+
+/// The startup error dialog on Linux, run on this (the GTK main) thread.
+/// rfd's GTK dialog runs on a thread of its own and never appears once tao
+/// has started GTK here, which it does before anything can fail, so the
+/// process would wait on it forever. GTK is started here only if it is not
+/// running yet; with no display that fails at once and stderr stands alone.
+#[cfg(target_os = "linux")]
+fn show_linux_startup_dialog(error: &str) {
+    use gtk::prelude::*;
+    if !gtk::is_initialized_main_thread() && gtk::init().is_err() {
+        return;
     }
+    let dialog = gtk::MessageDialog::new(
+        None::<&gtk::Window>,
+        gtk::DialogFlags::MODAL,
+        gtk::MessageType::Error,
+        gtk::ButtonsType::Ok,
+        &text::startup_dialog_body(error),
+    );
+    dialog.set_title(text::STARTUP_DIALOG_TITLE);
+    dialog.run();
+    // SAFETY: the dialog is ours alone and not used after this.
+    unsafe { dialog.destroy() };
 }
 
-/// Whether an X11 or Wayland display is set, so a dialog can be shown.
-#[cfg(any(target_os = "linux", test))]
-fn has_graphical_session(
-    display: Option<std::ffi::OsString>,
-    wayland_display: Option<std::ffi::OsString>,
-) -> bool {
-    [display, wayland_display]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.is_empty())
-}
-
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod startup_dialog_tests {
-    use super::has_graphical_session;
-    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
 
+    /// Needs a display of its own, `xvfb-run cargo test -- --ignored
+    /// gtk_startup`: its dialog is a real window, which
+    /// `x11_lists_sources_with_thumbnails_and_captures_one` would count. GTK is
+    /// started first, as tao does before anything can fail, and the dialog
+    /// must still appear; a check on GTK's own loop answers it once mapped.
     #[test]
-    fn a_display_or_wayland_socket_allows_the_dialog() {
-        assert!(has_graphical_session(Some(OsString::from(":0")), None));
-        assert!(has_graphical_session(
-            None,
-            Some(OsString::from("wayland-0"))
-        ));
-        assert!(has_graphical_session(
-            Some(OsString::from(":1")),
-            Some(OsString::from("wayland-1"))
-        ));
-    }
-
-    #[test]
-    fn a_headless_run_keeps_stderr_only() {
-        assert!(!has_graphical_session(None, None));
-        assert!(!has_graphical_session(
-            Some(OsString::new()),
-            Some(OsString::new())
-        ));
+    #[ignore = "needs an X display (xvfb-run)"]
+    fn gtk_startup_dialog_appears_after_gtk_started() {
+        use gtk::prelude::*;
+        gtk::init().expect("xvfb-run provides a display");
+        let seen = Arc::new(AtomicBool::new(false));
+        let seen_by_watchdog = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            if !seen_by_watchdog.load(Ordering::SeqCst) {
+                eprintln!("the startup dialog never appeared");
+                std::process::exit(1);
+            }
+        });
+        let seen_by_check = Arc::clone(&seen);
+        gtk::glib::timeout_add(Duration::from_millis(100), move || {
+            let dialog = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk::MessageDialog>().ok())
+                .find(|d| {
+                    d.is_mapped() && d.title().as_deref() == Some(super::text::STARTUP_DIALOG_TITLE)
+                });
+            match dialog {
+                Some(dialog) => {
+                    seen_by_check.store(true, Ordering::SeqCst);
+                    dialog.response(gtk::ResponseType::Ok);
+                    gtk::glib::ControlFlow::Break
+                }
+                None => gtk::glib::ControlFlow::Continue,
+            }
+        });
+        super::show_linux_startup_dialog("test failure");
+        assert!(seen.load(Ordering::SeqCst));
     }
 }
 
