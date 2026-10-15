@@ -105,8 +105,9 @@ fn bus<R: Runtime>(app: &AppHandle<R>) -> &'static Sender<Command> {
 enum Ended {
     /// Every sender is gone: the app is exiting.
     Closed,
-    /// The bus connection failed. The command it was about to run, if any,
-    /// is handed back to retry once on a new connection.
+    /// The bus connection failed. A popup it was about to show is handed
+    /// back to retry once on a new connection; a close is not, since the
+    /// popups of the old connection went with it.
     BusLost(Option<Command>),
 }
 
@@ -165,7 +166,8 @@ fn serve(
                 Ok(false) => break,
                 Err(e) => {
                     log::warn!("[notify] session bus lost: {e}");
-                    return Ended::BusLost(next.take());
+                    let show = next.take().filter(|c| matches!(c, Command::Show { .. }));
+                    return Ended::BusLost(show);
                 }
             }
         }
@@ -213,7 +215,9 @@ fn watch_signals(
 ) {
     let clicked = Arc::clone(popups);
     let watched = conn.add_match(
-        MatchRule::new_signal(INTERFACE, "ActionInvoked").with_path(OBJECT_PATH),
+        MatchRule::new_signal(INTERFACE, "ActionInvoked")
+            .with_sender(BUS_NAME)
+            .with_path(OBJECT_PATH),
         move |(id, action): (u32, String), _: &Connection, _: &dbus::Message| {
             if action == "default" {
                 let target = lock(&clicked).activated(id);
@@ -227,7 +231,9 @@ fn watch_signals(
     let gone = Arc::clone(popups);
     let watched = watched.and_then(|_| {
         conn.add_match(
-            MatchRule::new_signal(INTERFACE, "NotificationClosed").with_path(OBJECT_PATH),
+            MatchRule::new_signal(INTERFACE, "NotificationClosed")
+                .with_sender(BUS_NAME)
+                .with_path(OBJECT_PATH),
             move |(id, _reason): (u32, u32), _: &Connection, _: &dbus::Message| {
                 lock(&gone).closed(id);
                 true
