@@ -11,7 +11,9 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
-import type { ChatMessagePayload } from "./types";
+import { membersStore } from "@stores/members.store";
+import { blocksStore } from "@stores/blocks.store";
+import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
@@ -248,6 +250,74 @@ export function notifyMention(channelId: number): void {
       80,
     );
     fireDesktopNotification(title, "", 0, { host: currentHost(), channelId });
+  }
+  if (flash) flashTaskbar();
+  if (chime) playNotificationSound();
+}
+
+/**
+ * Announce one `channel_activity` entry: a new message in a channel the reader
+ * is not viewing (WP 2B-2). The frame carries no content, so the popup has a
+ * title and no body; it names the author when the frame does, and opens the
+ * message itself.
+ *
+ * Gates match notifyIncomingMessage: own and blocked authors never alert,
+ * "Suppress @everyone" drops an alert only the @everyone/@here caused (a
+ * direct mention still alerts), then level, channel mute, Do Not Disturb, the
+ * popup/flash/chime preferences, the focused-elsewhere rule and burst
+ * coalescing. A DM is skipped: its own chat_message reaches every participant.
+ */
+export function notifyChannelActivity(entry: ChannelActivityEntry): void {
+  const { name: channelName, isDm } = resolveNotificationChannel(entry.channel_id);
+  if (isDm) return;
+
+  const authorId = entry.author_id;
+  if (authorId !== undefined) {
+    if (authStore.getState().user?.id === authorId) return;
+    if (blocksStore.getState().blockedByMe.has(authorId)) return;
+  }
+
+  const directMention = entry.mentions_you;
+  const everyoneMention = entry.mentions_everyone;
+  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) return;
+  const mentioned = directMention || everyoneMention;
+
+  const focused = isWindowFocused();
+  const activeChannelId = channelsStore.getState().activeChannelId;
+  if (focused && entry.channel_id === activeChannelId && !isWindowDetached(entry.channel_id)) {
+    return;
+  }
+  const focusedElsewhere = focused && entry.channel_id !== activeChannelId;
+
+  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm: false })) return;
+  if (!notificationAllowed(entry.channel_id, mentioned)) return;
+
+  const dnd = loadUserStatus() === "dnd";
+  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  if (!showPopup && !flash && !chime) return;
+
+  if (shouldCoalesce(entry.channel_id, mentioned, Date.now())) return;
+
+  if (showPopup) {
+    const channel = `#${channelName}`;
+    const member =
+      authorId === undefined ? undefined : membersStore.getState().members.get(authorId);
+    const author = member === undefined ? null : resolveDisplayName(member);
+    const title =
+      author === null
+        ? mentioned
+          ? connectText("notifications.mentionedIn", { channel })
+          : connectText("notifications.newIn", { channel })
+        : mentioned
+          ? connectText("notifications.mentioned", { author, channel })
+          : connectText("notifications.inChannel", { author, channel });
+    fireDesktopNotification(sanitizeNotif(title, 80), "", 0, {
+      host: currentHost(),
+      channelId: entry.channel_id,
+      messageId: entry.message_id,
+    });
   }
   if (flash) flashTaskbar();
   if (chime) playNotificationSound();

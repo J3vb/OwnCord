@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  notifyChannelActivity,
   notifyIncomingMessage,
   notifyMention,
   openMessageTarget,
@@ -12,7 +13,8 @@ import { dmStore } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
-import type { ChatMessagePayload } from "../../src/lib/types";
+import { setBlockedByMe } from "../../src/stores/blocks.store";
+import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
 import { muteChannel, setChannelMutesHost, unmuteChannel } from "../../src/lib/channel-mutes";
 import { setMessageJumpHandler } from "../../src/lib/message-navigation";
@@ -2146,6 +2148,159 @@ describe("notifyIncomingMessage", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(invoke).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("notifyChannelActivity (WP 2B-2)", () => {
+    function entry(
+      flags: Partial<{
+        message_id: number;
+        author_id: number;
+        mentions_you: boolean;
+        mentions_everyone: boolean;
+      }> = {},
+    ): ChannelActivityEntry {
+      return {
+        channel_id: 1,
+        message_id: 42,
+        author_id: 2,
+        mentions_you: false,
+        mentions_everyone: false,
+        ...flags,
+      };
+    }
+
+    async function spies() {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (invoke as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      return { invoke: invoke as ReturnType<typeof vi.fn>, win };
+    }
+
+    beforeEach(() => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            2,
+            {
+              id: 2,
+              username: "a_martinez",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+              displayName: "Alice",
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setBlockedByMe([]);
+    });
+
+    it("All level names the author and opens the message", async () => {
+      const { invoke } = await spies();
+
+      notifyChannelActivity(entry());
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith("notify_message", {
+          title: "Alice in #general",
+          body: "",
+          host: "",
+          channelId: 1,
+          messageId: 42,
+        });
+      });
+    });
+
+    it("an entry without an author is titled by its channel", async () => {
+      const { invoke } = await spies();
+
+      notifyChannelActivity(entry({ author_id: undefined }));
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ title: "New message in #general", messageId: 42 }),
+        );
+      });
+    });
+
+    it("Mentions only skips a plain message and announces a direct mention", async () => {
+      const { invoke } = await spies();
+      testPrefs.set("notificationLevel", "mentions");
+
+      notifyChannelActivity(entry());
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+
+      notifyChannelActivity(entry({ message_id: 43, mentions_you: true }));
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ title: "Alice mentioned you in #general", messageId: 43 }),
+        );
+      });
+    });
+
+    it("Suppress @everyone drops an @everyone-only alert but keeps a direct mention", async () => {
+      const { invoke } = await spies();
+      testPrefs.set("notificationLevel", "mentions");
+      testPrefs.set("suppressEveryone", true);
+
+      notifyChannelActivity(entry({ mentions_everyone: true }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+
+      notifyChannelActivity(entry({ message_id: 43, mentions_you: true, mentions_everyone: true }));
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ title: "Alice mentioned you in #general" }),
+        );
+      });
+    });
+
+    it("never alerts for the reader's own message or a blocked author", async () => {
+      const { invoke } = await spies();
+      setBlockedByMe([2]);
+
+      notifyChannelActivity(entry({ author_id: 1 }));
+      notifyChannelActivity(entry({ mentions_you: true }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
+    it("folds a burst in one channel into one alert", async () => {
+      const { invoke } = await spies();
+
+      notifyChannelActivity(entry());
+      notifyChannelActivity(entry({ message_id: 43 }));
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it("Nothing silences the popup, the chime and the flash", async () => {
+      const { invoke, win } = await spies();
+      testPrefs.set("notificationLevel", "nothing");
+
+      notifyChannelActivity(entry({ mentions_you: true }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
   });
 

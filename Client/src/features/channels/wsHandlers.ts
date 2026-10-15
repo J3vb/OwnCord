@@ -12,6 +12,7 @@ import {
   updateChannel,
   setMentionCount,
   setNsfwAcknowledged,
+  noteChannelMessage,
 } from "../../stores/channels.store";
 import {
   setMembers,
@@ -30,13 +31,14 @@ import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import { isChannelAway, markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
-import { notifyMention } from "../../lib/notifications";
+import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
+  resetChannelActivity();
   setChannels(payload.channels);
   setRoles(payload.roles ?? []);
   setMembers(payload.members);
@@ -219,7 +221,70 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   // no chat_message announced, so alert for it (WP 2B-1, interim). A lowered or
   // unchanged total (delete, purge, repeat frame) is not a new mention. The
   // active channel never alerts here: its own chat_message already does.
-  if (payload.count > previous) notifyMention(payload.channel_id);
+  // A server that sends channel_activity alerts from that frame instead, with
+  // the author and the message (WP 2B-2), so this alert waits a moment for one.
+  if (payload.count > previous) deferMentionAlert(payload.channel_id);
+}
+
+/**
+ * How long a mention_count alert waits for a channel_activity frame before it
+ * fires on its own. The server flushes activity on a 1 s window and resolves a
+ * flush within 2 s, so a server that has the frame sends one inside this.
+ */
+export const MENTION_ALERT_GRACE_MS = 3000;
+
+/** Whether this connection's server has sent a channel_activity frame. */
+let activitySeen = false;
+const pendingMentionAlerts = new Map<number, ReturnType<typeof setTimeout>>();
+
+function deferMentionAlert(channelId: number): void {
+  if (activitySeen || pendingMentionAlerts.has(channelId)) return;
+  pendingMentionAlerts.set(
+    channelId,
+    setTimeout(() => {
+      pendingMentionAlerts.delete(channelId);
+      notifyMention(channelId);
+    }, MENTION_ALERT_GRACE_MS),
+  );
+}
+
+/**
+ * Forget what the last connection's server sent and drop pending mention
+ * alerts. Run on every full `ready` (it may come from another server) and when
+ * the dispatcher is torn down.
+ */
+export function resetChannelActivity(): void {
+  activitySeen = false;
+  for (const timer of pendingMentionAlerts.values()) clearTimeout(timer);
+  pendingMentionAlerts.clear();
+}
+
+/**
+ * channel_activity (WP 2B-2): new messages in readable channels the reader is
+ * not viewing, so their unread dot shows without waiting for the next `ready`.
+ * Each entry bumps unread through noteChannelMessage, whose id watermark keeps
+ * a message `ready` already counted from counting again. The mention flags are
+ * never passed as a mention: mention_count owns the badge total. The active
+ * channel is skipped (its own chat_message reaches it), and so are unknown
+ * channels and DM ids. A message the watermark already holds does not alert.
+ *
+ * The first frame also marks the server as one that sends it: from then on
+ * this frame owns the alerts and mention_count only moves the badge.
+ */
+export function handleChannelActivity(payload: Payload<"channel_activity">): void {
+  activitySeen = true;
+  for (const timer of pendingMentionAlerts.values()) clearTimeout(timer);
+  pendingMentionAlerts.clear();
+
+  const state = channelsStore.getState();
+  for (const entry of payload.channels) {
+    if (entry.channel_id === state.activeChannelId) continue;
+    const ch = channelsStore.getState().channels.get(entry.channel_id);
+    if (ch === undefined || ch.type === "dm") continue;
+    if (ch.lastMessageId !== null && entry.message_id <= ch.lastMessageId) continue;
+    noteChannelMessage(entry.channel_id, entry.message_id, false);
+    notifyChannelActivity(entry);
+  }
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {
