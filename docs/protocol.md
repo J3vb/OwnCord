@@ -764,7 +764,8 @@ Own messages only. Max 4000 runes.
 ```
 
 `mentions`/`mentions_everyone`/`mentions_here` are re-resolved from the edited
-content and replace the stored set. Editing never raises anyone's
+content and replace the stored set, except a reply-ping target, which an
+edit keeps. Editing never raises anyone's
 `mention_count`: a badge is only ever raised by the original send, so
 re-adding an already-counted mention cannot double-count it.
 

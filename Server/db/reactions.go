@@ -25,7 +25,11 @@ func (d *DB) AddReaction(ctx context.Context, messageID, userID int64, emoji str
 	if err != nil {
 		return fmt.Errorf("AddReaction: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("AddReaction rows affected: %w", err)
+	}
+	if n == 0 {
 		return fmt.Errorf("AddReaction: %w", ErrReactionLimit)
 	}
 	return nil
