@@ -114,7 +114,7 @@ impl SideButtons {
         let mut group = XIModifierState::default();
         // SAFETY: every out pointer is a live local; on success the server
         // allocates `buttons.mask`, freed below with XFree.
-        let ok = unsafe {
+        unsafe {
             (self.xi.XIQueryPointer)(
                 self.display,
                 device,
@@ -133,7 +133,10 @@ impl SideButtons {
         if buttons.mask.is_null() {
             return (false, false);
         }
-        let held = if ok != 0 && buttons.mask_len > 0 {
+        // The return value is `same_screen`: false while the pointer is on
+        // another screen of a multi-screen display, where the mask is still
+        // valid. A failed request leaves the mask null (handled above).
+        let held = if buttons.mask_len > 0 {
             // SAFETY: Xlib allocated mask_len bytes at mask.
             let mask =
                 unsafe { std::slice::from_raw_parts(buttons.mask, buttons.mask_len as usize) };
