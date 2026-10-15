@@ -246,6 +246,7 @@ describe("replaceEmojiShortcodes", () => {
       ":JOY:",
       "`a\n:joy:`",
       "``a`:joy:``",
+      "\\```\na``:joy:\n```",
     ]) {
       expect(replaceEmojiShortcodes(text)).toBe(text);
     }

@@ -70,8 +70,9 @@ export function replaceEmojiShortcodes(content: string): string {
   let proseStart = 0;
   let i = 0;
   while (i < content.length) {
-    // An escaped `[`, backtick or `<` opens nothing, as in the parser.
-    if (content[i] === "\\") {
+    // An escaped `[`, backtick or `<` opens nothing, as in the parser; a code
+    // fence is found before escapes, so a backslash cannot open one up.
+    if (content[i] === "\\" && !content.startsWith("```", i + 1)) {
       i += 2;
       continue;
     }
