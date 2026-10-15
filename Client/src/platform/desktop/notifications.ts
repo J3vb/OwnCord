@@ -33,7 +33,7 @@ export const notifier: Notifier = {
   },
   // The plugin's desktop backend drops the click callback, so a message
   // notification goes through the host's own command (see
-  // src-tauri/src/message_notification.rs). On macOS and Linux it waits for the
+  // src-tauri/src/message_notification.rs). On macOS and Linux it hears the
   // activation and emits `notification-click`; on Windows it shows a
   // protocol-activation toast whose click comes back as an `owncord://message`
   // deep link instead, so this event never fires there.

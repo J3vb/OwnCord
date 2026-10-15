@@ -9,6 +9,7 @@ import {
   rollbackReaction,
   confirmSend,
   markSendFailed,
+  removeOptimistic,
   channelIdForSend,
   applyServerMessage,
   messagesStore,
@@ -464,11 +465,26 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
   clock.hasReceivedReadyBefore = true;
 }
 
+function hasSendRow(correlationId: string): boolean {
+  for (const rows of messagesStore.getState().messagesByChannel.values()) {
+    if (rows.some((m) => m.correlationId === correlationId)) return true;
+  }
+  return false;
+}
+
 /**
  * The pending-send and pending-reaction branches of `error`. Returns true when
  * the frame answered one of them and the error chain must stop.
  */
 export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
+  // 2A-3: a files-only send none of whose files could be attached stored
+  // nothing, and a Retry with the same ids fails the same way. Its row goes,
+  // even one already failed as unconfirmed; the channel controller puts its
+  // files back into the composer.
+  if (payload.code === "ATTACHMENTS_UNAVAILABLE" && id !== undefined && hasSendRow(id)) {
+    removeOptimistic(id);
+    return true;
+  }
   // If the error carries the request id of a pending optimistic send, mark
   // that specific row failed (with retry) instead of a global toast. This
   // covers SLOW_MODE, FORBIDDEN, RATE_LIMITED, BAD_REQUEST, etc. on send.
