@@ -136,6 +136,7 @@ export const shards = {
     "src/lib/profiles.ts",
     "src/lib/protocolTypes.ts",
     "src/lib/read-state.ts",
+    "src/lib/savedDrafts.ts",
     "src/lib/reconcile.ts",
     "src/lib/safe-render.ts",
     "src/lib/store.ts",

@@ -88,6 +88,16 @@ export function canManageMessages(): boolean {
 }
 
 /**
+ * A per-channel message affordance (can_delete_others / can_pin) as the server
+ * computed it, or — when it never said (an older server) — the role's
+ * MANAGE_MESSAGES, which is the behaviour before the server sent it. Absent is
+ * never read as false.
+ */
+export function channelBitOrRole(bit: boolean | undefined): boolean {
+  return bit ?? canManageMessages();
+}
+
+/**
  * Whether the signed-in user's role holds MANAGE_CHANNELS — create, edit,
  * delete and reorder channels, all of which the server gates on the same bit
  * behind `/api/v1/moderation/channels*`.

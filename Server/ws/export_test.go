@@ -331,15 +331,16 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 	return buildJSON(map[string]any{
 		"type": MsgTypeReady,
 		"payload": map[string]any{
-			"capabilities": f.head.Capabilities,
-			"channels":     f.head.Channels,
-			"members":      members,
-			"voice_states": f.tail.VoiceStates,
-			"roles":        f.tail.Roles,
-			"dm_channels":  f.head.DMChannels,
-			"server_name":  f.tail.ServerName,
-			"motd":         f.tail.MOTD,
-			"notices":      f.tail.Notices,
+			"capabilities":    f.head.Capabilities,
+			"channels":        f.head.Channels,
+			"member_timeouts": f.head.MemberTimeouts,
+			"members":         members,
+			"voice_states":    f.tail.VoiceStates,
+			"roles":           f.tail.Roles,
+			"dm_channels":     f.head.DMChannels,
+			"server_name":     f.tail.ServerName,
+			"motd":            f.tail.MOTD,
+			"notices":         f.tail.Notices,
 		},
 	}), nil
 }

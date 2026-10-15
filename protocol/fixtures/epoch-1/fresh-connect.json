@@ -89,6 +89,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",
@@ -332,6 +333,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",
