@@ -35,6 +35,9 @@ type VisibilityReader interface {
 	// only when a channel is actually labelled.
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	// ListBlockersOf backs the channel_activity flush (channel_activity.go):
+	// the users who blocked a message's author get no mention flag from it.
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
 	// IsGroupDM and IsTrustedSender back the B5-6 sender-aware DM voice
 	// audience (voice_broadcast.go's filterDMAudience): a one-to-one DM's
 	// voice_state/voice_leave fan-out must not reach a recipient who does

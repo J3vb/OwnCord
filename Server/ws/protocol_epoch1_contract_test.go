@@ -337,6 +337,7 @@ func compareTranscripts(t *testing.T, want, got *wireTranscript) {
 // do not repeat it. It is not a new abstraction over the harness — it is the
 // same calls reconnect_db_test.go and coverage_helpers_test.go make.
 type epochRig struct {
+	hub   *ws.Hub
 	db    *db.DB
 	wsURL string
 	tr    *wireTranscript
@@ -372,6 +373,7 @@ func newEpochRig(t *testing.T, journey string) *epochRig {
 	t.Cleanup(srv.Close)
 
 	return &epochRig{
+		hub:   hub,
 		db:    database,
 		wsURL: "ws" + strings.TrimPrefix(srv.URL, "http"),
 		tr:    newTranscript(journey),
@@ -660,6 +662,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"chat-edit-delete", journeyChatEditDelete},
 		{"reaction-add-remove", journeyReactionAddRemove},
 		{"typing", journeyTyping},
+		{"channel-activity", journeyChannelActivity},
 		{"mark-read", journeyMarkRead},
 		{"dm-send", journeyDMSend},
 		{"dm-request", journeyDMRequest},
@@ -895,6 +898,35 @@ func journeyTyping(t *testing.T, r *epochRig) {
 	})
 	b.expect("typing")
 	a.barrier()
+	b.barrier()
+}
+
+// journeyChannelActivity records the unread hint (WP 2B-2): bob is connected
+// but has not focused the channel alice posts in, so he gets a channel_activity
+// frame and no chat_message. The hint is delivered by a worker on a 1 s
+// window and rides the low queue, which a pong may overtake, so the journey
+// flushes the window itself before bob's barrier and reads the frame first.
+// alice's barrier proves her chat_send finished emitting before that flush.
+func journeyChannelActivity(t *testing.T, r *epochRig) {
+	_, _, aliceTok, bobTok := r.seedBaseline(t)
+
+	a, b := r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence_batch")
+	a.focus(textChannelID, false)
+
+	a.record, b.record = true, true
+	a.send(map[string]any{
+		"type":    "chat_send",
+		"id":      "req-channel-activity-1",
+		"payload": map[string]any{"channel_id": textChannelID, "content": "hello unfocused"},
+	})
+	a.expect("chat_send_ok")
+	a.expect("chat_message")
+	a.barrier()
+	r.hub.FlushChannelActivityNowForTest()
+	b.expect("channel_activity")
 	b.barrier()
 }
 

@@ -146,6 +146,22 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 	return set
 }
 
+// MentionReach is the per-reader mention rule: direct when uid is among the
+// mentioned ids, broad when the message pinged @everyone (or @here and the
+// reader's status shows them present). db.BroadcastStatus, not a bare
+// == "offline": the column stores the status the user *chose*, so an invisible
+// reader holds "invisible" and a literal comparison would ping them with @here
+// — the one thing "appear offline" is meant to stop. liveStatus is read only
+// for @here; "" means no live connection. The author and the author's blockers
+// are removed by the caller.
+func MentionReach(ids []int64, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
+	direct = slices.Contains(ids, uid)
+	if everyone {
+		broad = !hereOnly || (liveStatus != "" && db.BroadcastStatus(liveStatus) != db.StatusOffline)
+	}
+	return direct, broad
+}
+
 // mentionEntries resolves a message's fan-out to the recipients whose mention
 // badge it raises, as one batch entry (or none). It is the resolution half of
 // the old per-send applyMentionCounts, split out so the mention worker can
@@ -171,44 +187,22 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 	}
 
 	recipients := make(map[int64]struct{}, len(readers))
-	if set.Everyone {
-		for _, r := range readers {
-			// db.BroadcastStatus, not a bare == "offline": the column stores the
-			// status the user *chose*, so an invisible reader holds "invisible"
-			// here and a literal comparison would ping them with @here — the one
-			// thing "appear offline" is meant to stop. Collapsing first makes
-			// @here agree with what everyone else can see of that reader.
-			//
-			// The live status, when wired, stands in for the column: the row
-			// keeps a *chosen* idle/dnd across a disconnect by design
-			// (StampDisconnect only ever rewrites "online" -> "offline") and
-			// lags a connect by up to one batched stamp flush. A reader with
-			// no live connection ("") is offline whatever the row says, the
-			// read path's rule (ws/serve_ready.go presentableMembers).
-			if set.HereOnly {
-				status := r.Status
-				if s.liveStatus != nil {
-					status = s.liveStatus(r.UserID)
-				}
-				if status == "" || db.BroadcastStatus(status) == db.StatusOffline {
-					continue
-				}
+	for _, r := range readers {
+		// The live status, when wired, stands in for the column: the row
+		// keeps a *chosen* idle/dnd across a disconnect by design
+		// (StampDisconnect only ever rewrites "online" -> "offline") and
+		// lags a connect by up to one batched stamp flush. A reader with
+		// no live connection ("") is offline whatever the row says, the
+		// read path's rule (ws/serve_ready.go presentableMembers).
+		status := ""
+		if set.Everyone && set.HereOnly {
+			status = r.Status
+			if s.liveStatus != nil {
+				status = s.liveStatus(r.UserID)
 			}
+		}
+		if direct, broad := MentionReach(set.UserIDs, set.Everyone, set.HereOnly, r.UserID, status); direct || broad {
 			recipients[r.UserID] = struct{}{}
-		}
-	}
-	if len(set.UserIDs) > 0 {
-		// Build the reader set once instead of scanning readers per mentioned
-		// uid: that nested loop was O(mentions x readers), which gets
-		// expensive on a channel with many readers.
-		readerIDs := make(map[int64]struct{}, len(readers))
-		for _, r := range readers {
-			readerIDs[r.UserID] = struct{}{}
-		}
-		for _, uid := range set.UserIDs {
-			if _, ok := readerIDs[uid]; ok {
-				recipients[uid] = struct{}{}
-			}
 		}
 	}
 	delete(recipients, authorID)

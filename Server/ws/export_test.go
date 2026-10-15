@@ -656,3 +656,16 @@ func (h *Hub) DropSocketForTest(c *Client) {
 		h.leaveVoiceOnDisconnect(context.Background(), c, voiceLeaveReasonDisconnect)
 	}
 }
+
+// NoteChannelActivityForTest records a send with the channel_activity
+// coalescer, as the emit step of a chat_send does.
+func (h *Hub) NoteChannelActivityForTest(channelID, msgID, authorID int64) {
+	h.activity.note(activityNote{channelID: channelID, msgID: msgID, authorID: authorID})
+}
+
+// FlushChannelActivityNowForTest flushes the pending channel_activity window
+// regardless of the throttle. It serializes with the worker's own flush, so
+// when it returns every frame for the notes made before the call is queued.
+func (h *Hub) FlushChannelActivityNowForTest() {
+	h.flushChannelActivity(context.Background())
+}

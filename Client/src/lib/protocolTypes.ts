@@ -50,6 +50,7 @@ export const ServerMessageType = {
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
   APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   MENTION_COUNT: "mention_count", // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+  CHANNEL_ACTIVITY: "channel_activity", // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",

@@ -149,6 +149,7 @@ var supportEventPrefixCodes = map[string]string{
 	"DeleteOtherSessions after ":             "deleteothersessions_after",
 	"DeleteOtherSessions retry after ":       "deleteothersessions_retry_after",
 	"hub: broadcast channel full, dropping ": "broadcast_dropped",
+	"ws: channel_activity read failed: ":     "ws_channel_activity_read_failed",
 }
 
 func supportEventCode(message string) string {

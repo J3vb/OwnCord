@@ -99,7 +99,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                 |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below)             |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
@@ -1033,6 +1033,71 @@ The client ignores the frame for the channel currently on screen (its own
 `chat_message` handles that badge, counting a mention that lands while the
 window is unfocused too) and for a DM-channel id (a DM's badge lives in the DM
 store and its mention bump rides the DM's `chat_message`).
+
+---
+
+### channel_activity (Server -> Client, targeted)
+
+```json
+{
+  "type": "channel_activity",
+  "payload": {
+    "channels": [
+      {
+        "channel_id": 5,
+        "message_id": 812,
+        "author_id": 3,
+        "mentions_you": false,
+        "mentions_everyone": false
+      }
+    ]
+  }
+}
+```
+
+An unread hint for a channel the reader can read but is **not** viewing:
+`chat_message` is published only to the channel's topic subscribers, so an
+unfocused reader would otherwise learn of a new message only on the next
+`ready`. Each entry names a channel and a message that arrived there since the
+last frame; the client calls its channel-unread path with `message_id` (and
+never counts the flags as a mention, since `mention_count` owns the badge
+total).
+
+The server batches. A hub coalescer records each committed send and flushes on a
+leading-edge 1 s window: the first message after a quiet second is sent at once,
+later ones wait for the window to close. A flush resolves each changed channel's
+audience once and sends every recipient **one** frame listing all the channels
+that changed for them, so a connection gets about one frame per second however
+many channels are busy.
+
+- **Audience.** Connected users who may view the channel (the same
+  `CanViewChannel` verdict as `ready`), for `text` and `announcement` channels
+  only (the channels `ready` gives an `unread_count`). Not sent to the channel's
+  topic subscribers (they get `chat_message`), to the author of the window's
+  latest message, or for DMs (their participants get the sequenced
+  `chat_message` whatever they have focused). Edits, deletes, pins and
+  reactions produce no frame.
+- **Entries.** Per recipient and channel, at most two, in ascending
+  `message_id`: the latest message that mentioned the recipient (when there is
+  one), then the latest message overall when its id is higher. `mentions_you`
+  is true when the entry's message named the recipient with `@user`;
+  `mentions_everyone` when it pinged them with `@everyone`, or with `@here`
+  while their status shows them present. The two are separate because a client
+  may mute broad mentions without muting direct ones. A message from an author the
+  recipient has blocked, or the recipient's own message, sets neither flag.
+  A window keeps at most 16 mentioning messages per channel; `mention_count`
+  still raises the badge for any beyond that.
+- **NSFW.** A reader who has not acknowledged an NSFW-labelled channel gets the
+  entry **without `author_id`**, with `channel_id`, `message_id` and both flags
+  intact. `ready` already gives them the unread count and last message id.
+- **Delivery.** Unsequenced (no `seq`), on the low-priority queue, never stored
+  or replayed. A hint is not sent for a message the recipient already marked
+  read or opened. A full queue drops it silently and never forces a full `ready`.
+  A frame is not recalled once sent; pending state naming an erased user or a
+  swept message is dropped before the flush.
+
+`ready` and `mention_count` stay authoritative: a missed or dropped frame costs
+nothing, and a server that predates the frame simply never sends one.
 
 ---
 

@@ -126,6 +126,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	h.activity.forget(nil, ids)
 	set := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
 		set[id] = struct{}{}
@@ -150,6 +151,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 // deletes the persisted rows after releasing it. Idempotent and retried
 // from the erasure journal on failure.
 func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
+	h.activity.forget([]int64{userID}, nil)
 	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedUsers, []int64{userID},
 		func(seq uint64) {
 			h.tombstones.add(&h.tombstones.users, seq, userID)
