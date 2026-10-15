@@ -34,17 +34,15 @@ const MAX_BAR_HEIGHT: i32 = 240;
 
 /// Whether a top-level window of the WebView2 browser process is the bar.
 /// `host` is the origin without its scheme: the bar reads
-/// "http://tauri.localhost is sharing…" but drops an `https://`. The bar's
-/// text starts with the origin; a DevTools title ("DevTools - …") does not.
+/// "http://tauri.localhost is sharing…" but drops an `https://`. Some
+/// languages put words before the origin, so match it anywhere, but never a
+/// DevTools window ("DevTools - http://tauri.localhost/…").
 fn is_share_bar(title: &str, height: i32, host: &str) -> bool {
     !host.is_empty()
         && height > 0
         && height <= MAX_BAR_HEIGHT
-        && ["http://", "https://", ""].iter().any(|scheme| {
-            title
-                .strip_prefix(scheme)
-                .is_some_and(|t| t.starts_with(host))
-        })
+        && title.contains(host)
+        && !title.starts_with("DevTools")
 }
 
 /// `http://tauri.localhost` -> `tauri.localhost` (port kept in dev).
@@ -190,6 +188,11 @@ mod tests {
         ));
         assert!(is_share_bar(
             "tauri.localhost is sharing your screen.",
+            48,
+            ORIGIN
+        ));
+        assert!(is_share_bar(
+            "Partage en cours : http://tauri.localhost",
             48,
             ORIGIN
         ));
