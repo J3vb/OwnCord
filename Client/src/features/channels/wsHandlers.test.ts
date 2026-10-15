@@ -23,6 +23,7 @@ import { authStore } from "../../stores/auth.store";
 import { setLiveTailInView } from "../../lib/read-state";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
+import type { Message } from "../../stores/messages.store";
 
 vi.mock("../../lib/read-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/read-state")>();
@@ -397,6 +398,7 @@ function activityEntry(
 describe("handleChannelActivity (WP 2B-2)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map() }));
     setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
     setActiveChannel(2);
   });
@@ -449,17 +451,18 @@ describe("handleChannelActivity (WP 2B-2)", () => {
     expect(notifyChannelActivity).not.toHaveBeenCalled();
   });
 
-  it("once a frame has arrived, mention_count moves the badge without alerting", () => {
-    handleChannelActivity({ channels: [activityEntry(3, 50)] });
+  it("a mention entry first, then the mention_count rise: one alert", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 50, { mentions_you: true })] });
 
     handleMentionCount({ channel_id: 3, count: 1 });
     vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
     expect(channelsStore.getState().channels.get(3)!.mentionCount).toBe(1);
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
     expect(notifyMention).not.toHaveBeenCalled();
   });
 
-  it("a frame inside the grace window replaces the pending mention_count alert", () => {
+  it("a mention entry inside the grace window replaces the pending mention_count alert", () => {
     handleMentionCount({ channel_id: 3, count: 1 });
     vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS - 1);
 
@@ -468,6 +471,42 @@ describe("handleChannelActivity (WP 2B-2)", () => {
 
     expect(notifyMention).not.toHaveBeenCalled();
     expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("a mention the frames did not carry still alerts from mention_count", () => {
+    // The server keeps only the newest mentions of a busy window, so the frame
+    // may name the channel's latest message with neither flag set.
+    handleChannelActivity({ channels: [activityEntry(3, 50)] });
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleChannelActivity({ channels: [activityEntry(3, 51)] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a mention entry for another channel leaves this channel's alert pending", () => {
+    setChannels([channel(2, "text", 0), channel(3, "text", 1), channel(4, "text", 2)]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleChannelActivity({ channels: [activityEntry(4, 60, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a mention entry the watermark skips does not cancel the mention_count alert", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 105)] });
+    handleMentionCount({ channel_id: 3, count: 1 });
+
+    // A later window can carry an older mention than the latest id seen.
+    handleChannelActivity({ channels: [activityEntry(3, 103, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledWith(3);
   });
 
   it("a server without the frame still alerts from mention_count after the grace window", () => {
@@ -480,13 +519,26 @@ describe("handleChannelActivity (WP 2B-2)", () => {
     expect(notifyMention).toHaveBeenCalledWith(3);
   });
 
-  it("a new ready forgets the last server's frames", () => {
+  it("skips a message already loaded in the channel's list (one the reader just read)", () => {
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([[3, [{ id: 50 }, { id: 0 }] as unknown as Message[]]]),
+    }));
+
     handleChannelActivity({ channels: [activityEntry(3, 50)] });
+    expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(0);
+    expect(notifyChannelActivity).not.toHaveBeenCalled();
+
+    handleChannelActivity({ channels: [activityEntry(3, 51)] });
+    expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(1);
+  });
+
+  it("teardown drops a pending alert", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
 
     resetChannelActivity();
-    handleMentionCount({ channel_id: 3, count: 1 });
     vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
-    expect(notifyMention).toHaveBeenCalledWith(3);
+    expect(notifyMention).not.toHaveBeenCalled();
   });
 });

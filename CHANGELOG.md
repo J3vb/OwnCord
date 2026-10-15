@@ -67,6 +67,7 @@ and only when it changes something a contributor or fork holder must do
 **Notifications**
 
 - Suppress @everyone and @here now hides only those pings in channels you are not viewing. A message that mentions you by name still alerts, as it already did in the open channel. Older servers keep today's behaviour.
+- With an older server, a mention in a channel you are not viewing now alerts about 3 seconds after it arrives.
 
 **Desktop UI**
 

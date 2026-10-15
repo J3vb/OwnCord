@@ -2291,6 +2291,52 @@ describe("notifyIncomingMessage", () => {
       expect(invoke).toHaveBeenCalledTimes(1);
     });
 
+    it("chimes only while the window is focused on another channel", async () => {
+      const { invoke, win } = await spies();
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+
+      notifyChannelActivity(entry());
+
+      await vi.waitFor(() => {
+        expect(mockOscillator.start).toHaveBeenCalled();
+      });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("a muted channel stays silent unless the entry mentions the reader", async () => {
+      const { invoke } = await spies();
+      muteChannel(1);
+
+      try {
+        notifyChannelActivity(entry());
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+
+        notifyChannelActivity(entry({ message_id: 43, mentions_you: true }));
+        await vi.waitFor(() => {
+          expect(invoke).toHaveBeenCalledWith(
+            "notify_message",
+            expect.objectContaining({ title: "Alice mentioned you in #general" }),
+          );
+        });
+      } finally {
+        unmuteChannel(1);
+      }
+    });
+
+    it("Do Not Disturb suppresses the popup and the chime", async () => {
+      const { invoke } = await spies();
+      testPrefs.set("userStatus", "dnd");
+
+      notifyChannelActivity(entry({ mentions_you: true }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
     it("Nothing silences the popup, the chime and the flash", async () => {
       const { invoke, win } = await spies();
       testPrefs.set("notificationLevel", "nothing");
