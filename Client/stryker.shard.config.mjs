@@ -31,6 +31,8 @@ export const shards = {
     "src/features/voice/autoPlayCameras.ts",
     "src/features/voice/mediaEncryption.ts",
     "src/features/voice/videoCodec.ts",
+    "src/features/voice/decodeCaps.ts",
+    "src/features/voice/peerDecode.ts",
     "src/features/voice/e2eeIdentity.ts",
     "src/features/voice/e2eeEpoch.ts",
     "src/features/voice/e2eePeerState.ts",

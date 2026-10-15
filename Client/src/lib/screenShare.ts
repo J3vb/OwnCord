@@ -44,6 +44,7 @@ import {
 } from "../features/voice/shareSenderStats";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
+import { channelPeerDecode } from "../features/voice/peerDecode";
 import { resolveVideoCodec } from "../features/voice/videoCodec";
 import {
   getScreenSourcePicker,
@@ -459,6 +460,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       videoTrack.mediaStreamTrack,
       maxFramerate,
       CAMERA_PUBLISH_BITRATES[quality],
+      channelPeerDecode,
     );
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
@@ -719,7 +721,12 @@ export async function enableScreenshare(
     const videoCodec =
       videoTrack === undefined
         ? "vp8"
-        : await resolveVideoCodec(videoTrack.mediaStreamTrack, effectiveFps, maxBitrate);
+        : await resolveVideoCodec(
+            videoTrack.mediaStreamTrack,
+            effectiveFps,
+            maxBitrate,
+            channelPeerDecode,
+          );
     if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
       // A disableScreenshare (or the OS stop-sharing button) ran to
       // completion while Auto's probe was pending: it already stopped these
