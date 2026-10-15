@@ -1477,8 +1477,8 @@ carries the current lists.
 
 ### user_update (Server -> Client, broadcast)
 
-Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
-or `POST /api/v1/users/me/avatar` (username, avatar, display name, about
+Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`,
+`POST /api/v1/users/me/avatar` or `DELETE /api/v1/users/me/avatar` (username, avatar, display name, about
 and/or identity key).
 
 ```json

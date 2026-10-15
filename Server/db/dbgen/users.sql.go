@@ -222,7 +222,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 
 const listMembers = `-- name: ListMembers :many
 SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
-       u.display_name, u.about, CAST(strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at) AS TEXT) AS created_at,
+       u.display_name, u.about, CAST(COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at), u.created_at) AS TEXT) AS created_at,
        u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
