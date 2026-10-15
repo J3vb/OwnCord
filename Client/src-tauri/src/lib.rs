@@ -289,92 +289,9 @@ pub fn run() {
             commands::open_devtools,
         ])
         .setup(|app| {
-            #[cfg(desktop)]
-            use tauri::Manager as _;
-            // Rust logging is initialized by tauri_plugin_log (registered above).
-            // Record the version and PID first: paired with the "[update]
-            // installer launching" line, they bound the install gap a report
-            // describes (time from that line to this startup line).
-            log::info!(
-                "[startup] OwnCord {} starting (pid {})",
-                app.package_info().version,
-                std::process::id()
-            );
-            // A native crash (signal, or GDK's exit on an X error) leaves no
-            // panic: give it a last log line. After GTK init, so GDK's X
-            // handlers are the ones it chains to.
-            #[cfg(target_os = "linux")]
-            if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
-                crash_log::install(&dir.join("owncord-client.log"));
-                // A run that ends without a trace (SIGKILL) is reported by
-                // the next start; freezes and memory are logged as they happen.
-                exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
-            }
-            // Record the credential backend first: if this build has no
-            // persistent store, every later credential symptom follows from it.
-            secret_store::log_compiled_backend();
-            // The main window is built here, not from tauri.conf.json alone
-            // ("create": false): only a code-built webview takes a new-window
-            // handler, which stream pop-outs need (popout.rs).
-            // Close to tray and Start minimised (window_prefs.rs): read before
-            // the window exists, so a minimised login launch never flashes it.
-            #[cfg(desktop)]
-            let start_hidden = {
-                app.manage(window_prefs::WindowPrefs::load(app.handle()));
-                let prefs = app.state::<window_prefs::WindowPrefs>();
-                // Always consumed, so the marker never outlives one launch.
-                let show_next = window_prefs::take_show_next_launch(app.handle());
-                window_prefs::should_start_hidden(
-                    show_next,
-                    window_prefs::launched_minimized(),
-                    prefs.start_minimized(),
-                    window_prefs::tray_available,
-                )
-            };
-            if let Some(config) = app.config().app.windows.first().cloned() {
-                let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
-                #[cfg(desktop)]
-                let builder = {
-                    let handle = app.handle().clone();
-                    builder
-                        .visible(!start_hidden)
-                        .on_new_window(move |url, features| {
-                            popout::on_new_window(&handle, url, features)
-                        })
-                };
-                let window = builder.build()?;
-                // WebView2 hides device names until mic/camera are allowed.
-                #[cfg(windows)]
-                windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
-                #[cfg(target_os = "linux")]
-                exit_watch::watch_webview(&window);
-                let handle = app.handle().clone();
-                #[cfg(desktop)]
-                let main = window.clone();
-                window.on_window_event(move |event| match event {
-                    tauri::WindowEvent::Destroyed => {
-                        log::info!("[exit] main window destroyed");
-                        popout::close_all(&handle);
-                    }
-                    // The window's close button, Alt+F4, or the desktop
-                    // closing it: a quit, unless close to tray hides it.
-                    #[cfg(desktop)]
-                    // Registered after the window-state plugin's own listener,
-                    // so the geometry it saves is the visible one.
-                    tauri::WindowEvent::CloseRequested { api, .. } => {
-                        log::info!("[exit] main window close requested (close button, keyboard or desktop)");
-                        window_prefs::on_close_requested(&handle, &main, api);
-                    }
-                    _ => {}
-                });
-            }
-            diagnostics::spawn_frontend_watchdog(app.handle());
-            tray::create_tray(app.handle())?;
-            // WebKitGTK denies mic/camera access by default — grant it so
-            // voice/video works on Linux (no-op elsewhere; see linux_media).
-            #[cfg(target_os = "linux")]
-            linux_media::enable_media_capture(app.handle());
-            Ok(())
+            // A setup error makes Tauri panic inside run(), past the Err arm
+            // below, so it gets the same dialog here first.
+            setup_app(app).inspect_err(|e| show_startup_failure(&e.to_string()))
         })
         .build(tauri::generate_context!())
     {
@@ -404,18 +321,163 @@ pub fn run() {
             });
         }
         Err(e) => {
-            eprintln!("Fatal startup error: {e}");
-            log::error!("[exit] fatal startup error: {e}");
-            #[cfg(target_os = "linux")]
-            exit_watch::note_exit("startup failed");
-            #[cfg(not(target_os = "linux"))]
-            rfd::MessageDialog::new()
-                .set_title(text::STARTUP_DIALOG_TITLE)
-                .set_description(text::startup_dialog_body(&e.to_string()))
-                .set_level(rfd::MessageLevel::Error)
-                .show();
+            show_startup_failure(&e.to_string());
             std::process::exit(1);
         }
+    }
+}
+
+/// Builds the main window, tray and native hooks once the app exists.
+fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(desktop)]
+    use tauri::Manager as _;
+    // Rust logging is initialized by tauri_plugin_log (registered above).
+    // Record the version and PID first: paired with the "[update]
+    // installer launching" line, they bound the install gap a report
+    // describes (time from that line to this startup line).
+    log::info!(
+        "[startup] OwnCord {} starting (pid {})",
+        app.package_info().version,
+        std::process::id()
+    );
+    // A native crash (signal, or GDK's exit on an X error) leaves no
+    // panic: give it a last log line. After GTK init, so GDK's X
+    // handlers are the ones it chains to.
+    #[cfg(target_os = "linux")]
+    if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
+        crash_log::install(&dir.join("owncord-client.log"));
+        // A run that ends without a trace (SIGKILL) is reported by
+        // the next start; freezes and memory are logged as they happen.
+        exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
+    }
+    // Record the credential backend first: if this build has no
+    // persistent store, every later credential symptom follows from it.
+    secret_store::log_compiled_backend();
+    // The main window is built here, not from tauri.conf.json alone
+    // ("create": false): only a code-built webview takes a new-window
+    // handler, which stream pop-outs need (popout.rs).
+    // Close to tray and Start minimised (window_prefs.rs): read before
+    // the window exists, so a minimised login launch never flashes it.
+    #[cfg(desktop)]
+    let start_hidden = {
+        app.manage(window_prefs::WindowPrefs::load(app.handle()));
+        let prefs = app.state::<window_prefs::WindowPrefs>();
+        // Always consumed, so the marker never outlives one launch.
+        let show_next = window_prefs::take_show_next_launch(app.handle());
+        window_prefs::should_start_hidden(
+            show_next,
+            window_prefs::launched_minimized(),
+            prefs.start_minimized(),
+            window_prefs::tray_available,
+        )
+    };
+    if let Some(config) = app.config().app.windows.first().cloned() {
+        let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
+        #[cfg(desktop)]
+        let builder = {
+            let handle = app.handle().clone();
+            builder
+                .visible(!start_hidden)
+                .on_new_window(move |url, features| popout::on_new_window(&handle, url, features))
+        };
+        let window = builder.build()?;
+        // WebView2 hides device names until mic/camera are allowed.
+        #[cfg(windows)]
+        windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
+        #[cfg(target_os = "linux")]
+        exit_watch::watch_webview(&window);
+        let handle = app.handle().clone();
+        #[cfg(desktop)]
+        let main = window.clone();
+        window.on_window_event(move |event| match event {
+            tauri::WindowEvent::Destroyed => {
+                log::info!("[exit] main window destroyed");
+                popout::close_all(&handle);
+            }
+            // The window's close button, Alt+F4, or the desktop
+            // closing it: a quit, unless close to tray hides it.
+            #[cfg(desktop)]
+            // Registered after the window-state plugin's own listener,
+            // so the geometry it saves is the visible one.
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                log::info!(
+                    "[exit] main window close requested (close button, keyboard or desktop)"
+                );
+                window_prefs::on_close_requested(&handle, &main, api);
+            }
+            _ => {}
+        });
+    }
+    diagnostics::spawn_frontend_watchdog(app.handle());
+    tray::create_tray(app.handle())?;
+    // WebKitGTK denies mic/camera access by default — grant it so
+    // voice/video works on Linux (no-op elsewhere; see linux_media).
+    #[cfg(target_os = "linux")]
+    linux_media::enable_media_capture(app.handle());
+    Ok(())
+}
+
+/// Logs a fatal startup error and shows it in a dialog. A headless Linux run
+/// has nobody to answer the dialog and would block on it, so it keeps the
+/// stderr line alone.
+fn show_startup_failure(error: &str) {
+    eprintln!("Fatal startup error: {error}");
+    log::error!("[exit] fatal startup error: {error}");
+    #[cfg(target_os = "linux")]
+    exit_watch::note_exit("startup failed");
+    #[cfg(target_os = "linux")]
+    let show_dialog = has_graphical_session(
+        std::env::var_os("DISPLAY"),
+        std::env::var_os("WAYLAND_DISPLAY"),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let show_dialog = true;
+    if show_dialog {
+        rfd::MessageDialog::new()
+            .set_title(text::STARTUP_DIALOG_TITLE)
+            .set_description(text::startup_dialog_body(error))
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
+}
+
+/// Whether an X11 or Wayland display is set, so a dialog can be shown.
+#[cfg(any(target_os = "linux", test))]
+fn has_graphical_session(
+    display: Option<std::ffi::OsString>,
+    wayland_display: Option<std::ffi::OsString>,
+) -> bool {
+    [display, wayland_display]
+        .into_iter()
+        .flatten()
+        .any(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod startup_dialog_tests {
+    use super::has_graphical_session;
+    use std::ffi::OsString;
+
+    #[test]
+    fn a_display_or_wayland_socket_allows_the_dialog() {
+        assert!(has_graphical_session(Some(OsString::from(":0")), None));
+        assert!(has_graphical_session(
+            None,
+            Some(OsString::from("wayland-0"))
+        ));
+        assert!(has_graphical_session(
+            Some(OsString::from(":1")),
+            Some(OsString::from("wayland-1"))
+        ));
+    }
+
+    #[test]
+    fn a_headless_run_keeps_stderr_only() {
+        assert!(!has_graphical_session(None, None));
+        assert!(!has_graphical_session(
+            Some(OsString::new()),
+            Some(OsString::new())
+        ));
     }
 }
 

@@ -65,6 +65,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Desktop UI**
+
+- An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
+
 **Login & connection**
 
 - An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
