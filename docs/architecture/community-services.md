@@ -32,7 +32,10 @@ is erased with the account, so it adds no data class here. **Amended 2026-10-15:
 existing `message_mentions` row, so it adds no data class here. **Amended
 2026-10-15 (profiles):** `061_member_generation_about.sql` only re-creates the
 member-generation trigger so it also watches `users.about`, so it adds no data
-class here. Other
+class here. **Amended 2026-10-15 (custom status expiry):**
+`062_custom_status_expiry.sql` adds an expiry instant beside the existing
+`users.custom_status` line, which only its owner can set and which clears
+itself, so it adds no data class here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

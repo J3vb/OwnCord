@@ -318,7 +318,7 @@ func TestConnWrites_PresenceUpdateDropsPendingConnect(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "legacy", Status: db.StatusOffline})
 
 	_, _ = users.StampConnect(ctx, 1, db.StatusOffline)
-	if _, err := channels.HandlePresenceUpdate(ctx, 1, db.StatusOffline, nil, nil); err != nil {
+	if _, err := channels.HandlePresenceUpdate(ctx, 1, db.StatusOffline, nil, nil, nil); err != nil {
 		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
 	if err := w.Flush(ctx); err != nil {

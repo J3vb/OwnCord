@@ -76,6 +76,8 @@ func userFromGen(u dbgen.User) *User {
 		About:              u.About,
 		CustomStatus:       u.CustomStatus,
 		RegistrationStatus: u.RegistrationStatus,
+
+		CustomStatusExpiresAt: u.CustomStatusExpiresAt,
 	}
 }
 
