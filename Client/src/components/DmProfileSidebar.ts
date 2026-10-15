@@ -361,6 +361,7 @@ export function createDmProfileSidebar(
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && open) {
+          e.preventDefault();
           onClose();
         }
       },

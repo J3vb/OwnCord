@@ -296,9 +296,17 @@ function renderLoadErrorState(onRetryLoad?: () => void): HTMLDivElement {
 
 // -- Factory ------------------------------------------------------------------
 
+/** Share of the visible height one PageUp/PageDown scrolls. */
+const PAGE_SCROLL_FRACTION = 0.875;
+
 export type MessageListComponent = MountableComponent & {
   /** Scroll to a message by ID. Returns false if the message is not in the loaded window. */
   scrollToMessage(messageId: number): boolean;
+  /** Escape: mark the channel read, drop the unread bar and go back to the
+   *  newest messages (a detached window jumps to the present). */
+  markReadAndJumpToPresent(): void;
+  /** PageUp/PageDown from the message box: scroll one page; 1 is down. */
+  scrollPage(direction: 1 | -1): void;
 };
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
@@ -633,6 +641,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function dismissUnreadBar(): void {
     unreadBarDismissed = true;
     updateUnreadBar();
+  }
+
+  function markReadAndJumpToPresent(): void {
+    if (root === null) return;
+    dismissUnreadBar();
+    // The gate keeps a held or repeated Escape off the 5/s mark_read budget.
+    if (hasUnread(options.channelId)) markChannelRead(options.channelId);
+    if (isWindowDetached(options.channelId)) {
+      options.onJumpToPresent?.();
+      return;
+    }
+    scrollToBottom();
+    updateScrollToBottomBtn();
+  }
+
+  function scrollPage(direction: 1 | -1): void {
+    if (root === null) return;
+    // About what the browser's own PageDown moves, keeping a line of context.
+    root.scrollTop += direction * Math.round(root.clientHeight * PAGE_SCROLL_FRACTION);
   }
 
   /** A messagesByChannel / historyLoadState change landed: refresh the bar and the open position. */
@@ -2016,5 +2043,5 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return true;
   }
 
-  return { mount, destroy, scrollToMessage };
+  return { mount, destroy, scrollToMessage, markReadAndJumpToPresent, scrollPage };
 }

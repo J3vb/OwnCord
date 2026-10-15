@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 
+**Messaging**
+
+- Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
+
 ### Changed
 
 **Login & connection**
@@ -61,6 +65,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Upload File moved from Ctrl+U to Ctrl+Shift+U, as in Discord. Ctrl+U is now only Underline in the message box.
 - On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
 
 ### Fixed
@@ -73,7 +78,8 @@ and only when it changes something a contributor or fork holder must do
 **Messaging**
 
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
-  **Voice and video**
+
+**Voice and video**
 
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 

@@ -117,10 +117,13 @@ export type MessageInputComponent = MountableComponent & {
   setSendGate(reason: string | null): void;
   /**
    * Open the attachment file picker, as the "+" button does. Backs the
-   * Ctrl+U shortcut. No-op while the composer is disabled or when the host
+   * Ctrl+Shift+U shortcut. No-op while the composer is disabled or when the host
    * didn't wire an upload handler.
    */
   openFilePicker(): void;
+  /** Open or close the emoji or GIF picker, as its button does (Ctrl+E,
+   *  Ctrl+G). No-op while that button is disabled. */
+  togglePicker(kind: "emoji" | "gif"): void;
 };
 
 /** Ctrl/Cmd shortcut → markdown marker it wraps the selection in. */
@@ -326,6 +329,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   const uploadErrorId = `composer-refusal-${++nextComposerId}`;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
+  /** Set by mount(); backs togglePicker(). */
+  let togglePickerOf: ((kind: "emoji" | "gif") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
   /** Index of the "@" the open popup is completing; -1 when closed. */
   let mentionStart = -1;
@@ -1271,10 +1276,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           e.preventDefault();
           handleSend();
         }
+        // An Escape that cancels something is used up: the app-wide Escape
+        // (mark the channel read) leaves a prevented key alone.
         if (e.key === "Escape") {
           if (state.editing !== null) {
+            e.preventDefault();
             cancelEdit();
           } else if (state.replyTo !== null) {
+            e.preventDefault();
             clearReply();
           }
         }
@@ -1503,6 +1512,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     gifBtn.addEventListener("click", toggleGifPicker, { signal });
 
+    togglePickerOf = (kind) => {
+      const btn = kind === "emoji" ? emojiBtn : gifBtn;
+      if (btn.disabled) return;
+      if (kind === "emoji") toggleEmojiPicker();
+      else toggleGifPicker();
+    };
+
     // Store picker cleanup for destroy()
     cleanupPickers = () => {
       closeEmojiPicker();
@@ -1550,10 +1566,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     attachmentPreviewBar = null;
     uploadErrorEl = null;
     openPicker = null;
+    togglePickerOf = null;
   }
 
   function openFilePicker(): void {
     openPicker?.();
+  }
+
+  function togglePicker(kind: "emoji" | "gif"): void {
+    togglePickerOf?.(kind);
   }
 
   /** Capture the unsent state for a channel switch. Settled attachments carry
@@ -1652,6 +1673,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     setDisabled,
     setSendGate,
     openFilePicker,
+    togglePicker,
     getDraft,
     restoreDraft,
   };
