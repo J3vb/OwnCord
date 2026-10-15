@@ -67,8 +67,8 @@ fn is_allowed_ptt_vk(vk: i32) -> bool {
         0x28 | // Down
         0x2D | // Insert
         0x2E | // Delete
-        0x05 | // Mouse X1
-        0x06 // Mouse X2
+        VK_XBUTTON1 |
+        VK_XBUTTON2
     )
 }
 
@@ -123,9 +123,31 @@ fn layout_vk(vk: i32) -> i32 {
     }
 }
 
+/// Mouse 4 and Mouse 5 (XBUTTON1/XBUTTON2).
+const VK_XBUTTON1: i32 = 0x05;
+const VK_XBUTTON2: i32 = 0x06;
+
 #[cfg(target_os = "linux")]
 fn is_key_down(vk: i32) -> bool {
-    linux::vk_held(vk, &held_keys())
+    match vk {
+        VK_XBUTTON1 | VK_XBUTTON2 => side_button_vks(held_side_buttons()).contains(&vk),
+        _ => linux::vk_held(vk, &held_keys()),
+    }
+}
+
+/// The side-button VKs held in a (Mouse 4, Mouse 5) reading.
+#[cfg(any(target_os = "linux", test))]
+fn side_button_vks((back, forward): (bool, bool)) -> Vec<i32> {
+    [(back, VK_XBUTTON1), (forward, VK_XBUTTON2)]
+        .into_iter()
+        .filter_map(|(held, vk)| held.then_some(vk))
+        .collect()
+}
+
+/// (Mouse 4, Mouse 5) held now; both false with no X display or no XInput2.
+#[cfg(target_os = "linux")]
+fn held_side_buttons() -> (bool, bool) {
+    SIDE_BUTTONS.with(|b| b.as_ref().map_or((false, false), |b| b.held()))
 }
 
 /// One XQueryKeymap snapshot of every held key (empty with no X display).
@@ -150,6 +172,22 @@ thread_local! {
             log::warn!("Global key state unavailable: no X11/XWayland display");
         }
         ds
+    };
+}
+
+// The side buttons need XInput2, which `device_query` does not use; one
+// display connection per polling thread, like DEVICE_STATE.
+#[cfg(target_os = "linux")]
+thread_local! {
+    static SIDE_BUTTONS: Option<crate::mouse_buttons::SideButtons> = {
+        let buttons = crate::mouse_buttons::SideButtons::open();
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        if buttons.is_none() {
+            WARNED.call_once(|| {
+                log::warn!("Mouse side buttons unavailable: no X display with XInput2");
+            });
+        }
+        buttons
     };
 }
 
@@ -567,6 +605,7 @@ fn bindable_keys_down() -> Vec<i32> {
         .filter(|vk| is_allowed_ptt_vk(*vk))
         .collect();
     down.dedup();
+    down.extend(side_button_vks(held_side_buttons()));
     down
 }
 
@@ -577,6 +616,27 @@ fn bindable_keys_down() -> Vec<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn side_button_readings_map_to_the_windows_xbutton_vks() {
+        assert_eq!(side_button_vks((false, false)), Vec::<i32>::new());
+        assert_eq!(side_button_vks((true, false)), vec![VK_XBUTTON1]);
+        assert_eq!(side_button_vks((false, true)), vec![VK_XBUTTON2]);
+        assert_eq!(
+            side_button_vks((true, true)),
+            vec![VK_XBUTTON1, VK_XBUTTON2]
+        );
+        assert!(is_allowed_ptt_vk(VK_XBUTTON1) && is_allowed_ptt_vk(VK_XBUTTON2));
+    }
+
+    #[test]
+    fn a_held_side_button_is_captured_like_a_key() {
+        let mut stale = Vec::new();
+        assert_eq!(
+            next_captured(&side_button_vks((true, false)), &mut stale),
+            Some(VK_XBUTTON1)
+        );
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
