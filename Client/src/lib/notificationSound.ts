@@ -70,7 +70,12 @@ export function startRingChime(): void {
   // ringback, so it resumes when this chime ends.
   silenceRingback();
   playRingtone();
-  ringInterval = setInterval(() => playRingtone(), 2000);
+  // The ring switch is re-read before each burst, so turning it off while the
+  // phone rings stops the chime (and lets a pre-empted ringback resume).
+  ringInterval = setInterval(() => {
+    if (soundSwitchOn("ring")) playRingtone();
+    else stopRingChime();
+  }, 2000);
 }
 
 /** Stop the repeating incoming-call chime. Idempotent. */

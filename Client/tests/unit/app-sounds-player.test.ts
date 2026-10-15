@@ -221,6 +221,21 @@ describe("the call sounds' own switches", () => {
     expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(2);
   });
 
+  it("stops a ring in flight when its switch is turned off mid-ring", () => {
+    vi.useFakeTimers();
+    startRingChime();
+    const ctx = RecordingAudioContext.instances[0]!;
+    vi.advanceTimersByTime(2000);
+    expect(ctx.oscillators).toHaveLength(4);
+
+    savePref("soundRing", false);
+    vi.advanceTimersByTime(2000);
+    expect(ctx.oscillators).toHaveLength(4);
+    expect(ctx.oscillators[3]!.stop).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(10_000);
+    expect(ctx.oscillators).toHaveLength(4);
+  });
+
   it("keeps the ringback off while its own switch is off, ring switch notwithstanding", () => {
     savePref("soundRingback", false);
 
