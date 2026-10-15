@@ -3577,9 +3577,46 @@ describe("VideoGrid", () => {
 
     describe("a sharer republishing for another codec (WP M-5b)", () => {
       let live: boolean;
+      let cameraLive: boolean;
       beforeEach(() => {
         live = true;
-        grid.setCallbacks({ onStreamRemoved, isShareLive: () => live });
+        cameraLive = false;
+        grid.setCallbacks({
+          onStreamRemoved,
+          isStreamLive: (_userId, screenshare) => (screenshare ? live : cameraLive),
+        });
+      });
+
+      it("keeps a watched camera's tile and watch through its republish", () => {
+        const forgetStreamWatch = vi.fn();
+        grid.setCallbacks({
+          onStreamRemoved,
+          forgetStreamWatch,
+          isStreamLive: (_userId, screenshare) => !screenshare && cameraLive,
+        });
+        cameraLive = true;
+        const camera = { ...screen, isScreenshare: false };
+        grid.addStream(2, "Otto", fakeStreamWithTrack().stream, camera);
+        grid.addStream(2, "Otto", null, camera);
+        grid.removeStream(2);
+
+        const tile = (): HTMLElement | null =>
+          container.querySelector(".video-cell[data-user-id='2']");
+        expect(tile()).not.toBeNull();
+        expect(tile()!.classList.contains("video-cell--stopped")).toBe(false);
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(2, "Otto", again, camera);
+        expect(tile()!.querySelector("video")!.srcObject).toBe(again);
+        vi.advanceTimersByTime(10_000);
+        expect(tile()).not.toBeNull();
+        expect(forgetStreamWatch).not.toHaveBeenCalled();
+
+        // Turned off for real: the tile goes with its watch.
+        cameraLive = false;
+        grid.removeStream(2);
+        vi.advanceTimersByTime(250);
+        expect(tile()).toBeNull();
+        expect(forgetStreamWatch).toHaveBeenCalledWith(2);
       });
 
       it("shows no cover while the owner's voice state still says they share, and plays the share when it returns", () => {
@@ -3666,16 +3703,16 @@ describe("VideoGrid", () => {
       });
 
       it("a held tile that is closed stops looking at the owner", () => {
-        const isShareLive = vi.fn(() => true);
-        grid.setCallbacks({ onStreamRemoved, isShareLive });
+        const isStreamLive = vi.fn(() => true);
+        grid.setCallbacks({ onStreamRemoved, isStreamLive });
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
         grid.removeStream(SCREEN);
-        const looked = isShareLive.mock.calls.length;
+        const looked = isStreamLive.mock.calls.length;
 
         grid.destroy?.();
         vi.advanceTimersByTime(10_000);
 
-        expect(isShareLive.mock.calls.length).toBe(looked);
+        expect(isStreamLive.mock.calls.length).toBe(looked);
         expect(onStreamRemoved).not.toHaveBeenCalled();
       });
     });

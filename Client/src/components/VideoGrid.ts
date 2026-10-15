@@ -110,11 +110,11 @@ export interface VideoGridCallbacks {
   readonly onCallPopout?: (out: boolean, restore: boolean) => void;
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
-  /** Whether this user's voice state still says they share their screen. A
-   *  sharer switching codec unpublishes and publishes the same share (WP
-   *  M-5b), so a watched share whose owner is still sharing gets a moment to
-   *  come back before its tile says the stream ended. */
-  readonly isShareLive?: (userId: number) => boolean;
+  /** Whether this user's voice state still says their screen share (or
+   *  camera) is on. A codec switch unpublishes and publishes the same track
+   *  (WP M-5b), so a watched stream whose owner still has it on gets a moment
+   *  to come back, keeping its watch, before its tile ends. */
+  readonly isStreamLive?: (userId: number, screenshare: boolean) => boolean;
   /** Back to the full stream view of `tileId`, from its mini-player. */
   readonly onReturnToStream?: (tileId: number) => void;
   /** Focus a control on the main page, for focus that was in a mini-player
@@ -1745,16 +1745,16 @@ export function createVideoGrid(): VideoGridComponent {
       setTrackMuted(existing, false);
       if (!existing.el.classList.contains("video-cell--stopped")) {
         existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
-        // A codec switch unsubscribes before it unpublishes: a share whose
-        // owner still shares waits for its republish, pop-out and mini open.
-        const sharer = existing.config;
+        // A codec switch unsubscribes before it unpublishes: a stream whose
+        // owner still has it on waits for its republish, pop-out and mini open.
+        const owner = existing.config;
         if (
-          sharer?.isScreenshare === true &&
-          !sharer.isSelf &&
+          owner !== undefined &&
+          !owner.isSelf &&
           existing.holding === undefined &&
-          callbacks.isShareLive?.(sharer.audioUserId) === true
+          callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
         ) {
-          holdForRepublish(userId, existing, sharer.audioUserId);
+          holdForRepublish(userId, existing, owner.audioUserId, owner.isScreenshare);
         } else {
           setStopped(userId, true, false);
         }
@@ -2070,29 +2070,34 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(userId);
     if (entry === undefined || entry.ending !== undefined || entry.holding !== undefined) return;
     const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
-    const sharer = entry.config;
+    const owner = entry.config;
     if (
       watched &&
-      sharer?.isScreenshare === true &&
-      !sharer.isSelf &&
-      callbacks.isShareLive?.(sharer.audioUserId) === true
+      owner !== undefined &&
+      !owner.isSelf &&
+      callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
     ) {
-      holdForRepublish(userId, entry, sharer.audioUserId);
+      holdForRepublish(userId, entry, owner.audioUserId, owner.isScreenshare);
       return;
     }
     endStream(userId);
   }
 
-  /** The stream went but its owner's voice state still says they share: a
-   *  codec switch republishes the share. Show no cover until the owner's state
-   *  says otherwise or the grace runs out. */
-  function holdForRepublish(userId: number, entry: CellEntry, owner: number): void {
+  /** The stream went but its owner's voice state still says it is on: a
+   *  codec switch republishes it. Show no cover and keep the watch until the
+   *  owner's state says otherwise or the grace runs out. */
+  function holdForRepublish(
+    userId: number,
+    entry: CellEntry,
+    owner: number,
+    screenshare: boolean,
+  ): void {
     let waited = 0;
     const look = (): void => {
       entry.holding = undefined;
       if (cells.get(userId) !== entry) return;
       waited += REPUBLISH_HOLD_POLL_MS;
-      if (waited < REPUBLISH_HOLD_MS && callbacks.isShareLive?.(owner) === true) {
+      if (waited < REPUBLISH_HOLD_MS && callbacks.isStreamLive?.(owner, screenshare) === true) {
         entry.holding = setTimeout(look, REPUBLISH_HOLD_POLL_MS);
         return;
       }
