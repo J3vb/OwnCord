@@ -269,23 +269,8 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if err := requireChannelWritable(ch); err != nil {
 		return err
 	}
-	if ch.Type == "dm" {
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil || !ok {
-			return fmt.Errorf("%w: access denied", ErrNotFound)
-		}
-		if blkErr := RequireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return blkErr
-		}
-		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-			return err
-		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
-		// Require READ_MESSAGES alongside MANAGE_MESSAGES so a role locked out
-		// of a private channel cannot mutate its pins — the admin panel's
-		// "Can access" toggle denies READ_MESSAGES|CONNECT_VOICE and leaves
-		// MANAGE_MESSAGES intact. Mirrors handleReaction and checkSendPermission.
-		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	if err := s.pinAuthz(ctx, userID, ch); err != nil {
+		return err
 	}
 	// Verify message belongs to this channel.
 	msg, err := s.st.GetMessage(ctx, msgID)
@@ -305,4 +290,36 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return nil
+}
+
+// pinAuthz decides whether userID may pin or unpin in ch. The rule is
+// permissions.CanPinMessage; this only maps its verdict onto the service's
+// error kinds, which are unchanged. A DM non-participant or a failed
+// participation lookup is an opaque ErrNotFound; a confirmed participant's
+// failed block lookup stays an internal error, as before. A block or timeout
+// keeps its own kind, and
+// every other refusal, or a failure to resolve the subject, is ErrForbidden
+// (the permission lookup fails closed to 403, never 500).
+func (s *MessageService) pinAuthz(ctx context.Context, userID int64, ch *db.Channel) error {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
+		if ch.Type == "dm" {
+			if sub.DMParticipant {
+				return err
+			}
+			return fmt.Errorf("%w: access denied", ErrNotFound)
+		}
+		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	}
+	verdict := permissions.CanPinMessage(sub)
+	switch {
+	case verdict == nil:
+		return nil
+	case ch.Type == "dm" && errors.Is(verdict, permissions.ErrNotDMParticipant):
+		return fmt.Errorf("%w: access denied", ErrNotFound)
+	case errors.Is(verdict, permissions.ErrBlocked), errors.Is(verdict, permissions.ErrTimedOut):
+		return denial(verdict)
+	default:
+		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	}
 }

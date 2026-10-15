@@ -1295,7 +1295,7 @@ Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (
 Pin a message in a channel. A successful pin or unpin is broadcast to the channel as [`chat_pinned`](protocol.md#chat_pinned-server---client-broadcast).
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
+**Permission:** `READ_MESSAGES` and `MANAGE_MESSAGES` on the channel; in a DM, a participant who is not blocked and not timed out
 
 #### Response 204 No Content
 
@@ -1306,7 +1306,7 @@ Pin a message in a channel. A successful pin or unpin is broadcast to the channe
 Unpin a message from a channel.
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
+**Permission:** `READ_MESSAGES` and `MANAGE_MESSAGES` on the channel; in a DM, a participant who is not blocked and not timed out
 
 #### Response 204 No Content
 
