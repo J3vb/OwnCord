@@ -172,6 +172,14 @@ pub enum Event {
     VoiceGate {
         open: bool,
     },
+    /// A level report from the capture, every ~50 ms while it runs: the
+    /// loudest ~10 ms RMS after the input volume, and whether the voice gate
+    /// is open. It drives the settings meter and automatic sensitivity, as
+    /// the web path's detector reports do.
+    InputLevel {
+        rms: f32,
+        open: bool,
+    },
     EncryptionStatus {
         identity: String,
         encrypted: bool,
@@ -743,7 +751,11 @@ impl NativeSession {
         self.capture.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
-            Arc::new(move |open| on_event(Event::VoiceGate { open })),
+            Arc::new({
+                let on_event = on_event.clone();
+                move |open| on_event(Event::VoiceGate { open })
+            }),
+            Arc::new(move |rms, open| on_event(Event::InputLevel { rms, open })),
         );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
@@ -816,9 +828,15 @@ impl NativeSession {
         self.capture.set_ptt_gated(gated);
     }
 
-    /// Set the input-sensitivity gate's threshold (0: no gate).
-    pub fn set_voice_gate(&self, threshold: f32) {
-        self.capture.set_voice_gate(threshold);
+    /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
+    /// moves it without restarting the detector.
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+        self.capture.set_voice_gate(threshold, retune);
+    }
+
+    /// Set the input volume as a linear gain (0 to 2).
+    pub fn set_input_gain(&self, gain: f32) {
+        self.capture.set_input_gain(gain);
     }
 
     /// Publish any audio source as the microphone track. The app passes its
@@ -1639,6 +1657,12 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+        let json = serde_json::to_string(&Event::InputLevel {
+            rms: 0.25,
+            open: false,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"inputLevel","rms":0.25,"open":false}"#);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! input-sensitivity gate (`VoiceGate`) and push-to-talk's gate decide
 //! whether the frame goes out or silence does.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -137,6 +137,56 @@ const GATE_LOOKAHEAD_FRAMES: usize = 5;
 /// Told whether the voice gate is open after each change.
 pub type GateSink = Arc<dyn Fn(bool) + Send + Sync>;
 
+/// Told each level report: the loudest ~10 ms RMS since the last one, after
+/// the input volume, and whether the voice gate is open.
+pub type LevelSink = Arc<dyn Fn(f32, bool) + Send + Sync>;
+
+/// Frames per level report: vad-worklet.js reports its loudest level every
+/// ~50 ms, which the meter and automatic sensitivity both read.
+const LEVEL_REPORT_FRAMES: u32 = 5;
+
+/// The input volume's top: 200 %, as audioPipeline's `setInputVolume`.
+const MAX_INPUT_GAIN: f32 = 2.0;
+
+/// The input volume as a linear gain (0 to 2, `inputVolume` / 100 as on the
+/// web path), shared by every stream a capture opens.
+#[derive(Clone)]
+pub struct InputGain(Arc<AtomicU32>);
+
+impl Default for InputGain {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU32::new(1.0_f32.to_bits())))
+    }
+}
+
+impl InputGain {
+    pub fn set(&self, gain: f32) {
+        let gain = if gain.is_finite() {
+            gain.clamp(0.0, MAX_INPUT_GAIN)
+        } else {
+            1.0
+        };
+        self.0.store(gain.to_bits(), Ordering::Relaxed);
+    }
+
+    fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+}
+
+/// Scale `frame` by a gain that moves from `from` to `to` across it, so a
+/// slider move does not click (micProcessor's GainNode ramps likewise).
+fn apply_gain(frame: &mut [i16], from: f32, to: f32) {
+    if from == 1.0 && to == 1.0 {
+        return;
+    }
+    let step = (to - from) / frame.len() as f32;
+    for (i, s) in frame.iter_mut().enumerate() {
+        let gain = from + step * (i + 1) as f32;
+        *s = (f32::from(*s) * gain).round().clamp(-32768.0, 32767.0) as i16;
+    }
+}
+
 /// The input-sensitivity gate: the web path's voice detector
 /// (vad-worklet.js) on the same level scale, the RMS (-1 to 1) of ~10 ms of
 /// processed audio, so one slider position gates alike on both paths.
@@ -149,11 +199,18 @@ pub struct VoiceGate {
     speech: u32,
     closed: bool,
     on_change: Option<GateSink>,
+    on_level: Option<LevelSink>,
+    level_peak: f32,
+    level_frames: u32,
 }
 
 impl VoiceGate {
     pub fn report_to(&mut self, sink: GateSink) {
         self.on_change = Some(sink);
+    }
+
+    pub fn report_levels_to(&mut self, sink: LevelSink) {
+        self.on_level = Some(sink);
     }
 
     /// Restart the detector open at `threshold`, as the web path restarts its
@@ -163,12 +220,24 @@ impl VoiceGate {
             threshold: threshold.max(0.0),
             closed: self.closed,
             on_change: self.on_change.take(),
+            on_level: self.on_level.take(),
             ..Self::default()
         };
         if self.on() {
             self.set_closed(false);
         } else {
             self.closed = false;
+        }
+    }
+
+    /// Move the threshold without restarting the detector, as automatic
+    /// sensitivity moves the worklet's (its "threshold" message): the gate
+    /// keeps its state and counts. Turning the gate on or off restarts it.
+    pub fn retune(&mut self, threshold: f32) {
+        if self.on() && threshold > 0.0 {
+            self.threshold = threshold;
+        } else {
+            self.set_threshold(threshold);
         }
     }
 
@@ -205,6 +274,23 @@ impl VoiceGate {
         }
         self.closed
     }
+
+    /// Take one frame's level: the gate runs on it while on, and every
+    /// `LEVEL_REPORT_FRAMES` the loudest one goes to the level sink. Returns
+    /// whether the gate is now closed.
+    fn observe(&mut self, rms: f32) -> bool {
+        let closed = self.on() && self.update(rms);
+        if let Some(sink) = &self.on_level {
+            self.level_peak = self.level_peak.max(rms);
+            self.level_frames += 1;
+            if self.level_frames >= LEVEL_REPORT_FRAMES {
+                sink(self.level_peak, !closed);
+                self.level_peak = 0.0;
+                self.level_frames = 0;
+            }
+        }
+        closed
+    }
 }
 
 fn rms(frame: &[i16]) -> f32 {
@@ -220,6 +306,10 @@ pub struct Processor {
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate (the capture's shared one).
     voice: Arc<Mutex<VoiceGate>>,
+    /// The input volume (the capture's shared one) and the gain the last
+    /// frame ended on, which the next ramps from.
+    gain: InputGain,
+    applied_gain: f32,
     /// The voice behind the gate's detector while the gate is on.
     lookahead: VecDeque<i16>,
     framer: Framer,
@@ -234,6 +324,8 @@ impl Processor {
             denoise: enhanced_noise_suppression.then(DenoiseState::new),
             gated: Arc::default(),
             voice: Arc::default(),
+            gain: InputGain::default(),
+            applied_gain: 1.0,
             lookahead: VecDeque::new(),
             framer: Framer::default(),
             input: Box::new([0.0; FRAME]),
@@ -253,7 +345,17 @@ impl Processor {
         self
     }
 
+    /// Follow input volume `gain` (the capture's shared one).
+    pub fn with_input_gain(mut self, gain: InputGain) -> Self {
+        self.applied_gain = gain.get();
+        self.gain = gain;
+        self
+    }
+
     /// Feed mono samples (-1 to 1); each processed 10 ms frame goes to `out`.
+    /// The input volume applies after the APM and RNNoise and before the
+    /// voice gate, as on the web path (micProcessor's GainNode feeds the
+    /// detector), so the gate and the level reports see what is sent.
     /// While the voice gate or push-to-talk's is closed the frame is zeroed
     /// after the APM and RNNoise ran, so their state stays warm for the next
     /// word or press.
@@ -263,6 +365,8 @@ impl Processor {
             denoise,
             gated,
             voice,
+            gain,
+            applied_gain,
             lookahead,
             framer,
             input,
@@ -282,9 +386,12 @@ impl Processor {
                     .zip(output.iter())
                     .for_each(|(s, o)| *s = o.clamp(-32768.0, 32767.0) as i16);
             }
+            let target = gain.get();
+            apply_gain(frame, *applied_gain, target);
+            *applied_gain = target;
             let (voiced, closed) = {
                 let mut voice = lock(voice);
-                (voice.on(), voice.on() && voice.update(rms(frame)))
+                (voice.on(), voice.observe(rms(frame)))
             };
             if voiced {
                 if lookahead.is_empty() {
@@ -372,6 +479,8 @@ struct Feed {
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate, likewise.
     voice: Arc<Mutex<VoiceGate>>,
+    /// The input volume, likewise.
+    gain: InputGain,
 }
 
 impl Feed {
@@ -386,27 +495,43 @@ impl Feed {
         let source = lock(&self.source).clone().ok_or("no microphone track")?;
         let processor = Processor::new(apm, denoise)
             .gated_by(self.gated.clone())
-            .with_voice_gate(self.voice.clone());
+            .with_voice_gate(self.voice.clone())
+            .with_input_gain(self.gain.clone());
         open_input(device, processor, source, dead)
     }
 }
 
 impl Capture {
-    /// `on_voice_gate` is told each time the voice gate opens or closes.
+    /// `on_voice_gate` is told each time the voice gate opens or closes,
+    /// `on_level` each level report.
     pub fn configure(
         &mut self,
         apm: Arc<Apm>,
         enhanced_noise_suppression: bool,
         on_voice_gate: GateSink,
+        on_level: LevelSink,
     ) {
         *lock(&self.feed.processing) = Some((apm, enhanced_noise_suppression));
-        lock(&self.feed.voice).report_to(on_voice_gate);
+        let mut voice = lock(&self.feed.voice);
+        voice.report_to(on_voice_gate);
+        voice.report_levels_to(on_level);
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
-    /// path's scale (`vadThreshold`).
-    pub fn set_voice_gate(&self, threshold: f32) {
-        lock(&self.feed.voice).set_threshold(threshold);
+    /// path's scale (`vadThreshold`). `retune` moves it without restarting
+    /// the detector (automatic sensitivity's steps).
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+        let mut voice = lock(&self.feed.voice);
+        if retune {
+            voice.retune(threshold);
+        } else {
+            voice.set_threshold(threshold);
+        }
+    }
+
+    /// Set the input volume as a linear gain (0 to 2).
+    pub fn set_input_gain(&self, gain: f32) {
+        self.feed.gain.set(gain);
     }
 
     /// Close or open push-to-talk's gate. The input stream stays as it is:
@@ -761,7 +886,12 @@ mod tests {
     fn the_watchers_feed_follows_the_captures_current_source() {
         let mut capture = Capture::default();
         let watchers = capture.feed.clone();
-        capture.configure(Apm::new(&opts(false, false)), false, Arc::new(|_| {}));
+        capture.configure(
+            Apm::new(&opts(false, false)),
+            false,
+            Arc::new(|_| {}),
+            Arc::new(|_, _| {}),
+        );
         assert!(!watchers.ready(), "no source yet");
         let source = NativeAudioSource::new(
             livekit::webrtc::audio_source::AudioSourceOptions::default(),
@@ -893,8 +1023,136 @@ mod tests {
     fn the_voice_gate_is_shared_with_the_watchers_feed() {
         let capture = Capture::default();
         let watchers = capture.feed.clone();
-        capture.set_voice_gate(0.03);
+        capture.set_voice_gate(0.03, false);
         assert_eq!(lock(&watchers.voice).threshold, 0.03);
+    }
+
+    /// Automatic sensitivity's steps move the threshold without restarting
+    /// the detector: a closed gate stays closed and says nothing, as the
+    /// worklet's "threshold" message keeps its counts. Off and on still
+    /// restart.
+    #[test]
+    fn a_retune_moves_the_threshold_without_reopening_the_gate() {
+        let (gate, reports) = reporting_gate(0.02);
+        let mut p =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
+        run(&mut p, &noise(FRAME * 100, 0.005, 9));
+        assert_eq!(*lock(&reports), [false]);
+        lock(&gate).retune(0.03);
+        assert_eq!(lock(&gate).threshold, 0.03);
+        assert!(lock(&gate).closed, "still closed");
+        assert_eq!(*lock(&reports), [false], "no restart, no report");
+        lock(&gate).retune(0.0);
+        assert!(!lock(&gate).on(), "0 turns it off");
+        assert!(
+            !lock(&gate).closed,
+            "and reopens it, silently as set_threshold does"
+        );
+        lock(&gate).retune(0.02);
+        assert!(
+            lock(&gate).on() && !lock(&gate).closed,
+            "turning it on restarts open"
+        );
+        assert_eq!(lock(&gate).grace, 0, "with a fresh start-up grace");
+    }
+
+    fn reported_levels(gate: &Arc<Mutex<VoiceGate>>) -> Arc<Mutex<Vec<(f32, bool)>>> {
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let sink = levels.clone();
+        lock(gate).report_levels_to(Arc::new(move |rms, open| lock(&sink).push((rms, open))));
+        levels
+    }
+
+    /// One level report per 50 ms, the loudest 10 ms frame in it, as
+    /// vad-worklet.js reports its peak: the meter and automatic sensitivity
+    /// read the same numbers on both paths. It reports with no gate too.
+    #[test]
+    fn level_reports_carry_the_loudest_frame_every_fifty_ms() {
+        let gate = Arc::new(Mutex::new(VoiceGate::default()));
+        let levels = reported_levels(&gate);
+        for rms in [0.01, 0.04, 0.02, 0.0, 0.01, 0.03, 0.0, 0.0, 0.0] {
+            lock(&gate).observe(rms);
+        }
+        assert_eq!(*lock(&levels), [(0.04, true)], "one report so far");
+        lock(&gate).observe(0.0);
+        assert_eq!(*lock(&levels), [(0.04, true), (0.03, true)]);
+    }
+
+    /// A report says whether the gate is open, for the meter's colour.
+    #[test]
+    fn a_level_report_says_the_gate_is_closed() {
+        let (gate, _) = reporting_gate(0.02);
+        let levels = reported_levels(&gate);
+        let mut p =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
+        run(&mut p, &noise(FRAME * 100, 0.005, 9));
+        let last = *lock(&levels).last().unwrap();
+        assert!(!last.1, "closed after the hold: {last:?}");
+        assert!(last.0 > 0.0 && last.0 < 0.02, "the quiet level: {last:?}");
+    }
+
+    /// The loudest reported level once the ramp has settled.
+    fn steady_level(gain: f32, input: &[f32]) -> f32 {
+        let gate = Arc::new(Mutex::new(VoiceGate::default()));
+        let levels = reported_levels(&gate);
+        let input_gain = InputGain::default();
+        input_gain.set(gain);
+        let mut p = Processor::new(Apm::new(&opts(false, false)), false)
+            .with_voice_gate(gate)
+            .with_input_gain(input_gain);
+        run(&mut p, input);
+        let reports = lock(&levels).clone();
+        reports[2..].iter().map(|r| r.0).fold(0.0, f32::max)
+    }
+
+    /// The input volume scales the voice before the gate and the level
+    /// reports see it, as micProcessor's GainNode feeds the web detector:
+    /// 200 % doubles the level, 50 % halves it, 0 % is silence.
+    #[test]
+    fn the_input_volume_scales_what_the_gate_and_meter_see() {
+        let input = noise(FRAME * 50, 0.05, 3);
+        let unity = steady_level(1.0, &input);
+        assert!(unity > 0.0);
+        let double = steady_level(2.0, &input);
+        let half = steady_level(0.5, &input);
+        assert!((double / unity - 2.0).abs() < 0.05, "{double} vs {unity}");
+        assert!((half / unity - 0.5).abs() < 0.05, "{half} vs {unity}");
+        assert_eq!(steady_level(0.0, &input), 0.0);
+    }
+
+    /// A volume change ramps across one frame instead of jumping, so a slider
+    /// move does not click; a frame at 100 % is left untouched.
+    #[test]
+    fn a_volume_change_ramps_across_one_frame() {
+        let mut frame = [1000_i16; FRAME];
+        apply_gain(&mut frame, 1.0, 2.0);
+        assert!(
+            frame[0] > 1000 && frame[0] < 1010,
+            "starts near the old gain"
+        );
+        assert_eq!(frame[FRAME - 1], 2000, "ends on the new one");
+        assert!(frame.windows(2).all(|w| w[0] <= w[1]), "no jump");
+        let mut unity = [1234_i16; FRAME];
+        apply_gain(&mut unity, 1.0, 1.0);
+        assert!(unity.iter().all(|&s| s == 1234));
+        let mut loud = [30000_i16; FRAME];
+        apply_gain(&mut loud, 2.0, 2.0);
+        assert!(loud.iter().all(|&s| s == 32767), "clipped, not wrapped");
+    }
+
+    /// The capture's input volume is the one every stream it opens follows,
+    /// held to 0-200 %; a stray non-number keeps 100 %.
+    #[test]
+    fn the_input_volume_is_shared_with_the_watchers_feed() {
+        let capture = Capture::default();
+        let watchers = capture.feed.clone();
+        assert_eq!(watchers.gain.get(), 1.0, "100 % until set");
+        capture.set_input_gain(0.5);
+        assert_eq!(watchers.gain.get(), 0.5);
+        capture.set_input_gain(3.0);
+        assert_eq!(watchers.gain.get(), 2.0);
+        capture.set_input_gain(f32::NAN);
+        assert_eq!(watchers.gain.get(), 1.0);
     }
 
     /// A stream the watcher reopens (device loss, a default move) is built
