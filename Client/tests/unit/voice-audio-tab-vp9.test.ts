@@ -29,6 +29,7 @@ vi.mock("@lib/livekitSession", () => ({
   reapplyAudioProcessing: vi.fn(),
   reapplyEnhancedNoiseSuppression: vi.fn(),
   getLocalMicSettings: () => null,
+  onNativeInputLevel: () => () => {},
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
