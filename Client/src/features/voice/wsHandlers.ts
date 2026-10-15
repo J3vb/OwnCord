@@ -13,6 +13,7 @@ import {
   setVoiceConfig,
   setModeratorDeafened,
   restateSelfVoiceState,
+  setPeerVideoDecode,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -383,7 +384,27 @@ export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
   );
 }
 
+/** Most decode entries kept from one announce (the server allows 8). */
+const MAX_VIDEO_DECODE = 8;
+
+/** The announce's `video_decode` when it is an array of strings (capped), else
+ *  undefined. The wire is untrusted: a malformed list must read as absent. */
+function narrowVideoDecode(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list: unknown[] = value;
+  if (!list.every((entry): entry is string => typeof entry === "string")) return undefined;
+  return list.slice(0, MAX_VIDEO_DECODE);
+}
+
 export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">): void {
+  // The decode list rides with the key. Record it before the E2EE hand-off so
+  // a list that arrives before key setup is not lost; absent clears the entry.
+  // It must never keep the key from being processed, hence the guard.
+  try {
+    setPeerVideoDecode(payload.user_id, narrowVideoDecode(payload.video_decode));
+  } catch (err) {
+    log.warn("voice_e2ee_announce: could not record video_decode", err);
+  }
   void livekitSession().then(({ handleE2EEAnnounce }) =>
     handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
   );
