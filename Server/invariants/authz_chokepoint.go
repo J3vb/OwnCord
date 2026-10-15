@@ -253,7 +253,7 @@ func (h authzHit) excessMessage(want, got int) string {
 }
 
 // authzPredicateList names the B2-5 predicates a call site should be using.
-const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent, CanDeleteMessage"
+const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage"
 
 // authzHits reports every raw permission check in one file, whether or not it
 // is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same

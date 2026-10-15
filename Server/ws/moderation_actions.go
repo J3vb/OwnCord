@@ -91,8 +91,9 @@ func (h *Hub) RearmTimeoutExpiries() {
 const timeoutExpiryRefreshSlack = time.Second
 
 // RefreshUserChannels re-sends userID's live client a channel_create for
-// every non-DM channel it can see, each carrying its CURRENT can_send and
-// can_moderate_voice — RefreshChannelVisibility's per-recipient send, for a
+// every non-DM channel it can see, each carrying its CURRENT
+// channelAffordances (can_send, can_moderate_voice, can_delete_others,
+// can_pin, can_react) — RefreshChannelVisibility's per-recipient send, for a
 // change that moves only this one user's verdicts: a timeout issued, lifted
 // or expiring (Subject.TimedOut). Visibility itself cannot move on such a
 // change, so hidden channels are skipped rather than sent a channel_delete
@@ -131,8 +132,7 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		if live == nil {
 			return
 		}
-		live.sendMsg(buildChannelCreateFor(ch,
-			permissions.CanSendMessage(sub) == nil, permissions.AuthorizeVoiceModerator(sub) == nil))
+		live.sendMsg(buildChannelCreateFor(ch, affordancesFor(sub)))
 	}
 }
 

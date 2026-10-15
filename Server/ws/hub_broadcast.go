@@ -129,8 +129,8 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 // channel that channel_overrides hides from their role — metadata the ready
 // payload (buildReady/VisibleChannelIDs) deliberately withholds.
 //
-// Each recipient gets its own frame carrying its can_send and
-// can_moderate_voice verdicts for the new channel, the same targeted form
+// Each recipient gets its own frame carrying its channelAffordances
+// verdicts for the new channel, the same targeted form
 // RefreshChannelVisibility sends: a brand-new channel has no earlier verdict
 // for an absent field to leave unchanged. Like RefreshChannelVisibility the
 // sends bypass the sequenced replay path, so begin/endTargetedFanout force a
@@ -149,8 +149,7 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 		if live == nil {
 			continue
 		}
-		canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
-		live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
+		live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
 	}
 }
 

@@ -285,6 +285,13 @@ type channelPayload struct {
 	// Q5), the same value the ready payload ships per channel. Same
 	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
 	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
+	// CanDeleteOthers, CanPin and CanReact are the per-recipient message
+	// affordances (3A-13), the same values the ready payload ships per
+	// channel. Same per-recipient, targeted-only, absent-means-unchanged
+	// rules as CanSend.
+	CanDeleteOthers *bool `json:"can_delete_others,omitempty"`
+	CanPin          *bool `json:"can_pin,omitempty"`
+	CanReact        *bool `json:"can_react,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -722,11 +729,14 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 }
 
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's can_send and can_moderate_voice verdicts.
-func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byte {
+// carrying that client's own affordance verdicts (see channelAffordances).
+func buildChannelCreateFor(ch *db.Channel, a channelAffordances) []byte {
 	p := channelPayloadFrom(ch)
-	p.CanSend = &canSend
-	p.CanModerateVoice = &canModerateVoice
+	p.CanSend = &a.CanSend
+	p.CanModerateVoice = &a.CanModerateVoice
+	p.CanDeleteOthers = &a.CanDeleteOthers
+	p.CanPin = &a.CanPin
+	p.CanReact = &a.CanReact
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: p,

@@ -48,7 +48,10 @@
             },
             "channels": [
               {
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -66,7 +69,10 @@
                 "voice_max_video": 25
               },
               {
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -276,7 +282,10 @@
             },
             "channels": [
               {
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
@@ -294,7 +303,10 @@
                 "voice_max_video": 25
               },
               {
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
