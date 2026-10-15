@@ -72,6 +72,8 @@ export type WsErrorCode =
   // request: refused at once, the ring is never delivered (D-03).
   | "CALL_REQUIRES_ACCEPTANCE"
   | "CONFLICT"
+  // A files-only chat_send none of whose uploads could be attached (2A-3).
+  | "ATTACHMENTS_UNAVAILABLE"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
@@ -478,6 +480,8 @@ export interface ChatSendOkPayload {
   readonly deduplicated?: boolean;
   readonly message_id: number;
   readonly timestamp: string;
+  /** Requested uploads the server did not attach (2A-3); absent from older servers. */
+  readonly skipped_attachment_ids?: readonly string[];
 }
 
 export interface ChatEditedPayload {

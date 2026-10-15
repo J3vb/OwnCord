@@ -106,7 +106,7 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null, [], []);
 
     comp.destroy?.();
   });
@@ -121,7 +121,7 @@ describe("MessageInput", () => {
 
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, [], []);
 
     comp.destroy?.();
   });
@@ -497,7 +497,12 @@ describe("MessageInput", () => {
     expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
     expect(textarea.value).toBe("draft");
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).toHaveBeenCalledWith("draft", null, ["srv-1"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "draft",
+      null,
+      ["srv-1"],
+      [expect.objectContaining({ id: "srv-1" })],
+    );
     comp.destroy?.();
   });
 
@@ -692,7 +697,12 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-7"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-7"],
+      [expect.objectContaining({ id: "srv-7" })],
+    );
 
     comp.destroy?.();
   });
@@ -712,7 +722,7 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("reply content", 55, []);
+    expect(opts.onSend).toHaveBeenCalledWith("reply content", 55, [], []);
 
     // Reply bar should be hidden after send
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
@@ -922,7 +932,12 @@ describe("MessageInput", () => {
       expect(notices[0]!.textContent).toMatch(/expired/i);
 
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("with files", null, ["fresh"]);
+      expect(opts.onSend).toHaveBeenCalledWith(
+        "with files",
+        null,
+        ["fresh"],
+        [expect.objectContaining({ id: "fresh" })],
+      );
       comp.destroy?.();
     });
 
@@ -996,7 +1011,7 @@ describe("MessageInput", () => {
 
       comp.setDisabled(null);
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("queued", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("queued", null, [], []);
       comp.destroy?.();
     });
 
@@ -1050,7 +1065,7 @@ describe("MessageInput", () => {
       // Lifting the gate allows the send.
       comp.setSendGate(null);
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, [], []);
       comp.destroy?.();
     });
 
@@ -1099,7 +1114,7 @@ describe("MessageInput", () => {
       expect(container.querySelector(".attachment-upload-error")).toBeNull();
       expect(textarea.hasAttribute("aria-describedby")).toBe(false);
       textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      expect(opts.onSend).toHaveBeenCalledWith("mid-sentence", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("mid-sentence", null, [], []);
       comp.destroy?.();
     });
 
@@ -1207,7 +1222,12 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("with attachment", null, ["srv-123"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "with attachment",
+      null,
+      ["srv-123"],
+      [expect.objectContaining({ id: "srv-123" })],
+    );
 
     comp.destroy?.();
   });
@@ -1519,7 +1539,7 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "hello";
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).toHaveBeenCalledWith("hello", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("hello", null, [], []);
 
     comp.destroy?.();
   });
@@ -1733,7 +1753,7 @@ describe("MessageInput", () => {
     textarea.value = "no attachment";
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
-    expect(opts.onSend).toHaveBeenCalledWith("no attachment", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("no attachment", null, [], []);
 
     comp.destroy?.();
   });
@@ -2001,7 +2021,7 @@ describe("MessageInput", () => {
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
-    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, [], []);
 
     comp.destroy?.();
   });
@@ -2036,7 +2056,7 @@ describe("MessageInput", () => {
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
     // The GIF is sent as its own message...
-    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, [], []);
     // ...and the user's typed draft survives, instead of being overwritten
     // and thrown away.
     expect(textarea.value).toBe("wait for it...");

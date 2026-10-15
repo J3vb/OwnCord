@@ -37,6 +37,12 @@ pub fn tray_tooltip(count: u32) -> String {
     }
 }
 
+// --- Message notifications -----------------------------------------------
+
+/// The click action on a message or call notification (macOS, Linux).
+#[cfg_attr(windows, allow(dead_code))]
+pub const NOTIFICATION_OPEN: &str = "Open";
+
 // --- Close to tray notice --------------------------------------------------
 
 /// Shown once, the first time the X button hides the window to the tray.
