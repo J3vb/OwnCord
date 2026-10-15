@@ -142,7 +142,7 @@ func (s *MessageService) replaySkipped(ctx context.Context, p SendMessageParams,
 	}
 	rows, err := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{msgID})
 	if err != nil {
-		slog.Error("MessageService.SendMessage GetAttachments (replay)", "err", err, "msg_id", msgID)
+		slog.Error("MessageService.SendMessage GetAttachments", "err", err, "msg_id", msgID, "replay", true)
 		return nil
 	}
 	linked := make([]string, 0, len(rows[msgID]))
