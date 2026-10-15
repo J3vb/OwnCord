@@ -61,8 +61,12 @@ type Hub struct {
 
 	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
-	seq            uint64           // atomic monotonic sequence counter
-	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
+	seq   uint64         // atomic monotonic sequence counter
+	seqMu syncutil.Mutex // serializes seq assignment + replay insertion + delivery order
+	// timeoutViewMu serializes the member_timeouts snapshot with its sends
+	// (member_timeouts.go). Lock order: timeoutViewMu, then Client.mu; never
+	// taken with h.mu, seqMu or presenceMu held, and no I/O under it.
+	timeoutViewMu  syncutil.Mutex
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 	queueDrops     queueDropState   // SRV-03 (hub_stats.go)

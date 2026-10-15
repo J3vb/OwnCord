@@ -77,6 +77,11 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 			c.setPendingModFlags(pendingMuted, pendingDeafened, pendingMutedBy)
 		}
 		if c.lastSeq > 0 {
+			// A resume that replays (no visibility change since lastSeq)
+			// keeps the member_timeouts list the client already holds, so
+			// the new connection inherits which kind it is; a change took
+			// the full-ready path, which sets the flag itself.
+			c.timeoutsFull.Store(old.timeoutsFull.Load())
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
 			//

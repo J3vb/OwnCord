@@ -99,7 +99,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below)             |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below)             |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
@@ -541,6 +541,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+
+**member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
 `status` is per-viewer. Two rules apply, in this order, so a client never has
 to reconstruct them:
@@ -1626,6 +1628,21 @@ with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (
 `kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
 for a lifted timeout; present for an active timeout.
 
+### member_timeouts (Server -> Client)
+
+WP 3C-7c: the active-timeout list changed. A timeout was issued, lifted or ran out, or the viewer's role changed so that they now (or no longer) hold `MODERATE_MEMBERS`/`ADMINISTRATOR`. Targeted and unsequenced, never replayed. It **replaces the viewer's list wholesale**, the way `roles_update` and `emoji_update` do: drop what you hold and keep exactly these entries.
+
+```json
+{
+  "type": "member_timeouts",
+  "payload": {
+    "timeouts": [{ "user_id": 5, "expires_at": "2026-10-15T13:00:00Z" }]
+  }
+}
+```
+
+Audience: every connected moderator (`MODERATE_MEMBERS` or `ADMINISTRATOR`) receives the full list; a timed-out member receives only their own entry (or `[]` once it ends). Nobody else receives anything. When a viewer stops being a moderator they receive one last frame holding only their own entry. `ready.member_timeouts` carries the same view on every connect, and a resume that missed a change takes a full `ready`, so a client that was offline never needs the frame. An entry is active while now is before `expires_at`; a client should also drop it locally at that moment. The list names no actor and no reason. An Administrator target is exempt from the timeout's effect, but the sanction still exists, so the list shows it. The server does not consult this view: enforcement stays in the send predicates.
+
 ## Appeals
 
 ### appeal_status (Server -> Client)
@@ -2578,6 +2595,7 @@ tables below add per-type behavioral notes.
 | `server_restart`      | Yes      | All clients                                                             |
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `mod_action`          | No       | Direct to the live target only                                          |
+| `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
 | `appeal_status`       | No       | Direct to the appellant only                                            |
 | `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                |
 | `error`               | No       | Direct to requester                                                     |

@@ -16,6 +16,9 @@ type readyFields struct {
 	tail     readyTail
 	roster   *memberRoster
 	viewerID int64
+	// timeoutsFull: the ready carries every active timeout (a moderator's
+	// view), not just the viewer's own; becomes Client.timeoutsFull.
+	timeoutsFull bool
 }
 
 // readyPayload is one viewer's ready frame: the fields either side of members
@@ -26,6 +29,8 @@ type readyPayload struct {
 	head, tail []byte
 	roster     *memberRoster
 	viewerID   int64
+	// timeoutsFull: see readyFields.
+	timeoutsFull bool
 }
 
 // readyHead and readyTail are the payload fields before and after members,
@@ -35,6 +40,9 @@ type readyHead struct {
 	Capabilities map[string]any     `json:"capabilities"`
 	Channels     []map[string]any   `json:"channels"`
 	DMChannels   []db.DMChannelInfo `json:"dm_channels"`
+	// MemberTimeouts is the viewer's member_timeouts view (WP 3C-7c); "member_timeouts"
+	// sorts before "members", so it is the last head field and key order holds.
+	MemberTimeouts []memberTimeoutEntry `json:"member_timeouts"`
 }
 
 type readyTail struct {
@@ -83,10 +91,11 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	}
 	// {"payload":{<head fields>,"members":[…],<tail fields>},"type":"ready"}
 	return &readyPayload{
-		head:     append(append([]byte(`{"payload":`), head[:len(head)-1]...), `,"members":`...),
-		tail:     append(append([]byte{','}, tail[1:len(tail)-1]...), `},"type":"`+MsgTypeReady+`"}`...),
-		roster:   f.roster,
-		viewerID: f.viewerID,
+		head:         append(append([]byte(`{"payload":`), head[:len(head)-1]...), `,"members":`...),
+		tail:         append(append([]byte{','}, tail[1:len(tail)-1]...), `},"type":"`+MsgTypeReady+`"}`...),
+		roster:       f.roster,
+		viewerID:     f.viewerID,
+		timeoutsFull: f.timeoutsFull,
 	}, nil
 }
 

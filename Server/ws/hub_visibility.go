@@ -379,6 +379,7 @@ func (h *Hub) RefreshAllChannelVisibility() {
 		}
 		h.RefreshChannelVisibility(&channels[i])
 	}
+	h.refreshTimeoutViewsAfterRoleChange()
 }
 
 func (h *Hub) revokeUnreadableChannels(userID int64) {

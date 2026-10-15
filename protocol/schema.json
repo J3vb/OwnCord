@@ -109,6 +109,12 @@
       "note": "B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed"
     },
     {
+      "wire": "member_timeouts",
+      "go": "MsgTypeMemberTimeouts",
+      "ts": "MEMBER_TIMEOUTS",
+      "note": "WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale"
+    },
+    {
       "wire": "appeal_status",
       "go": "MsgTypeAppealStatus",
       "ts": "APPEAL_STATUS",
