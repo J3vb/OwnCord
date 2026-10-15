@@ -105,8 +105,9 @@ fn bus<R: Runtime>(app: &AppHandle<R>) -> &'static Sender<Command> {
 enum Ended {
     /// Every sender is gone: the app is exiting.
     Closed,
-    /// The bus connection failed; the next command opens a new one.
-    BusLost,
+    /// The bus connection failed. The command it was about to run, if any,
+    /// is handed back to retry once on a new connection.
+    BusLost(Option<Command>),
 }
 
 /// Serve commands until the app exits. A session bus that cannot be reached
@@ -114,7 +115,16 @@ enum Ended {
 /// notifications for the rest of the run.
 fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + Sync + 'static) {
     let on_click: Arc<dyn Fn(MessageTarget) + Send + Sync> = Arc::new(on_click);
-    while let Ok(first) = commands.recv() {
+    let mut retry: Option<Command> = None;
+    loop {
+        let retrying = retry.is_some();
+        let first = match retry.take() {
+            Some(command) => command,
+            None => match commands.recv() {
+                Ok(command) => command,
+                Err(_) => return,
+            },
+        };
         let conn = match Connection::new_session() {
             Ok(conn) => conn,
             Err(e) => {
@@ -128,7 +138,9 @@ fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + Sy
         };
         match serve(&conn, first, &commands, Arc::clone(&on_click)) {
             Ended::Closed => return,
-            Ended::BusLost => {}
+            // Once only, so a bus that keeps dropping cannot spin this loop.
+            Ended::BusLost(left) if !retrying => retry = left,
+            Ended::BusLost(_) => {}
         }
     }
 }
@@ -153,7 +165,7 @@ fn serve(
                 Ok(false) => break,
                 Err(e) => {
                     log::warn!("[notify] session bus lost: {e}");
-                    return Ended::BusLost;
+                    return Ended::BusLost(next.take());
                 }
             }
         }
@@ -163,8 +175,11 @@ fn serve(
                 reply,
                 deadline,
             }) => {
-                if Instant::now() < deadline {
-                    let _ = reply.send(send_popup(conn, &popups, popup));
+                // Wait no longer than the caller does, so a popup cannot
+                // appear after the caller has given up and shown its own.
+                let left = deadline.saturating_duration_since(Instant::now());
+                if !left.is_zero() {
+                    let _ = reply.send(send_popup(conn, &popups, popup, left));
                 }
             }
             Some(Command::Close { tag }) => {
@@ -198,7 +213,7 @@ fn watch_signals(
 ) {
     let clicked = Arc::clone(popups);
     let watched = conn.add_match(
-        MatchRule::new_signal(INTERFACE, "ActionInvoked"),
+        MatchRule::new_signal(INTERFACE, "ActionInvoked").with_path(OBJECT_PATH),
         move |(id, action): (u32, String), _: &Connection, _: &dbus::Message| {
             if action == "default" {
                 let target = lock(&clicked).activated(id);
@@ -212,7 +227,7 @@ fn watch_signals(
     let gone = Arc::clone(popups);
     let watched = watched.and_then(|_| {
         conn.add_match(
-            MatchRule::new_signal(INTERFACE, "NotificationClosed"),
+            MatchRule::new_signal(INTERFACE, "NotificationClosed").with_path(OBJECT_PATH),
             move |(id, _reason): (u32, u32), _: &Connection, _: &dbus::Message| {
                 lock(&gone).closed(id);
                 true
@@ -223,10 +238,12 @@ fn watch_signals(
     let watched = watched.and_then(|_| {
         conn.add_match(
             MatchRule::new_signal("org.freedesktop.DBus", "NameOwnerChanged"),
-            move |(name, _old, _new): (String, String, String),
+            move |(name, old, _new): (String, String, String),
                   _: &Connection,
                   _: &dbus::Message| {
-                if name == BUS_NAME {
+                // An empty old owner is the server's first start (often
+                // started by our own first Notify): nothing to forget.
+                if name == BUS_NAME && !old.is_empty() {
                     lock(&restarted).clear();
                 }
                 true
@@ -242,13 +259,14 @@ fn send_popup(
     conn: &Connection,
     popups: &Mutex<Popups<MessageTarget>>,
     popup: Popup,
+    timeout: Duration,
 ) -> Result<(), String> {
     let replaces = popup
         .tag
         .as_deref()
         .map_or(0, |tag| lock(popups).replaces(tag));
     let (id,): (u32,) = conn
-        .with_proxy(BUS_NAME, OBJECT_PATH, CALL_TIMEOUT)
+        .with_proxy(BUS_NAME, OBJECT_PATH, timeout)
         .method_call(
             INTERFACE,
             "Notify",
@@ -515,6 +533,7 @@ mod tests {
         let closes = Arc::clone(&closed);
         let client = Arc::new(Mutex::new(None::<String>));
         let notifier = Arc::clone(&client);
+        let activated = AtomicBool::new(false);
         server.start_receive(
             MatchRule::new_method_call(),
             Box::new(move |msg: Message, conn: &Connection| {
@@ -534,6 +553,18 @@ mod tests {
                         *lock(&notifier) = msg.sender().map(|s| s.to_string());
                         if prop_cast::<bool>(&hints, "suppress-sound") == Some(&true) {
                             served.store(true, Ordering::SeqCst);
+                        }
+                        // The bus starts a D-Bus-activated server for the
+                        // first call and announces it before the reply.
+                        if !activated.swap(true, Ordering::SeqCst) {
+                            let started = Message::new_signal(
+                                "/org/freedesktop/DBus",
+                                "org.freedesktop.DBus",
+                                "NameOwnerChanged",
+                            )
+                            .unwrap()
+                            .append3(BUS_NAME, "", ":1.99");
+                            let _ = conn.send(started);
                         }
                         let id = if replaces == 0 {
                             ids.fetch_add(1, Ordering::SeqCst) + 1
@@ -592,17 +623,20 @@ mod tests {
             show(channel_id, None).expect("popup shown");
         }
         assert!(suppressed.load(Ordering::SeqCst));
-        // The 20th popup (id 60) still opens its target on click.
-        let mut click = Message::new_signal(OBJECT_PATH, INTERFACE, "ActionInvoked")
-            .unwrap()
-            .append2(60u32, "default");
         let showed_by = lock(&client).clone().expect("Notify came from the client");
-        click.set_destination(Some(showed_by.into()));
-        signal_tx.send(click).unwrap();
-        let target = click_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("click");
-        assert_eq!(target.channel_id, 20);
+        // The first popup (id 41) survives the server's start announcement,
+        // and the 20th (id 60) still opens its target on click.
+        for (id, channel_id) in [(41u32, 1), (60, 20)] {
+            let mut click = Message::new_signal(OBJECT_PATH, INTERFACE, "ActionInvoked")
+                .unwrap()
+                .append2(id, "default");
+            click.set_destination(Some(showed_by.clone().into()));
+            signal_tx.send(click).unwrap();
+            let target = click_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("click");
+            assert_eq!(target.channel_id, channel_id);
+        }
 
         // A ring, then a redial replacing it, then the ring ends.
         show(7, Some("call-7")).expect("ring shown");
