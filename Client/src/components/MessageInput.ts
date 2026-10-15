@@ -1298,6 +1298,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         if (state.replyTo === null) return;
         state = { ...state, replyTo: { ...state.replyTo, ping: !replyPing() } };
         showReplyBar();
+        textarea?.focus();
       },
       { signal },
     );

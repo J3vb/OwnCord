@@ -66,6 +66,7 @@ describe("reply bar @ON/@OFF (3A-12)", () => {
     toggle().click();
     expect(toggle().getAttribute("aria-pressed")).toBe("false");
     expect(toggle().classList.contains("off")).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector(".msg-textarea"));
     send("quiet");
     expect(opts.onSend).toHaveBeenLastCalledWith("quiet", 9, [], [], false);
 
