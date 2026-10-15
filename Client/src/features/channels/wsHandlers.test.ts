@@ -4,8 +4,11 @@ import {
   handleChannelDelete,
   handleMemberBan,
   handleMemberUpdate,
+  handleChannelActivity,
   handleMentionCount,
   markReadyActiveChannelRead,
+  MENTION_ALERT_GRACE_MS,
+  resetChannelActivity,
 } from "./wsHandlers";
 import {
   channelsStore,
@@ -20,13 +23,17 @@ import { authStore } from "../../stores/auth.store";
 import { setLiveTailInView } from "../../lib/read-state";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
+import type { Message } from "../../stores/messages.store";
 
 vi.mock("../../lib/read-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/read-state")>();
   return { ...actual, markChannelRead: vi.fn() };
 });
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/notifications", () => ({ notifyMention: vi.fn() }));
+vi.mock("../../lib/notifications", () => ({
+  notifyMention: vi.fn(),
+  notifyChannelActivity: vi.fn(),
+}));
 let lastChannel: number | null = null;
 vi.mock("../../lib/last-channel", () => ({
   loadLastChannel: () => lastChannel,
@@ -35,7 +42,7 @@ vi.mock("../../lib/last-channel", () => ({
 }));
 import { markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
-import { notifyMention } from "../../lib/notifications";
+import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -57,10 +64,13 @@ beforeEach(() => {
   messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
   lastChannel = null;
   vi.clearAllMocks();
+  resetChannelActivity();
   hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
 });
 
 afterEach(() => {
+  resetChannelActivity();
+  vi.useRealTimers();
   hasFocus.mockRestore();
 });
 
@@ -188,11 +198,18 @@ describe("handleChannelDelete", () => {
 
 describe("handleMentionCount", () => {
   describe("notifies for a mention in another channel (WP 2B-1)", () => {
+    // The alert waits MENTION_ALERT_GRACE_MS for a channel_activity frame
+    // (WP 2B-2); these cases model a server that never sends one.
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
     it("notifies once when the total rises on a channel that is not active", () => {
       setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
       setActiveChannel(2);
 
       handleMentionCount({ channel_id: 3, count: 1 });
+      vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
       expect(notifyMention).toHaveBeenCalledTimes(1);
       expect(notifyMention).toHaveBeenCalledWith(3);
@@ -204,6 +221,7 @@ describe("handleMentionCount", () => {
       setMentionCount(3, 1);
 
       handleMentionCount({ channel_id: 3, count: 0 });
+      vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
       expect(notifyMention).not.toHaveBeenCalled();
     });
@@ -214,6 +232,7 @@ describe("handleMentionCount", () => {
       setMentionCount(3, 2);
 
       handleMentionCount({ channel_id: 3, count: 2 });
+      vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
       expect(notifyMention).not.toHaveBeenCalled();
     });
@@ -225,6 +244,7 @@ describe("handleMentionCount", () => {
       handleMentionCount({ channel_id: 2, count: 1 });
       hasFocus.mockReturnValue(false);
       handleMentionCount({ channel_id: 2, count: 2 });
+      vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
       expect(notifyMention).not.toHaveBeenCalled();
     });
@@ -233,6 +253,7 @@ describe("handleMentionCount", () => {
       setChannels([{ ...channel(7, "dm", 0), mention_count: 0 }]);
 
       handleMentionCount({ channel_id: 7, count: 3 });
+      vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
 
       expect(notifyMention).not.toHaveBeenCalled();
     });
@@ -363,5 +384,161 @@ describe("handleMemberBan", () => {
     }));
     handleMemberBan({ user_id: 9 });
     expect(messagesStore.getState().messagesByChannel.get(1)![0]!.referencedMessage).toBe(snippet);
+  });
+});
+
+function activityEntry(
+  channel_id: number,
+  message_id: number,
+  flags: Partial<{ author_id: number; mentions_you: boolean; mentions_everyone: boolean }> = {},
+): Payload<"channel_activity">["channels"][number] {
+  return { channel_id, message_id, mentions_you: false, mentions_everyone: false, ...flags };
+}
+
+describe("handleChannelActivity (WP 2B-2)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map() }));
+    setChannels([channel(2, "text", 0), channel(3, "text", 1)]);
+    setActiveChannel(2);
+  });
+
+  it("shows an unread dot on a channel the reader is not viewing, and alerts", () => {
+    const e = activityEntry(3, 50, { author_id: 9 });
+
+    handleChannelActivity({ channels: [e] });
+
+    const ch = channelsStore.getState().channels.get(3)!;
+    expect(ch.unreadCount).toBe(1);
+    expect(ch.lastMessageId).toBe(50);
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
+    expect(notifyChannelActivity).toHaveBeenCalledWith(e);
+  });
+
+  it("never counts the mention flags toward the badge", () => {
+    handleChannelActivity({
+      channels: [
+        activityEntry(3, 50, { mentions_you: true, mentions_everyone: true }),
+        activityEntry(3, 51),
+      ],
+    });
+
+    const ch = channelsStore.getState().channels.get(3)!;
+    expect(ch.mentionCount).toBe(0);
+    expect(ch.lastMessageId).toBe(51);
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the active channel, unknown channels, DM ids and messages already counted", () => {
+    setChannels([channel(2, "text", 0), channel(3, "text", 1), channel(7, "dm", 2)]);
+    setActiveChannel(2);
+    handleChannelActivity({ channels: [activityEntry(3, 50)] });
+    vi.mocked(notifyChannelActivity).mockClear();
+
+    handleChannelActivity({
+      channels: [
+        activityEntry(2, 60),
+        activityEntry(99, 61),
+        activityEntry(7, 62),
+        activityEntry(3, 50),
+        activityEntry(3, 49),
+      ],
+    });
+
+    expect(channelsStore.getState().channels.get(2)!.unreadCount).toBe(0);
+    expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(1);
+    expect(channelsStore.getState().channels.get(7)!.unreadCount).toBe(0);
+    expect(notifyChannelActivity).not.toHaveBeenCalled();
+  });
+
+  it("a mention entry first, then the mention_count rise: one alert", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 50, { mentions_you: true })] });
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(channelsStore.getState().channels.get(3)!.mentionCount).toBe(1);
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
+    expect(notifyMention).not.toHaveBeenCalled();
+  });
+
+  it("a mention entry inside the grace window replaces the pending mention_count alert", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS - 1);
+
+    handleChannelActivity({ channels: [activityEntry(3, 50, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).not.toHaveBeenCalled();
+    expect(notifyChannelActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("a mention the frames did not carry still alerts from mention_count", () => {
+    // The server keeps only the newest mentions of a busy window, so the frame
+    // may name the channel's latest message with neither flag set.
+    handleChannelActivity({ channels: [activityEntry(3, 50)] });
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleChannelActivity({ channels: [activityEntry(3, 51)] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a mention entry for another channel leaves this channel's alert pending", () => {
+    setChannels([channel(2, "text", 0), channel(3, "text", 1), channel(4, "text", 2)]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 3, count: 1 });
+    handleChannelActivity({ channels: [activityEntry(4, 60, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a mention entry the watermark skips does not cancel the mention_count alert", () => {
+    handleChannelActivity({ channels: [activityEntry(3, 105)] });
+    handleMentionCount({ channel_id: 3, count: 1 });
+
+    // A later window can carry an older mention than the latest id seen.
+    handleChannelActivity({ channels: [activityEntry(3, 103, { mentions_you: true })] });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("a server without the frame still alerts from mention_count after the grace window", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS - 1);
+    expect(notifyMention).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(notifyMention).toHaveBeenCalledTimes(1);
+    expect(notifyMention).toHaveBeenCalledWith(3);
+  });
+
+  it("skips a message already loaded in the channel's list (one the reader just read)", () => {
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([[3, [{ id: 50 }, { id: 0 }] as unknown as Message[]]]),
+    }));
+
+    handleChannelActivity({ channels: [activityEntry(3, 50)] });
+    expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(0);
+    expect(notifyChannelActivity).not.toHaveBeenCalled();
+
+    handleChannelActivity({ channels: [activityEntry(3, 51)] });
+    expect(channelsStore.getState().channels.get(3)!.unreadCount).toBe(1);
+  });
+
+  it("teardown drops a pending alert", () => {
+    handleMentionCount({ channel_id: 3, count: 1 });
+
+    resetChannelActivity();
+    vi.advanceTimersByTime(MENTION_ALERT_GRACE_MS);
+
+    expect(notifyMention).not.toHaveBeenCalled();
   });
 });
