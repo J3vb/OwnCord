@@ -1745,7 +1745,19 @@ export function createVideoGrid(): VideoGridComponent {
       setTrackMuted(existing, false);
       if (!existing.el.classList.contains("video-cell--stopped")) {
         existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
-        setStopped(userId, true, false);
+        // A codec switch unsubscribes before it unpublishes: a share whose
+        // owner still shares waits for its republish, pop-out and mini open.
+        const sharer = existing.config;
+        if (
+          sharer?.isScreenshare === true &&
+          !sharer.isSelf &&
+          existing.holding === undefined &&
+          callbacks.isShareLive?.(sharer.audioUserId) === true
+        ) {
+          holdForRepublish(userId, existing, sharer.audioUserId);
+        } else {
+          setStopped(userId, true, false);
+        }
       }
       applyNames(existing, username, config?.name ?? username);
       return;

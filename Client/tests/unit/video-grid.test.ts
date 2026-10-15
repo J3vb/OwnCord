@@ -3603,6 +3603,33 @@ describe("VideoGrid", () => {
         expect(onStreamRemoved).not.toHaveBeenCalled();
       });
 
+      it("in livekit's real order (unsubscribe, then unpublish) shows no Watch cover and plays the share when it returns", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStreamWithTrack().stream, screen);
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+        grid.removeStream(SCREEN);
+
+        expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+        expect(cell()!.querySelector(".video-stopped")).toBeNull();
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+        expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+        vi.advanceTimersByTime(10_000);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
+
+      it("in livekit's real order still says the stream ended once the owner stops sharing", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+        grid.removeStream(SCREEN);
+
+        live = false;
+        vi.advanceTimersByTime(250);
+        expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      });
+
       it("shows the cover as soon as the owner's voice state says the share is over", () => {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
         grid.removeStream(SCREEN);

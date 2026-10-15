@@ -99,6 +99,7 @@ function rig(opts: { screen?: PublishCodec; camera?: PublishCodec; delayed?: boo
     getCameraState: () => camera,
     getScreenState: () => screen,
     getDeps: () => ({}) as VideoTrackDeps,
+    onSwitchError: () => {},
   });
   made.push(controller);
   return {
@@ -134,6 +135,15 @@ afterEach(() => {
 });
 
 describe("CodecSwitchController", () => {
+  it("never moves an H.264 share, whatever a peer's list says", async () => {
+    const r = rig({ screen: "h264" });
+    r.screen.preferred = "h264";
+    r.controller.kick();
+    join(2, ["vp8"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(r.calls).toEqual([]);
+  });
+
   it("switches a VP9 share down to VP8 1.5 s after a viewer without VP9 joins", async () => {
     const r = rig({ screen: "vp9" });
     r.controller.kick();

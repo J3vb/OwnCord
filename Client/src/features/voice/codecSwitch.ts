@@ -65,6 +65,8 @@ export interface CodecSwitchHost {
   readonly getCameraState: () => CameraTrackState;
   readonly getScreenState: () => ScreenTrackState;
   readonly getDeps: () => VideoTrackDeps;
+  /** A switch threw outside republishVideo's own handling. */
+  readonly onSwitchError: (err: unknown) => void;
 }
 
 export class CodecSwitchController {
@@ -102,7 +104,10 @@ export class CodecSwitchController {
       : screenLiveCodec(this.host.getScreenState());
   }
 
+  /** Only a VP9 publish switches live. Every shipped client plays VP8 and
+   *  H.264, so a peer list without them never moves an H.264 or VP8 publish. */
   private pick(live: LiveCodec): PublishCodec {
+    if (live.preferred !== "vp9") return live.published;
     return pickCommonCodec(live.preferred, channelPeerDecode());
   }
 
@@ -154,7 +159,9 @@ export class CodecSwitchController {
       target,
       timer: setTimeout(() => {
         slot.pending = null;
-        if (epoch === this.epoch) void this.run(kind, slot);
+        if (epoch === this.epoch) {
+          this.run(kind, slot).catch((err: unknown) => this.host.onSwitchError(err));
+        }
       }, delay),
     };
   }

@@ -67,6 +67,7 @@ export class MediaControl {
     getCameraState: () => this._cameraState,
     getScreenState: () => this._screenState,
     getDeps: () => this._videoTrackDeps,
+    onSwitchError: (err) => log.warn("Codec switch failed", err),
   });
   private latestVideoDevice: string | null = null;
 
