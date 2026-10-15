@@ -43,7 +43,7 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	peerSend := make(chan []byte, 8)
 	peer := &Client{userID: peerID, send: peerSend, sendHigh: peerSend, sendLow: peerSend}
 	peer.voiceChID = chanID
-	peer.e2eePubKey = "peer-pub-key-b64"
+	peer.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
 	hub.clients[peerID] = peer
 	hub.mu.Unlock()
@@ -57,8 +57,7 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	old.voiceChID = chanID
 	old.voiceJoinToken = "join-token"
 	old.voiceJoinCompleted = true
-	old.e2eePubKey = "user-pub-key-b64"
-	old.e2eeSignature = "user-sig"
+	old.e2ee = e2eeAnnounce{key: "user-pub-key-b64", sig: "user-sig"}
 	hub.mu.Lock()
 	hub.clients[userID] = old
 	hub.mu.Unlock()

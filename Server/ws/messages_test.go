@@ -714,7 +714,7 @@ func TestBuildVoiceToken_ValidJSON(t *testing.T) {
 // ─── buildVoiceE2EEAnnounce ─────────────────────────────────────────────────
 
 func TestBuildVoiceE2EEAnnounce_ValidJSON(t *testing.T) {
-	msg := buildVoiceE2EEAnnounce(42, "dGVzdC1wdWJrZXk=", "")
+	msg := buildVoiceE2EEAnnounce(42, e2eeAnnounce{key: "dGVzdC1wdWJrZXk="})
 	if !json.Valid(msg) {
 		t.Error("buildVoiceE2EEAnnounce output is not valid JSON")
 	}

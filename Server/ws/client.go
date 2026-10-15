@@ -47,8 +47,7 @@ type Client struct {
 	// while its voice_states row stays behind for nothing to reap (OC-0270).
 	// Guarded by voiceMu.
 	voiceJoinCompleted bool
-	e2eePubKey         string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	e2eeSignature      string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
+	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list); guarded by voiceMu
 	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
 	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
 	// the voice_states row those flags normally live in before the target's
@@ -254,8 +253,7 @@ func (c *Client) clearVoiceState() (int64, string, bool) {
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
 	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
+	c.e2ee = e2eeAnnounce{}
 	return oldChID, oldJoinToken, oldCompleted
 }
 
@@ -273,8 +271,7 @@ func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
 	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
+	c.e2ee = e2eeAnnounce{}
 	return oldJoinToken, true
 }
 
@@ -304,22 +301,6 @@ func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, server
 	c.pendingModServerDeafened = false
 	c.pendingModServerMutedBy = nil
 	return serverMuted, serverDeafened, serverMutedBy
-}
-
-// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
-// together with its identity-key signature ("" for legacy announces).
-func (c *Client) setE2EEPubKey(key, signature string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.e2eePubKey = key
-	c.e2eeSignature = signature
-}
-
-// getE2EEPubKey returns the stored ECDH public key and its signature.
-func (c *Client) getE2EEPubKey() (string, string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.e2eePubKey, c.e2eeSignature
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

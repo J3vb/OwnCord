@@ -229,12 +229,8 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 	if result.SetPresence != nil {
 		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
 	}
-	if result.SetE2EEPubKey != nil {
-		sig := ""
-		if result.SetE2EESignature != nil {
-			sig = *result.SetE2EESignature
-		}
-		c.setE2EEPubKey(*result.SetE2EEPubKey, sig)
+	if result.SetE2EEAnnounce != nil {
+		c.setE2EEAnnounce(*result.SetE2EEAnnounce)
 	}
 	if result.SetVoiceJoinToken != nil {
 		unlock := h.voiceLock(c.userID)
