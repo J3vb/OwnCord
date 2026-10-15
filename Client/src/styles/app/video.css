@@ -401,6 +401,10 @@
 .video-self-detail {
   font-size: var(--font-size-xs);
 }
+.video-self-stats {
+  font-size: var(--font-size-xs);
+  opacity: 0.8;
+}
 .video-self-actions {
   display: flex;
   flex-wrap: wrap;
@@ -419,6 +423,7 @@
 .video-focus-strip .video-tile-nav,
 .video-focus-strip .video-tile-overlay,
 .video-focus-strip .video-self-detail,
+.video-focus-strip .video-self-stats,
 .video-focus-strip .video-self-actions {
   display: none;
 }

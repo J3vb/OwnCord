@@ -1,6 +1,7 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { Room, Track } from "livekit-client";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -112,6 +113,8 @@ export class LiveKitSession {
   private serverHost: string | null = null;
   /** Remote-video callbacks and the video stream lookups. */
   private _remoteTracks = new RemoteTracks(() => this._room);
+  /** Your screen share's last sender sample, for the support bundle. */
+  private _shareSender: ShareSenderSample | null = null;
   // Test-visibility proxies: the callbacks live on RemoteTracks.
   private get onRemoteVideoCallback(): RemoteVideoCallback | null {
     return this._remoteTracks.onRemoteVideoCallback;
@@ -1017,8 +1020,12 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
-  getLocalScreenshareFps(): Promise<number | null> {
-    return this._remoteTracks.getLocalScreenshareFps();
+  /** What your screen share is sending; the last sample also goes into the
+   *  support bundle's voice diagnostics. */
+  async getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
+    const sample = await this._remoteTracks.getLocalScreenshareStats();
+    this._shareSender = sample;
+    return sample;
   }
 
   /** Your screen share is publishing its audio too. */
@@ -1070,13 +1077,25 @@ export class LiveKitSession {
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
-    const info = buildSessionDebugInfo({
+    const debug = buildSessionDebugInfo({
       room: this._room,
       currentChannelId: this._currentChannelId,
       outputVolumeMultiplier: this._audioElements.getOutputVolumeMultiplier(),
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });
+    // Your share's sender stats (M-1), as the share's own tile last read them
+    // (it polls while you share); each read also asks for a fresh sample.
+    // Nothing from a share that has ended.
+    const sharing =
+      this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShare) !== undefined;
+    if (sharing) {
+      this.getLocalScreenshareStats().catch((err: unknown) =>
+        log.debug("share sender stats failed", err),
+      );
+    }
+    if (!sharing) this._shareSender = null;
+    const info = { ...debug, screenShareSender: this._shareSender };
     if (!isLinuxDesktop()) return info;
     // B7-11 rule 3: native resources are countable through the facade. Each
     // read asks the backend for a fresh snapshot, which the next read reports.
@@ -1153,7 +1172,7 @@ export const reapplyEnhancedNoiseSuppression =
   session.reapplyEnhancedNoiseSuppression.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
-export const getLocalScreenshareFps = session.getLocalScreenshareFps.bind(session);
+export const getLocalScreenshareStats = session.getLocalScreenshareStats.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
