@@ -4028,6 +4028,7 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
+ "gtk",
  "html5ever 0.38.0",
  "keyring",
  "libc",

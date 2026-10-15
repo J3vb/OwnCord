@@ -112,8 +112,9 @@ keyring = { version = "3", default-features = false, features = [
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
-# Native message box for the fatal-startup path in lib.rs, where the Tauri app
-# never built and tauri-plugin-dialog has no AppHandle to run through. Already
+# Native message box for the fatal-startup path in lib.rs on Windows and macOS,
+# where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
+# run through (Linux shows that dialog with gtk instead, see below). Already
 # in the tree via that same plugin, so this costs no extra build -- but only
 # while the versions match: the plugin pins ^0.16, and Cargo unifies features
 # only within a semver-compatible group. Moving this to 0.17 forks rfd into two
@@ -223,6 +224,10 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# The startup error dialog (lib.rs): shown with GTK directly on the main
+# thread, since rfd's GTK dialog never appears once tao has started GTK. Same
+# 0.18 line tao, wry and webkit2gtk already build, so no new crate.
+gtk = "0.18"
 # Native Linux camera capture (native_voice/camera.rs). WebKitGTK freezes a
 # hidden page's <video> element and stops requestVideoFrameCallback, so the
 # webview camera pump (features/voice/native/cameraUplink.ts) stalls whenever
