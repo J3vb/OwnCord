@@ -101,7 +101,8 @@ UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?;
 -- with nothing to indicate the list was incomplete.
 -- name: ListMembers :many
 SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
-       u.display_name, u.custom_status
+       u.display_name, u.about, CAST(COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at), u.created_at) AS TEXT) AS created_at,
+       u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))

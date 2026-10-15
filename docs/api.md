@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 191 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 192 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -196,6 +196,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
+| DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | GET     | `/api/v1/users/me/moderation`                                        |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
@@ -877,6 +878,25 @@ client is expected to downscale and square-crop before uploading.
 | ------ | -------------- | -------------------------------------------------------------- |
 | 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
 | 429    | `RATE_LIMITED` | Too many uploads                                               |
+
+### DELETE /api/v1/users/me/avatar
+
+Remove the authenticated user's avatar. It does what `PATCH /api/v1/users/me`
+with `"avatar": ""` does, but sends no username, so a rename made on another
+device is never reverted. It works for an uploaded file and for an `https://`
+URL alike, shares the `PATCH` rate limit, and is idempotent: with no avatar it
+still answers 200. Everyone receives a `user_update` with `avatar: null`. The
+old file stays on disk for the operator sweep, but stops being served to other
+users. An older server answers 405; fall back to the `PATCH`.
+
+#### Response 200 OK
+
+The same user object `PATCH /api/v1/users/me` returns, with no `avatar` key.
+
+| Status | Code           | Cause             |
+| ------ | -------------- | ----------------- |
+| 401    | `UNAUTHORIZED` | Not authenticated |
+| 429    | `RATE_LIMITED` | Too many requests |
 
 ---
 
