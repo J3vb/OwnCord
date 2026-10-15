@@ -43,15 +43,19 @@ pub fn tray_tooltip(count: u32) -> String {
 pub const TRAY_NOTICE_TITLE: &str = "OwnCord";
 pub const TRAY_NOTICE_BODY: &str = "OwnCord is still running in the tray";
 
-// --- Startup failure dialog ------------------------------------------------
+// --- Startup failure dialog (not Linux) ------------------------------------
 
-// On Linux lib.rs shows it only when a display is set; a headless run keeps
-// the stderr line alone.
+// The startup failure dialog is `#[cfg(not(target_os = "linux"))]` in lib.rs
+// (Linux reports a fatal startup error to the console instead), so these are
+// unused there outside the tests.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const STARTUP_DIALOG_TITLE: &str = "OwnCord failed to start";
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const STARTUP_DIALOG_BODY: &str =
     "The application encountered a startup error and cannot continue.\n\n{error}";
 
 /// The startup dialog body with the raw error detail appended verbatim.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn startup_dialog_body(error: &str) -> String {
     STARTUP_DIALOG_BODY.replace("{error}", error)
 }

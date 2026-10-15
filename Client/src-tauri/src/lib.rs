@@ -408,58 +408,14 @@ pub fn run() {
             log::error!("[exit] fatal startup error: {e}");
             #[cfg(target_os = "linux")]
             exit_watch::note_exit("startup failed");
-            // A headless Linux run has nobody to answer the dialog and would
-            // block on it, so it keeps the stderr line alone.
-            #[cfg(target_os = "linux")]
-            let show_dialog = has_graphical_session(
-                std::env::var_os("DISPLAY"),
-                std::env::var_os("WAYLAND_DISPLAY"),
-            );
             #[cfg(not(target_os = "linux"))]
-            let show_dialog = true;
-            if show_dialog {
-                rfd::MessageDialog::new()
-                    .set_title(text::STARTUP_DIALOG_TITLE)
-                    .set_description(text::startup_dialog_body(&e.to_string()))
-                    .set_level(rfd::MessageLevel::Error)
-                    .show();
-            }
+            rfd::MessageDialog::new()
+                .set_title(text::STARTUP_DIALOG_TITLE)
+                .set_description(text::startup_dialog_body(&e.to_string()))
+                .set_level(rfd::MessageLevel::Error)
+                .show();
             std::process::exit(1);
         }
-    }
-}
-
-/// Whether an X11 or Wayland display is set, so a dialog can be shown.
-#[cfg(any(target_os = "linux", test))]
-fn has_graphical_session(
-    display: Option<std::ffi::OsString>,
-    wayland_display: Option<std::ffi::OsString>,
-) -> bool {
-    [display, wayland_display]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.is_empty())
-}
-
-#[cfg(test)]
-mod startup_dialog_tests {
-    use super::has_graphical_session;
-    use std::ffi::OsString;
-
-    #[test]
-    fn a_display_or_wayland_socket_allows_the_dialog() {
-        assert!(has_graphical_session(Some(OsString::from(":0")), None));
-        assert!(has_graphical_session(None, Some(OsString::from("wayland-0"))));
-        assert!(has_graphical_session(
-            Some(OsString::from(":1")),
-            Some(OsString::from("wayland-1"))
-        ));
-    }
-
-    #[test]
-    fn a_headless_run_keeps_stderr_only() {
-        assert!(!has_graphical_session(None, None));
-        assert!(!has_graphical_session(Some(OsString::new()), Some(OsString::new())));
     }
 }
 
