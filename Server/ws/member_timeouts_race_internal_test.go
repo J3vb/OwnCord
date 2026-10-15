@@ -421,3 +421,39 @@ func TestReplayResume_NoOldClient_RevokeSendsOwnOnly(t *testing.T) {
 		t.Fatalf("after the revoke the resumed connection holds %v (ok=%v), want its own-only (empty) list", held, ok)
 	}
 }
+
+// fanoutInFlightAtResolve reports whether a reconnect registering right after
+// a timeout delivery resolved its audience would be forced onto a full ready,
+// even with a last_seq above every watermark bump so far.
+func fanoutInFlightAtResolve(t *testing.T, h *Hub) *atomic.Bool {
+	t.Helper()
+	var forced atomic.Bool
+	setTimeoutViewResolvedHook(t, func() {
+		h.seqMu.Lock()
+		forced.Store(h.mustFullResyncAtRegister(1<<62, 1<<40))
+		h.seqMu.Unlock()
+	})
+	return &forced
+}
+
+func TestPublishMemberTimeouts_ReconnectMidFanoutTakesFullReady(t *testing.T) {
+	f := roleChangeFixture(t)
+	forced := fanoutInFlightAtResolve(t, f.hub)
+
+	f.hub.publishMemberTimeouts(f.targetID)
+
+	if !forced.Load() {
+		t.Error("a reconnect registering mid-publish was not forced onto a full ready")
+	}
+}
+
+func TestRoleRefreshTimeoutViews_ReconnectMidFanoutTakesFullReady(t *testing.T) {
+	f := roleChangeFixture(t)
+	forced := fanoutInFlightAtResolve(t, f.hub)
+
+	f.hub.refreshTimeoutViewsAfterRoleChange()
+
+	if !forced.Load() {
+		t.Error("a reconnect registering mid-refresh was not forced onto a full ready")
+	}
+}

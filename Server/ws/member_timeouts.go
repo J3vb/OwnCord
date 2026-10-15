@@ -55,9 +55,10 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 // full list) and to targetID (their own entry). It reads the timeout mirror,
 // never a parameter, so a stale timer or a superseded issue is harmless.
 //
-// The visibility watermark is bumped around it, like RefreshUserChannels, so
-// a user offline or mid-reconnect resumes onto a full ready (which carries
-// member_timeouts) instead of replaying past the change.
+// The frames are unsequenced, so the fan-out is bracketed by
+// begin/endTargetedFanout: a user offline or mid-reconnect resumes onto a full
+// ready (which carries member_timeouts) instead of replaying past the change,
+// including a reconnect that registers after the audience was resolved.
 //
 // deliverTimeoutViews resolves the audience outside every lock and resolves
 // it again if a role refresh started meanwhile; snapshot and sends then run
@@ -68,8 +69,8 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 // only if that reload fails is the publish skipped and logged, and the next
 // ready repairs it.
 func (h *Hub) publishMemberTimeouts(targetID int64) {
-	h.MarkVisibilityChanged()
-	defer h.bumpVisibilityWatermark()
+	h.beginTargetedFanout()
+	defer h.endTargetedFanout()
 	if h.perms == nil {
 		return
 	}
@@ -90,14 +91,13 @@ func (h *Hub) publishMemberTimeouts(targetID int64) {
 //
 // RefreshAllChannelVisibility bumps timeoutView.gen on entry, so a publish
 // that resolved its verdicts before this role change resolves them again;
-// this bumps the visibility watermark, so a resume across it takes a full
-// ready.
+// begin/endTargetedFanout force a resume across it onto a full ready.
 func (h *Hub) refreshTimeoutViewsAfterRoleChange() {
 	if h.perms == nil {
 		return
 	}
-	h.MarkVisibilityChanged()
-	defer h.bumpVisibilityWatermark()
+	h.beginTargetedFanout()
+	defer h.endTargetedFanout()
 	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {
 		return isMod || c.timeouts.full.Load()
 	})
