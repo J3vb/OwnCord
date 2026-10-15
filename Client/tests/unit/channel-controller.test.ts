@@ -929,6 +929,8 @@ describe("createChannelController", () => {
       capturedMessageInputOpts!.onEmptyEdit(5);
 
       expect(previewEl()?.textContent).toContain("mine");
+      // No click opened this, so the Shift tip does not apply.
+      expect(document.querySelector("[data-testid='msg-delete-tip']")).toBeNull();
       document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
       ctrl.destroyChannel();
     });

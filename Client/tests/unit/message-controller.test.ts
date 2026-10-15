@@ -431,6 +431,18 @@ describe("createMessageController", () => {
       expect(mockSetOlderLoadFailed).not.toHaveBeenCalledWith(42, true);
     });
 
+    it("sets no flag when the window was replaced (a jump) while the fetch was in flight", async () => {
+      mockGetChannelMessages.mockReturnValueOnce([{ id: 10 }]);
+      // The jump swaps in an around-window whose oldest row differs.
+      mockGetChannelMessages.mockReturnValue([{ id: 500 }]);
+      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("fail")) });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadOlderMessages(42, makeAbort().signal);
+
+      expect(mockSetOlderLoadFailed).not.toHaveBeenCalledWith(42, true);
+    });
+
     it("sets no flag when the failed fetch was aborted", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
       const { signal, abort } = makeAbort();

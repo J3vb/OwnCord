@@ -220,6 +220,18 @@ describe("renderers", () => {
       expect(shouldGroup(prev, curr)).toBe(false);
     });
 
+    it("groups a same-author pair 6 minutes apart (inside the 7-minute window)", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, timestamp: "2025-01-15T12:06:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(true);
+    });
+
+    it("does not group a pair exactly 7:00 apart (the window is exclusive)", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, timestamp: "2025-01-15T12:07:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(false);
+    });
+
     it("returns false when time difference exceeds threshold", () => {
       const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
       const curr = makeMessage({

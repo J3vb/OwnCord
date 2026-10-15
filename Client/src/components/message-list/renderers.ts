@@ -58,7 +58,7 @@ import {
   formatMessageTimestamp,
   parseTimestamp,
 } from "@lib/formatting";
-import { formatDiscordTimestamp } from "../../features/messaging/discordTimestamp";
+import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
@@ -79,7 +79,7 @@ import {
 
 /** Weekday, date and time for a tooltip, in Discord's "F" style. */
 function fullDateTimeTitle(iso: string): string {
-  return formatDiscordTimestamp(Math.floor(parseTimestamp(iso).getTime() / 1000), "F").title;
+  return formatFullDateTime(parseTimestamp(iso));
 }
 
 export function renderDayDivider(iso: string): HTMLDivElement {

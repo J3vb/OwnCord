@@ -278,33 +278,51 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     options.onSelect(emoji);
   }
 
+  /** The load-failure row, built once while the load stays failed. It is kept
+   *  in place across re-renders (a search keystroke must not re-announce it
+   *  or stack listeners) and dropped when the failure ends. */
+  let failureRow: HTMLElement | null = null;
+  function ensureFailureRow(): HTMLElement {
+    if (failureRow !== null) return failureRow;
+    const failure = createElement("div", {
+      class: "ep-load-failed",
+      role: "alert",
+      "data-testid": "emoji-load-failed",
+    });
+    const retry = createElement(
+      "button",
+      { class: "ep-retry", type: "button", "data-testid": "emoji-retry" },
+      messagingText("retry"),
+    );
+    retry.addEventListener(
+      "click",
+      () => {
+        loadFailed = false;
+        renderAll();
+        startCatalogLoad();
+        // The row is gone: keep keyboard focus in the picker.
+        searchInput.focus();
+      },
+      { signal },
+    );
+    failure.append(createElement("span", {}, messagingText("emoji.loadFailed")), retry);
+    failureRow = failure;
+    return failure;
+  }
+
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
-    clearChildren(scrollArea);
+    for (const child of Array.from(scrollArea.children)) {
+      if (child !== failureRow) child.remove();
+    }
 
     // A failed load says so, with a way to try again, above whatever Recent
     // and Server emoji are already showing.
     if (loadFailed && emojiCatalog() === null) {
-      const failure = createElement("div", {
-        class: "ep-load-failed",
-        role: "alert",
-        "data-testid": "emoji-load-failed",
-      });
-      const retry = createElement(
-        "button",
-        { class: "ep-retry", type: "button", "data-testid": "emoji-retry" },
-        messagingText("retry"),
-      );
-      retry.addEventListener(
-        "click",
-        () => {
-          loadFailed = false;
-          renderAll();
-          startCatalogLoad();
-        },
-        { signal },
-      );
-      failure.append(createElement("span", {}, messagingText("emoji.loadFailed")), retry);
-      scrollArea.appendChild(failure);
+      const row = ensureFailureRow();
+      if (row.parentElement !== scrollArea) scrollArea.prepend(row);
+    } else if (failureRow !== null) {
+      failureRow.remove();
+      failureRow = null;
     }
 
     // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.

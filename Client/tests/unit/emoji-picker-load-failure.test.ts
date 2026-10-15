@@ -45,6 +45,25 @@ describe("EmojiPicker load failure", () => {
     picker.destroy();
   });
 
+  it("keeps one alert row across searches and returns focus to the search box on Retry", async () => {
+    loadMock.mockRejectedValue(new Error("offline"));
+    const picker = createEmojiPicker({ onSelect: vi.fn(), onClose: vi.fn() });
+    document.body.appendChild(picker.element);
+    await flush();
+    const row = picker.element.querySelector("[data-testid='emoji-load-failed']");
+    const search = picker.element.querySelector<HTMLInputElement>(".ep-search")!;
+
+    search.value = "a";
+    search.dispatchEvent(new Event("input"));
+    search.value = "ab";
+    search.dispatchEvent(new Event("input"));
+    expect(picker.element.querySelector("[data-testid='emoji-load-failed']")).toBe(row);
+
+    picker.element.querySelector<HTMLButtonElement>("[data-testid='emoji-retry']")!.click();
+    expect(document.activeElement).toBe(search);
+    picker.destroy();
+  });
+
   // Order matters: the success test below leaves the real catalog loaded.
   it("a second failure shows Retry again", async () => {
     loadMock.mockRejectedValue(new Error("offline"));

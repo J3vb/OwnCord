@@ -1380,6 +1380,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (loadingOlder) return;
     olderRetryAt = 0;
     fireOlderLoad();
+    // The row hides while the page loads: keep keyboard focus in the list.
+    root?.focus({ preventScroll: true });
   }
   // The oldest loaded message's id, not the count: a live tail append also
   // changes the count while a history fetch is still in flight, and
@@ -1527,7 +1529,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   function mount(parentContainer: Element): void {
     region = createElement("div", { class: "messages-region" });
-    root = createElement("div", { class: "messages-container" });
+    // Focusable by script only (-1): the older-history Retry hands focus here.
+    root = createElement("div", { class: "messages-container", tabindex: "-1" });
 
     topSpacer = createElement("div", { class: "virtual-spacer-top" });
     contentContainer = createElement("div", { class: "virtual-content" });

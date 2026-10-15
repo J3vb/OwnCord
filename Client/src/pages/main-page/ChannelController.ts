@@ -1008,7 +1008,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
     /** `onConfirm` runs just before the delete is sent. */
-    function openDeleteConfirm(msgId: number, onConfirm?: () => void): void {
+    function openDeleteConfirm(
+      msgId: number,
+      flow: { readonly onConfirm?: () => void; readonly clicked: boolean },
+    ): void {
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -1020,13 +1023,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
       const target = getChannelMessages(channelId).find((m) => m.id === msgId);
       if (target !== undefined) body.appendChild(renderDeletePreview(target));
-      body.appendChild(
-        createElement(
-          "p",
-          { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
-          messagingText("delete.shiftTip"),
-        ),
-      );
+      // The tip is about the Delete click, so it is left out when no click
+      // opened this (an emptied edit).
+      if (flow.clicked) {
+        body.appendChild(
+          createElement(
+            "p",
+            { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
+            messagingText("delete.shiftTip"),
+          ),
+        );
+      }
       const footer = createElement("div", { class: "modal-footer" });
       const cancel = createElement(
         "button",
@@ -1054,7 +1061,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         "click",
         () => {
           modal.close();
-          onConfirm?.();
+          flow.onConfirm?.();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -1127,7 +1134,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Shift-click skips the prompt, as Discord's delete confirm does
         // (P4-12). A plain click opens a confirm.
         if (!shiftKey) {
-          openDeleteConfirm(msgId);
+          openDeleteConfirm(msgId, { clicked: true });
           return;
         }
         sendDelete(msgId);
@@ -1269,7 +1276,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // Discord's flow: clearing an edit and pressing Enter asks to delete the
       // message. Cancel leaves the edit open; Delete closes it first.
       onEmptyEdit: (messageId: number) => {
-        openDeleteConfirm(messageId, () => messageInput?.cancelEdit());
+        openDeleteConfirm(messageId, {
+          onConfirm: () => messageInput?.cancelEdit(),
+          clicked: false,
+        });
       },
       onDraftChange: scheduleDraftSave,
     });

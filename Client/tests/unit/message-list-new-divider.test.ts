@@ -315,7 +315,7 @@ describe("MessageList — new-messages divider", () => {
     // A live message lands first, via the real append path — exactly what
     // dispatcher.ts's chat_message handler does while a history fetch for
     // the same channel is still outstanding.
-    const liveTimestamp = new Date(Date.UTC(2024, 0, 15, 0, 51 * 5)).toISOString();
+    const liveTimestamp = new Date(Date.UTC(2024, 0, 15, 0, 51 * 10)).toISOString();
     addMessage({
       id: 1001,
       channel_id: CHANNEL_ID,
@@ -331,7 +331,7 @@ describe("MessageList — new-messages divider", () => {
     // had already arrived live, exactly as the real merge produces.
     const history = Array.from({ length: 50 }, (_, i) => ({
       ...makeMessage(951 + i),
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, (i + 1) * 5)).toISOString(),
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, (i + 1) * 10)).toISOString(),
     }));
     setMessages([...history, { ...makeMessage(1001), timestamp: liveTimestamp }]);
     messagesStore.flush();

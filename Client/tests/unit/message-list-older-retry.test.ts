@@ -156,6 +156,17 @@ describe("older-history Retry row", () => {
     expect(row()?.hidden).toBe(false);
   });
 
+  it("moves focus to the scroller when Retry hides the row", () => {
+    const root = mountWith(vi.fn(() => new Promise<void>(() => {})));
+    setOlderLoadFailed(1, true);
+    messagesStore.flush();
+    retry().focus();
+
+    retry().click();
+
+    expect(document.activeElement).toBe(root);
+  });
+
   it("hides the row when the flag clears", () => {
     mountWith(vi.fn());
     setOlderLoadFailed(1, true);

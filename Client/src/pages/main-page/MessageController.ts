@@ -198,7 +198,11 @@ export function createMessageController(opts: MessageControllerOptions): Message
         // Inline Retry at the top of the list (a toast would vanish and leave
         // the reader at the top with no way to ask again). An aborted fetch
         // never reaches here, so it sets no flag.
-        setOlderLoadFailed(channelId, true);
+        // Only for the window this fetch started from: after a jump replaced
+        // it, the failure belongs to a page nobody is waiting for.
+        if (getChannelMessages(channelId)[0]?.id === oldest.id) {
+          setOlderLoadFailed(channelId, true);
+        }
       }
     }
   }
