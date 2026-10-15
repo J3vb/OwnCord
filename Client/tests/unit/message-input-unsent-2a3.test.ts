@@ -85,7 +85,7 @@ describe("MessageInput unsent attachments (2A-3)", () => {
     send(container);
     expect(opts.onSend).not.toHaveBeenCalled();
     expect(opts.onUploadFile).not.toHaveBeenCalled();
-    expect(errorLine(container)).toBe(messagingText("error.attachmentsNotSent"));
+    expect(errorLine(container)).toBe(messagingText("error.attachmentExpired"));
 
     (
       container.querySelector(".attachment-remove, [data-testid=attachment-remove]") as HTMLElement
@@ -125,6 +125,7 @@ describe("MessageInput unsent attachments (2A-3)", () => {
     expect(chips(container)).toHaveLength(1);
     comp.restoreUnsent(files, "skipped");
     expect(chips(container)).toHaveLength(10);
+    expect(errorLine(container)).toBe(messagingText("error.tooManyAttachments", { max: "10" }));
     comp.destroy?.();
   });
 

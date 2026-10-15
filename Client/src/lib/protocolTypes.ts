@@ -126,4 +126,5 @@ export const ServerRestartReason = {
   SHUTDOWN: "shutdown", // a stop or restart from outside the server (signal, supervisor)
 } as const;
 
-export type ServerRestartReasonValue = (typeof ServerRestartReason)[keyof typeof ServerRestartReason];
+export type ServerRestartReasonValue =
+  (typeof ServerRestartReason)[keyof typeof ServerRestartReason];

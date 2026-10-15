@@ -841,11 +841,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         for (const a of stale) refreshStale(a);
         showUploadError(
           messagingText(
-            stale.some((a) => a.unsent === true && a.expired === true)
-              ? "error.attachmentsNotSent"
-              : stale.some((a) => a.expired === true)
-                ? "error.attachmentExpired"
-                : "error.attachmentRefreshing",
+            stale.some((a) => a.expired === true)
+              ? "error.attachmentExpired"
+              : "error.attachmentRefreshing",
           ),
         );
         return;
@@ -1779,7 +1777,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       void followUpload(pending, handle);
     }
     if (unsent.length > 0) restoreUnsent(unsent, "skipped");
-    else if (live.length < draft.attachments.length) {
+    if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));
     }
   }
@@ -1787,9 +1785,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** A chip for a file the server did not attach. It is stale from the start,
    *  so Send re-uploads it from its file and never posts the old id again; with
    *  no file it is expired and only removing it frees Send. */
-  function addUnsentChip(att: SentAttachment): void {
-    if (attachmentPreviewBar === null || pendingAttachments.length >= MAX_ATTACHMENTS) return;
-    if (pendingAttachments.some((a) => a.id === att.id)) return;
+  function addUnsentChip(att: SentAttachment): boolean {
+    if (pendingAttachments.some((a) => a.id === att.id)) return true;
+    if (attachmentPreviewBar === null || pendingAttachments.length >= MAX_ATTACHMENTS) return false;
     const item = createElement("div", {
       class: "attachment-preview-item unsent",
       title: messagingText("attach.notSent"),
@@ -1806,6 +1804,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       unsent: true,
       ...(att.file === undefined ? { expired: true } : { file: att.file }),
     });
+    return true;
   }
 
   function restoreUnsent(
@@ -1817,11 +1816,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (replyTo != null && state.replyTo === null && state.editing === null) {
       setReplyTo(replyTo.messageId, replyTo.username);
     }
-    for (const f of files) addUnsentChip(f);
+    const dropped = files.filter((f) => !addUnsentChip(f)).length;
     showUploadError(
-      messagingText(
-        reason === "unavailable" ? "error.attachmentsUnavailable" : "error.attachmentsNotSent",
-      ),
+      dropped > 0
+        ? messagingText("error.tooManyAttachments", { max: String(MAX_ATTACHMENTS) })
+        : messagingText(
+            reason === "unavailable" ? "error.attachmentsUnavailable" : "error.attachmentsNotSent",
+          ),
     );
   }
 

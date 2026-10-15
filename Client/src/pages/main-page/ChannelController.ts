@@ -215,6 +215,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // user has since left must not be attributed to whatever channel is
       // mounted when it arrives.
       channelId: number;
+      // The account that sent it: a frame for another account's send is ignored.
+      userId: number;
       clientMessageId?: string;
       // When the client handed this message to the socket (epoch ms): a late
       // ack's cooldown starts here, not when the ack is finally received.
@@ -306,6 +308,37 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     sendTimers.delete(id);
     window.clearTimeout(owned.timer);
     owned.release?.();
+  }
+
+  /** 2A-3: give files a send did not carry back to the composer of the
+   *  channel it went to, mounted or stashed, with the send's reply target
+   *  when given and that composer has none of its own. */
+  function putBackUnsent(
+    sentTo: number,
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo: number | null = null,
+  ): void {
+    const target =
+      replyTo === null
+        ? undefined
+        : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
+    const reply =
+      target === undefined ? null : { messageId: target.id, username: target.user.username };
+    if (sentTo === currentChannelId && messageInput !== null) {
+      messageInput.restoreUnsent(files, reason, reply);
+      return;
+    }
+    const stashed = draftByChannel.get(sentTo);
+    draftByChannel.set(sentTo, {
+      content: stashed?.content ?? "",
+      replyTo: stashed?.replyTo ?? reply,
+      attachments: [
+        ...(stashed?.attachments ?? []),
+        ...files.map((f) => ({ ...f, uploadedAt: 0, unsent: true })),
+      ],
+      ...(stashed?.uploads === undefined ? {} : { uploads: stashed.uploads }),
+    });
   }
 
   function destroyChannel(): void {
@@ -529,6 +562,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -569,6 +603,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo,
           attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -617,6 +652,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         (recovered
           ? {
               ...recovered,
+              userId: owner.userId,
               replyTo: null,
               attachments: [] as readonly SentAttachment[],
             }
@@ -648,37 +684,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         return;
       }
       performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
-    }
-
-    /** 2A-3: give files a send did not carry back to the composer of the
-     *  channel it went to, mounted or stashed, with the send's reply target
-     *  when given and that composer has none of its own. */
-    function putBackUnsent(
-      sentTo: number,
-      files: readonly SentAttachment[],
-      reason: "skipped" | "unavailable",
-      replyTo: number | null = null,
-    ): void {
-      const target =
-        replyTo === null
-          ? undefined
-          : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
-      const reply =
-        target === undefined ? null : { messageId: target.id, username: target.user.username };
-      if (sentTo === currentChannelId && messageInput !== null) {
-        messageInput.restoreUnsent(files, reason, reply);
-        return;
-      }
-      const stashed = draftByChannel.get(sentTo);
-      draftByChannel.set(sentTo, {
-        content: stashed?.content ?? "",
-        replyTo: stashed?.replyTo ?? reply,
-        attachments: [
-          ...(stashed?.attachments ?? []),
-          ...files.map((f) => ({ ...f, uploadedAt: 0, unsent: true })),
-        ],
-        ...(stashed?.uploads === undefined ? {} : { uploads: stashed.uploads }),
-      });
     }
 
     function deleteDraft(correlationId: string): void {
@@ -1223,11 +1228,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         const sentDraft =
           correlationId === undefined ? undefined : draftByCorrelation.get(correlationId);
         const sentTo = sentDraft?.channelId;
-        // 2A-3: the message went without these files; their chips go back.
-        // Ids the send did not carry are ignored.
-        const skipped = new Set(payload.skipped_attachment_ids ?? []);
-        const unsent = sentDraft?.attachments.filter((a) => skipped.has(a.id)) ?? [];
-        if (sentTo !== undefined && unsent.length > 0) putBackUnsent(sentTo, unsent, "skipped");
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
         // switch, so its draft must too), which means nothing else would ever
@@ -1343,15 +1343,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const edit = untrack(pendingEdits, correlationId);
           if (edit !== undefined) failEdits([edit], false);
           untrack(pendingDeletes, correlationId);
-          const draft = draftByCorrelation.get(correlationId);
-          if (payload.code === "ATTACHMENTS_UNAVAILABLE" && draft !== undefined && ownsSession()) {
-            // 2A-3: a files-only send none of whose files the server could
-            // attach. The dispatcher drops its row (nothing was stored); its
-            // files and reply go back to the composer.
-            draftByCorrelation.delete(correlationId);
-            clearSendTimer(correlationId);
-            putBackUnsent(draft.channelId, draft.attachments, "unavailable", draft.replyTo);
-          }
         }
         if (payload.code !== "SLOW_MODE") return;
         if (!sentToMountedChannel(correlationId)) return;
@@ -1416,7 +1407,34 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
   }
 
+  // 2A-3 at controller scope, not per mount: an ack or refusal can land while
+  // no channel is mounted (an NSFW gate, a cleared selection), and its files
+  // still go back to the channel they were sent to. Registered before any
+  // mount, so these run before a mount's own listeners drop the draft.
+  const unsentUnsubs = [
+    ws.on("chat_send_ok", (payload, correlationId) => {
+      const draft = correlationId ? draftByCorrelation.get(correlationId) : undefined;
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // The message went without these files. Ids the send did not carry are ignored.
+      const skipped = new Set(payload.skipped_attachment_ids ?? []);
+      const unsent = draft.attachments.filter((a) => skipped.has(a.id));
+      if (unsent.length > 0) putBackUnsent(draft.channelId, unsent, "skipped");
+    }),
+    ws.on("error", (payload, correlationId) => {
+      if (payload.code !== "ATTACHMENTS_UNAVAILABLE" || !correlationId) return;
+      const draft = draftByCorrelation.get(correlationId);
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // A files-only send none of whose files could be attached: the
+      // dispatcher drops its row (nothing was stored), and a Retry with the
+      // same ids would fail the same way.
+      draftByCorrelation.delete(correlationId);
+      clearSendTimer(correlationId);
+      putBackUnsent(draft.channelId, draft.attachments, "unavailable", draft.replyTo);
+    }),
+  ];
+
   function destroy(): void {
+    for (const off of unsentUnsubs) off();
     destroyChannel();
     for (const draft of draftByChannel.values()) {
       for (const upload of draft.uploads ?? []) upload.owner.destroy();
