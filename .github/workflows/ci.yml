@@ -67,6 +67,7 @@ jobs:
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
       permissions: ${{ steps.select.outputs.permissions }}
+      changelog: ${{ steps.select.outputs.changelog }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -172,11 +173,14 @@ jobs:
   # minutes instead of after the 20-minute race step.
   #
   # Gated on the `server` capability like the other server jobs, so a client-only
-  # PR does not pay for it.
+  # PR does not pay for it, and also on `changelog`: its document gates run
+  # TestBundledChangelog, the server's only reader of CHANGELOG.md, so a
+  # changelog line on a client PR is checked here in minutes instead of
+  # selecting both race legs.
   server-fast-checks:
     name: Server Lint & Invariants
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true' || needs.changes.outputs.changelog == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

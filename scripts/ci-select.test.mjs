@@ -26,11 +26,25 @@ test("a documentation-only change runs no application job", () => {
   }
 });
 
-test("a CHANGELOG.md edit runs the server and client jobs, which both ship it", () => {
+test("a CHANGELOG.md edit runs the client jobs and the server's changelog gate, not the race legs", () => {
   const sel = picked("M\tCHANGELOG.md");
-  assert.equal(sel.server, true);
+  assert.equal(sel.changelog, true);
   assert.equal(sel.client, true);
+  assert.equal(sel.server, false);
+  assert.equal(sel.integration, false);
   assert.equal(sel.rust, false);
+});
+
+test("a client change with a changelog line does not select the server legs", () => {
+  const sel = picked(["M\tClient/src/lib/ws.ts", "M\tCHANGELOG.md"].join("\n"));
+  assert.equal(sel.server, false);
+  assert.equal(sel.changelog, true);
+});
+
+test("a release refresh of the bundled changelog still runs the server legs", () => {
+  const sel = picked(["M\tCHANGELOG.md", "M\tServer/admin/static/changelog.md"].join("\n"));
+  assert.equal(sel.server, true);
+  assert.equal(sel.changelog, true);
 });
 
 test("a prose change still leaves the two always-on jobs alone", () => {
