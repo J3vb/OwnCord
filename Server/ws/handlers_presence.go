@@ -134,7 +134,7 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{} // silently drop other errors
 	}
 
-	return Result{SetChannelID: &chID}
+	return Result{SetChannelID: &chID, Events: []Event{channelReadEvt(info.UserID, chID)}}
 }
 
 // handleMarkReadV2 is the V2 handler for mark_read messages. It runs the same
@@ -161,5 +161,5 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		}
 		return Result{} // silently drop other errors
 	}
-	return Result{}
+	return Result{Events: []Event{channelReadEvt(info.UserID, markCmd.ChannelID)}}
 }

@@ -54,6 +54,7 @@ import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
+  notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({

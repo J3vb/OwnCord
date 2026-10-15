@@ -128,6 +128,9 @@ type chatSendOKPayload struct {
 	Deduplicated    bool   `json:"deduplicated,omitempty"`
 	MessageID       int64  `json:"message_id"`
 	Timestamp       string `json:"timestamp"`
+	// SkippedAttachmentIDs are requested uploads the send did not attach (no
+	// reason per id); absent when every one was attached.
+	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
 type chatEditedPayload struct {
@@ -539,11 +542,11 @@ func buildUploadPolicy(blocked, allowed []string) []byte {
 }
 
 // buildChatSendOK correlates the current request with the original commit.
-func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool) []byte {
+func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skippedAttachmentIDs []string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatSendOK,
 		ID:      requestID,
-		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate},
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate, SkippedAttachmentIDs: skippedAttachmentIDs},
 	})
 }
 

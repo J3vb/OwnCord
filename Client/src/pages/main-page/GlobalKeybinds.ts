@@ -7,14 +7,21 @@
  * signalling messages into a session that doesn't exist. Mute and deafen work
  * anywhere, like the user panel's buttons: outside a call they only change the
  * saved state the next join starts with.
+ *
+ * Escape marks the open channel read (Shift+Escape the whole server) only when
+ * nothing else used the key: a dialog or Settings open when it was pressed, or
+ * any handler that called preventDefault() on it (closing a popup, cancelling
+ * an edit), keeps the key for itself.
  */
 
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen, isDisplayed } from "@lib/dialogOpen";
 import { keyEventToVk, loadGlobalShortcutVks, type GlobalShortcutVks } from "@lib/voiceShortcuts";
+import { inputMode } from "@lib/inputMode";
+import { loadPref } from "@lib/preferences";
 
 const log = createLogger("global-keybinds");
 
@@ -27,8 +34,17 @@ export interface GlobalKeybindHandlers {
   readonly onToggleDeafen: () => void;
   /** Ctrl+Shift+V — toggle the camera (voice only). */
   readonly onToggleCamera: () => void;
-  /** Ctrl+U — open the composer's attachment picker. */
+  /** Ctrl+Shift+U — open the composer's attachment picker. */
   readonly onUploadFile: () => void;
+  /** Ctrl+E / Ctrl+G — open or close the composer's emoji or GIF picker. */
+  readonly onTogglePicker: (kind: "emoji" | "gif") => void;
+  /** Escape — mark the open channel read and return to its newest messages. */
+  readonly onMarkChannelRead: () => void;
+  /** Shift+Escape — mark every server channel read. */
+  readonly onMarkServerRead: () => void;
+  /** PageUp/PageDown from the message box — scroll the messages a page.
+   *  `direction` is 1 for down, -1 for up. */
+  readonly onScrollMessages: (direction: 1 | -1) => void;
   /** Alt+↑/↓ — step to the previous/next channel; with Shift, the previous/
    *  next unread one (DP-35). `direction` is 1 for down/next, -1 for up. */
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
@@ -53,6 +69,14 @@ function inVoice(): boolean {
 export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => void {
   const handler = (e: KeyboardEvent): void => {
     if (handlers.isSuspended?.() === true) return;
+
+    // AltGr arrives as Ctrl+Alt on Windows; a character typed with it (@ on
+    // AZERTY) is plain typing, not a shortcut.
+    const altGrChar = e.key.length === 1 && e.getModifierState("AltGraph");
+    if ((!e.ctrlKey && !e.metaKey && !e.altKey) || altGrChar) {
+      handlePlainKey(e);
+      return;
+    }
 
     // Alt+↑/↓ (DP-35) steps channels; Alt+Shift+↑/↓ steps unread channels.
     // Checked before the Ctrl/Meta guard below, which rejects any Alt combo.
@@ -94,7 +118,11 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       const vk = keyEventToVk(e);
       const keys = (handlers.voiceShortcutKeys ?? loadGlobalShortcutVks)();
       const action = vk === keys.mute ? "mute" : vk === keys.deafen ? "deafen" : null;
-      if (action === null) return;
+      if (action === null) {
+        // A mute or deafen bound to U before U was reserved keeps it.
+        if (key === "u") run("upload-file", handlers.onUploadFile);
+        return;
+      }
       if (handlers.isGlobalPollerActive?.() === true) {
         // The poller fires on exactly Ctrl+Shift; any other combo is not ours.
         if (e.ctrlKey && !e.metaKey) e.preventDefault();
@@ -123,17 +151,94 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       case "d":
         if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
         break;
-      case "u":
-        run("upload-file", handlers.onUploadFile);
+      // Ctrl+E / Ctrl+G work from the message box and from an open picker
+      // (to close it or switch), but another text field keeps its own keys.
+      case "e":
+      case "g":
+        if (isTypingTarget(e.target) && !isComposer(e.target) && !inPicker(e.target)) break;
+        run("toggle-picker", () => handlers.onTogglePicker(key === "e" ? "emoji" : "gif"));
         break;
       default:
         break;
     }
   };
 
+  /** Page keys from the message box scroll the messages; a printable key
+   *  with nothing focused starts typing in the message box. */
+  const handlePlainKey = (e: KeyboardEvent): void => {
+    if (e.isComposing || e.defaultPrevented) return;
+    if (e.key === "PageUp" || e.key === "PageDown") {
+      // A focused scroller pages itself; only these two would page nothing.
+      if (!isComposer(e.target) && e.target !== document.body) return;
+      if (dialogOpen()) return;
+      const direction = e.key === "PageDown" ? 1 : -1;
+      runGlobal(e, "scroll-messages", () => handlers.onScrollMessages(direction));
+      return;
+    }
+    // Space stays with the page (scrolling, pressing a focused control).
+    if (e.key.length !== 1 || e.key === " " || e.repeat || !isIdleTarget(e.target)) return;
+    // The push-to-talk key is polled natively and still reaches the page;
+    // held during a call it must not type into the message box.
+    if (isPttKey(e) || dialogOpen()) return;
+    const composer = findComposer();
+    // Focus moves before the key's default runs, so the character lands in
+    // the message box: no preventDefault here.
+    if (composer !== null) composer.focus();
+  };
+
+  // Escape is decided after every other listener: the window's bubble phase
+  // runs last. What was open is read in its capture phase, before the key
+  // closes it.
+  let escapeTaken = false;
+  const onEscapeCapture = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape") return;
+    escapeTaken = handlers.isSuspended?.() === true || dialogOpen();
+  };
+  const onEscape = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
+    if (isTypingTarget(e.target) && !isComposer(e.target)) return;
+    if (e.shiftKey) runGlobal(e, "mark-server-read", handlers.onMarkServerRead);
+    else runGlobal(e, "mark-channel-read", handlers.onMarkChannelRead);
+  };
+
   const owner = new Disposable();
   document.addEventListener("keydown", handler, { signal: owner.signal });
+  window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
+  window.addEventListener("keydown", onEscape, { signal: owner.signal });
   return () => owner.destroy();
+}
+
+/** Controls that take keys of their own; typing on one of them stays there. */
+const INTERACTIVE =
+  'button, a[href], input, textarea, select, [contenteditable="true"], [role="button"], ' +
+  '[role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="tab"], ' +
+  '[role="slider"], [role="radio"], [role="checkbox"], [role="switch"], [role="textbox"]';
+
+/** Nothing that takes typed keys has focus. */
+function isIdleTarget(target: EventTarget | null): boolean {
+  if (target === document.body || target === document.documentElement) return true;
+  return target instanceof Element && target.closest(INTERACTIVE) === null;
+}
+
+/** Inside an open emoji or GIF picker, which focuses its own search field. */
+function inPicker(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".emoji-picker, .gif-picker") !== null;
+}
+
+/** The bound push-to-talk key, in a call with Push to Talk as the input mode. `keyCode`
+ *  is the Windows VK the native poller uses, on every platform for these keys. */
+function isPttKey(e: KeyboardEvent): boolean {
+  if (!inVoice() || inputMode() !== "ptt") return false;
+  const vk = loadPref<number>("pttVk", 0);
+  return vk !== 0 && e.keyCode === vk;
+}
+
+/** The message box on screen, when it can be typed into. */
+function findComposer(): HTMLTextAreaElement | null {
+  const composer = document.querySelector<HTMLTextAreaElement>("textarea.msg-textarea");
+  if (composer === null || composer.readOnly || composer.disabled) return null;
+  return isDisplayed(composer) ? composer : null;
 }
 
 /** A text-entry control, where a bare Alt+Arrow belongs to the field. */

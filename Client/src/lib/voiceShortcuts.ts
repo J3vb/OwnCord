@@ -23,8 +23,9 @@ export const GLOBAL_DEAFEN_VK_PREF = "globalDeafenVk";
 export const DEFAULT_GLOBAL_MUTE_VK = 0x4d; // M
 export const DEFAULT_GLOBAL_DEAFEN_VK = 0x44; // D
 
-/** The in-app camera shortcut (Ctrl+Shift+V); a global binding may not claim it. */
-const RESERVED_CAMERA_VK = 0x56; // V
+/** In-app Ctrl+Shift shortcuts a global binding may not claim: camera
+ *  (Ctrl+Shift+V) and upload (Ctrl+Shift+U). */
+const RESERVED_VKS: ReadonlySet<number> = new Set([0x56, 0x55]); // V, U
 
 export interface GlobalShortcutVks {
   mute: number;
@@ -96,6 +97,6 @@ export function shortcutConflict(
 ): "duplicate" | "reserved" | null {
   const other = action === "mute" ? current.deafen : current.mute;
   if (vk === other) return "duplicate";
-  if (vk === RESERVED_CAMERA_VK) return "reserved";
+  if (RESERVED_VKS.has(vk)) return "reserved";
   return null;
 }

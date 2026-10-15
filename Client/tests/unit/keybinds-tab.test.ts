@@ -228,8 +228,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 5 Navigation + 3 Communication + 2 Global + 5 Messages = 16
-    expect(rows.length).toBe(16);
+    // 1 PTT + 8 Navigation + 3 Communication + 2 Global + 7 Messages = 21
+    expect(rows.length).toBe(21);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -450,7 +450,24 @@ describe("KeybindsTab", () => {
     expect(labels).toContain("Edit Last Message");
   });
 
-  it("renders the composer formatting keybinds and explains the Ctrl+U overlap", () => {
+  it("lists the chat keys with their combos, upload on Ctrl+Shift+U", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const rows = new Map(
+      Array.from(el.querySelectorAll(".keybind-row")).map((r) => [
+        r.querySelector(".setting-label")?.textContent,
+        r.querySelector(".kbd")?.textContent,
+      ]),
+    );
+    expect(rows.get("Upload File")).toBe("Ctrl + Shift + U");
+    expect(rows.get("Underline")).toBe("Ctrl + U");
+    expect(rows.get("Mark Channel as Read")).toBe("Escape");
+    expect(rows.get("Mark Server as Read")).toBe("Shift + Escape");
+    expect(rows.get("Scroll Chat")).toBe("Page Up / Page Down");
+    expect(rows.get("Emoji Picker")).toBe("Ctrl + E");
+    expect(rows.get("GIF Picker")).toBe("Ctrl + G");
+  });
+
+  it("renders the composer formatting keybinds and their hint", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const labels = Array.from(el.querySelectorAll(".setting-label")).map((l) => l.textContent);
     expect(labels).toContain("Bold");

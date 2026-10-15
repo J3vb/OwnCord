@@ -399,6 +399,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "keydown",
     (e) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         options.onClose();
       }
     },

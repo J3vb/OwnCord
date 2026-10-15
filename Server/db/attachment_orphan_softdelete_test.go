@@ -31,8 +31,8 @@ func TestDeleteOrphanedAttachments_ReclaimsAttachmentOfSoftDeletedMessage(t *tes
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-softdel-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-softdel-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	// Soft-delete the message the attachment is linked to. Under the current
@@ -79,8 +79,8 @@ func TestDeleteOrphanedAttachments_DoesNotReclaimAttachmentOfLiveMessage(t *test
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-live-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-live-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	files, err := database.DeleteOrphanedAttachments(ctx, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))

@@ -108,8 +108,10 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
-  /** Open the composer's attachment picker (Ctrl+U). No-op with no composer. */
+  /** Open the composer's attachment picker (Ctrl+Shift+U). No-op with no composer. */
   openFilePicker(): void;
+  /** Open or close the composer's emoji or GIF picker (Ctrl+E, Ctrl+G). */
+  togglePicker(kind: "emoji" | "gif"): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1370,6 +1372,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     destroyChannel,
     destroy,
     openFilePicker: () => messageInput?.openFilePicker(),
+    togglePicker: (kind) => messageInput?.togglePicker(kind),
     get currentChannelId() {
       return currentChannelId;
     },

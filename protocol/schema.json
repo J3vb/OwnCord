@@ -120,6 +120,12 @@
       "ts": "MENTION_COUNT",
       "note": "DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal"
     },
+    {
+      "wire": "channel_activity",
+      "go": "MsgTypeChannelActivity",
+      "ts": "CHANNEL_ACTIVITY",
+      "note": "2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed"
+    },
     { "wire": "error", "go": "MsgTypeError", "ts": "ERROR" },
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },

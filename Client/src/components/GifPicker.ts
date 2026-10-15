@@ -419,6 +419,7 @@ export function createGifPicker(options: GifPickerOptions): {
     "keydown",
     (e) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         options.onClose();
       }
     },

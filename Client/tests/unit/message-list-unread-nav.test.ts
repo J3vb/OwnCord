@@ -988,4 +988,60 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(sendMarkRead).not.toHaveBeenCalled();
     });
   });
+  // ---------------------------------------------------------------------------
+  // 3A-1 — Escape and the page keys
+  // ---------------------------------------------------------------------------
+
+  describe("Escape and PageUp/PageDown (3A-1)", () => {
+    const bar = () => container.querySelector<HTMLElement>('[data-testid="unread-bar"]');
+
+    it("Escape marks read once, drops the unread bar and goes to the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+      expect(bar()?.hidden).toBe(false);
+      scrollUp();
+      // A message counted while the reader was scrolled up.
+      incrementUnread(CHANNEL_ID, true);
+
+      msgList!.markReadAndJumpToPresent();
+
+      expect(sendMarkRead).toHaveBeenCalledOnce();
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+      expect(bar()?.hidden).toBe(true);
+      expect(root().scrollTop).toBe(SCROLL_HEIGHT);
+
+      // Nothing left unread: a second Escape spends no mark_read.
+      msgList!.markReadAndJumpToPresent();
+      expect(sendMarkRead).toHaveBeenCalledOnce();
+    });
+
+    it("Escape in a detached window jumps to the present", () => {
+      const onJumpToPresent = vi.fn();
+      options = { ...options, onJumpToPresent };
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      setDetached(true);
+      mount();
+      scrollUp();
+
+      msgList!.markReadAndJumpToPresent();
+
+      expect(onJumpToPresent).toHaveBeenCalledOnce();
+      expect(root().scrollTop).toBe(300);
+    });
+
+    it("scrollPage moves about one screen, keeping a line of context", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollTo(5_000);
+
+      msgList!.scrollPage(-1);
+      expect(root().scrollTop).toBe(5_000 - 525);
+      msgList!.scrollPage(1);
+      expect(root().scrollTop).toBe(5_000);
+    });
+  });
 });

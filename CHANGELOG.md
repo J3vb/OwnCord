@@ -53,14 +53,26 @@ and only when it changes something a contributor or fork holder must do
 
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 
+**Messaging**
+
+- Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
+- When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
+- Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
+
 ### Changed
 
 **Login & connection**
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 
+**Notifications**
+
+- Suppress @everyone and @here now hides only those pings in channels you are not viewing. A message that mentions you by name still alerts, as it already did in the open channel. Older servers keep today's behaviour.
+- With an older server, a mention in a channel you are not viewing now alerts about 3 seconds after it arrives.
+
 **Desktop UI**
 
+- Upload File moved from Ctrl+U to Ctrl+Shift+U, as in Discord. Ctrl+U is now only Underline in the message box.
 - On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
 
 ### Fixed
@@ -77,7 +89,8 @@ and only when it changes something a contributor or fork holder must do
 **Messaging**
 
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
-  **Voice and video**
+
+**Voice and video**
 
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 - On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.

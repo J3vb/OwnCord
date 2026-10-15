@@ -143,6 +143,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
+	MsgTypeChannelActivity:     false, // ids and flags only (2B-2); the author id is withheld from an unacknowledged reader of a labelled channel
 }
 
 // reconnectFrameReadableRaceHook, when non-nil, runs once per content-bearing

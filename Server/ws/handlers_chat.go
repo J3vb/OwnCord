@@ -35,7 +35,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
-	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID, result.Duplicate)
+	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp, sendCmd.ClientMessageID, result.Duplicate, result.SkippedAttachmentIDs)
 	if result.Duplicate {
 		return Result{Reply: reply}
 	}
@@ -72,10 +72,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	})
 
 	if !result.IsDM {
-		return Result{
-			Reply:  reply,
-			Events: []Event{channelEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, payload: broadcast}},
-		}
+		return channelSendResult(reply, broadcast, sendCmd.ChannelID, info.UserID, result)
 	}
 
 	// DM path: build dm_channel_open events + sequenced message.
@@ -125,6 +122,21 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		result.ParticipantIDs))
 
 	return Result{Reply: reply, Events: events}
+}
+
+// channelSendResult is a committed non-DM send: the sequenced chat_message,
+// then the note the channel_activity coalescer records.
+func channelSendResult(reply, broadcast []byte, channelID, authorID int64, result *service.SendMessageResult) Result {
+	return Result{
+		Reply: reply,
+		Events: []Event{
+			channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
+			channelActivityEvt{
+				channelID: channelID, msgID: result.MessageID, authorID: authorID,
+				mentions: result.Mentions, everyone: result.MentionsEveryone, hereOnly: result.MentionsHere,
+			},
+		},
+	}
 }
 
 // handleChatEditV2 processes a chat_edit command via the MessageService.
@@ -195,6 +207,8 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: err.Error()}}
 	case errors.Is(err, service.ErrSlowMode):
 		return Result{Error: ClientError{Code: ErrCodeSlowMode, Message: err.Error()}}
+	case errors.Is(err, service.ErrAttachmentsUnavailable):
+		return Result{Error: ClientError{Code: ErrCodeAttachmentsUnavailable, Message: err.Error()}}
 	case errors.Is(err, service.ErrBadRequest):
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: err.Error()}}
 	case errors.Is(err, service.ErrNotFound):

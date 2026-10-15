@@ -69,7 +69,7 @@ import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
-import { setMarkReadSender } from "@lib/read-state";
+import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
@@ -1048,6 +1048,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
         onUploadFile: () => channelCtrl?.openFilePicker(),
+        onTogglePicker: (kind) => channelCtrl?.togglePicker(kind),
+        onMarkChannelRead: () => channelCtrl?.messageList?.markReadAndJumpToPresent(),
+        // A server-wide action, like the header's Mark Server as Read: DMs stay as they are.
+        onMarkServerRead: () => markAllRead({ includeDms: false }),
+        onScrollMessages: (direction) => channelCtrl?.messageList?.scrollPage(direction),
         onStepChannel: (direction, unreadOnly) => {
           if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
           stepChannel(direction, unreadOnly);

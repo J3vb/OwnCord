@@ -27,6 +27,10 @@ function makeHandlers(): {
   onToggleCamera: Mock<() => void>;
   onUploadFile: Mock<() => void>;
   onStepChannel: Mock<(direction: 1 | -1, unreadOnly: boolean) => void>;
+  onTogglePicker: Mock<(kind: "emoji" | "gif") => void>;
+  onMarkChannelRead: Mock<() => void>;
+  onMarkServerRead: Mock<() => void>;
+  onScrollMessages: Mock<(direction: 1 | -1) => void>;
 } {
   return {
     onSearch: vi.fn<() => void>(),
@@ -35,6 +39,10 @@ function makeHandlers(): {
     onToggleCamera: vi.fn<() => void>(),
     onUploadFile: vi.fn<() => void>(),
     onStepChannel: vi.fn<(direction: 1 | -1, unreadOnly: boolean) => void>(),
+    onTogglePicker: vi.fn<(kind: "emoji" | "gif") => void>(),
+    onMarkChannelRead: vi.fn<() => void>(),
+    onMarkServerRead: vi.fn<() => void>(),
+    onScrollMessages: vi.fn<(direction: 1 | -1) => void>(),
   };
 }
 
@@ -71,13 +79,31 @@ describe("global keybinds", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("Ctrl+U opens the file picker", () => {
+  it("Ctrl+Shift+U opens the file picker; Ctrl+U alone does not", () => {
     const h = makeHandlers();
     detach = attachGlobalKeybinds(h);
 
-    press("u");
+    const plain = press("u", { code: "KeyU" });
+    expect(h.onUploadFile).not.toHaveBeenCalled();
+    expect(plain.defaultPrevented).toBe(false);
 
+    const upload = press("U", { shiftKey: true, code: "KeyU" });
     expect(h.onUploadFile).toHaveBeenCalledOnce();
+    expect(upload.defaultPrevented).toBe(true);
+  });
+
+  it("a mute already bound to U keeps Ctrl+Shift+U", () => {
+    saveGlobalShortcutVk("mute", 0x55);
+    onTestFinished(() => {
+      saveGlobalShortcutVk("mute", 0x4d);
+    });
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    press("U", { shiftKey: true, code: "KeyU" });
+
+    expect(h.onToggleMute).toHaveBeenCalledOnce();
+    expect(h.onUploadFile).not.toHaveBeenCalled();
   });
 
   it("does not fire while a dialog/modal owns focus (#17)", () => {
@@ -321,7 +347,7 @@ describe("global keybinds", () => {
     detach = attachGlobalKeybinds({ ...h, isSuspended: () => true });
 
     press("f");
-    press("u");
+    press("U", { shiftKey: true, code: "KeyU" });
 
     expect(h.onSearch).not.toHaveBeenCalled();
     expect(h.onUploadFile).not.toHaveBeenCalled();
@@ -462,5 +488,249 @@ describe("global keybinds", () => {
     press("f");
 
     expect(h.onSearch).not.toHaveBeenCalled();
+  });
+  // 3A-1: Discord's chat keys.
+  describe("chat keys", () => {
+    /** A key pressed on `el` (focused, in the page), bubbling like a real one. */
+    function keyOn(
+      el: HTMLElement | Document,
+      key: string,
+      init: KeyboardEventInit = {},
+    ): KeyboardEvent {
+      if (el instanceof HTMLElement) {
+        if (!el.isConnected) document.body.appendChild(el);
+        el.focus();
+      }
+      const event = new KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    function composer(): HTMLTextAreaElement {
+      const ta = document.createElement("textarea");
+      ta.className = "msg-textarea";
+      document.body.appendChild(ta);
+      onTestFinished(() => ta.remove());
+      return ta;
+    }
+
+    it("Escape marks the channel read; Shift+Escape the server", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const esc = keyOn(document.body, "Escape");
+      keyOn(document.body, "Escape", { shiftKey: true });
+
+      expect(h.onMarkChannelRead).toHaveBeenCalledOnce();
+      expect(h.onMarkServerRead).toHaveBeenCalledOnce();
+      expect(esc.defaultPrevented).toBe(true);
+    });
+
+    it("Escape from the message box marks read, from another field does not", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      keyOn(composer(), "Escape");
+      const search = document.createElement("input");
+      onTestFinished(() => search.remove());
+      keyOn(search, "Escape");
+
+      expect(h.onMarkChannelRead).toHaveBeenCalledOnce();
+    });
+
+    it("an Escape another handler used (cancel an edit, close a popup) marks nothing", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const box = composer();
+      box.addEventListener("keydown", (e) => e.preventDefault());
+      keyOn(box, "Escape");
+
+      expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("an Escape that closes a dialog marks nothing, though the dialog is gone after", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const dialog = document.createElement("div");
+      dialog.className = "modal-overlay visible";
+      document.body.appendChild(dialog);
+      // Like modalFactory: closes on Escape without preventDefault.
+      const owner = new AbortController();
+      document.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.key === "Escape") dialog.remove();
+        },
+        { signal: owner.signal },
+      );
+
+      keyOn(document.body, "Escape");
+
+      expect(dialog.isConnected).toBe(false);
+      expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+
+      keyOn(document.body, "Escape");
+      expect(h.onMarkChannelRead).toHaveBeenCalledOnce();
+      owner.abort();
+    });
+
+    it("Escape does nothing while suspended, held down, or with Ctrl", () => {
+      let suspended = true;
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({ ...h, isSuspended: () => suspended });
+
+      keyOn(document.body, "Escape");
+      suspended = false;
+      keyOn(document.body, "Escape", { repeat: true });
+      keyOn(document.body, "Escape", { ctrlKey: true });
+
+      expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("PageUp/PageDown from the message box scroll the messages", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const box = composer();
+      const down = keyOn(box, "PageDown");
+      keyOn(box, "PageUp");
+      keyOn(document.body, "PageDown");
+
+      expect(h.onScrollMessages.mock.calls).toEqual([[1], [-1], [1]]);
+      expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("PageDown on another focused element is left to that element", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const scroller = document.createElement("div");
+      scroller.tabIndex = 0;
+      onTestFinished(() => scroller.remove());
+      const search = document.createElement("input");
+      onTestFinished(() => search.remove());
+      keyOn(scroller, "PageDown");
+      keyOn(search, "PageDown");
+
+      expect(h.onScrollMessages).not.toHaveBeenCalled();
+    });
+
+    it("typing with nothing focused moves focus to the message box", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+      box.blur();
+
+      const typed = keyOn(document.body, "h");
+
+      expect(document.activeElement).toBe(box);
+      // The character itself must still land: the key is not cancelled.
+      expect(typed.defaultPrevented).toBe(false);
+    });
+
+    it("typing leaves focus alone on a control, for Space, shortcuts and a read-only box", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+
+      const button = document.createElement("button");
+      onTestFinished(() => button.remove());
+      keyOn(button, "h");
+      expect(document.activeElement).toBe(button);
+
+      button.blur();
+      keyOn(document.body, " ");
+      keyOn(document.body, "Shift");
+      expect(document.activeElement).not.toBe(box);
+
+      box.readOnly = true;
+      keyOn(document.body, "h");
+      expect(document.activeElement).not.toBe(box);
+    });
+
+    it("the push-to-talk key and a held key do not pull focus into the message box", () => {
+      localStorage.setItem("owncord:settings:inputMode", JSON.stringify("ptt"));
+      localStorage.setItem("owncord:settings:pttVk", JSON.stringify(0x56));
+      onTestFinished(() => {
+        localStorage.removeItem("owncord:settings:inputMode");
+        localStorage.removeItem("owncord:settings:pttVk");
+      });
+      mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+      box.blur();
+
+      keyOn(document.body, "v", { keyCode: 0x56 });
+      keyOn(document.body, "h", { repeat: true });
+      expect(document.activeElement).not.toBe(box);
+
+      keyOn(document.body, "h", { keyCode: 0x48 });
+      expect(document.activeElement).toBe(box);
+
+      // Outside a call the key is just a letter.
+      mockVoiceGetState.mockReturnValue({ currentChannelId: null });
+      box.blur();
+      keyOn(document.body, "v", { keyCode: 0x56 });
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("a character typed with AltGr (Ctrl+Alt on Windows) starts a message", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+      box.blur();
+
+      keyOn(document.body, "@", { ctrlKey: true, altKey: true, modifierAltGraph: true });
+
+      expect(document.activeElement).toBe(box);
+      expect(h.onSearch).not.toHaveBeenCalled();
+    });
+
+    it("Ctrl+E and Ctrl+G toggle the emoji and GIF pickers, also from the message box", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const e = keyOn(document.body, "e", { ctrlKey: true });
+      keyOn(composer(), "g", { ctrlKey: true });
+
+      expect(h.onTogglePicker.mock.calls).toEqual([["emoji"], ["gif"]]);
+      expect(e.defaultPrevented).toBe(true);
+    });
+
+    it("Ctrl+E and Ctrl+G reach an open picker's own search field", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const picker = document.createElement("div");
+      picker.className = "emoji-picker";
+      const search = document.createElement("input");
+      picker.appendChild(search);
+      document.body.appendChild(picker);
+      onTestFinished(() => picker.remove());
+      keyOn(search, "e", { ctrlKey: true });
+      keyOn(search, "g", { ctrlKey: true });
+
+      expect(h.onTogglePicker.mock.calls).toEqual([["emoji"], ["gif"]]);
+    });
+
+    it("another text field keeps Ctrl+E and Ctrl+G", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const search = document.createElement("input");
+      onTestFinished(() => search.remove());
+      keyOn(search, "e", { ctrlKey: true });
+      keyOn(search, "g", { ctrlKey: true });
+
+      expect(h.onTogglePicker).not.toHaveBeenCalled();
+    });
   });
 });

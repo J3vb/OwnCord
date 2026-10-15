@@ -34,6 +34,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // the unit dispatcher tests stub it.
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
+  notifyMention: vi.fn(),
+  notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({
@@ -61,7 +63,7 @@ import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
 import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, resetChannelsStore } from "../../src/stores/channels.store";
+import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
 import {
   addOptimisticMessage,
@@ -429,6 +431,17 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
   it("typing: the indicator is keyed on the fixture's channel id", async () => {
     await dispatch("typing", "typing");
     expect(membersStore.getState().typingUsers.get(1)?.size).toBe(1);
+  });
+
+  it("channel-activity: b's hint marks the unfocused channel unread, not mentioned", async () => {
+    const MESSAGE_ID = 5003;
+    setChannels([{ id: 1, name: "general", type: "text", category: null, position: 0 }]);
+    await dispatch("channel-activity", "channel_activity", { message_id: MESSAGE_ID });
+    expect(channelsStore.getState().channels.get(1)).toMatchObject({
+      unreadCount: 1,
+      mentionCount: 0,
+      lastMessageId: MESSAGE_ID,
+    });
   });
 
   it("dm-send: the DM broadcast is appended to its DM channel", async () => {
