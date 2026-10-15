@@ -152,8 +152,9 @@ func newSkippedAttachmentFixture(t *testing.T) (send func(reqID string, payload 
 			t.Fatal(err)
 		}
 		hub.HandleMessageForTest(client, raw)
-		var out []skippedTestFrame
-		for _, b := range drainChanTimeout(frames, 150*time.Millisecond) {
+		raws := drainChanTimeout(frames, 150*time.Millisecond)
+		out := make([]skippedTestFrame, 0, len(raws))
+		for _, b := range raws {
 			var f skippedTestFrame
 			if err := json.Unmarshal(b, &f); err != nil {
 				t.Fatal(err)
@@ -191,10 +192,8 @@ func TestChatSend_AckCarriesSkippedAttachmentIDs(t *testing.T) {
 
 	// Nothing skipped: the field is absent from the wire, not an empty list.
 	plain := map[string]any{"content": "plain", "client_message_id": fmt.Sprintf("%d:%s", time.Now().UnixMilli(), uuid.NewString())}
-	for _, f := range send("plain", plain) {
-		if f.Type == "chat_send_ok" && f.Payload.MessageID == 0 {
-			t.Fatalf("plain ack lacks message id: %+v", f)
-		}
+	if ok := findSkippedFrame(send("plain", plain), "chat_send_ok"); ok == nil || ok.Payload.MessageID == 0 || ok.Payload.Skipped != nil {
+		t.Fatalf("plain ack = %+v, want a message id and no skipped ids", ok)
 	}
 }
 

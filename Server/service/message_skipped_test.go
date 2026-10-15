@@ -210,3 +210,34 @@ func TestSendMessage_ReplaySkippedReadFailureOmits(t *testing.T) {
 		t.Fatalf("skipped = %v, want nil when the read fails (never a false skip)", retry.SkippedAttachmentIDs)
 	}
 }
+
+// missedReceiptStore hides the sender's receipt from the pre-gate lookup, so a
+// retry reaches CreateMessageDelivery and is caught by its in-transaction
+// duplicate check instead (two sends racing).
+type missedReceiptStore struct{ Store }
+
+func (missedReceiptStore) FindMessageDelivery(context.Context, db.MessageDeliveryParams) (*db.MessageDelivery, error) {
+	return nil, nil
+}
+
+func TestSendMessage_InTxDuplicateReplaysSkipped(t *testing.T) {
+	svc, database := newSkippedAttachmentService(t)
+	ctx := context.Background()
+	sweepAttachment(t, database, "att-b")
+
+	p := deliveryTestParams()
+	p.Content, p.AttachmentIDs = "hi", []string{"att-a", "att-b"}
+	first, err := svc.SendMessage(ctx, p)
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	racing := NewMessageService(missedReceiptStore{Store: database}, svc.perms, nil)
+	racing.RunBackgroundInlineForTest()
+	retry, err := racing.SendMessage(ctx, p)
+	if err != nil || !retry.Duplicate || retry.MessageID != first.MessageID {
+		t.Fatalf("retry = %+v, %v, want in-tx duplicate of %d", retry, err, first.MessageID)
+	}
+	if !reflect.DeepEqual(retry.SkippedAttachmentIDs, []string{"att-b"}) {
+		t.Fatalf("replayed skipped = %v, want [att-b]", retry.SkippedAttachmentIDs)
+	}
+}

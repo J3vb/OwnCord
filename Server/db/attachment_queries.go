@@ -173,7 +173,7 @@ func linkAttachmentsToMessage(ctx context.Context, exec attachmentLinker, messag
 	if err != nil {
 		return nil, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	var linked []string
 	for rows.Next() {
 		var id string
