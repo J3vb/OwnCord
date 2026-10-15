@@ -56,6 +56,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"MessageService.SendMessage DeleteMessage (cleanup)":                                                      "messageservice_sendmessage_deletemessage_cleanup",
 	"MessageService.SendMessage DeleteMessage (empty-after-link cleanup)":                                     "messageservice_sendmessage_deletemessage_empty_after_link",
 	"MessageService.SendMessage GetAttachments":                                                               "messageservice_sendmessage_getattachments",
+	"MessageService.SendMessage GetAttachments (replay)":                                                      "messageservice_sendmessage_getattachments_replay",
 	"MessageService.SendMessage GetDMDeliveryTargets":                                                         "messageservice_sendmessage_getdmdeliverytargets",
 	"MessageService.SendMessage GetDMParticipants":                                                            "messageservice_sendmessage_getdmparticipants",
 	"MessageService.SendMessage LinkAttachments":                                                              "messageservice_sendmessage_linkattachments",
