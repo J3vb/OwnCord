@@ -103,7 +103,10 @@ Supporting pieces:
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
   `src/lib/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264 or Auto by choice on Windows;
-  Linux native always publishes VP8), `src/lib/audioElements.ts` (per-user
+  Linux native always publishes VP8), `src/features/voice/codecSwitch.ts`
+  (republishes a live VP9 camera or share on a codec every viewer decodes when
+  a peer that cannot decode VP9 joins, and back once they leave),
+  `src/lib/audioElements.ts` (per-user
   volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
   (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
