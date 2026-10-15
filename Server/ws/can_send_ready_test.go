@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // TestBuildReady_IncludesCanSend confirms every ready channel carries the
@@ -81,6 +83,115 @@ func TestBuildReady_CanModerateVoice(t *testing.T) {
 		for _, ch := range env.Payload.Channels {
 			if got, ok := ch["can_moderate_voice"]; !ok || got != tc.want {
 				t.Errorf("role %d channel %v can_moderate_voice = %v (present %v), want %v", tc.roleID, ch["name"], got, ok, tc.want)
+			}
+		}
+	}
+}
+
+// TestBuildReady_MessageAffordances: every non-DM ready channel carries
+// can_delete_others, can_pin and can_react for each kind of viewer, always
+// present, and the dm_channels entries carry none of them.
+func TestBuildReady_MessageAffordances(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`,
+		permissions.ManageMessages|permissions.AddReactions); err != nil {
+		t.Fatalf("pin Moderator permissions: %v", err)
+	}
+	general, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	staff, err := database.CreateChannel(ctx, "staff", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	news, err := database.CreateChannel(ctx, "news", "announcement", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	member := seedTestUser(t, database, "affordance-member")
+	peer := seedTestUser(t, database, "affordance-peer")
+	mod, err := database.CreateUser(ctx, "affordance-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser mod: %v", err)
+	}
+	denied, err := database.CreateUser(ctx, "affordance-denied", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser denied: %v", err)
+	}
+	admin := seedCoverageOwner(t, database, "affordance-admin")
+	if err := database.UpsertChannelUserOverride(ctx, staff, denied, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride: %v", err)
+	}
+	if _, _, err := database.GetOrCreateDMChannel(ctx, member, peer); err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	type verdict struct{ del, pin, react bool }
+	cases := []struct {
+		name   string
+		userID int64
+		want   map[int64]verdict
+	}{
+		{"member", member, map[int64]verdict{general: {false, false, true}, staff: {false, false, true}, news: {false, false, true}}},
+		{"moderator", mod, map[int64]verdict{general: {true, true, true}, staff: {true, true, true}, news: {true, true, true}}},
+		{"moderator with a user deny of MANAGE on one channel", denied, map[int64]verdict{general: {true, true, true}, staff: {false, false, true}, news: {true, true, true}}},
+		{"administrator", admin.ID, map[int64]verdict{general: {true, true, true}, staff: {true, true, true}, news: {true, true, true}}},
+	}
+	for _, tc := range cases {
+		user, err := database.GetUserByID(ctx, tc.userID)
+		if err != nil || user == nil {
+			t.Fatalf("%s: GetUserByID: %v", tc.name, err)
+		}
+		role, err := database.GetRoleForUser(ctx, tc.userID)
+		if err != nil || role == nil {
+			t.Fatalf("%s: GetRoleForUser: %v", tc.name, err)
+		}
+		msg, err := hub.BuildReadyWithRoleForTest(database, tc.userID, role)
+		if err != nil {
+			t.Fatalf("%s: BuildReadyWithRoleForTest: %v", tc.name, err)
+		}
+		var env struct {
+			Payload struct {
+				Channels   []map[string]any `json:"channels"`
+				DMChannels []map[string]any `json:"dm_channels"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(msg, &env); err != nil {
+			t.Fatalf("%s: unmarshal: %v", tc.name, err)
+		}
+		seen := 0
+		for _, ch := range env.Payload.Channels {
+			id := int64(ch["id"].(float64))
+			want, ok := tc.want[id]
+			for _, key := range []string{"can_send", "can_moderate_voice", "can_delete_others", "can_pin", "can_react"} {
+				if _, present := ch[key]; !present {
+					t.Errorf("%s: channel %v missing %s", tc.name, ch["name"], key)
+				}
+			}
+			if !ok {
+				continue
+			}
+			seen++
+			got := verdict{ch["can_delete_others"] == true, ch["can_pin"] == true, ch["can_react"] == true}
+			if got != want {
+				t.Errorf("%s: channel %v (del, pin, react) = %+v, want %+v", tc.name, ch["name"], got, want)
+			}
+		}
+		if seen != len(tc.want) {
+			t.Errorf("%s: saw %d of %d expected channels", tc.name, seen, len(tc.want))
+		}
+		if tc.userID == member {
+			if len(env.Payload.DMChannels) == 0 {
+				t.Fatalf("%s: expected an open DM in dm_channels", tc.name)
+			}
+			for _, dm := range env.Payload.DMChannels {
+				for _, key := range []string{"can_send", "can_moderate_voice", "can_delete_others", "can_pin", "can_react"} {
+					if _, present := dm[key]; present {
+						t.Errorf("%s: dm_channels entry carries %s", tc.name, key)
+					}
+				}
 			}
 		}
 	}

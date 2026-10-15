@@ -153,45 +153,32 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 	return out
 }
 
-// channelCanSend reports whether a user with the given role and per-channel
-// override may post in a channel of chanType — the ready payload's can_send
-// affordance, so the client can pre-disable the composer without a
-// round-trip. It is permissions.CanSendMessage, the same predicate the send
-// path enforces, so the affordance cannot drift from the rule (S-12).
-//
-// timedOut is the caller's current timeout verdict (via subjectFor),
-// threaded through as a plain bool so the lookup happens once per ready
-// payload instead of once per channel — a timed-out user must not see
-// can_send: true anywhere (OC-0434).
-func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
+// readyAffordances resolves one ready channel's subject from the role, the
+// per-channel override and the caller's timeout verdict (resolved once per
+// payload via subjectFor, administrators exempt), then asks affordancesFor.
+// A nil role fails closed to all false.
+func readyAffordances(role *db.Role, o db.ChannelOverride, ch *db.Channel, timedOut bool) channelAffordances {
 	if role == nil {
-		return false
+		return channelAffordances{}
 	}
-	return permissions.CanSendMessage(permissions.Subject{
+	return affordancesFor(permissions.Subject{
 		RolePerms: role.Permissions,
 		Override:  permOverride(o),
-		Channel:   permissions.ChannelRef{Type: chanType},
+		Channel:   channelRef(ch),
 		TimedOut:  timedOut,
-	}) == nil
+	})
 }
 
-// channelCanModerateVoice is the ready payload's can_moderate_voice
-// affordance (B9 Q5): whether the caller may mute, deafen, move or
-// disconnect voice participants in this channel. It is
-// permissions.AuthorizeVoiceModerator — the one authorizer voiceModTarget
-// enforces in the target's channel (base MUTE_MEMBERS, then effective
-// READ|MUTE_MEMBERS after both override layers, i.e. CanModerateVoice) — so
-// the client's controls follow the effective permission, not the base bit.
-// Target rank and move capacity are per-target and stay server-side refusals.
+// channelCanSend is the ready payload's can_send verdict for a role, override
+// and channel type; a one-line delegation to affordancesFor (S-12, OC-0434).
+func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
+	return readyAffordances(role, o, &db.Channel{Type: chanType}, timedOut).CanSend
+}
+
+// channelCanModerateVoice is the ready payload's can_moderate_voice verdict
+// (B9 Q5); a one-line delegation to affordancesFor.
 func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType string) bool {
-	if role == nil {
-		return false
-	}
-	return permissions.AuthorizeVoiceModerator(permissions.Subject{
-		RolePerms: role.Permissions,
-		Override:  permOverride(o),
-		Channel:   permissions.ChannelRef{Type: chanType},
-	}) == nil
+	return readyAffordances(role, o, &db.Channel{Type: chanType}, false).CanModerateVoice
 }
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
@@ -243,7 +230,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
 // acknowledging there. timedOut is the caller's current timeout verdict,
-// fed into every channel's can_send — see channelCanSend (OC-0434).
+// fed into every channel's affordances — see readyAffordances (OC-0434).
 func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
@@ -254,15 +241,6 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			"category": visibleChannels[i].Category,
 			"topic":    visibleChannels[i].Topic,
 			"position": visibleChannels[i].Position,
-			// can_send drives the client's composer affordance. It mirrors
-			// MessageService.checkSendPermission for non-DM channels: base role
-			// ± channel overrides must grant READ|SEND, and announcement
-			// channels additionally require MANAGE_MESSAGES; admins bypass. The
-			// server remains the authority — this only pre-disables the UI.
-			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type, timedOut),
-			// Voice-moderation affordance (B9 Q5), same shape and refresh
-			// path as can_send — see channelCanModerateVoice.
-			"can_moderate_voice": channelCanModerateVoice(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
 			// Cooldown in seconds (0 = off). Lets the composer disable itself
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
@@ -282,6 +260,11 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
 			"voice_max_video": visibleChannels[i].VoiceMaxVideo,
 		}
+		// Per-viewer affordances (can_send, can_moderate_voice,
+		// can_delete_others, can_pin, can_react): the predicates' verdicts
+		// over one subject, asked only in affordancesFor. The server remains
+		// the authority; these only pre-disable controls.
+		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
 		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
@@ -410,7 +393,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Current timeout verdict (OC-0434): channelCanSend's Subject must
+	// Current timeout verdict (OC-0434): readyAffordances' Subject must
 	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right

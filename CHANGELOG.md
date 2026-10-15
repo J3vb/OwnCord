@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
 - Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
+- The server now tells each client, per channel, whether it may delete other members' messages, pin, and react (`can_delete_others`, `can_pin`, `can_react` in `ready` and in the per-viewer `channel_create`), so the app can disable controls the server would refuse. Pinning now follows the same permission rule as before, defined in one place; nothing about who can pin changes. A timed-out moderator keeps pin and delete-others in channels; a timed-out member cannot react. The desktop app's buttons follow in a later change.
 
 ### Changed
 

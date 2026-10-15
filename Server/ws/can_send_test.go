@@ -138,3 +138,48 @@ func TestBuildErrorMsgWithID(t *testing.T) {
 		t.Error("empty reqID should omit the id field")
 	}
 }
+
+// TestAffordancesFor locks the five per-viewer verdicts to the predicates they
+// delegate to, one case per distinguishing subject. The DM-typed and timed-out
+// rows are the ones the rules diverge on: a DM verdict never involves MANAGE,
+// and a timeout flips send and react but not pin or delete-others.
+func TestAffordancesFor(t *testing.T) {
+	const (
+		member = permissions.ReadMessages | permissions.SendMessages | permissions.AddReactions
+		mod    = member | permissions.ManageMessages | permissions.MuteMembers
+	)
+	textCh := permissions.ChannelRef{Type: "text"}
+	dmCh := permissions.ChannelRef{Type: "dm"}
+	cases := []struct {
+		name string
+		sub  permissions.Subject
+		want channelAffordances
+	}{
+		{"zero subject is all false", permissions.Subject{}, channelAffordances{}},
+		{"member", permissions.Subject{RolePerms: member, Channel: textCh},
+			channelAffordances{CanSend: true, CanReact: true}},
+		{"moderator", permissions.Subject{RolePerms: mod, Channel: textCh},
+			channelAffordances{CanSend: true, CanModerateVoice: true, CanDeleteOthers: true, CanPin: true, CanReact: true}},
+		{"moderator with a user deny of MANAGE", permissions.Subject{RolePerms: mod, Channel: textCh, Override: permissions.ChannelOverride{UserDeny: permissions.ManageMessages}},
+			channelAffordances{CanSend: true, CanModerateVoice: true, CanReact: true}},
+		{"role deny of ADD_REACTIONS", permissions.Subject{RolePerms: member, Channel: textCh, Override: permissions.ChannelOverride{Deny: permissions.AddReactions}},
+			channelAffordances{CanSend: true}},
+		{"administrator", permissions.Subject{RolePerms: permissions.Administrator, Channel: textCh},
+			channelAffordances{CanSend: true, CanModerateVoice: true, CanDeleteOthers: true, CanPin: true, CanReact: true}},
+		{"timed-out moderator keeps pin and delete-others", permissions.Subject{RolePerms: mod, Channel: textCh, TimedOut: true},
+			channelAffordances{CanModerateVoice: true, CanDeleteOthers: true, CanPin: true}},
+		{"DM participant: pin and react, never delete-others", permissions.Subject{Channel: dmCh, DMParticipant: true},
+			channelAffordances{CanSend: true, CanPin: true, CanReact: true}},
+		{"timed-out DM participant", permissions.Subject{Channel: dmCh, DMParticipant: true, TimedOut: true},
+			channelAffordances{}},
+		{"blocked DM participant", permissions.Subject{Channel: dmCh, DMParticipant: true, DMBlocked: true},
+			channelAffordances{}},
+		{"DM non-participant, even an administrator", permissions.Subject{RolePerms: permissions.Administrator, Channel: dmCh},
+			channelAffordances{}},
+	}
+	for _, c := range cases {
+		if got := affordancesFor(c.sub); got != c.want {
+			t.Errorf("%s: affordancesFor = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
