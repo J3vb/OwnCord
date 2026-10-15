@@ -182,6 +182,12 @@ type MemberGeneration struct {
 	Generation int64 `json:"generation"`
 }
 
+type MentionReceipt struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+	MessageID int64 `json:"messageId"`
+}
+
 type Message struct {
 	ID               int64   `json:"id"`
 	ChannelID        int64   `json:"channelId"`

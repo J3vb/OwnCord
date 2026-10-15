@@ -35,7 +35,11 @@ member-generation trigger so it also watches `users.about`, so it adds no data
 class here. **Amended 2026-10-15 (custom status expiry):**
 `062_custom_status_expiry.sql` adds an expiry instant beside the existing
 `users.custom_status` line, which only its owner can set and which clears
-itself, so it adds no data class here. Other
+itself, so it adds no data class here. **Amended 2026-10-15 (mention ledger):**
+`063_mention_receipts.sql` adds a private per-recipient record of which messages
+raised each mention badge, which no other user or service reads and which is
+removed with the recipient (erasure) or the message (cascade), so it adds no
+data class here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
