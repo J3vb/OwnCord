@@ -419,19 +419,17 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Logs a fatal startup error and shows it in a dialog. A headless Linux run
-/// has nobody to answer the dialog and would block on it, so it keeps the
-/// stderr line alone.
+/// Logs a fatal startup error and shows it in a dialog. On Linux the dialog
+/// needs a display that opens: with none (a headless run) or a stale one (an
+/// ended SSH session, a dead Wayland socket) the dialog toolkit cannot start
+/// and its caller would wait forever, so the stderr line stands alone.
 fn show_startup_failure(error: &str) {
     eprintln!("Fatal startup error: {error}");
     log::error!("[exit] fatal startup error: {error}");
     #[cfg(target_os = "linux")]
     exit_watch::note_exit("startup failed");
     #[cfg(target_os = "linux")]
-    let show_dialog = has_graphical_session(
-        std::env::var_os("DISPLAY"),
-        std::env::var_os("WAYLAND_DISPLAY"),
-    );
+    let show_dialog = display_opens();
     #[cfg(not(target_os = "linux"))]
     let show_dialog = true;
     if show_dialog {
@@ -443,43 +441,100 @@ fn show_startup_failure(error: &str) {
     }
 }
 
-/// Whether an X11 or Wayland display is set, so a dialog can be shown.
+/// Whether a Wayland or X11 display actually accepts a connection, the way
+/// GTK would try them.
+#[cfg(target_os = "linux")]
+fn display_opens() -> bool {
+    let wayland = wayland_socket(
+        std::env::var_os("WAYLAND_DISPLAY"),
+        std::env::var_os("XDG_RUNTIME_DIR"),
+    )
+    .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok());
+    wayland || std::env::var_os("DISPLAY").is_some_and(|display| x11_display_opens(&display))
+}
+
+/// The Wayland socket `WAYLAND_DISPLAY` names: an absolute path as is, a bare
+/// name under `XDG_RUNTIME_DIR`.
 #[cfg(any(target_os = "linux", test))]
-fn has_graphical_session(
-    display: Option<std::ffi::OsString>,
+fn wayland_socket(
     wayland_display: Option<std::ffi::OsString>,
-) -> bool {
-    [display, wayland_display]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.is_empty())
+    runtime_dir: Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let name = std::path::PathBuf::from(wayland_display.filter(|v| !v.is_empty())?);
+    if name.is_absolute() {
+        return Some(name);
+    }
+    let dir = runtime_dir.filter(|v| !v.is_empty())?;
+    Some(std::path::Path::new(&dir).join(name))
+}
+
+/// Opens and closes the X display `name` through Xlib, loaded at runtime.
+#[cfg(target_os = "linux")]
+fn x11_display_opens(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(name) = std::ffi::CString::new(name.as_bytes()) else {
+        return false;
+    };
+    if name.is_empty() {
+        return false;
+    }
+    let Ok(xlib) = x11_dl::xlib::Xlib::open() else {
+        return false;
+    };
+    // SAFETY: name is a valid C string; a non-null result is closed once.
+    unsafe {
+        let display = (xlib.XOpenDisplay)(name.as_ptr());
+        if display.is_null() {
+            return false;
+        }
+        (xlib.XCloseDisplay)(display);
+    }
+    true
 }
 
 #[cfg(test)]
 mod startup_dialog_tests {
-    use super::has_graphical_session;
+    use super::wayland_socket;
     use std::ffi::OsString;
+    use std::path::PathBuf;
 
     #[test]
-    fn a_display_or_wayland_socket_allows_the_dialog() {
-        assert!(has_graphical_session(Some(OsString::from(":0")), None));
-        assert!(has_graphical_session(
-            None,
-            Some(OsString::from("wayland-0"))
-        ));
-        assert!(has_graphical_session(
-            Some(OsString::from(":1")),
-            Some(OsString::from("wayland-1"))
-        ));
+    fn a_bare_wayland_name_lives_in_the_runtime_dir() {
+        assert_eq!(
+            wayland_socket(
+                Some(OsString::from("wayland-0")),
+                Some(OsString::from("/run/user/1000"))
+            ),
+            Some(PathBuf::from("/run/user/1000/wayland-0"))
+        );
+        assert_eq!(
+            wayland_socket(Some(OsString::from("/tmp/wl")), None),
+            Some(PathBuf::from("/tmp/wl"))
+        );
     }
 
     #[test]
-    fn a_headless_run_keeps_stderr_only() {
-        assert!(!has_graphical_session(None, None));
-        assert!(!has_graphical_session(
-            Some(OsString::new()),
-            Some(OsString::new())
-        ));
+    fn no_wayland_name_or_runtime_dir_means_no_socket() {
+        assert_eq!(wayland_socket(None, Some(OsString::from("/run"))), None);
+        assert_eq!(
+            wayland_socket(Some(OsString::new()), Some(OsString::from("/run"))),
+            None
+        );
+        assert_eq!(
+            wayland_socket(Some(OsString::from("wayland-0")), None),
+            None
+        );
+    }
+
+    /// Needs a display: `xvfb-run cargo test -- --ignored x11`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs an X display (xvfb-run)"]
+    fn x11_a_live_display_opens_and_a_stale_one_does_not() {
+        let live = std::env::var_os("DISPLAY").expect("xvfb-run sets DISPLAY");
+        assert!(super::x11_display_opens(&live));
+        assert!(!super::x11_display_opens(&OsString::from(":97")));
+        assert!(!super::x11_display_opens(&OsString::new()));
     }
 }
 
