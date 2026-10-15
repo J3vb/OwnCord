@@ -293,7 +293,7 @@
 .composer-slow-note {
   margin-top: 6px;
   padding: 0 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 .composer-slow-note[hidden] {

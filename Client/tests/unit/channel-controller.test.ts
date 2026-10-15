@@ -2709,6 +2709,20 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("updates the note when the user's role changes", () => {
+      seed(5);
+      const before = membersStoreSubscribers.length;
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      for (const cb of membersStoreSubscribers.slice(before)) cb();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
     it("hides the note for a moderator, who bypasses slow mode", () => {
       seed(5);
       mockRole.value = "moderator";

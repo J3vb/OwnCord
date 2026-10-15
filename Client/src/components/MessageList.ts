@@ -36,6 +36,7 @@ import {
   renderMessage,
   authorAvatarKey,
   refreshConnectionControls,
+  fullDateTimeTitle,
 } from "./message-list/renderers";
 import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
@@ -1998,6 +1999,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const text = formatMessageTimestamp(item.message.timestamp);
       for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
         el.textContent = text;
+      }
+      const title = fullDateTimeTitle(item.message.timestamp);
+      for (const el of children[i]!.querySelectorAll<HTMLElement>(".msg-time, .msg-hover-time")) {
+        el.title = title;
+      }
+      const edited = children[i]!.querySelector<HTMLElement>(".msg-edited");
+      if (edited !== null && item.message.editedAt !== null) {
+        edited.title = fullDateTimeTitle(item.message.editedAt);
       }
       relabelInlineTimestamps(children[i]!);
     }

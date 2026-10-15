@@ -1567,6 +1567,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         () => refreshComposerState(),
       ),
     );
+    // A role change can make the user exempt from slow mode, or no longer so.
+    composerGatingUnsubs.push(
+      membersStore.subscribeSelector(
+        (s) => s.roleRevision ?? 0,
+        () => refreshComposerState(),
+      ),
+    );
     if (dmRecipientId !== null) {
       // Un-gate live when the block clears (unblock) and gate on a refused send.
       composerGatingUnsubs.push(

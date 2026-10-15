@@ -78,7 +78,7 @@ import {
 // -- Composite rendering functions --------------------------------------------
 
 /** Weekday, date and time for a tooltip, in Discord's "F" style. */
-function fullDateTimeTitle(iso: string): string {
+export function fullDateTimeTitle(iso: string): string {
   return formatFullDateTime(parseTimestamp(iso));
 }
 

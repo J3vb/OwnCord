@@ -1782,6 +1782,7 @@ describe("MessageList", () => {
         const text = container.querySelector(".msg-time")!.textContent!;
         expect(text).toContain("18:34");
         expect(text).not.toMatch(/AM|PM/i);
+        expect(container.querySelector<HTMLElement>(".msg-time")!.title).toContain("18:34");
       } finally {
         vi.useRealTimers();
       }
