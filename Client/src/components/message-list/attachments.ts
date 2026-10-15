@@ -26,6 +26,7 @@ import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
 import { messageStatusText } from "../../i18n/messageStatus";
+import type { ImageMenuTarget } from "./image-menu";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -1196,6 +1197,19 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     }
 
     function attachLightbox(img: HTMLImageElement): void {
+      // Keyboard-operable like an inline image (B9-9): focus it and Enter or
+      // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
+      img.tabIndex = 0;
+      img.setAttribute("role", "button");
+      img.setAttribute(
+        "aria-label",
+        messageStatusText("file.openImage", { filename: att.filename }),
+      );
+      img.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        img.click();
+      });
       img.addEventListener("click", () => {
         openImageLightbox(img.src, att.filename, { url: resolvedUrl });
       });
@@ -1223,6 +1237,13 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       });
       recoverEvictedImage(img, { url: inlineUrl });
       attachLightbox(img);
+      bindImageMenu({
+        img,
+        link: null,
+        // The row may show a thumbnail or a frozen GIF frame; copy the file.
+        full: () => fetchImageAsObjectUrl(resolvedUrl),
+        save: () => downloadFile(resolvedUrl, att.filename),
+      });
       img.addEventListener(
         "load",
         () => {
@@ -1303,6 +1324,54 @@ async function downloadFile(url: string, filename: string): Promise<void> {
   }
 }
 
+// -- Image menu ---------------------------------------------------------------
+
+type ImageMenuModule = typeof import("./image-menu");
+/** Set once the lazy menu module has loaded, so teardown can close its menu. */
+let imageMenuModule: ImageMenuModule | null = null;
+
+function loadImageMenu(): Promise<ImageMenuModule> {
+  return import("./image-menu").then((m) => {
+    imageMenuModule = m;
+    return m;
+  });
+}
+
+/** Save an image whose bytes are already in the webview. */
+export function saveImageBytes(src: string, url: string): Promise<void> {
+  return loadImageMenu().then((m) => m.saveImageBytes(src, url));
+}
+
+/**
+ * Open the image menu (Copy Image, Copy Link, Open Link, Save Image) on
+ * right-click of `target.img`, or on the Menu key / Shift+F10 when the image
+ * has focus (they fire `contextmenu` with no pointer position). `signal`, when
+ * given, closes the menu with its owner (the lightbox).
+ */
+export function bindImageMenu(target: ImageMenuTarget, signal?: AbortSignal): void {
+  const { img } = target;
+  img.addEventListener(
+    "contextmenu",
+    (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // A hidden image is still loading or refused: nothing to copy.
+      if (img.hidden || !img.hasAttribute("src")) return;
+      let { clientX: x, clientY: y } = e;
+      if (x === 0 && y === 0) {
+        const rect = img.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      }
+      loadImageMenu().then(
+        (m) => m.openImageMenu(x, y, target, signal),
+        (err: unknown) => log.warn("Image menu failed to load", { error: String(err) }),
+      );
+    },
+    signal !== undefined ? { signal } : undefined,
+  );
+}
+
 // -- Lightbox -----------------------------------------------------------------
 
 // Store the cleanup function for the active lightbox so rapid reopens
@@ -1314,6 +1383,7 @@ let activeLightboxClose: (() => void) | null = null;
  *  document listeners and a revoked blob URL. */
 export function closeActiveLightbox(): void {
   activeLightboxClose?.();
+  imageMenuModule?.closeImageMenu();
 }
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
@@ -1418,6 +1488,8 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   let clickStartY = 0;
 
   img.addEventListener("mousedown", (e) => {
+    // A right-click opens the image menu; only the primary button pans.
+    if (e.button !== 0) return;
     e.preventDefault();
     clickStartX = e.clientX;
     clickStartY = e.clientY;
@@ -1459,6 +1531,31 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
+  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
+  bindImageMenu(
+    {
+      img,
+      link: sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null,
+      // img may still show the thumbnail or a frozen GIF frame it opened with.
+      full:
+        sourceUrl === null
+          ? undefined
+          : isServerUrl(sourceUrl)
+            ? () => fetchImageAsObjectUrl(sourceUrl)
+            : () => fetchExternalImage({ url: sourceUrl }),
+      save: () => {
+        if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, alt);
+        if (sourceUrl === null) return saveImageBytes(img.src, "");
+        // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
+        // shows a one-frame preview.
+        return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
+          saveImageBytes(bytes ?? img.src, sourceUrl),
+        );
+      },
+    },
+    disposable.signal,
+  );
+
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     close();
@@ -1470,6 +1567,12 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
+    // Focus stays on the close button, so the Menu key / Shift+F10 open the
+    // image's menu from there, centred on the image.
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    }
     if (e.key === "Tab") {
       // Contain focus in the dialog: its close button is the only Tab stop.
       e.preventDefault();

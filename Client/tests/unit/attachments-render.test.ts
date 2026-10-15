@@ -583,6 +583,37 @@ describe("renderAttachment — server thumbnails", () => {
     expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
   });
 
+  it("an image row is a keyboard control that opens the lightbox", async () => {
+    const el = renderAttachment(att);
+    document.body.appendChild(el);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    const img = el.querySelector("img")!;
+    expect(img.tabIndex).toBe(0);
+    expect(img.getAttribute("aria-label")).toBe("Open photo.jpg");
+
+    img.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(document.querySelector(".image-lightbox")).not.toBeNull();
+    el.remove();
+  });
+
+  it("right-click on an image row opens Copy Image and Save Image", async () => {
+    const el = renderAttachment(att);
+    document.body.appendChild(el);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    el.querySelector("img")!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        Array.from(document.querySelectorAll(".image-context-menu [role='menuitem']")).map(
+          (e) => e.textContent,
+        ),
+      ).toEqual(["Copy Image", "Save Image"]),
+    );
+    el.remove();
+  });
+
   it("opening a thumbnail loads the original into the lightbox", async () => {
     authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
     const el = renderAttachment(att);

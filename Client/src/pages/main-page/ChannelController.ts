@@ -21,6 +21,7 @@ import { createMessageInput } from "@components/MessageInput";
 import type {
   ComposerDraft,
   MessageInputComponent,
+  ReplyTarget,
   SentAttachment,
 } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
@@ -206,6 +207,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     {
       content: string;
       replyTo: number | null;
+      // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
+      // retry resends the same value.
+      replyPing?: boolean;
       // Each file with its name (and picked File, when there is one), so a
       // file the server did not attach can go back into the composer (2A-3).
       attachments: readonly SentAttachment[];
@@ -310,6 +314,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     owned.release?.();
   }
 
+  /** 3A-12: the reply bar shows the display name, and no @ON/@OFF on your own message. */
+  function replyTargetOf(msg: {
+    readonly id: number;
+    readonly user: {
+      readonly id: number;
+      readonly username: string;
+      readonly display_name?: string | null;
+    };
+  }): ReplyTarget {
+    return {
+      messageId: msg.id,
+      username: msg.user.display_name || msg.user.username,
+      self: msg.user.id === getCurrentUserId(),
+    };
+  }
+
   /** 2A-3: give files a send did not carry back to the composer of the
    *  channel it went to, mounted or stashed, with the send's reply target
    *  when given and that composer has none of its own. */
@@ -318,13 +338,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     files: readonly SentAttachment[],
     reason: "skipped" | "unavailable",
     replyTo: number | null = null,
+    ping?: boolean,
   ): void {
     const target =
       replyTo === null
         ? undefined
         : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
-    const reply =
-      target === undefined ? null : { messageId: target.id, username: target.user.username };
+    const reply = target === undefined ? null : { ...replyTargetOf(target), ping };
     if (sentTo === currentChannelId && messageInput !== null) {
       messageInput.restoreUnsent(files, reason, reply);
       return;
@@ -495,6 +515,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       replyTo: number | null,
       files: readonly SentAttachment[],
       existingClientMessageId?: string,
+      replyPing = false,
     ): void {
       const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
@@ -560,6 +581,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
+          ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
           channelId,
           userId: owner.userId,
@@ -585,6 +607,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             channel_id: channelId,
             content,
             reply_to: replyTo,
+            ...(replyTo === null ? {} : { reply_ping: replyPing }),
             attachments,
             ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
           },
@@ -601,6 +624,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
+          ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
           channelId,
           userId: owner.userId,
@@ -654,6 +678,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
               ...recovered,
               userId: owner.userId,
               replyTo: null,
+              replyPing: false,
               attachments: [] as readonly SentAttachment[],
             }
           : undefined);
@@ -683,7 +708,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         performSend(draft.content, null, draft.attachments);
         return;
       }
-      performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
+      performSend(
+        draft.content,
+        draft.replyTo,
+        draft.attachments,
+        draft.clientMessageId,
+        draft.replyPing === true,
+      );
     }
 
     function deleteDraft(correlationId: string): void {
@@ -961,7 +992,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);
         const msg = msgs.find((m) => m.id === msgId);
-        messageInput?.setReplyTo(msgId, msg?.user.username ?? "");
+        if (msg === undefined) messageInput?.setReplyTo(msgId, "");
+        else {
+          const { messageId, username, ...replyOpts } = replyTargetOf(msg);
+          messageInput?.setReplyTo(messageId, username, replyOpts);
+        }
       },
       onEditClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);
@@ -1040,6 +1075,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         replyTo: number | null,
         _attachments: readonly string[],
         files: readonly SentAttachment[],
+        replyPing: boolean,
       ) => {
         // A reply whose target was deleted while composing sends as a plain
         // message.
@@ -1047,7 +1083,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           replyTo === null
             ? undefined
             : getChannelMessages(channelId).find((m) => m.id === replyTo);
-        performSend(content, target?.deleted === true ? null : replyTo, files);
+        const reply = target?.deleted === true ? null : replyTo;
+        performSend(content, reply, files, undefined, reply !== null && replyPing === true);
       },
       onUploadFile: async (
         file: File,
@@ -1429,7 +1466,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // same ids would fail the same way.
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
-      putBackUnsent(draft.channelId, draft.attachments, "unavailable", draft.replyTo);
+      putBackUnsent(
+        draft.channelId,
+        draft.attachments,
+        "unavailable",
+        draft.replyTo,
+        draft.replyPing,
+      );
     }),
   ];
 

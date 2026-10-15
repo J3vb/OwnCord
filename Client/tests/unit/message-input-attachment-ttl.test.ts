@@ -97,6 +97,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-2"],
       [expect.objectContaining({ id: "srv-2" })],
+      false,
     );
     comp.destroy?.();
   });
@@ -135,6 +136,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-3"],
       [expect.objectContaining({ id: "srv-3" })],
+      false,
     );
     comp.destroy?.();
   });
@@ -156,6 +158,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-1"],
       [expect.objectContaining({ id: "srv-1" })],
+      false,
     );
     expect(onUploadFile).toHaveBeenCalledTimes(1);
     comp.destroy?.();
@@ -191,6 +194,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-2"],
       [expect.objectContaining({ id: "srv-2" })],
+      false,
     );
     comp.destroy?.();
   });
@@ -219,7 +223,7 @@ describe("MessageInput staged attachment age limit", () => {
     (chip.querySelector(".attachment-preview-remove") as HTMLButtonElement).click();
     await vi.advanceTimersByTimeAsync(1000);
     send(container);
-    expect(opts.onSend).toHaveBeenCalledWith("with file", null, [], []);
+    expect(opts.onSend).toHaveBeenCalledWith("with file", null, [], [], false);
     comp.destroy?.();
   });
 
@@ -276,6 +280,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-2"],
       [expect.objectContaining({ id: "srv-2" })],
+      false,
     );
     comp.destroy?.();
   });
@@ -306,6 +311,7 @@ describe("MessageInput staged attachment age limit", () => {
       null,
       ["srv-2"],
       [expect.objectContaining({ id: "srv-2" })],
+      false,
     );
     comp.destroy?.();
   });

@@ -22,6 +22,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { loadPref, savePref } from "@lib/preferences";
 import type { IconName } from "@lib/icons";
 import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
@@ -249,6 +250,14 @@ export {
   clearIncomingCall,
 } from "../features/direct-messages/callAlerts";
 
+/** The expanded panel's dragged height, in px; 0 means the default share. */
+const HEIGHT_PREF = "dmCallHeight";
+/** Keep MIN_HEIGHT in step with the clamp on `.dm-call-panel--expanded`. */
+const MIN_HEIGHT = 160;
+/** What a drag always leaves for the message list. */
+const MESSAGES_MIN_HEIGHT = 120;
+const KEY_STEP = 24;
+
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
   const unsubs: Array<() => void> = [];
@@ -286,7 +295,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     "aria-live": "polite",
     "data-testid": "dm-call-live",
   });
-  appendChildren(root, body, live);
+  // The drag handle on the panel's bottom edge (Discord's resizable call):
+  // outside `body`, so a rebuild keeps it and a drag in progress.
+  const resizer = createElement("div", {
+    class: "dcp-resize",
+    role: "separator",
+    "aria-orientation": "horizontal",
+    "aria-label": d("resizeLabel"),
+    "aria-valuemin": String(MIN_HEIGHT),
+    tabindex: "0",
+    "data-testid": "dcp-resize",
+  });
+  appendChildren(root, body, resizer, live);
+  let savedHeight = loadPref<number>(HEIGHT_PREF, 0);
+  let drag: { startY: number; startHeight: number; max: number } | null = null;
 
   // Per-render references for the in-place refresh.
   let avatars = new Map<number, AvatarRef>();
@@ -743,6 +765,117 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     body.appendChild(row);
   }
 
+  // --- Resize -------------------------------------------------------------
+
+  /** Only the expanded panel resizes; collapsed and strip rows keep their own
+   *  height. The stylesheet clamps the height to the chat column. */
+  function applyHeight(): void {
+    const expanded = root.classList.contains("dm-call-panel--expanded");
+    resizer.hidden = !expanded;
+    if (!expanded) {
+      endDrag();
+      root.style.removeProperty("--dcp-height");
+      return;
+    }
+    if (savedHeight > 0) root.style.setProperty("--dcp-height", `${String(savedHeight)}px`);
+    else root.style.removeProperty("--dcp-height");
+    resizer.setAttribute("aria-valuemax", String(maxHeight()));
+    resizer.setAttribute("aria-valuenow", String(drawnHeight()));
+  }
+
+  function drawnHeight(): number {
+    return Math.round(root.getBoundingClientRect().height);
+  }
+
+  /** The tallest the panel may be: the chat column less its fixed rows (the
+   *  header, typing line and composer, at their current heights) and room for
+   *  a few messages. */
+  function maxHeight(): number {
+    let column = root.parentElement;
+    while (column !== null && getComputedStyle(column).display === "contents") {
+      column = column.parentElement;
+    }
+    if (column === null) return MIN_HEIGHT;
+    let fixed = 0;
+    for (const child of Array.from(column.children)) {
+      if (child.contains(root) || parseFloat(getComputedStyle(child).flexGrow) > 0) continue;
+      fixed += child.getBoundingClientRect().height;
+    }
+    const available = column.getBoundingClientRect().height - fixed - MESSAGES_MIN_HEIGHT;
+    return Math.max(MIN_HEIGHT, Math.round(available));
+  }
+
+  /** Saves what is actually drawn: an audio-only panel never goes below its
+   *  content (min-height: fit-content), so the saved height cannot sit under it. */
+  function setHeight(height: number, max: number): void {
+    savedHeight = Math.round(Math.max(MIN_HEIGHT, Math.min(height, max)));
+    applyHeight();
+    const drawn = drawnHeight();
+    if (drawn > 0 && drawn !== savedHeight) {
+      savedHeight = drawn;
+      applyHeight();
+    }
+  }
+
+  function endDrag(): void {
+    if (drag === null) return;
+    drag = null;
+    root.classList.remove("dm-call-panel--resizing");
+    savePref(HEIGHT_PREF, savedHeight);
+  }
+
+  const resizeOpts = { signal: disposable.signal };
+  resizer.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      drag = {
+        startY: e.clientY,
+        startHeight: root.getBoundingClientRect().height,
+        max: maxHeight(),
+      };
+      root.classList.add("dm-call-panel--resizing");
+      try {
+        resizer.setPointerCapture(e.pointerId);
+      } catch {
+        // No capture (the pointer is already gone): moves over the handle still resize.
+      }
+    },
+    resizeOpts,
+  );
+  resizer.addEventListener(
+    "pointermove",
+    (e: PointerEvent) => {
+      if (drag !== null) setHeight(drag.startHeight + e.clientY - drag.startY, drag.max);
+    },
+    resizeOpts,
+  );
+  resizer.addEventListener("pointerup", endDrag, resizeOpts);
+  resizer.addEventListener("pointercancel", endDrag, resizeOpts);
+  resizer.addEventListener("lostpointercapture", endDrag, resizeOpts);
+  resizer.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      const step = e.key === "ArrowUp" ? -KEY_STEP : KEY_STEP;
+      setHeight(root.getBoundingClientRect().height + step, maxHeight());
+      savePref(HEIGHT_PREF, savedHeight);
+    },
+    resizeOpts,
+  );
+  // Double-click puts the default height back.
+  resizer.addEventListener(
+    "dblclick",
+    () => {
+      savedHeight = 0;
+      applyHeight();
+      savePref(HEIGHT_PREF, 0);
+    },
+    resizeOpts,
+  );
+
   // --- Update ---------------------------------------------------------------
 
   function rebuild(): void {
@@ -794,6 +927,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       peopleGiven = people.length > 0;
     }
     root.hidden = view.kind === "none";
+    // After the reveal, so the separator's value is measured from a drawn panel.
+    applyHeight();
     if (view.kind === "none") root.removeAttribute("aria-label");
     else root.setAttribute("aria-label", d("region", { name: callName(view.dm, currentUserId()) }));
     root.dataset.state = view.kind;

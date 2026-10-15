@@ -21,11 +21,12 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-# Cancel a superseded run of the same pull request. Pushes to dev and main are
-# never cancelled: each one is a merged tree that the next merge would
-# otherwise cancel before it finished, so the "green alone, red together" check
-# a dev push exists for rarely completed. Same-ref pushes still queue behind the
-# running one (GitHub keeps one pending run per group).
+# Cancel a superseded run of the same pull request. Any other run (a push to
+# dev or main, a manual dispatch) is never cancelled once it is running: each
+# dev push is a merged tree that the next merge would otherwise cancel before
+# it finished, so the "green alone, red together" check a dev push exists for
+# rarely completed. Later runs queue behind it, and GitHub keeps only one
+# pending run per group, so of three quick merges the middle one is skipped.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -540,17 +541,18 @@ jobs:
         run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
 
       # One leg is enough: -tags deadlock swaps syncutil's lock types and
-      # reports lock-order inversions, which do not depend on the OS. The race
-      # step above still runs every test on both legs.
+      # reports lock-order inversions, which do not depend on the OS, and no
+      # Windows-only file takes a syncutil lock. The race step above still runs
+      # every test on both legs.
       - name: Run tests with deadlock detection
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
       # Go's test cache does not record it as an input and the -race run above
-      # answers a doc-only edit from cache. The deadlock leg happens to run them
-      # with -count=1 today; this step says so on purpose, so narrowing that
-      # leg's package set cannot silently drop the gates.
+      # answers a doc-only edit from cache. The ubuntu deadlock step happens to
+      # run them with -count=1 today; this step says so on purpose, on both legs,
+      # so narrowing that step's package set cannot silently drop the gates.
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
       #   admin            -> CHANGELOG.md (the panel's bundled release notes)

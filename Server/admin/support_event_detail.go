@@ -428,18 +428,31 @@ func supportTruncate(s string) string {
 
 // supportAttachDetail fills Detail on events, newest first, until
 // supportDetailBudget is spent; older events past it keep only their code.
+// A failure that repeats logs the same attrs each time, so each distinct
+// attrs string is scrubbed once and its read-only detail shared.
 func supportAttachDetail(events []supportEvent, attrs []string, known *supportKnown) {
+	type scrubbed struct {
+		detail map[string]any
+		size   int
+	}
+	seen := map[string]scrubbed{}
 	used := 0
 	for i := len(events) - 1; i >= 0; i-- {
-		detail := supportDetail(attrs[i], known)
-		if detail == nil {
+		s, ok := seen[attrs[i]]
+		if !ok {
+			s.detail = supportDetail(attrs[i], known)
+			s.size = -1
+			if s.detail != nil {
+				if data, err := json.Marshal(s.detail); err == nil {
+					s.size = len(data)
+				}
+			}
+			seen[attrs[i]] = s
+		}
+		if s.size < 0 || used+s.size > supportDetailBudget {
 			continue
 		}
-		data, err := json.Marshal(detail)
-		if err != nil || used+len(data) > supportDetailBudget {
-			continue
-		}
-		used += len(data)
-		events[i].Detail = detail
+		used += s.size
+		events[i].Detail = s.detail
 	}
 }

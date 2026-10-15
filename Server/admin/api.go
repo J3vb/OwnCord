@@ -14,12 +14,12 @@ import (
 )
 
 // setupLimiterReapInterval controls how often the setup endpoint's
-// dedicated rate limiter reaps stale window entries. A var, not a const, so
-// tests can shrink it instead of waiting on the real interval (see
-// export_test.go). Cleanup is per-key-window-aware since item 6 (round 3
-// review; auth/ratelimit.go's entry.window), so there is no separate
-// max-window to tune here anymore — each entry retires on its own window.
-var setupLimiterReapInterval = 5 * time.Minute
+// dedicated rate limiter reaps stale window entries. Cleanup is
+// per-key-window-aware since item 6 (round 3 review; auth/ratelimit.go's
+// entry.window), so there is no separate max-window to tune here — each
+// entry retires on its own window. The reap test runs on synctest's fake
+// clock rather than shrinking this.
+const setupLimiterReapInterval = 5 * time.Minute
 
 // setupLimiterHook, when non-nil, receives the *auth.RateLimiter NewAdminAPI
 // creates for the /setup endpoint. Test-only seam: NewAdminAPI returns only
@@ -172,19 +172,12 @@ func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
 // fires there is no live goroutine, only a runtime timer, so nothing needs
 // to stop it.
 func startSetupLimiterReap(rl *auth.RateLimiter) {
-	// Capture the timing once, synchronously, on the caller's goroutine.
-	// The rescheduled AfterFunc callbacks below must never re-read the
-	// package vars themselves: those callbacks run on their own goroutine
-	// indefinitely (nothing stops the chain), so a later test's
-	// SetSetupLimiterReapTiming restoring the vars on its own goroutine
-	// would otherwise race an in-flight reap here.
-	interval := setupLimiterReapInterval
 	var reap func()
 	reap = func() {
 		rl.Cleanup()
-		time.AfterFunc(interval, reap)
+		time.AfterFunc(setupLimiterReapInterval, reap)
 	}
-	time.AfterFunc(interval, reap)
+	time.AfterFunc(setupLimiterReapInterval, reap)
 }
 
 // ─── NewAdminAPI ──────────────────────────────────────────────────────────────

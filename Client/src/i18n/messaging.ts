@@ -28,7 +28,10 @@ export const messagingText = defineCatalog("messaging", {
     other: "Scroll to bottom, {shown} new messages",
   },
 
-  "reply.replyingTo": "Replying to @{username}",
+  "reply.replyingTo": "Replying to {username}",
+  "reply.pingOn": "@ ON",
+  "reply.pingOff": "@ OFF",
+  "reply.pingLabel": "Mention the author of the message you reply to",
   "reply.cancel": "Cancel reply",
   "composer.placeholder": "Message #{channel}",
   "composer.announcementOnly": "Only moderators can post in announcement channels",

@@ -16,6 +16,7 @@ export const dmCallText = defineCatalog("dmCall", {
   collapseLabel: "Collapse call",
   expand: "Expand",
   expandLabel: "Expand call",
+  resizeLabel: "Resize call",
   share: "Share your screen",
   leave: "Leave call",
   calling: "Calling…",

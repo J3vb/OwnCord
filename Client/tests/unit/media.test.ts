@@ -286,6 +286,30 @@ describe("media.ts", () => {
       expect(src).toBe(createObjectURLMock.mock.results[0]!.value);
     });
 
+    it("opens the image menu with the image's link on right-click", async () => {
+      const wrap = renderInlineImage("https://example.com/menu.gif");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      wrap.querySelector("img")!.dispatchEvent(new Event("load"));
+      wrap.querySelector("img")!.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 5,
+          clientY: 5,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(
+          Array.from(document.querySelectorAll(".image-context-menu [role='menuitem']")).map(
+            (el) => el.textContent,
+          ),
+        ).toEqual(["Copy Image", "Copy Link", "Open Link", "Save Image"]),
+      );
+      closeActiveLightbox();
+      wrap.remove();
+    });
+
     it("sets default min-height of 200px when no cached height", () => {
       const wrap = renderInlineImage("https://example.com/new.jpg");
       expect(wrap.style.minHeight).toBe("200px");
