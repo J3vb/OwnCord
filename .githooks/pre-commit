@@ -28,6 +28,10 @@ if [ -n "$go_staged" ]; then
         unformatted=$(gofmt -l $go_staged)
         [ -n "$unformatted" ] && fail "gofmt needed (run gofmt -w on): $unformatted"
         (cd Server && go vet ./...) || fail "go vet"
+        # The db-import table in docs/architecture/server-boundaries.md goes
+        # stale when a file starts or stops importing db; CI fails on it.
+        (cd Server && go test -count=1 ./cmd/dbinventory/) \
+            || fail "docs/architecture/server-boundaries.md is stale — paste the output of 'go run ./cmd/dbinventory' (in Server/) between its markers"
     else
         printf 'pre-commit: WARNING: go/gofmt not installed; skipping Go checks.\n' >&2
     fi
@@ -136,6 +140,9 @@ if [ -n "$ts_staged" ]; then
             npx oxlint $test_rel || fail "oxlint"
         fi
         npm run -s typecheck || fail "tsc --noEmit"
+        # A new src file must be listed in one shard of stryker.shard.config.mjs.
+        node scripts/check-mutation-shards.mjs \
+            || fail "a Client/src file is in no mutation shard — add it to Client/stryker.shard.config.mjs"
         cd "$repo_root" || exit 1
     fi
 fi
