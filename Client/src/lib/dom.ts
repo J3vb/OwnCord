@@ -96,3 +96,16 @@ export function focusIsOurs(owner: Element): boolean {
   const active = document.activeElement;
   return active === null || active === document.body || owner.contains(active);
 }
+
+/**
+ * Whether a right-click on `target` should keep the webview's own menu: a
+ * text field, where it offers Cut, Copy, Paste, Select All and spelling
+ * fixes. The app suppresses that menu everywhere else.
+ */
+export function wantsNativeMenu(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLInputElement) {
+    return /^(text|search|email|url|password|number|tel)$/.test(target.type);
+  }
+  return target instanceof HTMLElement && target.isContentEditable === true;
+}

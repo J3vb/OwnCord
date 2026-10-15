@@ -9,7 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
-import { setOwnedTimeout } from "@lib/dom";
+import { setOwnedTimeout, wantsNativeMenu } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { installFileDropGuard } from "./features/messaging/fileDropGuard";
 
@@ -100,9 +100,9 @@ function voiceSessionLeave(sendWsLeave: boolean): void {
     .catch((e) => log.warn("Failed to leave voice session", e));
 }
 
-// Disable the default browser context menu globally.
+// Disable the default browser context menu everywhere but text fields.
 document.addEventListener("contextmenu", (e) => {
-  e.preventDefault();
+  if (!wantsNativeMenu(e.target)) e.preventDefault();
 });
 
 // F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.

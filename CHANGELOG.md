@@ -59,6 +59,9 @@ and only when it changes something a contributor or fork holder must do
 - A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone.
 - Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
 - Typing `#` in the message box suggests channels to link, as `@` does for people.
+- Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
+- Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
+- Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
 - A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
