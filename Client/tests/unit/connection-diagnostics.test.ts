@@ -45,6 +45,7 @@ describe("connection diagnostics", () => {
       ws: { ping: vi.fn().mockResolvedValue(undefined) },
       getRoom: vi.fn().mockReturnValue(null),
       getUserMedia: vi.fn().mockResolvedValue(stream),
+      listNativeInputs: vi.fn().mockResolvedValue(null),
     };
   });
   afterEach(() => {
@@ -248,6 +249,70 @@ describe("connection diagnostics", () => {
     expect(final("media")).toMatchObject({
       status: "failed",
       detail: expect.stringContaining("call changed"),
+    });
+  });
+
+  describe("Linux native voice", () => {
+    afterEach(() => localStorage.removeItem("owncord:settings:audioInputDevice"));
+    function nativeRoom(state = "connected", signaling = true): Room {
+      const room = {
+        state,
+        remoteParticipants: new Map([["other", {}]]),
+        // The native room has no browser transports or signaling socket.
+        engine: { pcManager: undefined, client: { ws: undefined } },
+        isSignalingConnected: vi.fn().mockReturnValue(signaling),
+      } as unknown as Room;
+      services.getRoom = vi.fn().mockReturnValue(room);
+      return room;
+    }
+
+    it("passes signaling on a connected native call and does not claim media was checked", async () => {
+      nativeRoom();
+      await run(false);
+      expect(final("signaling")?.status).toBe("passed");
+      expect(final("media")).toMatchObject({
+        status: "not-tested",
+        detail: expect.stringContaining("Linux"),
+      });
+    });
+
+    it("fails signaling while the native backend is reconnecting", async () => {
+      nativeRoom("reconnecting", false);
+      await run(false);
+      expect(final("signaling")?.status).toBe("failed");
+    });
+
+    it("checks the saved microphone against the native list without opening a webview device", async () => {
+      localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("alsa:usb-mic"));
+      services.listNativeInputs = vi.fn().mockResolvedValue([
+        { deviceId: "alsa:default", label: "Default", kind: "audioinput" },
+        { deviceId: "alsa:usb-mic", label: "USB mic", kind: "audioinput" },
+      ]);
+      await run();
+      expect(services.getUserMedia).not.toHaveBeenCalled();
+      expect(final("microphone")).toMatchObject({
+        status: "passed",
+        detail: expect.stringContaining("microphone is connected"),
+      });
+    });
+
+    it("says calls will use the default when the saved native microphone is gone", async () => {
+      localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("alsa:gone"));
+      services.listNativeInputs = vi
+        .fn()
+        .mockResolvedValue([{ deviceId: "alsa:default", label: "Default", kind: "audioinput" }]);
+      await run();
+      expect(final("microphone")).toMatchObject({
+        status: "passed",
+        detail: expect.stringContaining("system default"),
+      });
+    });
+
+    it("fails the microphone check when the native backend lists no microphone", async () => {
+      services.listNativeInputs = vi.fn().mockResolvedValue([]);
+      await run();
+      expect(services.getUserMedia).not.toHaveBeenCalled();
+      expect(final("microphone")?.status).toBe("failed");
     });
   });
 });
