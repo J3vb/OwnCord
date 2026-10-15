@@ -194,6 +194,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       }
       // The same gap for the camera and share flags: an announce sent while
       // the socket was down never reached the server (WP 1C-8).
+      for (const uid of left) setPeerVideoDecode(uid, undefined);
       void livekitSession().then(({ handleParticipantLeft, reconcileVideoFlags }) => {
         for (const uid of left) void handleParticipantLeft(uid);
         if (prevVoiceChannelId === selfVoiceState.channel_id)
@@ -353,6 +354,8 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // "reconnecting" badge can mean the loop, so any other clears the store now.
   const loopMayOwn = voiceStore.getState().voiceStatus === "reconnecting";
   if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
+  // A rejoin may come from another client; its own announce restates the list.
+  setPeerVideoDecode(payload.user_id, undefined);
   void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
     if (sameChannel) void handleParticipantLeft(payload.user_id);
     if (shouldTeardownSession && !isAutoReconnecting()) {

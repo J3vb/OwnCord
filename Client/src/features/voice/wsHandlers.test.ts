@@ -3,6 +3,7 @@ import {
   handleVoiceE2eeAnnounce,
   handleVoiceError,
   handleVoiceJoinRollback,
+  handleVoiceLeave,
   handleVoiceState,
   snapshotReadyVoice,
 } from "./wsHandlers";
@@ -18,7 +19,7 @@ import {
 import { authStore } from "../../stores/auth.store";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
-import type { Payload } from "../connection/dispatchContext";
+import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 import { expectConsole } from "../../../tests/helpers/console";
 
 vi.mock("../../lib/livekitSession", () => ({
@@ -334,6 +335,15 @@ describe("handleVoiceE2eeAnnounce", () => {
     handleVoiceE2eeAnnounce(announce(["vp8"]));
     expect(voiceStore.getState().peerVideoDecode?.has(5)).toBe(true);
     handleVoiceE2eeAnnounce(announce(undefined));
+    expect(voiceStore.getState().peerVideoDecode?.has(5)).toBe(false);
+  });
+
+  it("drops a peer's list when that peer leaves voice", () => {
+    joinVoiceChannel(4);
+    handleVoiceE2eeAnnounce(announce(["vp8"]));
+    handleVoiceLeave({ channel_id: 4, user_id: 5 }, {
+      voiceRejoinChannelId: null,
+    } as ReconnectClock);
     expect(voiceStore.getState().peerVideoDecode?.has(5)).toBe(false);
   });
 
