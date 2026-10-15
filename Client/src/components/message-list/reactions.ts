@@ -141,10 +141,8 @@ export function applyReactionLock(el: HTMLElement, locked: string | null, defaul
 
 /** Apply the current lock to every reaction control under `root`. Called when
  *  the timeout or the connection changes; no row is rebuilt. */
-export function refreshReactionLocks(root: ParentNode, channelId?: number): void {
-  const locked = reactionLockReason(
-    channelId === undefined ? undefined : channelCanReact(channelId),
-  );
+export function refreshReactionLocks(root: ParentNode, channelId: number): void {
+  const locked = reactionLockReason(channelCanReact(channelId));
   for (const el of root.querySelectorAll<HTMLElement>(
     ".reaction-chip, [data-testid^='msg-react-']",
   )) {

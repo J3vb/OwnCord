@@ -354,9 +354,21 @@ describe("channel permission bits (3A-13)", () => {
     it("stops reacting to channel changes after destroy", () => {
       setRole(false);
       setChannel({ can_delete_others: false });
+      const original = channelsStore.subscribeSelector.bind(channelsStore);
+      const unsubs: Array<ReturnType<typeof vi.fn>> = [];
+      const spy = vi
+        .spyOn(channelsStore, "subscribeSelector")
+        .mockImplementation((...args: Parameters<typeof original>) => {
+          const unsub = vi.fn(original(...args));
+          unsubs.push(unsub);
+          return unsub;
+        });
       mount();
+      spy.mockRestore();
+      expect(unsubs.length).toBeGreaterThanOrEqual(2);
       list?.destroy?.();
       list = null;
+      for (const unsub of unsubs) expect(unsub).toHaveBeenCalledTimes(1);
       expect(() => patch({ canDeleteOthers: true })).not.toThrow();
     });
   });
