@@ -159,6 +159,14 @@ function scanClose(src: string, from: number, marker: string): number {
         continue;
       }
     }
+    if (c === "<") {
+      ANGLE_URL_RE.lastIndex = j;
+      const angle = ANGLE_URL_RE.exec(src);
+      if (angle !== null) {
+        j += angle[0].length;
+        continue;
+      }
+    }
     const u = urlEnd(src, j);
     if (u > j) {
       j = u;

@@ -298,6 +298,11 @@ describe("<url> posts a link with no embed", () => {
     expect(extractUrls("\\\\<https://a.example/x>")).toEqual([]);
   });
 
+  it("stays whole inside emphasis that uses a character from the address", () => {
+    const el = renderMessageContent("**<https://example.com/a**>**");
+    expect(el.querySelector("strong a")?.getAttribute("href")).toBe("https://example.com/a**");
+  });
+
   it("holds an address as long as a message allows", () => {
     const url = `https://a.example/${"x".repeat(3000)}`;
     expect(parseInline(`<${url}>`)).toEqual([{ type: "url", url, raw: `<${url}>` }]);

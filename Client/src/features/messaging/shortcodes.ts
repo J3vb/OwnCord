@@ -7,7 +7,7 @@
  * backslash. Before the emoji set has loaded, the text is sent as typed.
  */
 import { codeSpanEnd } from "../../lib/markdown";
-import { customEmojiLoaded, resolveEmoji } from "@stores/emoji.store";
+import { customEmojiLoaded, resolveEmoji } from "../../stores/emoji.store";
 import { emojiCatalog, emojiForShortcode, skinTone, withSkinTone } from "./emojiCatalog";
 
 /** Parts never touched besides code spans and masked links: code blocks,
