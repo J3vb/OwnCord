@@ -364,6 +364,9 @@ func (h *Hub) refreshChannelVisibilityAffordances(ctx context.Context, ch *db.Ch
 // channel-override handlers do, so the per-client lookups below repopulate from
 // post-change data.
 func (h *Hub) RefreshAllChannelVisibility() {
+	// Deferred so the member_timeouts views follow the role change even when
+	// the channel list cannot be read.
+	defer h.refreshTimeoutViewsAfterRoleChange()
 	if h.db == nil {
 		return
 	}
@@ -379,7 +382,6 @@ func (h *Hub) RefreshAllChannelVisibility() {
 		}
 		h.RefreshChannelVisibility(&channels[i])
 	}
-	h.refreshTimeoutViewsAfterRoleChange()
 }
 
 func (h *Hub) revokeUnreadableChannels(userID int64) {

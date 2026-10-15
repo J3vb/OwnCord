@@ -129,3 +129,16 @@ func (h *Hub) writeReadyMembers(w *bufio.Writer, roster *memberRoster, viewerID 
 	}
 	_ = w.WriteByte(']')
 }
+
+// buildFreshReady is handleFreshConnect's buildReady, called after
+// registerNow: it reads timeoutView.gen before the build resolves the
+// viewer's Subject and then records which member_timeouts list the ready
+// carries (commitReadyTimeouts).
+func (h *Hub) buildFreshReady(ctx context.Context, database ReadySnapshotReader, c *Client, role *db.Role) (*readyPayload, error) {
+	gen := h.timeoutViewGenNow()
+	ready, err := h.buildReady(ctx, database, c.userID, role)
+	if ready != nil {
+		h.commitReadyTimeouts(c, gen, ready.timeoutsFull)
+	}
+	return ready, err
+}

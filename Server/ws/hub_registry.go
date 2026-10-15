@@ -49,6 +49,13 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// after the hub lock is released.
 	var replacedVoiceChID int64
 
+	// Until told otherwise, assume c holds the full member_timeouts list: a
+	// replaying resume keeps whatever list its last connection held (its old
+	// *Client is usually gone by now), and a fresh connect lowers this in
+	// commitReadyTimeouts. A wrong true costs one own-only frame on the next
+	// role refresh; a wrong false would leave a demoted user the full list.
+	c.timeouts.full.Store(true)
+
 	h.mu.Lock()
 	if h.wakeBlockedLocked(c) {
 		// U4: leave the other device's session alone and refuse this one;
@@ -77,11 +84,6 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 			c.setPendingModFlags(pendingMuted, pendingDeafened, pendingMutedBy)
 		}
 		if c.lastSeq > 0 {
-			// A resume that replays (no visibility change since lastSeq)
-			// keeps the member_timeouts list the client already holds, so
-			// the new connection inherits which kind it is; a change took
-			// the full-ready path, which sets the flag itself.
-			c.timeoutsFull.Store(old.timeoutsFull.Load())
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
 			//

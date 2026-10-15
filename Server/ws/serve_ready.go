@@ -594,10 +594,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// resync owed (P5-S03). Cleared before the build, so a drop after it
 	// marks the user again; restored if the ready never reaches the client.
 	owedResync := h.takeOwedResync(c)
-	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
-	if ready != nil {
-		c.timeoutsFull.Store(ready.timeoutsFull)
-	}
+	ready, readyErr := h.buildFreshReady(ctx, database, c, userRole)
 	release() // the write below is the peer's pace, not the database's
 	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
 		return err

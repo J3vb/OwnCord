@@ -288,11 +288,12 @@ func (c *collector) finish() {
 }
 
 // Two moderators issue and lift concurrently: whatever the interleaving, the
-// last frame a moderator holds is the newest mirror.
+// last frame a moderator holds is the newest mirror, and so is the target's.
 func TestMemberTimeouts_ConcurrentIssueLiftConverges(t *testing.T) {
 	f := newTimeoutViewFixture(t)
 	ctx := context.Background()
 	col := collect(t, f.sends[f.modID])
+	tcol := collect(t, f.sends[f.targetID])
 	for round := range 40 {
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -316,6 +317,13 @@ func TestMemberTimeouts_ConcurrentIssueLiftConverges(t *testing.T) {
 		col.mu.Unlock()
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("round %d: moderator holds %v, mirror says %v", round, got, want)
+		}
+		wantOwn := entryIDs(memberTimeoutsFor(f.targetID, false, snap, time.Now()))
+		tcol.mu.Lock()
+		gotOwn := entryIDs(tcol.last)
+		tcol.mu.Unlock()
+		if !reflect.DeepEqual(gotOwn, wantOwn) {
+			t.Fatalf("round %d: target holds %v, mirror says %v", round, gotOwn, wantOwn)
 		}
 	}
 }
@@ -343,7 +351,7 @@ func TestRoleChange_GrantModerateSendsFullView(t *testing.T) {
 	if len(fr) != 1 || !reflect.DeepEqual(entryIDs(fr[0]), []int64{f.targetID}) {
 		t.Fatalf("new moderator frames = %v, want the full list", fr)
 	}
-	if !f.hub.GetClient(f.byID).timeoutsFull.Load() {
+	if !f.hub.GetClient(f.byID).timeouts.full.Load() {
 		t.Error("timeoutsFull not set after the grant")
 	}
 	// A client that never was a moderator is left alone.
@@ -355,7 +363,7 @@ func TestRoleChange_GrantModerateSendsFullView(t *testing.T) {
 func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 	f := roleChangeFixture(t)
 	ctx := context.Background()
-	f.hub.GetClient(f.modID).timeoutsFull.Store(true) // as its ready set it
+	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
 	if err := f.database.UpdateUserRole(ctx, f.modID, 4); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
@@ -366,7 +374,7 @@ func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 	if len(fr) != 1 || len(fr[0]) != 0 {
 		t.Fatalf("ex-moderator frames = %v, want one own-only (empty) list", fr)
 	}
-	if f.hub.GetClient(f.modID).timeoutsFull.Load() {
+	if f.hub.GetClient(f.modID).timeouts.full.Load() {
 		t.Error("timeoutsFull still set after the revoke")
 	}
 	// Second refresh: the flag is down, so nothing more is sent.

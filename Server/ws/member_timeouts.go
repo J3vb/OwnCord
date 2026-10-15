@@ -50,61 +50,6 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 	return out
 }
 
-// timeoutViewer is one connected recipient of the member_timeouts view.
-type timeoutViewer struct {
-	client *Client
-	isMod  bool
-}
-
-// timeoutViewers maps userIDs to their live clients, each tagged with its
-// moderator verdict. Takes h.mu briefly (GetClient) and nothing else, so the
-// caller must hold no lock; users with no live client are skipped.
-func (h *Hub) timeoutViewers(mods map[int64]bool, extra ...int64) []timeoutViewer {
-	ids := make([]int64, 0, len(mods)+len(extra))
-	seen := make(map[int64]bool, len(mods)+len(extra))
-	for uid := range mods {
-		ids = append(ids, uid)
-		seen[uid] = true
-	}
-	for _, uid := range extra {
-		if uid != 0 && !seen[uid] {
-			seen[uid] = true
-			ids = append(ids, uid)
-		}
-	}
-	out := make([]timeoutViewer, 0, len(ids))
-	for _, uid := range ids {
-		if c := h.GetClient(uid); c != nil {
-			out = append(out, timeoutViewer{client: c, isMod: mods[uid]})
-		}
-	}
-	return out
-}
-
-// moderatorSet is moderationAudience as a set. Resolves permissions outside
-// every lock.
-func (h *Hub) moderatorSet(ctx context.Context) map[int64]bool {
-	ids := h.moderationAudience(ctx)
-	set := make(map[int64]bool, len(ids))
-	for _, uid := range ids {
-		set[uid] = true
-	}
-	return set
-}
-
-// sendTimeoutViews sends each viewer their own view of snap and records which
-// kind of list it holds. The caller holds timeoutViewMu and nothing else.
-//
-// Lock order: timeoutViewMu, then Client.mu (sendMsg). timeoutViewMu is never
-// taken with h.mu, h.seqMu or h.presenceMu held, and nothing under it does
-// I/O: sendMsg only queues.
-func (h *Hub) sendTimeoutViews(viewers []timeoutViewer, snap map[int64]time.Time, now time.Time) {
-	for _, v := range viewers {
-		v.client.timeoutsFull.Store(v.isMod)
-		v.client.sendMsg(buildMemberTimeouts(memberTimeoutsFor(v.client.userID, v.isMod, snap, now)))
-	}
-}
-
 // publishMemberTimeouts re-sends the member_timeouts view after targetID's
 // timeout was issued, lifted or expired: to every connected moderator (the
 // full list) and to targetID (their own entry). It reads the timeout mirror,
@@ -114,68 +59,48 @@ func (h *Hub) sendTimeoutViews(viewers []timeoutViewer, snap map[int64]time.Time
 // a user offline or mid-reconnect resumes onto a full ready (which carries
 // member_timeouts) instead of replaying past the change.
 //
-// The audience is resolved outside every lock. Snapshot and sends then run
-// under timeoutViewMu, so the last frame any viewer receives always reflects
-// the newest mirror: a concurrent issue and lift cannot leave a moderator
-// holding the older list. With the mirror unloaded the publish is skipped
-// and logged; the next ready repairs it.
+// deliverTimeoutViews resolves the audience outside every lock and re-checks
+// it against concurrent role refreshes; snapshot and sends then run under
+// timeoutView.mu, so the last frame any viewer receives always reflects the
+// newest mirror and a current verdict. With the mirror unloaded the publish
+// is skipped and logged; the next ready repairs it.
 func (h *Hub) publishMemberTimeouts(targetID int64) {
 	h.MarkVisibilityChanged()
 	defer h.bumpVisibilityWatermark()
 	if h.perms == nil {
 		return
 	}
-	ctx := context.Background()
-	viewers := h.timeoutViewers(h.moderatorSet(ctx), targetID)
-	if len(viewers) == 0 {
-		return
-	}
-	h.timeoutViewMu.Lock()
-	defer h.timeoutViewMu.Unlock()
-	snap, ok := h.perms.TimeoutSnapshot()
+	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {
+		return isMod || c.userID == targetID
+	})
 	if !ok {
 		slog.Warn("hub: publishMemberTimeouts skipped, timeout mirror not loaded", "user_id", targetID)
-		return
 	}
-	h.sendTimeoutViews(viewers, snap, time.Now())
 }
 
-// refreshTimeoutViewsAfterRoleChange runs at the end of
-// RefreshAllChannelVisibility. A role edit can make a client a moderator or
-// stop it being one: moderators get the full list again, and a client whose
-// timeoutsFull flipped true to false gets its own-only list, replacing the
-// full one it held. Clients that never were moderators get nothing.
+// refreshTimeoutViewsAfterRoleChange runs at the end of every
+// RefreshAllChannelVisibility, after the caller invalidated the permission
+// cache. A role edit can make a client a moderator or stop it being one:
+// moderators get the full list again, and a client that holds the full list
+// but is no longer a moderator gets its own-only list, replacing it. Clients
+// holding their own-only list that stay non-moderators get nothing.
+//
+// It bumps timeoutView.gen first, so a publish or connect that resolved its
+// verdicts before this role change resolves them again, and the visibility
+// watermark, so a resume across it takes a full ready.
 func (h *Hub) refreshTimeoutViewsAfterRoleChange() {
 	if h.perms == nil {
 		return
 	}
-	ctx := context.Background()
-	mods := h.moderatorSet(ctx)
-	h.mu.RLock()
-	all := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		all = append(all, c)
-	}
-	h.mu.RUnlock()
-
-	var viewers []timeoutViewer
-	for _, c := range all {
-		isMod := mods[c.userID]
-		if isMod || c.timeoutsFull.Load() {
-			viewers = append(viewers, timeoutViewer{client: c, isMod: isMod})
-		}
-	}
-	if len(viewers) == 0 {
-		return
-	}
-	h.timeoutViewMu.Lock()
-	defer h.timeoutViewMu.Unlock()
-	snap, ok := h.perms.TimeoutSnapshot()
+	h.bumpTimeoutViewGen()
+	h.MarkVisibilityChanged()
+	defer h.bumpVisibilityWatermark()
+	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {
+		return isMod || c.timeouts.full.Load()
+	})
 	if !ok {
 		slog.Warn("hub: refreshTimeoutViewsAfterRoleChange skipped, timeout mirror not loaded")
-		return
 	}
-	h.sendTimeoutViews(viewers, snap, time.Now())
 }
 
 // readyTimeouts is a ready's member_timeouts slot and which kind it is.
