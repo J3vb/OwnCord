@@ -3,23 +3,43 @@
  *
  * Voice E2EE is always on, and livekit-client then publishes no backup codec,
  * so every viewer must decode the one chosen here or see a black tile. VP8 and
- * H.264 are the two every shipped client decodes. VP8 is the default; H.264
+ * H.264 are the two every shipped client decodes; VP9 is a dev-flagged option
+ * picked only when every peer reports decoding it. VP8 is the default; H.264
  * lets Windows encode on the graphics card. The Linux native engine always
  * publishes VP8: its release build has no hardware encoder, and software
  * H.264 there is slower than VP8.
  */
 
+import { supportsVP9 } from "livekit-client";
 import { loadPref } from "../../lib/preferences";
-import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
+import { devShowsVp9, pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";
 
-export type VideoCodecPref = "vp8" | "h264" | "auto";
-export type PublishCodec = "vp8" | "h264";
+export type VideoCodecPref = "vp8" | "h264" | "vp9" | "auto";
+export type PublishCodec = "vp8" | "h264" | "vp9";
 
 /** The saved choice, VP8 unless the user picked another. */
 export function getVideoCodecPref(): VideoCodecPref {
   const saved = loadPref<string>("videoCodec", "vp8");
-  return saved === "h264" || saved === "auto" ? saved : "vp8";
+  return saved === "h264" || saved === "vp9" || saved === "auto" ? saved : "vp8";
+}
+
+/** Whether this webview can publish VP9. livekit-client's check throws where
+ *  `RTCRtpSender` does not exist (tests, a very old webview). */
+function canPublishVp9(): boolean {
+  try {
+    return supportsVP9();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the settings list VP9: the webview can publish it, this is not the
+ *  Linux native engine, and the dev flag is set (WP M-5a). Hidden from users
+ *  until the server relays `video_decode`, since until then VP9 is picked only
+ *  when you are alone and nobody watches. */
+export function vp9Offered(): boolean {
+  return !isLinuxDesktop() && devShowsVp9() && canPublishVp9();
 }
 
 /** Auto's rule: H.264 only where the browser says it encodes it in hardware
@@ -76,7 +96,7 @@ export async function resolveVideoCodec(
 /** The codec for one publish of `track` at `fps` and `bitrate`, before peers
  *  are considered. Auto probes at the captured size, since a hardware encoder
  *  can take 1080p30 and refuse 1080p120. A saved VP8 is probed the same way at
- *  120 fps; a saved H.264 never is. */
+ *  120 fps; a saved H.264 or VP9 never is. */
 async function resolvePreferredCodec(
   track: MediaStreamTrack,
   fps: number,
@@ -85,6 +105,11 @@ async function resolvePreferredCodec(
   if (isLinuxDesktop()) return "vp8";
   const pref = getVideoCodecPref();
   if (pref === "h264") return pref;
+  // livekit-client silently publishes VP8 for an unsupported VP9, which would
+  // leave our log and the sender-stats readout naming the wrong codec. VP9
+  // skips the 120 fps probe: Auto's rule is about hardware H.264. A saved VP9
+  // the settings no longer offer (no dev flag) publishes VP8, as the select shows.
+  if (pref === "vp9") return devShowsVp9() && canPublishVp9() ? pref : "vp8";
   if (pref === "vp8" && fps < HARDWARE_CODEC_FPS) return pref;
   try {
     const { width, height } = track.getSettings();

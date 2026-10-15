@@ -45,7 +45,7 @@ import {
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 import { channelPeerDecode } from "../features/voice/peerDecode";
-import { resolveVideoCodec } from "../features/voice/videoCodec";
+import { resolveVideoCodec, type PublishCodec } from "../features/voice/videoCodec";
 import {
   getScreenSourcePicker,
   type ScreenSourcePicker,
@@ -80,6 +80,30 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
  *  below it. Mirrored by `camera_publish_options` in native_voice/session.rs. */
 export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | undefined {
   return quality === "high" ? [VideoPresets.h360, VideoPresets.h720] : undefined;
+}
+
+/** The simulcast part of a video publish's options. VP9 is published as SVC,
+ *  where livekit-client builds its own spatial layers and never reads ours, so
+ *  it gets none; VP8 and H.264 keep the camera's and the share's layers. */
+export function videoLayerOptions(
+  kind: "camera" | "screen",
+  codec: PublishCodec,
+  quality: StreamQuality,
+  fps: number,
+): Pick<TrackPublishOptions, "simulcast" | "videoSimulcastLayers" | "screenShareSimulcastLayers"> {
+  if (codec === "vp9") return { simulcast: false };
+  if (kind === "camera") {
+    const layers = cameraSimulcastLayers(quality);
+    return {
+      simulcast: quality !== "source",
+      ...(layers ? { videoSimulcastLayers: layers } : {}),
+    };
+  }
+  const simulcast = isScreenShareSimulcast(quality, fps);
+  return {
+    simulcast,
+    ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
+  };
 }
 
 /** Screen-share audio: capture it, but exclude OwnCord's own playback from the
@@ -454,7 +478,6 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       await disableCamera(state, deps);
       return;
     }
-    const simulcastLayers = cameraSimulcastLayers(quality);
     const maxFramerate = quality === "low" ? 15 : 30;
     const videoCodec = await resolveVideoCodec(
       videoTrack.mediaStreamTrack,
@@ -472,8 +495,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     }
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
-      simulcast: quality !== "source",
-      ...(simulcastLayers ? { videoSimulcastLayers: simulcastLayers } : {}),
+      ...videoLayerOptions("camera", videoCodec, quality, maxFramerate),
       videoEncoding: {
         maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
         maxFramerate,
@@ -737,11 +759,10 @@ export async function enableScreenshare(
     }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
-      const simulcast = isVideo && isScreenShareSimulcast(quality, fps);
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
-        simulcast,
+        ...(isVideo ? videoLayerOptions("screen", videoCodec, quality, fps) : { simulcast: false }),
         // livekit-client takes a screen share's encoding from
         // screenShareEncoding; it ignores videoEncoding for that source.
         ...(isVideo
@@ -755,7 +776,6 @@ export async function enableScreenshare(
             }
           : {}),
         ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
-        ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
       });
       if ((state.generation ?? 0) !== generation) {
         removeEndedListener?.();

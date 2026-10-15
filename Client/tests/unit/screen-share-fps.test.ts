@@ -32,6 +32,8 @@ import {
   getCameraQuality,
   getScreenShareQuality,
   isScreenShareSimulcast,
+  cameraSimulcastLayers,
+  videoLayerOptions,
   screenShareDegradation,
   SCREENSHARE_PRESETS,
   SCREENSHARE_SIMULCAST_LAYERS,
@@ -209,5 +211,51 @@ describe("screen share FPS", () => {
       getScreenShareCaptureOptions("high", 120);
       expect(SCREENSHARE_PRESETS.high.resolution?.frameRate).toBe(before);
     });
+  });
+});
+
+describe("videoLayerOptions", () => {
+  it.each(["low", "medium", "high", "source"] as const)(
+    "gives a VP9 camera at %s no simulcast and no layers",
+    (quality) => {
+      expect(videoLayerOptions("camera", "vp9", quality, 30)).toEqual({ simulcast: false });
+    },
+  );
+
+  it.each([
+    ["low", 30],
+    ["medium", 30],
+    ["high", 30],
+    ["high", 120],
+    ["source", 60],
+  ] as const)(
+    "gives a VP9 screen share at %s %i fps no simulcast and no layers",
+    (quality, fps) => {
+      expect(videoLayerOptions("screen", "vp9", quality, fps)).toEqual({ simulcast: false });
+    },
+  );
+
+  it.each(["vp8", "h264"] as const)("keeps today's camera options for %s", (codec) => {
+    expect(videoLayerOptions("camera", codec, "low", 15)).toEqual({ simulcast: true });
+    expect(videoLayerOptions("camera", codec, "medium", 30)).toEqual({ simulcast: true });
+    expect(videoLayerOptions("camera", codec, "source", 30)).toEqual({ simulcast: false });
+    expect(videoLayerOptions("camera", codec, "high", 30)).toEqual({
+      simulcast: true,
+      videoSimulcastLayers: cameraSimulcastLayers("high"),
+    });
+  });
+
+  it.each(["vp8", "h264"] as const)("keeps today's screen share options for %s", (codec) => {
+    expect(videoLayerOptions("screen", codec, "medium", 30)).toEqual({
+      simulcast: true,
+      screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
+    });
+    expect(videoLayerOptions("screen", codec, "high", 60)).toEqual({
+      simulcast: true,
+      screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
+    });
+    expect(videoLayerOptions("screen", codec, "high", 120)).toEqual({ simulcast: false });
+    expect(videoLayerOptions("screen", codec, "low", 30)).toEqual({ simulcast: false });
+    expect(videoLayerOptions("screen", codec, "source", 30)).toEqual({ simulcast: false });
   });
 });
