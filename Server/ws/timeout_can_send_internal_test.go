@@ -203,3 +203,68 @@ func TestRefreshUserChannels_WaitsForMidHandshakeRegistration(t *testing.T) {
 		t.Fatal("RefreshUserChannels returned while reconnectRegister still held h.seqMu — it must wait for the registration")
 	}
 }
+
+// A timeout flips the target's can_send and can_react to false in the
+// refreshed channel_create but leaves can_delete_others and can_pin true,
+// because enforcement lets a timed-out moderator keep both in channels.
+func TestTimeout_RefreshFlipsReactKeepsPinAndDelete(t *testing.T) {
+	f := newTimeoutCanSendFixture(t)
+	ctx := context.Background()
+	// Promote the target to the Moderator role so pin and delete-others start
+	// true; the actor (Owner) outranks it.
+	if _, err := f.database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`,
+		permissions.ManageMessages|permissions.AddReactions); err != nil {
+		t.Fatalf("grant Moderator bits: %v", err)
+	}
+	if _, err := f.database.ExecContext(ctx, `UPDATE users SET role_id = 3 WHERE id = ?`, f.targetID); err != nil {
+		t.Fatalf("promote target: %v", err)
+	}
+
+	read := func() (send, react, pin, del *bool) {
+		deadline := time.After(time.Second)
+		for {
+			select {
+			case raw := <-f.send:
+				var msg struct {
+					Type    string `json:"type"`
+					Payload struct {
+						ID              int64 `json:"id"`
+						CanSend         *bool `json:"can_send"`
+						CanReact        *bool `json:"can_react"`
+						CanPin          *bool `json:"can_pin"`
+						CanDeleteOthers *bool `json:"can_delete_others"`
+					} `json:"payload"`
+				}
+				if json.Unmarshal(raw, &msg) != nil || msg.Type != "channel_create" || msg.Payload.ID != f.chID {
+					continue
+				}
+				return msg.Payload.CanSend, msg.Payload.CanReact, msg.Payload.CanPin, msg.Payload.CanDeleteOthers
+			case <-deadline:
+				t.Fatal("no channel_create within a second")
+				return nil, nil, nil, nil
+			}
+		}
+	}
+	check := func(stage string, wantSend, wantReact bool) {
+		t.Helper()
+		send, react, pin, del := read()
+		if send == nil || react == nil || pin == nil || del == nil {
+			t.Fatalf("%s: channel_create omitted an affordance (%v %v %v %v)", stage, send, react, pin, del)
+		}
+		if *send != wantSend || *react != wantReact {
+			t.Errorf("%s: can_send/can_react = %v/%v, want %v/%v", stage, *send, *react, wantSend, wantReact)
+		}
+		if !*pin || !*del {
+			t.Errorf("%s: can_pin/can_delete_others = %v/%v, want true/true", stage, *pin, *del)
+		}
+	}
+
+	if _, err := f.mod.Timeout(ctx, f.actorID, f.targetID, "cool off", time.Hour, nil); err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	check("timed out", false, false)
+	if err := f.mod.LiftTimeout(ctx, f.actorID, f.targetID); err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+	check("lifted", true, true)
+}

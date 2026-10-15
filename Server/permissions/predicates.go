@@ -196,6 +196,31 @@ func CanDeleteMessage(s Subject, isAuthor bool) (asModerator bool, err error) {
 	return false, missing(ManageMessages)
 }
 
+// CanPinMessage is the pin and unpin policy for a channel. A non-DM channel
+// needs READ and MANAGE there; the timeout is deliberately not consulted, so a
+// timed-out moderator keeps the verdict enforcement has always given them. In
+// a DM, membership then no block then no timeout decide, in that order, and
+// MANAGE is not involved. The archive gate is the caller's shared write gate,
+// not this predicate, as for CanDeleteMessage.
+func CanPinMessage(s Subject) error {
+	if s.Channel.Type == "dm" {
+		if err := dmMember(s); err != nil {
+			return err
+		}
+		if s.DMBlocked {
+			return ErrBlocked
+		}
+		if s.TimedOut {
+			return ErrTimedOut
+		}
+		return nil
+	}
+	if !s.Has(ReadMessages | ManageMessages) {
+		return missing(ManageMessages)
+	}
+	return nil
+}
+
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
 // membership, so this can only ever narrow), READ_MESSAGES for a non-DM

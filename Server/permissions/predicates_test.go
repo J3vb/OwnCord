@@ -273,3 +273,28 @@ func TestCanDeleteMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestCanPinMessage(t *testing.T) {
+	runPredicate(t, "CanPinMessage", CanPinMessage, []predicateCase{
+		{"moderator pins", Subject{RolePerms: modBits, Channel: text(false)}, nil},
+		{"member without MANAGE refused", Subject{RolePerms: memberBits, Channel: text(false)}, ErrPermissionDenied},
+		{"role deny MANAGE refuses a moderator", Subject{RolePerms: modBits, Override: deny(ManageMessages), Channel: text(false)}, ErrPermissionDenied},
+		{"user deny MANAGE refuses a moderator", Subject{RolePerms: modBits, Override: userDeny(ManageMessages), Channel: text(false)}, ErrPermissionDenied},
+		{"role allow MANAGE lets a member pin", Subject{RolePerms: memberBits, Override: allow(ManageMessages), Channel: text(false)}, nil},
+		{"user allow MANAGE lets a member pin", Subject{RolePerms: memberBits, Override: userAllow(ManageMessages), Channel: text(false)}, nil},
+		{"user allow beats role deny", Subject{RolePerms: modBits, Override: ChannelOverride{Deny: ManageMessages, UserAllow: ManageMessages}, Channel: text(false)}, nil},
+		{"deny READ refuses a moderator", Subject{RolePerms: modBits, Override: deny(ReadMessages), Channel: text(false)}, ErrPermissionDenied},
+		{"MANAGE without READ refused", Subject{RolePerms: ManageMessages, Channel: text(false)}, ErrPermissionDenied},
+		{"admin bypasses a deny", Subject{RolePerms: Administrator, Override: deny(ReadMessages | ManageMessages), Channel: text(false)}, nil},
+		{"timed-out non-DM moderator is allowed", Subject{RolePerms: modBits, Channel: text(false), TimedOut: true}, nil},
+		{"timed-out non-DM member still refused", Subject{RolePerms: memberBits, Channel: text(false), TimedOut: true}, ErrPermissionDenied},
+		{"announcement follows the same rule", Subject{RolePerms: modBits, Channel: announcement()}, nil},
+		{"dm participant pins without MANAGE", Subject{Channel: dm(), DMParticipant: true}, nil},
+		{"dm non-participant refused, even admin", Subject{RolePerms: Administrator, Channel: dm()}, ErrNotDMParticipant},
+		{"dm blocked refused", Subject{Channel: dm(), DMParticipant: true, DMBlocked: true}, ErrBlocked},
+		{"dm timed out refused", Subject{Channel: dm(), DMParticipant: true, TimedOut: true}, ErrTimedOut},
+		{"dm non-participant beats blocked", Subject{Channel: dm(), DMBlocked: true, TimedOut: true}, ErrNotDMParticipant},
+		{"dm blocked beats timed out", Subject{Channel: dm(), DMParticipant: true, DMBlocked: true, TimedOut: true}, ErrBlocked},
+		{"zero subject refused", Subject{}, ErrPermissionDenied},
+	})
+}

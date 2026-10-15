@@ -190,6 +190,28 @@ func FuzzPredicateParity(f *testing.F) {
 		}
 		wantErr(t, "CanModerateVoice", s, CanModerateVoice(s), wantMod)
 
+		// Pinning, against the raw rule SetMessagePinned used: a DM answers
+		// to membership, then block, then timeout; any other channel needs
+		// effective READ+MANAGE and never consults the timeout.
+		for _, timedOut := range []bool{false, true} {
+			sp := s
+			sp.TimedOut = timedOut
+			var wantPin error
+			switch {
+			case isDM && !dmParticipant:
+				wantPin = ErrNotDMParticipant
+			case isDM && dmBlocked:
+				wantPin = ErrBlocked
+			case isDM && timedOut:
+				wantPin = ErrTimedOut
+			case isDM:
+				wantPin = nil
+			case !has(ReadMessages | ManageMessages):
+				wantPin = ErrPermissionDenied
+			}
+			wantErr(t, "CanPinMessage", sp, CanPinMessage(sp), wantPin)
+		}
+
 		// The two definitional identities. A future edit that gives session
 		// admission its own rule, or lets someone announce a post they cannot
 		// make, breaks here rather than silently.

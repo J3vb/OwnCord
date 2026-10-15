@@ -470,7 +470,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -491,6 +491,27 @@ after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
 (Administrator bypasses the bits). Target rank and move-destination capacity
 are per-target and stay server-side refusals. No override data is sent. Older
 servers omit it.
+
+`can_delete_others`, `can_pin` and `can_react` are the caller's per-channel
+message affordances, always present on every non-DM channel and absent from
+`dm_channels` entries, which carry none of these affordance fields. Each is one
+predicate's verdict over the caller's role and both override layers, the same
+predicate the server enforces, so a control built on it is never refused for
+lack of permission:
+
+- `can_delete_others` is `permissions.CanDeleteMessage` answering "as a
+  moderator" (`READ_MESSAGES | MANAGE_MESSAGES`), for deleting another member's
+  message. Deleting your own message never depends on it.
+- `can_pin` is `permissions.CanPinMessage` (`READ_MESSAGES | MANAGE_MESSAGES`
+  in the channel), enforced by `SetMessagePinned` and the REST pin routes.
+- `can_react` is `permissions.CanAddReaction` (`READ_MESSAGES | ADD_REACTIONS`,
+  false while timed out), enforced by the reaction handlers.
+
+An Administrator gets all three `true`. A timed-out moderator keeps
+`can_delete_others` and `can_pin` in channels, because enforcement allows
+both there, but `can_react` follows the timeout. Older servers omit all three;
+a client then keeps its role-only behaviour and must not treat absent as
+`false`. No override data is sent.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
@@ -771,6 +792,10 @@ re-adding an already-counted mention cannot double-count it.
 
 ### chat_delete (Client -> Server)
 
+Deleting another member's message needs the channel's `can_delete_others`
+verdict (see `channels[]` under `ready`); deleting your own does not. A DM
+has no `can_delete_others`: a participant deletes only their own messages.
+
 ```json
 {
   "type": "chat_delete",
@@ -827,6 +852,9 @@ Emitted by the REST pin/unpin handlers
 `READ_MESSAGES|MANAGE_MESSAGES`, or DM participant) to every reader of the
 channel, so other clients and the pinner's own other devices do not show stale
 pins. Sequenced and replayable like `chat_edited`; `pinned` is the new state.
+Whether the caller may send the pin is the channel's `can_pin` verdict (see
+`channels[]` under `ready`). A DM has no `can_pin`; there any participant who
+is not blocked and not timed out may pin.
 
 ```json
 {
@@ -1164,13 +1192,17 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "voice_max_users": 0,
     "voice_max_video": 0,
     "can_send": true,
-    "can_moderate_voice": false
+    "can_moderate_voice": false,
+    "can_delete_others": false,
+    "can_pin": false,
+    "can_react": true
   }
 }
 ```
 
 Every `channel_create` is addressed to one client and carries that viewer's own
-`can_send` and `can_moderate_voice` — the same values `ready` ships per channel.
+`can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` and `can_react`
+— the same values `ready` ships per channel.
 It has no `seq` and is not replayed: a client that misses one is forced onto a
 full `ready` on resume instead. It is sent in three cases:
 
@@ -1180,14 +1212,14 @@ full `ready` on resume instead. It is sent in three cases:
   see or post, `RefreshChannelVisibility` sends each still-visible client its
   own copy, so the composer affordance converges without a reconnect. A role
   edit or a role- or user-override edit on the channel converges the
-  voice-moderation controls the same way.
+  voice-moderation, delete-others, pin and reaction controls the same way.
 - **Timeout refresh.** When a moderator times a member out or lifts the
   timeout, or the timeout expires, that member alone gets a fresh copy of
-  every channel they can see, so their `can_send` follows the timeout without
-  a reconnect.
+  every channel they can see, so their `can_send` and `can_react` follow the
+  timeout without a reconnect.
 
-Older servers sent `channel_create` as one shared broadcast without either field.
-**Treat an absent `can_send` or `can_moderate_voice` as "unchanged", never as `false`.**
+Older servers sent `channel_create` as one shared broadcast without these fields.
+**Treat an absent `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -1206,7 +1238,10 @@ regardless of client. `channel_create`/`channel_update` themselves still reach
 every viewer including the one that just turned the label on, since those
 frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
 only in `ready` (above), not in this broadcast, the same reason `can_send` is
-omitted from it. See `PUT`/`DELETE
+omitted from it. None of the per-viewer fields (`can_send`,
+`can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
+this is one encoded frame for every recipient, and a single value would be
+wrong for some of them. See `PUT`/`DELETE
 /api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
 records or revokes consent, and the `nsfw_ack` frame below for the second-
 device signal. The desktop client's own gating UI (blur, consent prompt) is
