@@ -55,7 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call.
+- On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
 
 **Messaging**
 

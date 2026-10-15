@@ -27,7 +27,7 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
@@ -615,6 +615,34 @@ pub struct NativeSession {
     playout: Playout,
     capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
+    /// Emits the capture's reports (`enable_audio`), off the audio thread.
+    capture_reports: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Capture reports (gate edges and level reports, ~20 a second) waiting for
+/// the webview: about three seconds of them.
+const CAPTURE_REPORT_QUEUE: usize = 64;
+
+/// The capture's report sinks and the task that emits what they queue. The
+/// capture reports from the audio callback thread, which must never wait on
+/// an emit (it serializes and takes the webviews' lock): the sinks only
+/// queue, dropping a report when the queue is full, and the task emits, in
+/// order. It ends when the sinks are dropped with the capture.
+fn capture_report_sinks(on_event: EventSink) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
+    let (reports, mut queue) = tokio::sync::mpsc::channel(CAPTURE_REPORT_QUEUE);
+    let emitter = tokio::spawn(async move {
+        while let Some(event) = queue.recv().await {
+            on_event(event);
+        }
+    });
+    let gate_reports = reports.clone();
+    let on_gate: GateSink = Arc::new(move |open| {
+        let _ = gate_reports.try_send(Event::VoiceGate { open });
+    });
+    let on_level: LevelSink = Arc::new(move |rms, open| {
+        let _ = reports.try_send(Event::InputLevel { rms, open });
+    });
+    (on_gate, on_level, emitter)
 }
 
 /// The microphone's publish options: the channel's configured bitrate
@@ -690,6 +718,7 @@ impl NativeSession {
             playout,
             capture: Capture::default(),
             forwarder,
+            capture_reports: None,
         })
     }
 
@@ -747,15 +776,13 @@ impl NativeSession {
         }
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
-        let on_event = self.on_event.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
+        self.capture_reports = Some(emitter);
         self.capture.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
-            Arc::new({
-                let on_event = on_event.clone();
-                move |open| on_event(Event::VoiceGate { open })
-            }),
-            Arc::new(move |rms, open| on_event(Event::InputLevel { rms, open })),
+            on_gate,
+            on_level,
         );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
@@ -1232,6 +1259,9 @@ impl NativeSession {
             log::warn!("[native_voice] room close: {e}");
         }
         self.forwarder.abort();
+        if let Some(reports) = &self.capture_reports {
+            reports.abort();
+        }
     }
 }
 
@@ -1643,6 +1673,30 @@ mod tests {
             o.key_derivation_algorithm,
             KeyDerivationAlgorithm::PBKDF2
         ));
+    }
+
+    /// The audio thread's report sinks only queue: with the emitter not yet
+    /// run they return at once, past a full queue, and the emitter then
+    /// delivers what fit, in order.
+    #[tokio::test]
+    async fn capture_reports_queue_without_blocking_and_arrive_in_order() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(Arc::new(move |event| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::to_string(&event).unwrap());
+        }));
+        on_gate(false);
+        for _ in 0..CAPTURE_REPORT_QUEUE * 2 {
+            on_level(0.5, false);
+        }
+        drop((on_gate, on_level));
+        emitter.await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), CAPTURE_REPORT_QUEUE, "the overflow is dropped");
+        assert_eq!(seen[0], r#"{"type":"voiceGate","open":false}"#);
+        assert_eq!(seen[1], r#"{"type":"inputLevel","rms":0.5,"open":false}"#);
     }
 
     #[test]

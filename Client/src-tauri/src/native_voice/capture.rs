@@ -232,12 +232,12 @@ impl VoiceGate {
 
     /// Move the threshold without restarting the detector, as automatic
     /// sensitivity moves the worklet's (its "threshold" message): the gate
-    /// keeps its state and counts. Turning the gate on or off restarts it.
+    /// keeps its state and counts. Only a running gate moves: a retune sent
+    /// before the gate was turned off (Push to Talk, sensitivity 100) must
+    /// not turn it back on.
     pub fn retune(&mut self, threshold: f32) {
         if self.on() && threshold > 0.0 {
             self.threshold = threshold;
-        } else {
-            self.set_threshold(threshold);
         }
     }
 
@@ -1029,8 +1029,8 @@ mod tests {
 
     /// Automatic sensitivity's steps move the threshold without restarting
     /// the detector: a closed gate stays closed and says nothing, as the
-    /// worklet's "threshold" message keeps its counts. Off and on still
-    /// restart.
+    /// worklet's "threshold" message keeps its counts. It never turns the
+    /// gate on or off: that is a set_threshold.
     #[test]
     fn a_retune_moves_the_threshold_without_reopening_the_gate() {
         let (gate, reports) = reporting_gate(0.02);
@@ -1043,17 +1043,11 @@ mod tests {
         assert!(lock(&gate).closed, "still closed");
         assert_eq!(*lock(&reports), [false], "no restart, no report");
         lock(&gate).retune(0.0);
-        assert!(!lock(&gate).on(), "0 turns it off");
-        assert!(
-            !lock(&gate).closed,
-            "and reopens it, silently as set_threshold does"
-        );
+        assert_eq!(lock(&gate).threshold, 0.03, "a retune never turns it off");
+        // A late retune after the gate was turned off leaves it off.
+        lock(&gate).set_threshold(0.0);
         lock(&gate).retune(0.02);
-        assert!(
-            lock(&gate).on() && !lock(&gate).closed,
-            "turning it on restarts open"
-        );
-        assert_eq!(lock(&gate).grace, 0, "with a fresh start-up grace");
+        assert!(!lock(&gate).on(), "a retune never turns it on");
     }
 
     fn reported_levels(gate: &Arc<Mutex<VoiceGate>>) -> Arc<Mutex<Vec<(f32, bool)>>> {
