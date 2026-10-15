@@ -480,9 +480,19 @@ jobs:
         if: env.RUN_SERVER != 'false'
         run: go build -tags otel,wazero ./...
 
+      # The install fetches modules the build did not (x/vuln, x/telemetry), and
+      # a proxy.golang.org stream reset there once failed a leg before any test
+      # ran. Retry only the download; the scan itself runs once.
       - name: Go vulnerability check
         if: env.RUN_SERVER != 'false'
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && govulncheck ./...
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+          govulncheck ./...
 
       # Generated sqlc output must never drift from db/queries/. One leg of
       # the matrix is enough; make is not guaranteed on the Windows runner.
