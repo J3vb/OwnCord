@@ -107,7 +107,7 @@ describe("reactions while offline (3A-3)", () => {
 
     setConnectionStatus("connected");
     uiStore.flush();
-    refreshReactionLocks(el);
+    refreshReactionLocks(el, makeMessage().channelId);
     expect(chip.hasAttribute("aria-disabled")).toBe(false);
     chip.click();
     expect(opts.onReactionClick).toHaveBeenCalledWith(1, "🔥");

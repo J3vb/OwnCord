@@ -19,7 +19,7 @@ import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/message-navigation";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { channelsStore } from "@stores/channels.store";
-import { canManageMessages } from "@lib/permissions";
+import { channelBitOrRole } from "@lib/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 
 // ---------------------------------------------------------------------------
@@ -96,12 +96,12 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     api,
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
-    // A DM participant may pin; a channel needs MANAGE_MESSAGES — mirroring
-    // the server's SetMessagePinned gate so the panel is read-only rather than
+    // A DM participant may pin; a channel follows the server's per-channel
+    // can_pin (MANAGE_MESSAGES on an older server) — mirroring the server's gate so the panel is read-only rather than
     // offering an unpin the server refuses (F1).
     canPin: (channelId: number) => {
       const channel = channelsStore.getState().channels.get(channelId);
-      return channel?.type === "dm" || canManageMessages();
+      return channel?.type === "dm" || channelBitOrRole(channel?.canPin);
     },
     // The panel forwards the channel it was opened for (captured at open
     // time), not whatever is active now — the active channel can change
