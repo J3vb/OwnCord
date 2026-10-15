@@ -292,8 +292,9 @@ pub fn run() {
         ])
         .setup(|app| {
             // A setup error makes Tauri panic inside run(), past the Err arm
-            // below, so it gets the same dialog here first.
-            setup_app(app).inspect_err(|e| show_startup_failure(&e.to_string()))
+            // below, so it gets the same dialog here first. Setup runs on
+            // the event loop, so the display is already open.
+            setup_app(app).inspect_err(|e| show_startup_failure(&e.to_string(), true))
         })
         .build(tauri::generate_context!())
     {
@@ -323,7 +324,7 @@ pub fn run() {
             });
         }
         Err(e) => {
-            show_startup_failure(&e.to_string());
+            show_startup_failure(&e.to_string(), false);
             std::process::exit(1);
         }
     }
@@ -423,15 +424,20 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 /// needs a display that opens: with none (a headless run) or a stale one (an
 /// ended SSH session, a dead Wayland socket) the dialog toolkit cannot start
 /// and its caller would wait forever, so the stderr line stands alone.
-fn show_startup_failure(error: &str) {
+/// `display_open` says the app already holds an open display, so no probe is
+/// needed.
+fn show_startup_failure(error: &str, display_open: bool) {
     eprintln!("Fatal startup error: {error}");
     log::error!("[exit] fatal startup error: {error}");
     #[cfg(target_os = "linux")]
     exit_watch::note_exit("startup failed");
     #[cfg(target_os = "linux")]
-    let show_dialog = display_opens();
+    let show_dialog = display_open || display_opens();
     #[cfg(not(target_os = "linux"))]
-    let show_dialog = true;
+    let show_dialog = {
+        let _ = display_open;
+        true
+    };
     if show_dialog {
         rfd::MessageDialog::new()
             .set_title(text::STARTUP_DIALOG_TITLE)
@@ -447,12 +453,16 @@ fn show_startup_failure(error: &str) {
 #[cfg(target_os = "linux")]
 fn display_opens() -> bool {
     let allowed = gdk_backends(std::env::var_os("GDK_BACKEND").as_deref());
+    // A compositor can hand over a connected socket in WAYLAND_SOCKET instead
+    // of naming one; it is consumed when GTK starts, so while it is still set
+    // it is live.
     let wayland = || {
-        wayland_socket(
-            std::env::var_os("WAYLAND_DISPLAY"),
-            std::env::var_os("XDG_RUNTIME_DIR"),
-        )
-        .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
+        std::env::var_os("WAYLAND_SOCKET").is_some_and(|fd| !fd.is_empty())
+            || wayland_socket(
+                std::env::var_os("WAYLAND_DISPLAY"),
+                std::env::var_os("XDG_RUNTIME_DIR"),
+            )
+            .is_some_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
     };
     let x11 = || std::env::var_os("DISPLAY").is_some_and(|display| x11_display_opens(&display));
     (allowed.wayland && wayland()) || (allowed.x11 && x11())
