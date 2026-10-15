@@ -21,10 +21,14 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-# Cancel in-progress runs for the same branch/PR, never on main
+# Cancel a superseded run of the same pull request. Pushes to dev and main are
+# never cancelled: each one is a merged tree that the next merge would
+# otherwise cancel before it finished, so the "green alone, red together" check
+# a dev push exists for rarely completed. Same-ref pushes still queue behind the
+# running one (GitHub keeps one pending run per group).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -498,9 +502,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make docs-verify
 
+      # Coverage is profiled on the Linux leg only: the floor check below reads
+      # that leg alone, and coverage instrumentation slows the Windows leg,
+      # which is the longest job in the workflow, for a profile nothing reads.
       - name: Run tests with race detection and coverage
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+
+      - name: Run tests with race detection
+        if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        run: go test -race -timeout 20m ./...
 
       # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
       # upstream, so a YAML-only assertion cannot tell whether livekit-server
@@ -528,8 +539,11 @@ jobs:
           OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
         run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
 
+      # One leg is enough: -tags deadlock swaps syncutil's lock types and
+      # reports lock-order inversions, which do not depend on the OS. The race
+      # step above still runs every test on both legs.
       - name: Run tests with deadlock detection
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
@@ -593,7 +607,7 @@ jobs:
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-coverage-${{ matrix.os }}
