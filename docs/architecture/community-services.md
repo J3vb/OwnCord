@@ -38,8 +38,9 @@ class here. **Amended 2026-10-15 (custom status expiry):**
 itself, so it adds no data class here. **Amended 2026-10-15 (mention ledger):**
 `063_mention_receipts.sql` adds a private per-recipient record of which messages
 raised each mention badge, which no other user or service reads and which is
-removed with the recipient (erasure) or the message (cascade), so it adds no
-data class here. Other
+removed with the recipient (erasure) or the message (cascade). It is no
+community service, so it adds nothing here; its lifecycle row is class 11a in
+`data-lifecycle.md`. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
