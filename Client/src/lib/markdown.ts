@@ -16,6 +16,8 @@
  * inside code" all fall out of one rule set instead of fighting each other.
  */
 
+import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp";
+
 /** Emphasis-style wrappers, in the flavour Discord uses. */
 export type InlineStyle = "strong" | "em" | "underline" | "strike" | "spoiler";
 
@@ -28,7 +30,18 @@ export type InlineNode =
       readonly raw: string;
       readonly children: readonly InlineNode[];
     }
+  /** `<https://…>`: a link with no embed, shown without its brackets. */
+  | { readonly type: "url"; readonly url: string; readonly raw: string }
+  /** `<t:unix>` / `<t:unix:style>`, shown in the reader's own time zone. */
+  | { readonly type: "timestamp"; readonly unix: number; readonly style: TimestampStyle }
   | { readonly type: InlineStyle; readonly children: readonly InlineNode[] };
+
+export type { TimestampStyle };
+
+/** `<t:1700000000>` or `<t:1700000000:R>`, at the start of the input. */
+const TIMESTAMP_RE = /^<t:(-?\d{1,13})(?::([tTdDfFR]))?>/;
+/** `<https://…>`, at the start of the input. */
+const ANGLE_URL_RE = /^<(https?:\/\/[^\s<>]+)>/i;
 
 /** Characters a backslash can neutralise. Anything else keeps its backslash. */
 const ESCAPABLE = "\\`*_~|[]()>#-+.!";
@@ -262,6 +275,26 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
       }
     }
 
+    if (c === "<") {
+      const rest = src.slice(i, i + 2100);
+      const ts = TIMESTAMP_RE.exec(rest);
+      // Past what a Date can hold (±8.64e12 s) the token stays text.
+      if (ts !== null && Math.abs(Number(ts[1])) <= 8.64e12) {
+        flush();
+        const style = (ts[2] ?? "f") as TimestampStyle;
+        out.push({ type: "timestamp", unix: Number(ts[1]), style });
+        i += ts[0].length;
+        continue;
+      }
+      const angle = ANGLE_URL_RE.exec(rest);
+      if (angle !== null) {
+        flush();
+        out.push({ type: "url", url: angle[1]!, raw: angle[0] });
+        i += angle[0].length;
+        continue;
+      }
+    }
+
     // A bare URL is opaque: its underscores and asterisks are address, not
     // markup, and it is autolinked later by the renderer.
     const u = urlEnd(src, i);
@@ -377,6 +410,7 @@ function blockText(block: BlockNode, spoilerLabel: string): string {
   switch (block.type) {
     case "paragraph":
     case "heading":
+    case "subtext":
       return inlineText(parseInline(block.text), spoilerLabel);
     case "quote":
       return parseBlocks(block.text)
@@ -399,6 +433,10 @@ function inlineText(nodes: readonly InlineNode[], spoilerLabel: string): string 
           return node.value;
         case "spoiler":
           return spoilerLabel;
+        case "url":
+          return node.url;
+        case "timestamp":
+          return formatDiscordTimestamp(node.unix, node.style).text;
         case "link":
           return inlineText(node.children, spoilerLabel);
         default:
@@ -413,6 +451,8 @@ function inlineText(nodes: readonly InlineNode[], spoilerLabel: string): string 
 export type BlockNode =
   | { readonly type: "paragraph"; readonly text: string }
   | { readonly type: "heading"; readonly level: 1 | 2 | 3; readonly text: string }
+  /** `-# small text`: a line in smaller, muted type. */
+  | { readonly type: "subtext"; readonly text: string }
   | { readonly type: "quote"; readonly text: string }
   | {
       readonly type: "list";
@@ -429,6 +469,7 @@ export interface ListItem {
 }
 
 const HEADING_RE = /^(#{1,3}) +(.*)$/;
+const SUBTEXT_RE = /^-# +(.*)$/;
 const QUOTE_RE = /^> ?(.*)$/;
 const BLOCK_QUOTE_ALL_RE = /^>>> ?(.*)$/;
 const BULLET_RE = /^( *)([-*]) +(.*)$/;
@@ -490,6 +531,13 @@ export function parseBlocks(text: string): BlockNode[] {
         i++;
       }
       out.push({ type: "quote", text: collected.join("\n") });
+      continue;
+    }
+
+    const subtext = SUBTEXT_RE.exec(line);
+    if (subtext !== null) {
+      flushPara();
+      out.push({ type: "subtext", text: subtext[1]! });
       continue;
     }
 
