@@ -50,6 +50,7 @@ import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/last-channel";
+import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/savedDrafts";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -73,6 +74,8 @@ const log = createLogger("channel-ctrl");
 /** Longer than ws.ts's 60 s server-silence deadline, so a half-open socket is
  *  declared dead (and the entry failed) before the entry can expire. */
 const TRACKED_ACTION_EXPIRY_MS = 90_000;
+/** How long typing must pause before the draft is written to storage. */
+const DRAFT_SAVE_DELAY_MS = 750;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -165,6 +168,67 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // (not per-mount) because the whole point is to outlive a channel switch.
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
+
+  // 3A-3: the mounted composer's text and reply also go to storage, so they
+  // survive a restart. Saved a moment after typing stops, and at once when the
+  // draft empties or the channel switches.
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // The account the mounted composer belongs to, captured at mount, so a late
+  // save never files a draft under whoever is signed in by then.
+  let draftOwner: { host: string; userId: number; current: () => boolean } | null = null;
+  // What was last written, so an edit (whose peeked draft never changes) does
+  // not rewrite storage on every key.
+  let lastSavedDraft = "";
+
+  function persistDraft(channelId: number, draft: SavedDraft): void {
+    const owner = draftOwner;
+    if (owner === null || !(owner.userId > 0) || owner.host === "" || !owner.current()) return;
+    const stamp = JSON.stringify([owner.host, owner.userId, channelId, draft]);
+    if (stamp === lastSavedDraft) return;
+    lastSavedDraft = stamp;
+    saveDraft(owner.host, owner.userId, channelId, draft);
+  }
+
+  function saveMountedDraft(): void {
+    if (draftSaveTimer !== null) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    if (messageInput !== null && currentChannelId !== null) {
+      persistDraft(currentChannelId, messageInput.peekDraft());
+    }
+  }
+
+  function scheduleDraftSave(): void {
+    if (draftSaveTimer !== null) clearTimeout(draftSaveTimer);
+    const draft = messageInput?.peekDraft();
+    if (draft !== undefined && draft.content === "" && draft.replyTo === null) {
+      saveMountedDraft();
+      return;
+    }
+    draftSaveTimer = setTimeout(saveMountedDraft, DRAFT_SAVE_DELAY_MS);
+  }
+
+  /** After a restart there is no in-memory draft, so take the saved one. Its
+   *  reply is dropped only when the loaded history shows the target deleted:
+   *  history is usually not loaded yet, and the server refuses a reply to a
+   *  message that is gone. */
+  function restoreSavedDraft(channelId: number, input: MessageInputComponent): void {
+    const userId = getCurrentUserId();
+    const host = api.getConfig?.().host ?? "";
+    if (!(userId > 0) || host === "") return;
+    const saved = loadSavedDraft(host, userId, channelId);
+    if (saved === null) return;
+    const target = saved.replyTo;
+    const gone =
+      target !== null &&
+      getChannelMessages(channelId).some((m) => m.id === target.messageId && m.deleted);
+    input.restoreDraft({
+      content: saved.content,
+      replyTo: gone ? null : target,
+      attachments: [],
+    });
+  }
 
   // When the last accepted send happened (epoch ms) per channel, so the Send
   // gate's countdown survives a channel switch instead of restarting from zero
@@ -347,6 +411,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     const reply = target === undefined ? null : { ...replyTargetOf(target), ping };
     if (sentTo === currentChannelId && messageInput !== null) {
       messageInput.restoreUnsent(files, reason, reply);
+      scheduleDraftSave();
       return;
     }
     const stashed = draftByChannel.get(sentTo);
@@ -391,6 +456,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       typingIndicator = null;
     }
     if (messageInput !== null) {
+      saveMountedDraft();
       // UX-1: stash the unsent state before the composer is torn down. Empty
       // drafts are not stored, so switching away from a channel with nothing
       // typed leaves no entry behind.
@@ -472,6 +538,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+    draftOwner = { ...owner, current: ownsAccountSession };
 
     /**
      * Mount the gate or the withdraw bar. Their module (with its catalog) is
@@ -900,7 +967,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
-    function openDeleteConfirm(msgId: number): void {
+    /** `onConfirm` runs just before the delete is sent. */
+    function openDeleteConfirm(msgId: number, onConfirm?: () => void): void {
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -937,6 +1005,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         "click",
         () => {
           modal.close();
+          onConfirm?.();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -1148,6 +1217,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         });
         track(pendingEdits, id, { channelId, messageId, content: trimmed });
       },
+      // Discord's flow: clearing an edit and pressing Enter asks to delete the
+      // message. Cancel leaves the edit open; Delete closes it first.
+      onEmptyEdit: (messageId: number) => {
+        openDeleteConfirm(messageId, () => messageInput?.cancelEdit());
+      },
+      onDraftChange: scheduleDraftSave,
     });
     messageInput.mount(slots.inputSlot);
 
@@ -1166,7 +1241,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           : stashedDraft.replyTo;
       messageInput.restoreDraft({ ...stashedDraft, replyTo });
       draftByChannel.delete(channelId);
+    } else {
+      restoreSavedDraft(channelId, messageInput);
     }
+    // A dropped reply must not come back from storage on the next start.
+    scheduleDraftSave();
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user

@@ -76,6 +76,13 @@ vi.mock("@stores/emoji.store", () => ({
 
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
 import type { ReactionControllerOptions } from "../../src/pages/main-page/ReactionController";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,6 +124,19 @@ describe("createReactionController", () => {
   afterEach(() => {
     document.querySelectorAll(".reaction-picker-wrap").forEach((el) => el.remove());
     document.querySelectorAll("[data-testid]").forEach((el) => el.remove());
+  });
+
+  it("refuses to send while the socket is down, even from an open picker (3A-3)", () => {
+    mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+    const opts = makeOpts();
+    const ctrl = createReactionController(opts);
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    ctrl.handleReaction(1, "👍");
+
+    expect(opts.ws.send).not.toHaveBeenCalled();
+    expect(opts.showError).toHaveBeenCalledWith("Reconnecting…");
   });
 
   describe("20 different emoji per message (3A-12)", () => {

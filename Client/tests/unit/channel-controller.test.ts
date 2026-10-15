@@ -21,6 +21,7 @@ const {
   mockGetDraft,
   mockRestoreDraft,
   mockRestoreUnsent,
+  mockPeekDraft,
 } = vi.hoisted(() => ({
   mockMessageListMount: vi.fn(),
   mockMessageListDestroy: vi.fn(),
@@ -55,6 +56,9 @@ const {
   >(() => ({ content: "", replyTo: null, attachments: [] })),
   mockRestoreDraft: vi.fn(),
   mockRestoreUnsent: vi.fn(),
+  mockPeekDraft: vi.fn<
+    () => { content: string; replyTo: { messageId: number; username: string } | null }
+  >(() => ({ content: "", replyTo: null })),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -118,6 +122,7 @@ vi.mock("@components/MessageInput", () => ({
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
       restoreUnsent: mockRestoreUnsent,
+      peekDraft: mockPeekDraft,
     };
   }),
 }));
@@ -323,6 +328,8 @@ import {
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
+import { createMessageInput } from "@components/MessageInput";
+import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -692,6 +699,181 @@ describe("createChannelController", () => {
         replyTo: { messageId: 7, username: "alice" },
         attachments: [],
       });
+    });
+  });
+
+  describe("drafts survive a restart (3A-3)", () => {
+    const withHost = (): ChannelControllerOptions => {
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+      return opts;
+    };
+    beforeEach(() => localStorage.clear());
+
+    it("restores a saved draft on a fresh start, with its reply", () => {
+      saveDraft("chat.example", 1, 42, {
+        content: "from yesterday",
+        replyTo: { messageId: 7, username: "alice" },
+      });
+      const ctrl = createChannelController(withHost());
+      ctrl.mountChannel(42, "general");
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "from yesterday",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+      ctrl.destroy();
+    });
+
+    it("drops the saved reply when loaded history shows its message deleted", () => {
+      saveDraft("chat.example", 1, 42, {
+        content: "x",
+        replyTo: { messageId: 7, username: "alice" },
+      });
+      mockGetChannelMessages.mockReturnValue([{ id: 7, deleted: true }]);
+      const ctrl = createChannelController(withHost());
+      ctrl.mountChannel(42, "general");
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "x",
+        replyTo: null,
+        attachments: [],
+      });
+      ctrl.destroy();
+    });
+
+    it("saves the composer's text when typing pauses, and removes it once empty", () => {
+      vi.useFakeTimers();
+      try {
+        const ctrl = createChannelController(withHost());
+        ctrl.mountChannel(42, "general");
+        mockPeekDraft.mockReturnValue({ content: "typing…", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)?.content).toBe("typing…");
+
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+
+    it("saves straight away on a channel switch, to the channel it was typed in", () => {
+      vi.useFakeTimers();
+      try {
+        const ctrl = createChannelController(withHost());
+        ctrl.mountChannel(42, "general");
+        // Once for the change, once for the save on the switch; the new
+        // channel's composer starts empty.
+        mockPeekDraft
+          .mockReturnValueOnce({ content: "unsent", replyTo: null })
+          .mockReturnValueOnce({ content: "unsent", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        ctrl.mountChannel(99, "random");
+        expect(loadSavedDraft("chat.example", 1, 42)?.content).toBe("unsent");
+        expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("draft saves stay with their account (3A-3)", () => {
+    beforeEach(() => localStorage.clear());
+
+    it("skips a save once a different account is signed in", () => {
+      vi.useFakeTimers();
+      let userId = 1;
+      try {
+        const opts = makeOpts({ getCurrentUserId: () => userId });
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        mockPeekDraft.mockReturnValue({ content: "mine", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        userId = 2;
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        expect(loadSavedDraft("chat.example", 2, 42)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes a restored draft back without the reply it dropped", () => {
+      vi.useFakeTimers();
+      try {
+        const opts = makeOpts();
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        saveDraft("chat.example", 1, 42, {
+          content: "x",
+          replyTo: { messageId: 7, username: "alice" },
+        });
+        mockGetChannelMessages.mockReturnValue([{ id: 7, deleted: true }]);
+        mockPeekDraft.mockReturnValue({ content: "x", replyTo: null });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toEqual({ content: "x", replyTo: null });
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("empty edit offers delete (3A-3)", () => {
+    it("opens the delete confirm; Delete closes the edit and sends the delete", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "mine", user: { id: 1, username: "me" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const input = vi.mocked(createMessageInput).mock.results.at(-1)!.value as {
+        cancelEdit: ReturnType<typeof vi.fn>;
+      };
+
+      capturedMessageInputOpts!.onEmptyEdit(5);
+      expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
+      expect(input.cancelEdit).not.toHaveBeenCalled();
+
+      (document.querySelector("[data-testid='msg-delete-confirm']") as HTMLButtonElement).click();
+      expect(input.cancelEdit).toHaveBeenCalledTimes(1);
+      const deletes = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(deletes).toHaveLength(1);
+      ctrl.destroyChannel();
+    });
+
+    it("Cancel leaves the edit open and deletes nothing", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const input = vi.mocked(createMessageInput).mock.results.at(-1)!.value as {
+        cancelEdit: ReturnType<typeof vi.fn>;
+      };
+      capturedMessageInputOpts!.onEmptyEdit(5);
+      (document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement).click();
+      expect(input.cancelEdit).not.toHaveBeenCalled();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.some(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toBe(false);
+      ctrl.destroyChannel();
     });
   });
 
