@@ -20,8 +20,8 @@ use webview2_com::ScreenCaptureStartingEventHandler;
 use windows_core::Interface;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-    ShowWindowAsync, SW_HIDE,
+    EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, ShowWindowAsync, SW_HIDE,
 };
 
 /// How long to look for the bar after a capture starts: the picker is still
@@ -34,9 +34,15 @@ const MAX_BAR_HEIGHT: i32 = 240;
 
 /// Whether a top-level window of the WebView2 browser process is the bar.
 /// `host` is the origin without its scheme: the bar reads
-/// "http://tauri.localhost is sharing…" but drops an `https://`.
+/// "http://tauri.localhost is sharing…" but drops an `https://`. Some
+/// languages put words before the origin, so match it anywhere, but never a
+/// DevTools window ("DevTools - http://tauri.localhost/…").
 fn is_share_bar(title: &str, height: i32, host: &str) -> bool {
-    !host.is_empty() && height > 0 && height <= MAX_BAR_HEIGHT && title.contains(host)
+    !host.is_empty()
+        && height > 0
+        && height <= MAX_BAR_HEIGHT
+        && title.contains(host)
+        && !title.starts_with("DevTools")
 }
 
 /// `http://tauri.localhost` -> `tauri.localhost` (port kept in dev).
@@ -59,7 +65,8 @@ unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> windows_sys::core
     // SAFETY: plain Win32 queries on a window handle EnumWindows just gave us.
     unsafe {
         GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid != search.pid || IsWindowVisible(hwnd) == 0 {
+        // A minimised window reports a bar-sized rect; never touch one.
+        if pid != search.pid || IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 {
             return 1;
         }
         let mut rect = RECT {
@@ -78,6 +85,7 @@ unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> windows_sys::core
         if is_share_bar(&title, height, search.host) {
             // Async: a busy browser process must not stall this thread.
             ShowWindowAsync(hwnd, SW_HIDE);
+            log::info!("windows_share_bar: hid {title:?} ({height}px)");
             search.hidden = true;
         } else {
             search.seen.push(format!("{title:?} ({height}px)"));
@@ -183,6 +191,11 @@ mod tests {
             48,
             ORIGIN
         ));
+        assert!(is_share_bar(
+            "Partage en cours : http://tauri.localhost",
+            48,
+            ORIGIN
+        ));
     }
 
     #[test]
@@ -204,5 +217,10 @@ mod tests {
             ORIGIN
         ));
         assert!(!is_share_bar("anything", 48, ""));
+        assert!(!is_share_bar(
+            "DevTools - http://tauri.localhost/",
+            120,
+            ORIGIN
+        ));
     }
 }
