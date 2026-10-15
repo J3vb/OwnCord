@@ -400,6 +400,26 @@ export interface MentionCountPayload {
 }
 
 /**
+ * channel_activity (WP 2B-2): an unread hint for readable channels the reader
+ * is not viewing. Batched (about one frame a second), unsequenced and never
+ * replayed. Per channel at most two entries in ascending `message_id`: the
+ * latest message that mentioned the reader, then the latest overall.
+ * `author_id` is omitted for a reader who has not acknowledged an
+ * NSFW-labelled channel. `mention_count` stays the badge's authority.
+ */
+export interface ChannelActivityEntry {
+  readonly channel_id: number;
+  readonly message_id: number;
+  readonly author_id?: number;
+  readonly mentions_you: boolean;
+  readonly mentions_everyone: boolean;
+}
+
+export interface ChannelActivityPayload {
+  readonly channels: readonly ChannelActivityEntry[];
+}
+
+/**
  * mod_queue (B5-8/B5-10): a report or appeal queue changed, to MODERATE_MEMBERS
  * holders only, unsequenced and never replayed. Exactly one id is set; it is
  * an invalidation signal, never the report itself.
@@ -994,6 +1014,7 @@ export type ServerMessage =
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
   | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
   | (WsEnvelope<MentionCountPayload> & { readonly type: "mention_count" })
+  | (WsEnvelope<ChannelActivityPayload> & { readonly type: "channel_activity" })
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })

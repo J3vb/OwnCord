@@ -35,6 +35,8 @@ import {
   handleChannelDelete,
   handleChannelUpdate,
   handleMentionCount,
+  handleChannelActivity,
+  resetChannelActivity,
   handleEmojiUpdate,
   handleMemberBan,
   handleMemberJoin,
@@ -260,6 +262,11 @@ export function wireDispatcher(
   // mention_count: a mention raised this user's badge in a channel they may not
   // be viewing (DP-27).
   unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
+
+  // channel_activity: new messages in readable channels this user is not
+  // viewing, for their unread dot and alerts (WP 2B-2).
+  unsubs.push(ws.on(S.CHANNEL_ACTIVITY, handleChannelActivity));
+  unsubs.push(resetChannelActivity);
 
   // ── Members ───────────────────────────────────────────
 

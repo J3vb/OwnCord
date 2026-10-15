@@ -12,6 +12,7 @@ import {
   updateChannel,
   setMentionCount,
   setNsfwAcknowledged,
+  noteChannelMessage,
 } from "../../stores/channels.store";
 import {
   setMembers,
@@ -26,11 +27,12 @@ import { updateVoiceUserProfile } from "../../stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
+import { getChannelMessages } from "../../stores/messages.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import { isChannelAway, markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
-import { notifyMention } from "../../lib/notifications";
+import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
@@ -219,7 +221,90 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   // no chat_message announced, so alert for it (WP 2B-1, interim). A lowered or
   // unchanged total (delete, purge, repeat frame) is not a new mention. The
   // active channel never alerts here: its own chat_message already does.
-  if (payload.count > previous) notifyMention(payload.channel_id);
+  // A channel_activity entry for the mention alerts with the author and the
+  // message instead (WP 2B-2), so this alert waits a moment for one.
+  if (payload.count > previous) deferMentionAlert(payload.channel_id);
+}
+
+/**
+ * How long a mention_count alert waits for a channel_activity entry that
+ * carries the mention, and how long after such an entry a mention_count rise
+ * counts as the same mention. The server flushes activity on a 1 s window and
+ * resolves a flush within 2 s.
+ */
+export const MENTION_ALERT_GRACE_MS = 3000;
+
+/** Pending mention_count alerts, by channel. */
+const pendingMentionAlerts = new Map<number, ReturnType<typeof setTimeout>>();
+/** When a channel_activity mention entry last alerted, by channel. */
+const activityMentionAt = new Map<number, number>();
+
+/**
+ * Alert for a mention_count rise unless channel_activity announces it. Per
+ * channel, so a mention the frame did not carry (the server keeps only the
+ * newest mentions of a busy window, a dropped frame, a server without the
+ * frame) still alerts, one grace window late.
+ */
+function deferMentionAlert(channelId: number): void {
+  const alertedAt = activityMentionAt.get(channelId);
+  if (alertedAt !== undefined && Date.now() - alertedAt < MENTION_ALERT_GRACE_MS) return;
+  if (pendingMentionAlerts.has(channelId)) return;
+  pendingMentionAlerts.set(
+    channelId,
+    setTimeout(() => {
+      pendingMentionAlerts.delete(channelId);
+      notifyMention(channelId);
+    }, MENTION_ALERT_GRACE_MS),
+  );
+}
+
+/** Drop pending mention alerts and what they were matched against. Run when
+ *  the dispatcher is torn down. */
+export function resetChannelActivity(): void {
+  for (const timer of pendingMentionAlerts.values()) clearTimeout(timer);
+  pendingMentionAlerts.clear();
+  activityMentionAt.clear();
+}
+
+/**
+ * channel_activity (WP 2B-2): new messages in readable channels the reader is
+ * not viewing, so their unread dot shows without waiting for the next `ready`.
+ * Each entry bumps unread through noteChannelMessage, whose id watermark keeps
+ * a message `ready` already counted from counting again. The mention flags are
+ * never passed as a mention: mention_count owns the badge total. The active
+ * channel is skipped (its own chat_message reaches it), and so are unknown
+ * channels and DM ids. A message at or below the watermark, or below the
+ * newest message already loaded for the channel (one the reader just read
+ * there), neither counts nor alerts.
+ *
+ * An entry that carries a mention alerts with its author and message, so it
+ * replaces that channel's pending mention_count alert.
+ */
+/** The newest confirmed message loaded for a channel; a pending send has id 0. */
+function newestLoadedId(channelId: number): number {
+  const rows = getChannelMessages(channelId);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]!.id > 0) return rows[i]!.id;
+  }
+  return 0;
+}
+
+export function handleChannelActivity(payload: Payload<"channel_activity">): void {
+  const activeId = channelsStore.getState().activeChannelId;
+  for (const entry of payload.channels) {
+    if (entry.channel_id === activeId) continue;
+    const ch = channelsStore.getState().channels.get(entry.channel_id);
+    if (ch === undefined || ch.type === "dm") continue;
+    if (ch.lastMessageId !== null && entry.message_id <= ch.lastMessageId) continue;
+    if (entry.message_id <= newestLoadedId(entry.channel_id)) continue;
+    noteChannelMessage(entry.channel_id, entry.message_id, false);
+    if (entry.mentions_you || entry.mentions_everyone) {
+      clearTimeout(pendingMentionAlerts.get(entry.channel_id));
+      pendingMentionAlerts.delete(entry.channel_id);
+      activityMentionAt.set(entry.channel_id, Date.now());
+    }
+    notifyChannelActivity(entry);
+  }
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {
