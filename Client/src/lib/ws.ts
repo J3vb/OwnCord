@@ -146,6 +146,12 @@ export const PREAUTH_BUSY_CAP_MS = 70_000;
 // DP-02: the least time between two wake-signal redials, so a flapping network
 // or a burst of focus changes cannot spin the reconnect loop.
 const WAKE_KICK_FLOOR_MS = 2_000;
+// WP 2A-5: a `cseq` gap means the server lost a frame meant for this socket
+// and owes it a full ready. The resume waits a random 1-5 s so that, when one
+// server-side fault (a DB outage) marks every client at once, the herd does
+// not redial in one instant.
+const GAP_RESUME_MIN_MS = 1_000;
+const GAP_RESUME_MAX_MS = 5_000;
 // U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
 // the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
 // whether that wake would displace another device's live session: a lone
@@ -281,6 +287,12 @@ export function createWsClient({
   // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
   let lastSeq = 0;
+  // WP 2A-5: the last `cseq` seen on the current socket (0 before the first),
+  // the socket it belongs to, and the pending gap resume, if any. A new
+  // socket starts the count again and cancels a resume armed on the old one.
+  let lastCseq = 0;
+  let socketId = 0;
+  let gapResumeTimer: ReturnType<typeof setTimeout> | null = null;
   // P5-S04: an announced restart's redial point (receipt + delay_seconds +
   // this client's random offset in reconnect_spread_ms), so the whole server
   // does not redial into one instant. Cleared by the next dial.
@@ -558,9 +570,15 @@ export function createWsClient({
   function handleMessage(raw: string): void {
     const maxSize = config?.maxMessageSizeBytes ?? DEFAULT_MAX_MESSAGE_SIZE;
 
-    let parsed: { type?: string; payload?: unknown; id?: string; seq?: number };
+    let parsed: { type?: string; payload?: unknown; id?: string; seq?: number; cseq?: number };
     try {
-      parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string; seq?: number };
+      parsed = JSON.parse(raw) as {
+        type?: string;
+        payload?: unknown;
+        id?: string;
+        seq?: number;
+        cseq?: number;
+      };
     } catch {
       // Log the size only — `raw` is the decrypted frame (chat plaintext,
       // usernames) and this line is persisted to the on-disk log.
@@ -576,6 +594,10 @@ export function createWsClient({
     // be a leftover on the socket that died during the suspend — so it can
     // arm the wake marker but never clears it; only auth_ok does.
     if (suspendGapExceeded()) pendingWake = true;
+
+    // WP 2A-5: counted before the size guard, so a frame this client drops
+    // itself is not read as one the server lost.
+    if (typeof parsed.cseq === "number") noteCseq(parsed.cseq);
 
     // The size guard runs AFTER parsing (raw is already fully materialized
     // in memory either way, so this costs nothing) and exempts the handshake
@@ -675,6 +697,48 @@ export function createWsClient({
     dispatch(msg);
   }
 
+  // WP 2A-5: a `cseq` other than last + 1 means the server skipped a frame it
+  // could not deliver and marked this connection for a full ready. One resume
+  // per socket is enough: the next socket starts a fresh count.
+  function noteCseq(cseq: number): void {
+    const expected = lastCseq + 1;
+    lastCseq = cseq;
+    if (cseq === expected || gapResumeTimer !== null) return;
+    const delay = GAP_RESUME_MIN_MS + random() * (GAP_RESUME_MAX_MS - GAP_RESUME_MIN_MS);
+    log.info("Missed a live update; resuming to fetch fresh", {
+      expected,
+      received: cseq,
+      delayMs: Math.round(delay),
+    });
+    const owner = socketId;
+    gapResumeTimer = clock.setTimeout(() => {
+      gapResumeTimer = null;
+      if (owner !== socketId) return;
+      resumeForGap();
+    }, delay);
+  }
+
+  function cancelGapResume(): void {
+    if (gapResumeTimer !== null) {
+      clock.clearTimeout(gapResumeTimer);
+      gapResumeTimer = null;
+    }
+  }
+
+  // Tear down like the liveness deadline does and redial at once: the jitter
+  // already spread this client's resume, and the server answers it with the
+  // full ready it owes.
+  function resumeForGap(): void {
+    if (intentionalClose || certMismatchBlock || !config) return;
+    if (state !== "connected" || !proxyOpen) return;
+    proxyOpen = false;
+    stopHeartbeat();
+    stopLiveness();
+    cancelReconnect();
+    setState("reconnecting");
+    redial();
+  }
+
   function dispatch(msg: ServerMessage): void {
     const typeListeners = listeners.get(msg.type);
     if (!typeListeners || typeListeners.size === 0) {
@@ -741,6 +805,9 @@ export function createWsClient({
   function handleTransportState(next: SocketConnectionState, retryHint?: SocketRetryHint): void {
     if (next === "connected") {
       proxyOpen = true;
+      socketId++;
+      lastCseq = 0;
+      cancelGapResume();
       connectFailureCode = null;
       log.info("WebSocket open, sending auth", {
         host: config?.host ?? "unknown",
@@ -771,6 +838,7 @@ export function createWsClient({
       });
     } else if (next === "disconnected") {
       proxyOpen = false;
+      cancelGapResume();
       // Record the transport's distinct failure code, if any: a failed connect
       // can carry one (a certificate failure today), and a plain close clears
       // it. The pre-auth deadline reads this to name the failure.
@@ -818,6 +886,7 @@ export function createWsClient({
     busyRetryAfterMs = undefined;
     busyHold = false;
     cancelReconnect();
+    cancelGapResume();
     stopLiveness();
 
     setState("connecting");
@@ -918,6 +987,7 @@ export function createWsClient({
     busyRetryAfterMs = undefined;
     busyHold = false;
     cancelReconnect();
+    cancelGapResume();
     stopHeartbeat();
     stopLiveness();
     stopWakeListeners();

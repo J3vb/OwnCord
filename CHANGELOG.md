@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 **Login & connection**
 
 - An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
+- The desktop app now notices when that count skips and, after a short random wait, reconnects to fetch everything fresh, instead of waiting for its next disconnect. Servers without the count behave as before.
 
 **Messaging**
 
