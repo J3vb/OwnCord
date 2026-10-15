@@ -1163,10 +1163,10 @@ describe("DmCallPanel — resize", () => {
     handle.dispatchEvent(pointer("pointerdown", 400));
     handle.dispatchEvent(pointer("pointermove", 520));
     expect(root.style.getPropertyValue("--dcp-height")).toBe("520px");
-    // 1000px column less 280px kept for the header, composer and messages.
+    // 1000px column less 120px kept for the messages.
     handle.dispatchEvent(pointer("pointermove", 2000));
-    expect(root.style.getPropertyValue("--dcp-height")).toBe("720px");
-    expect(handle.getAttribute("aria-valuemax")).toBe("720");
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("880px");
+    expect(handle.getAttribute("aria-valuemax")).toBe("880");
     handle.dispatchEvent(pointer("pointermove", -500));
     expect(root.style.getPropertyValue("--dcp-height")).toBe("160px");
     expect(localStorage.getItem(PREF)).toBeNull();
@@ -1214,6 +1214,37 @@ describe("DmCallPanel — resize", () => {
     handle.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(root.style.getPropertyValue("--dcp-height")).toBe("");
     expect(localStorage.getItem(PREF)).toBe("0");
+  });
+
+  it("keeps the header and composer out of the room a drag can take", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    sized(root);
+    const composer = document.createElement("div");
+    host.appendChild(composer);
+    vi.spyOn(composer, "getBoundingClientRect").mockReturnValue(box(200));
+    const handle = q(root, "dcp-resize")!;
+
+    handle.dispatchEvent(pointer("pointerdown", 400));
+    handle.dispatchEvent(pointer("pointermove", 2000));
+    expect(root.style.getPropertyValue("--dcp-height")).toBe("680px");
+  });
+
+  it("reports the drawn height on first show", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const spy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === "dm-call-panel" && !this.hidden) return box(464);
+        return original.call(this);
+      });
+    try {
+      const { root } = mount();
+      expect(q(root, "dcp-resize")!.getAttribute("aria-valuenow")).toBe("464");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("never saves a height under what an audio-only panel draws", () => {

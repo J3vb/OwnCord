@@ -252,9 +252,10 @@ export {
 
 /** The expanded panel's dragged height, in px; 0 means the default share. */
 const HEIGHT_PREF = "dmCallHeight";
-/** Keep these in step with the clamp on `.dm-call-panel--expanded`. */
+/** Keep MIN_HEIGHT in step with the clamp on `.dm-call-panel--expanded`. */
 const MIN_HEIGHT = 160;
-const CHAT_MIN_HEIGHT = 280;
+/** What a drag always leaves for the message list. */
+const MESSAGES_MIN_HEIGHT = 120;
 const KEY_STEP = 24;
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
@@ -786,15 +787,22 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return Math.round(root.getBoundingClientRect().height);
   }
 
-  /** The tallest the panel may be: the chat column less the header, composer
-   *  and a few messages. */
+  /** The tallest the panel may be: the chat column less its fixed rows (the
+   *  header, typing line and composer, at their current heights) and room for
+   *  a few messages. */
   function maxHeight(): number {
     let column = root.parentElement;
     while (column !== null && getComputedStyle(column).display === "contents") {
       column = column.parentElement;
     }
-    const available = column === null ? 0 : column.getBoundingClientRect().height;
-    return Math.max(MIN_HEIGHT, Math.round(available - CHAT_MIN_HEIGHT));
+    if (column === null) return MIN_HEIGHT;
+    let fixed = 0;
+    for (const child of Array.from(column.children)) {
+      if (child.contains(root) || parseFloat(getComputedStyle(child).flexGrow) > 0) continue;
+      fixed += child.getBoundingClientRect().height;
+    }
+    const available = column.getBoundingClientRect().height - fixed - MESSAGES_MIN_HEIGHT;
+    return Math.max(MIN_HEIGHT, Math.round(available));
   }
 
   /** Saves what is actually drawn: an audio-only panel never goes below its
@@ -914,12 +922,13 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         break;
     }
     if (!root.classList.contains("dm-call-panel--video")) videoEl.remove();
-    applyHeight();
     if (people.length > 0 || peopleGiven) {
       options.videoGrid?.setPeople(people);
       peopleGiven = people.length > 0;
     }
     root.hidden = view.kind === "none";
+    // After the reveal, so the separator's value is measured from a drawn panel.
+    applyHeight();
     if (view.kind === "none") root.removeAttribute("aria-label");
     else root.setAttribute("aria-label", d("region", { name: callName(view.dm, currentUserId()) }));
     root.dataset.state = view.kind;

@@ -16,11 +16,11 @@
 .dm-call-panel[hidden] {
   display: none;
 }
-/* --dcp-height is the dragged height (DmCallPanel's MIN_HEIGHT and
-   CHAT_MIN_HEIGHT match the clamp), so the header, composer and a few
-   messages always stay visible. */
+/* --dcp-height is the dragged height. DmCallPanel caps a drag at what the
+   header, composer and a few messages leave; the clamp is the floor for a
+   window shrunk later (160px matches its MIN_HEIGHT). */
 .dm-call-panel--expanded {
-  height: clamp(160px, var(--dcp-height, 58%), calc(100% - 280px));
+  height: clamp(160px, var(--dcp-height, 58%), calc(100% - 160px));
   min-height: fit-content;
 }
 /* The drag handle straddles the bottom border; ns-resize like Discord's. */
@@ -37,10 +37,12 @@
   display: none;
 }
 .dcp-resize:hover,
-.dcp-resize:focus-visible,
 .dm-call-panel--resizing > .dcp-resize {
-  outline: none;
   background: linear-gradient(var(--accent) 0 0) center / 100% 2px no-repeat;
+}
+.dcp-resize:focus-visible {
+  outline: none;
+  background: linear-gradient(var(--focus-ring) 0 0) center / 100% 2px no-repeat;
 }
 .dm-call-panel--resizing,
 .dm-call-panel--resizing * {
