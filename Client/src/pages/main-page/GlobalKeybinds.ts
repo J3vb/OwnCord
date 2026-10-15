@@ -20,6 +20,8 @@ import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 import { dialogOpen, isDisplayed } from "@lib/dialogOpen";
 import { keyEventToVk, loadGlobalShortcutVks, type GlobalShortcutVks } from "@lib/voiceShortcuts";
+import { inputMode } from "@lib/inputMode";
+import { loadPref } from "@lib/preferences";
 
 const log = createLogger("global-keybinds");
 
@@ -146,11 +148,11 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       case "d":
         if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
         break;
-      // Ctrl+E / Ctrl+G work from the message box too, but another text
-      // field keeps its own keys.
+      // Ctrl+E / Ctrl+G work from the message box and from an open picker
+      // (to close it or switch), but another text field keeps its own keys.
       case "e":
       case "g":
-        if (isTypingTarget(e.target) && !isComposer(e.target)) break;
+        if (isTypingTarget(e.target) && !isComposer(e.target) && !inPicker(e.target)) break;
         run("toggle-picker", () => handlers.onTogglePicker(key === "e" ? "emoji" : "gif"));
         break;
       default:
@@ -161,16 +163,20 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   /** Page keys from the message box scroll the messages; a printable key
    *  with nothing focused starts typing in the message box. */
   const handlePlainKey = (e: KeyboardEvent): void => {
-    if (e.isComposing || e.defaultPrevented || dialogOpen()) return;
+    if (e.isComposing || e.defaultPrevented) return;
     if (e.key === "PageUp" || e.key === "PageDown") {
       // A focused scroller pages itself; only these two would page nothing.
       if (!isComposer(e.target) && e.target !== document.body) return;
+      if (dialogOpen()) return;
       const direction = e.key === "PageDown" ? 1 : -1;
       runGlobal(e, "scroll-messages", () => handlers.onScrollMessages(direction));
       return;
     }
     // Space stays with the page (scrolling, pressing a focused control).
-    if (e.key.length !== 1 || e.key === " " || !isIdleTarget(e.target)) return;
+    if (e.key.length !== 1 || e.key === " " || e.repeat || !isIdleTarget(e.target)) return;
+    // The push-to-talk key is polled natively and still reaches the page;
+    // held during a call it must not type into the message box.
+    if (isPttKey(e) || dialogOpen()) return;
     const composer = findComposer();
     // Focus moves before the key's default runs, so the character lands in
     // the message box: no preventDefault here.
@@ -210,6 +216,19 @@ const INTERACTIVE =
 function isIdleTarget(target: EventTarget | null): boolean {
   if (target === document.body || target === document.documentElement) return true;
   return target instanceof Element && target.closest(INTERACTIVE) === null;
+}
+
+/** Inside an open emoji or GIF picker, which focuses its own search field. */
+function inPicker(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".emoji-picker, .gif-picker") !== null;
+}
+
+/** The bound push-to-talk key, while Push to Talk is the input mode. `keyCode`
+ *  is the Windows VK the native poller uses, on every platform for these keys. */
+function isPttKey(e: KeyboardEvent): boolean {
+  if (inputMode() !== "ptt") return false;
+  const vk = loadPref<number>("pttVk", 0);
+  return vk !== 0 && e.keyCode === vk;
 }
 
 /** The message box on screen, when it can be typed into. */

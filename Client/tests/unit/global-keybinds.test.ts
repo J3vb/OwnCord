@@ -655,6 +655,26 @@ describe("global keybinds", () => {
       expect(document.activeElement).not.toBe(box);
     });
 
+    it("the push-to-talk key and a held key do not pull focus into the message box", () => {
+      localStorage.setItem("owncord:settings:inputMode", JSON.stringify("ptt"));
+      localStorage.setItem("owncord:settings:pttVk", JSON.stringify(0x56));
+      onTestFinished(() => {
+        localStorage.removeItem("owncord:settings:inputMode");
+        localStorage.removeItem("owncord:settings:pttVk");
+      });
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = composer();
+      box.blur();
+
+      keyOn(document.body, "v", { keyCode: 0x56 });
+      keyOn(document.body, "h", { repeat: true });
+      expect(document.activeElement).not.toBe(box);
+
+      keyOn(document.body, "h", { keyCode: 0x48 });
+      expect(document.activeElement).toBe(box);
+    });
+
     it("Ctrl+E and Ctrl+G toggle the emoji and GIF pickers, also from the message box", () => {
       const h = makeHandlers();
       detach = attachGlobalKeybinds(h);
@@ -664,6 +684,22 @@ describe("global keybinds", () => {
 
       expect(h.onTogglePicker.mock.calls).toEqual([["emoji"], ["gif"]]);
       expect(e.defaultPrevented).toBe(true);
+    });
+
+    it("Ctrl+E and Ctrl+G reach an open picker's own search field", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const picker = document.createElement("div");
+      picker.className = "emoji-picker";
+      const search = document.createElement("input");
+      picker.appendChild(search);
+      document.body.appendChild(picker);
+      onTestFinished(() => picker.remove());
+      keyOn(search, "e", { ctrlKey: true });
+      keyOn(search, "g", { ctrlKey: true });
+
+      expect(h.onTogglePicker.mock.calls).toEqual([["emoji"], ["gif"]]);
     });
 
     it("another text field keeps Ctrl+E and Ctrl+G", () => {

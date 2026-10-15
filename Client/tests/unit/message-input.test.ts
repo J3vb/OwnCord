@@ -758,7 +758,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("an Escape that cancels a reply is used up; one with nothing to cancel is not", () => {
+  it("an Escape that cancels an edit or reply is used up; one with nothing to cancel is not", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
@@ -768,6 +768,8 @@ describe("MessageInput", () => {
       return e;
     };
 
+    comp.startEdit(88, "editing");
+    expect(escape().defaultPrevented).toBe(true);
     comp.setReplyTo(44, "replyuser");
     expect(escape().defaultPrevented).toBe(true);
     // Nothing left to cancel: the app-wide Escape (mark read) may have it.
