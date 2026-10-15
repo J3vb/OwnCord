@@ -140,7 +140,10 @@ type Store interface {
 	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
-	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
+	NextCustomStatusExpiry(ctx context.Context) (string, bool, error)
+	ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]db.ExpiredCustomStatus, error)
+	ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error)
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	StampConnections(ctx context.Context, connected, disconnected []int64) error

@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS users (
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
-    custom_status TEXT
+    custom_status TEXT,
+    custom_status_expires_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

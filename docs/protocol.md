@@ -203,6 +203,7 @@ keeps it until one authenticates.
       "display_name": "Alex A.",
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
+      "custom_status_expires_at": "2026-10-15T18:00:00Z",
       "status": "invisible"
     },
     "server_name": "My Server",
@@ -221,6 +222,14 @@ keeps it until one authenticates.
 profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
+
+`custom_status_expires_at` (RFC 3339 UTC, or `null` when the custom status has
+no expiry or there is none) is the instant the signed-in user's own custom
+status clears itself, so a client can show a countdown. It is **only** in the
+user's own `auth_ok` and `GET /api/v1/users/me`: every other client is never
+told the instant, it just sees the status go to `null` (see `presence`). A
+status whose instant has passed but that the server has not cleared yet is
+sent as `null` in both fields.
 
 `status` is the user's **own true status**, `"invisible"` included. Only this
 message and their own `ready` entry ever carry it — every other client is told
@@ -957,6 +966,17 @@ Typing broadcasts are ephemeral -- they are NOT stored in the replay ring buffer
 }
 ```
 
+```json
+{
+  "type": "presence_update",
+  "payload": {
+    "status": "dnd",
+    "custom_status": "in a meeting",
+    "custom_status_expires_in": 3600
+  }
+}
+```
+
 Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 `"offline"` is still accepted from older clients (which used it to mean
 "appear offline") and is treated as the plain offline it says. Rate limited:
@@ -968,6 +988,19 @@ clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
 typed. While the user is timed out a non-empty `custom_status` is refused with
 `TIMED_OUT`; a bare status change and `""` still apply.
+
+`custom_status_expires_in` is optional: whole seconds, **60 to 604800** (one
+minute to seven days), after which the server clears the custom status by
+itself. A relative duration, so a client's clock skew does not matter; "clear
+today" is the seconds to local midnight. It is valid only with a non-empty
+`custom_status`: sent without one, with `""`, as a string or a fraction, or out
+of range, the frame is refused with `BAD_REQUEST`. A new `custom_status`
+without it has no expiry and replaces any old one; a bare status flip leaves
+both text and expiry alone; `""` clears both. The user's own `auth_ok.user` and
+`GET /api/v1/users/me` return the resulting `custom_status_expires_at`; it is
+never sent to other users. Idle, DnD and Invisible timers are not part of this:
+they stay on the client. An older server ignores the field, so the status just
+never expires there.
 
 The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
@@ -989,7 +1022,10 @@ cleared on `POST /api/v1/auth/logout`.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
 distinguishable from "this event does not mention it"; every presence
-broadcast carries the current value.
+broadcast carries the current value. When a custom status expires the server
+broadcasts a `presence` for the user with `custom_status: null` and the same
+`status` (split for an invisible user like any other presence), exactly as if
+they had cleared it; clients need no timer for other users' statuses.
 
 **Invisible splits this message in two.** When a user's status is
 `"invisible"`, everyone else receives a broadcast that says `"offline"`, and

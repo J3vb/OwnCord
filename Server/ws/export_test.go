@@ -674,3 +674,9 @@ func (h *Hub) FlushChannelActivityNowForTest() {
 func BuildChatSendOKForTest(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skipped []string) []byte {
 	return buildChatSendOK(requestID, msgID, timestamp, clientMessageID, duplicate, skipped)
 }
+
+// SetLivePresenceForTest records c's live presence as a connect stamp or
+// presence_update would.
+func SetLivePresenceForTest(c *Client, status string, customStatus *string, expiresAt string) {
+	c.setLivePresence(status, customStatus, expiresAt)
+}
