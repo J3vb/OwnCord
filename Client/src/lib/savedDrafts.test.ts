@@ -41,6 +41,12 @@ describe("saved drafts (3A-3)", () => {
     expect(loadSavedDraft("a.example", 1, 51)?.content).toBe("c51");
   });
 
+  it("does not keep a draft too long to ever send", () => {
+    saveDraft("a.example", 1, 10, { content: "short", replyTo: null });
+    saveDraft("a.example", 1, 10, { content: "x".repeat(8001), replyTo: null });
+    expect(loadSavedDraft("a.example", 1, 10)).toBeNull();
+  });
+
   it("drops a draft untouched for 30 days", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     saveDraft("a.example", 1, 10, { content: "old", replyTo: null });

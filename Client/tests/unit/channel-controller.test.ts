@@ -767,14 +767,64 @@ describe("createChannelController", () => {
       try {
         const ctrl = createChannelController(withHost());
         ctrl.mountChannel(42, "general");
-        mockPeekDraft.mockReturnValue({ content: "unsent", replyTo: null });
+        // Once for the change, once for the save on the switch; the new
+        // channel's composer starts empty.
+        mockPeekDraft
+          .mockReturnValueOnce({ content: "unsent", replyTo: null })
+          .mockReturnValueOnce({ content: "unsent", replyTo: null });
         capturedMessageInputOpts!.onDraftChange();
-        mockPeekDraft.mockReturnValue({ content: "unsent", replyTo: null });
         ctrl.mountChannel(99, "random");
         expect(loadSavedDraft("chat.example", 1, 42)?.content).toBe("unsent");
         expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
         vi.advanceTimersByTime(1000);
         expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("draft saves stay with their account (3A-3)", () => {
+    beforeEach(() => localStorage.clear());
+
+    it("skips a save once a different account is signed in", () => {
+      vi.useFakeTimers();
+      let userId = 1;
+      try {
+        const opts = makeOpts({ getCurrentUserId: () => userId });
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        mockPeekDraft.mockReturnValue({ content: "mine", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        userId = 2;
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        expect(loadSavedDraft("chat.example", 2, 42)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes a restored draft back without the reply it dropped", () => {
+      vi.useFakeTimers();
+      try {
+        const opts = makeOpts();
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        saveDraft("chat.example", 1, 42, {
+          content: "x",
+          replyTo: { messageId: 7, username: "alice" },
+        });
+        mockGetChannelMessages.mockReturnValue([{ id: 7, deleted: true }]);
+        mockPeekDraft.mockReturnValue({ content: "x", replyTo: null });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toEqual({ content: "x", replyTo: null });
         ctrl.destroy();
       } finally {
         mockPeekDraft.mockReturnValue({ content: "", replyTo: null });

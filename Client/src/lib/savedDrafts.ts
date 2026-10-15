@@ -13,6 +13,9 @@ const KEY_PREFIX = "owncord:drafts:";
 const MAX_DRAFTS = 50;
 /** A draft nobody came back to in this long is dropped on the next read. */
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/** Twice the message limit: a longer draft can never send, and 50 of them
+ *  would crowd the storage quota every other setting shares. */
+const MAX_SAVED_LENGTH = 8000;
 
 export interface SavedDraft {
   readonly content: string;
@@ -82,7 +85,7 @@ export function loadSavedDraft(host: string, userId: number, channelId: number):
   return { content: draft.content, replyTo: draft.replyTo ?? null };
 }
 
-/** Save a channel's draft; an empty one (no text, no reply) removes it. */
+/** Save a channel's draft; an empty or oversized one removes it. */
 export function saveDraft(
   host: string,
   userId: number,
@@ -95,7 +98,9 @@ export function saveDraft(
   const channel = String(channelId);
   // Re-inserted, so the map's order stays oldest first for the trim below.
   drafts.delete(channel);
-  if (draft.content !== "" || draft.replyTo !== null) {
+  const keep =
+    (draft.content !== "" || draft.replyTo !== null) && draft.content.length <= MAX_SAVED_LENGTH;
+  if (keep) {
     drafts.set(channel, {
       content: draft.content,
       ...(draft.replyTo === null ? {} : { replyTo: draft.replyTo }),

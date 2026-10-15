@@ -173,12 +173,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // survive a restart. Saved a moment after typing stops, and at once when the
   // draft empties or the channel switches.
   let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // The account the mounted composer belongs to, captured at mount, so a late
+  // save never files a draft under whoever is signed in by then.
+  let draftOwner: { host: string; userId: number; current: () => boolean } | null = null;
+  // What was last written, so an edit (whose peeked draft never changes) does
+  // not rewrite storage on every key.
+  let lastSavedDraft = "";
 
   function persistDraft(channelId: number, draft: SavedDraft): void {
-    const userId = getCurrentUserId();
-    const host = api.getConfig?.().host ?? "";
-    if (!(userId > 0) || host === "") return;
-    saveDraft(host, userId, channelId, draft);
+    const owner = draftOwner;
+    if (owner === null || !(owner.userId > 0) || owner.host === "" || !owner.current()) return;
+    const stamp = JSON.stringify([owner.host, owner.userId, channelId, draft]);
+    if (stamp === lastSavedDraft) return;
+    lastSavedDraft = stamp;
+    saveDraft(owner.host, owner.userId, channelId, draft);
   }
 
   function saveMountedDraft(): void {
@@ -403,6 +411,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     const reply = target === undefined ? null : { ...replyTargetOf(target), ping };
     if (sentTo === currentChannelId && messageInput !== null) {
       messageInput.restoreUnsent(files, reason, reply);
+      scheduleDraftSave();
       return;
     }
     const stashed = draftByChannel.get(sentTo);
@@ -529,6 +538,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+    draftOwner = { ...owner, current: ownsAccountSession };
 
     /**
      * Mount the gate or the withdraw bar. Their module (with its catalog) is
@@ -1234,6 +1244,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     } else {
       restoreSavedDraft(channelId, messageInput);
     }
+    // A dropped reply must not come back from storage on the next start.
+    scheduleDraftSave();
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
