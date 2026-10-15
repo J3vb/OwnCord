@@ -477,30 +477,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}, nil
 }
 
-// readyNoticePayload is one row of ready's notices slot (B5-9): an
-// unacknowledged warning. Never the actor, never the report link.
-type readyNoticePayload struct {
-	ID        int64  `json:"id"`
-	Kind      string `json:"kind"`
-	Reason    string `json:"reason"`
-	CreatedAt string `json:"created_at"`
-}
-
-// readyNotices resolves the connecting user's unacknowledged warnings for
-// ready's notices slot, always as a non-nil (possibly empty) slice so the
-// wire payload never carries a bare `null`.
-func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int64) ([]readyNoticePayload, error) {
-	rows, err := database.ListUnacknowledgedWarnings(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]readyNoticePayload, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, readyNoticePayload{ID: r.ID, Kind: r.Kind, Reason: r.Reason, CreatedAt: r.CreatedAt})
-	}
-	return out, nil
-}
-
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
 	// U4: refuse a wake reconnect before ANY handshake state change — most
 	// importantly before the grace take and freshConnectCleanStaleVoice below,
