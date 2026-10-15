@@ -18,7 +18,11 @@ import { setInlineImageDecorator } from "@components/message-list/media";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
-import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
+import type {
+  ComposerDraft,
+  MessageInputComponent,
+  SentAttachment,
+} from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
@@ -202,7 +206,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     {
       content: string;
       replyTo: number | null;
-      attachments: readonly string[];
+      // Each file with its name (and picked File, when there is one), so a
+      // file the server did not attach can go back into the composer (2A-3).
+      attachments: readonly SentAttachment[];
       // Which channel this cid was actually sent to. chat_send_ok and the
       // SLOW_MODE error are global ws.on subscriptions with no channel_id of
       // their own (OC-0059) — a late frame for a send made in a channel the
@@ -454,9 +460,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     function performSend(
       content: string,
       replyTo: number | null,
-      attachments: readonly string[],
+      files: readonly SentAttachment[],
       existingClientMessageId?: string,
     ): void {
+      const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
       if (user === null || !ownsSession()) return;
       // Sending while viewing a detached history window jumps to present: the
@@ -520,7 +527,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          attachments: files,
           channelId,
           clientMessageId,
           sentAt: Date.now(),
@@ -560,7 +567,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          attachments: files,
           channelId,
           clientMessageId,
           sentAt: Date.now(),
@@ -611,7 +618,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           ? {
               ...recovered,
               replyTo: null,
-              attachments: [] as readonly string[],
+              attachments: [] as readonly SentAttachment[],
             }
           : undefined);
       if (draft === undefined || draft.channelId !== channelId) return;
@@ -641,6 +648,37 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         return;
       }
       performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
+    }
+
+    /** 2A-3: give files a send did not carry back to the composer of the
+     *  channel it went to, mounted or stashed, with the send's reply target
+     *  when given and that composer has none of its own. */
+    function putBackUnsent(
+      sentTo: number,
+      files: readonly SentAttachment[],
+      reason: "skipped" | "unavailable",
+      replyTo: number | null = null,
+    ): void {
+      const target =
+        replyTo === null
+          ? undefined
+          : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
+      const reply =
+        target === undefined ? null : { messageId: target.id, username: target.user.username };
+      if (sentTo === currentChannelId && messageInput !== null) {
+        messageInput.restoreUnsent(files, reason, reply);
+        return;
+      }
+      const stashed = draftByChannel.get(sentTo);
+      draftByChannel.set(sentTo, {
+        content: stashed?.content ?? "",
+        replyTo: stashed?.replyTo ?? reply,
+        attachments: [
+          ...(stashed?.attachments ?? []),
+          ...files.map((f) => ({ ...f, uploadedAt: 0, unsent: true })),
+        ],
+        ...(stashed?.uploads === undefined ? {} : { uploads: stashed.uploads }),
+      });
     }
 
     function deleteDraft(correlationId: string): void {
@@ -992,14 +1030,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelId,
       channelName,
       gifApi: api,
-      onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
+      onSend: (
+        content: string,
+        replyTo: number | null,
+        _attachments: readonly string[],
+        files: readonly SentAttachment[],
+      ) => {
         // A reply whose target was deleted while composing sends as a plain
         // message.
         const target =
           replyTo === null
             ? undefined
             : getChannelMessages(channelId).find((m) => m.id === replyTo);
-        performSend(content, target?.deleted === true ? null : replyTo, attachments);
+        performSend(content, target?.deleted === true ? null : replyTo, files);
       },
       onUploadFile: async (
         file: File,
@@ -1180,6 +1223,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         const sentDraft =
           correlationId === undefined ? undefined : draftByCorrelation.get(correlationId);
         const sentTo = sentDraft?.channelId;
+        // 2A-3: the message went without these files; their chips go back.
+        // Ids the send did not carry are ignored.
+        const skipped = new Set(payload.skipped_attachment_ids ?? []);
+        const unsent = sentDraft?.attachments.filter((a) => skipped.has(a.id)) ?? [];
+        if (sentTo !== undefined && unsent.length > 0) putBackUnsent(sentTo, unsent, "skipped");
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
         // switch, so its draft must too), which means nothing else would ever
@@ -1295,6 +1343,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const edit = untrack(pendingEdits, correlationId);
           if (edit !== undefined) failEdits([edit], false);
           untrack(pendingDeletes, correlationId);
+          const draft = draftByCorrelation.get(correlationId);
+          if (payload.code === "ATTACHMENTS_UNAVAILABLE" && draft !== undefined && ownsSession()) {
+            // 2A-3: a files-only send none of whose files the server could
+            // attach. The dispatcher drops its row (nothing was stored); its
+            // files and reply go back to the composer.
+            draftByCorrelation.delete(correlationId);
+            clearSendTimer(correlationId);
+            putBackUnsent(draft.channelId, draft.attachments, "unavailable", draft.replyTo);
+          }
         }
         if (payload.code !== "SLOW_MODE") return;
         if (!sentToMountedChannel(correlationId)) return;

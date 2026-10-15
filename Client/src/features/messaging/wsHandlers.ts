@@ -9,6 +9,7 @@ import {
   rollbackReaction,
   confirmSend,
   markSendFailed,
+  removeOptimistic,
   channelIdForSend,
   applyServerMessage,
   messagesStore,
@@ -502,7 +503,11 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
       clientMessageId !== undefined &&
       pendingMessageBeforeRestore(clientMessageId);
     if (beforeRestore) showToast(connectText("app.sendBeforeRestore"), "error");
-    markSendFailed(id, beforeRestore ? "BEFORE_RESTORE" : payload.code);
+    // 2A-3: a files-only send none of whose files could be attached stored
+    // nothing, and a Retry with the same ids fails the same way. The row goes;
+    // the channel controller puts its files back into the composer.
+    if (payload.code === "ATTACHMENTS_UNAVAILABLE") removeOptimistic(id);
+    else markSendFailed(id, beforeRestore ? "BEFORE_RESTORE" : payload.code);
     return true;
   }
   // A failed optimistic reaction toggle: the pill reverting is the

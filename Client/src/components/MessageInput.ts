@@ -44,6 +44,7 @@ export interface MessageInputOptions {
     content: string,
     replyTo: number | null,
     attachments: readonly string[],
+    files: readonly SentAttachment[],
   ) => void;
   readonly onUploadFile?: (
     file: File,
@@ -59,6 +60,15 @@ export interface MessageInputOptions {
   readonly disabledReason?: string | null;
 }
 
+/** A file a send carried, kept so one the server did not attach can go back
+ *  into the composer (2A-3). `file` is absent on a chip restored from an older
+ *  draft, so that chip cannot re-upload. */
+export interface SentAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly file?: File;
+}
+
 /** A channel's unsent composer state, captured before a channel switch and
  *  restored when the user returns (UX-1). Uploads settled before the switch
  *  keep their server id; an upload still in flight rides along in `uploads`. */
@@ -72,6 +82,8 @@ export interface ComposerDraft {
     readonly uploadedAt: number;
     /** The picked file, so a restored chip past its age can re-upload. */
     readonly file?: File;
+    /** A file a send did not carry: it comes back in its error state. */
+    readonly unsent?: boolean;
   }[];
   /** Uploads still running when the composer was torn down. They keep going
    *  and the composer that restores the draft shows them again. */
@@ -106,6 +118,15 @@ export type MessageInputComponent = MountableComponent & {
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */
   restoreDraft(draft: ComposerDraft): void;
+  /**
+   * Put back files a send did not carry, as chips in their error state, and
+   * the send's reply target when the composer has no reply or edit of its own.
+   */
+  restoreUnsent(
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo?: ComposerDraft["replyTo"],
+  ): void;
   /** True when the composer holds no text, reply, edit or attachment. */
   isIdle(): boolean;
   /**
@@ -364,6 +385,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     file?: File;
     /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
     expired?: boolean;
+    /** Put back after a send did not carry it; cleared by a fresh upload. */
+    unsent?: boolean;
   }[] = [];
   /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
   const handedOff = new Set<DraftUpload>();
@@ -818,9 +841,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         for (const a of stale) refreshStale(a);
         showUploadError(
           messagingText(
-            stale.some((a) => a.expired === true)
-              ? "error.attachmentExpired"
-              : "error.attachmentRefreshing",
+            stale.some((a) => a.unsent === true && a.expired === true)
+              ? "error.attachmentsNotSent"
+              : stale.some((a) => a.expired === true)
+                ? "error.attachmentExpired"
+                : "error.attachmentRefreshing",
           ),
         );
         return;
@@ -843,10 +868,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     // Only include attachments that have finished uploading (have a real server ID)
-    const attachmentIds = pendingAttachments
-      .filter((a) => !a.id.startsWith("pending-"))
-      .map((a) => a.id);
-    options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
+    const files = pendingAttachments.flatMap((a): SentAttachment[] =>
+      a.id.startsWith("pending-")
+        ? []
+        : [{ id: a.id, filename: a.filename, ...(a.file === undefined ? {} : { file: a.file }) }],
+    );
+    options.onSend(
+      content,
+      state.replyTo?.messageId ?? null,
+      files.map((f) => f.id),
+      files,
+    );
     clearReply();
     clearPendingAttachments();
 
@@ -1127,6 +1159,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       pending.filename = result.filename;
       pending.upload = undefined;
       pending.uploadedAt = handle.settledAt ?? Date.now();
+      if (pending.unsent === true) {
+        pending.unsent = false;
+        item.classList.remove("unsent");
+        item.removeAttribute("title");
+      }
       item.classList.remove("uploading");
       progressBar.remove();
       if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
@@ -1568,7 +1605,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;
-              options.onSend(gifUrl, state.replyTo?.messageId ?? null, []);
+              options.onSend(gifUrl, state.replyTo?.messageId ?? null, [], []);
               clearReply();
             }
           }
@@ -1685,6 +1722,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
                 filename: a.filename,
                 uploadedAt: a.uploadedAt,
                 ...(a.file === undefined ? {} : { file: a.file }),
+                ...(a.unsent === true ? { unsent: true } : {}),
               },
             ],
       ),
@@ -1704,10 +1742,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
     const now = Date.now();
     const live = draft.attachments.filter(
-      (a) => a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
+      (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
     );
+    const unsent = live.filter((a) => a.unsent === true);
     for (const att of live) {
       if (attachmentPreviewBar === null) break;
+      if (att.unsent === true) continue;
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, att.filename);
       appendRemoveButton(item, att.filename);
@@ -1738,9 +1778,51 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       pendingAttachments.push(pending);
       void followUpload(pending, handle);
     }
-    if (live.length < draft.attachments.length) {
+    if (unsent.length > 0) restoreUnsent(unsent, "skipped");
+    else if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));
     }
+  }
+
+  /** A chip for a file the server did not attach. It is stale from the start,
+   *  so Send re-uploads it from its file and never posts the old id again; with
+   *  no file it is expired and only removing it frees Send. */
+  function addUnsentChip(att: SentAttachment): void {
+    if (attachmentPreviewBar === null || pendingAttachments.length >= MAX_ATTACHMENTS) return;
+    if (pendingAttachments.some((a) => a.id === att.id)) return;
+    const item = createElement("div", {
+      class: "attachment-preview-item unsent",
+      title: messagingText("attach.notSent"),
+    });
+    appendFileLabel(item, att.filename);
+    appendRemoveButton(item, att.filename);
+    attachmentPreviewBar.classList.add("visible");
+    attachmentPreviewBar.appendChild(item);
+    pendingAttachments.push({
+      id: att.id,
+      filename: att.filename,
+      previewEl: item,
+      uploadedAt: 0,
+      unsent: true,
+      ...(att.file === undefined ? { expired: true } : { file: att.file }),
+    });
+  }
+
+  function restoreUnsent(
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo?: ComposerDraft["replyTo"],
+  ): void {
+    if (attachmentPreviewBar === null) return;
+    if (replyTo != null && state.replyTo === null && state.editing === null) {
+      setReplyTo(replyTo.messageId, replyTo.username);
+    }
+    for (const f of files) addUnsentChip(f);
+    showUploadError(
+      messagingText(
+        reason === "unavailable" ? "error.attachmentsUnavailable" : "error.attachmentsNotSent",
+      ),
+    );
   }
 
   return {
@@ -1757,5 +1839,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     togglePicker,
     getDraft,
     restoreDraft,
+    restoreUnsent,
   };
 }

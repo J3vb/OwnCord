@@ -231,6 +231,21 @@ describe("handleMessagingError", () => {
     }
   });
 
+  it("drops the row of a send whose files were all unavailable (2A-3)", () => {
+    pendingSend("corr-1");
+
+    expect(handleMessagingError({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "corr-1")).toBe(
+      true,
+    );
+    expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.some((m) => m.correlationId === "corr-1"),
+    ).toBe(false);
+  });
+
   it("leaves an error with no matching send or reaction to the rest of the chain", () => {
     expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "other")).toBe(false);
     expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, undefined)).toBe(false);
