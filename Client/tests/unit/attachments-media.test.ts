@@ -248,6 +248,69 @@ describe("renderAttachment — video", () => {
     Object.defineProperty(video, "videoHeight", { value: 1920 });
     video.dispatchEvent(new Event("loadedmetadata"));
     expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("1080/1920");
+    // Scaled into the 400x300 box: 300 tall, so 169 wide, no black bars.
+    expect(video.style.width).toBe("169px");
+  });
+
+  it("never scales a small clip up", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 320 });
+    Object.defineProperty(video, "videoHeight", { value: 240 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(video.style.width).toBe("320px");
+  });
+
+  it("widens a tiny clip so its controls fit", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 40 });
+    Object.defineProperty(video, "videoHeight", { value: 40 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(video.style.width).toBe("120px");
+    expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("40/40");
+  });
+
+  it("letterboxes a very tall clip instead of passing the box height", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 100 });
+    Object.defineProperty(video, "videoHeight", { value: 10000 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(video.style.width).toBe("120px");
+    expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("120/300");
+  });
+
+  it("caps a wide clip at the box width", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 1920 });
+    Object.defineProperty(video, "videoHeight", { value: 1080 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(video.style.width).toBe("400px");
+  });
+
+  it("keeps a played clip's shape when the row is rebuilt", async () => {
+    const video = await playedVideo();
+    Object.defineProperty(video, "videoWidth", { value: 1080 });
+    Object.defineProperty(video, "videoHeight", { value: 1920 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+
+    const rebuilt = renderAttachment(att({ mime: "video/quicktime", filename: "clip.mov" }));
+    const again = rebuilt.querySelector("video") as HTMLVideoElement;
+    expect(again.style.width).toBe("169px");
+    expect(again.style.aspectRatio.replace(/\s/g, "")).toBe("1080/1920");
+  });
+
+  it("sizes a player from server dimensions before anything is fetched", () => {
+    const el = renderAttachment(att({ mime: "video/mp4", width: 480, height: 480 }));
+    const video = el.querySelector("video") as HTMLVideoElement;
+    expect(video.style.width).toBe("300px");
+    expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("480/480");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the CSS placeholder when the size is unknown", () => {
+    const el = renderAttachment(att({ mime: "video/mp4" }));
+    const video = el.querySelector("video") as HTMLVideoElement;
+    expect(video.style.width).toBe("");
+    expect(video.style.aspectRatio).toBe("");
   });
 
   it("keeps a player whose video decodes", async () => {

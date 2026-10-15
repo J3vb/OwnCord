@@ -281,6 +281,7 @@ export function clearAttachmentCaches(): void {
   inFlight.clear();
   mediaCache.clear();
   mediaInFlight.clear();
+  videoDims.clear();
 }
 
 /** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */
@@ -720,6 +721,11 @@ const mediaCache = new ObjectUrlCache(MEDIA_CACHE_MAX_BYTES, MEDIA_CACHE_MAX);
 /** In-flight media fetches, deduplicated the same way images are. */
 const mediaInFlight = new Map<string, Promise<string | null>>();
 
+/** Real video sizes learnt on play, so a row rebuilt by the virtual list keeps
+ *  the clip's shape instead of falling back to the 16:9 placeholder. */
+const videoDims = new Map<string, readonly [number, number]>();
+const VIDEO_DIMS_CAP = 500;
+
 /**
  * Fetch a video/audio attachment through the same authenticated,
  * cert-pinned path images use (fetchServerFile attaches the session bearer
@@ -1042,15 +1048,42 @@ function swapKeepingFocus(wrap: HTMLElement, next: HTMLElement): void {
   if (hadFocus) next.querySelector<HTMLElement>(".msg-file-download")?.focus();
 }
 
-/** Inline <video> player. Sized by the same .msg-image box as images so a
- *  video never blows the message column out; the source arrives on play
- *  because it needs the session token attached. A clip the engine cannot
+/** Largest box an inline video is drawn in, in CSS pixels: the cap an inline
+ *  image is shown at (400 wide by the reserved box, 300 tall by CSS). */
+const VIDEO_MAX_W = 400;
+const VIDEO_MAX_H = 300;
+/** Narrowest player, so the play and download buttons and the native controls
+ *  still fit a tiny or very tall clip. */
+const VIDEO_MIN_W = 120;
+
+/** Size the player to the clip's own shape, scaled down to the video box, so
+ *  a small or portrait video gets no black bars. Below VIDEO_MIN_W the player
+ *  is widened, and a box that would then pass VIDEO_MAX_H is letterboxed. The
+ *  width is a ceiling: a narrow column still shrinks it, keeping the ratio. */
+function sizeVideo(video: HTMLVideoElement, w: number, h: number): void {
+  const scale = Math.min(1, VIDEO_MAX_W / w, VIDEO_MAX_H / h);
+  const scaled = Math.round(w * scale);
+  const width = Math.max(VIDEO_MIN_W, scaled);
+  const fits = scaled >= VIDEO_MIN_W || (width * h) / w <= VIDEO_MAX_H;
+  video.style.width = `${width}px`;
+  video.style.aspectRatio = fits ? `${w} / ${h}` : `${width} / ${VIDEO_MAX_H}`;
+}
+
+/** Inline <video> player, capped to the same box as an image and sized to the
+ *  clip's real shape once it is known (server dimensions, an earlier play, or
+ *  the metadata on play); until then a 16:9 placeholder. The source arrives on
+ *  play because it needs the session token attached. A clip the engine cannot
  *  decode becomes the download chip, never a broken player. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
   const video = createElement("video", { preload: "metadata" });
   video.setAttribute("aria-label", att.filename);
+  const known =
+    att.width != null && att.height != null && att.width > 0 && att.height > 0
+      ? ([att.width, att.height] as const)
+      : videoDims.get(att.id);
+  if (known !== undefined) sizeVideo(video, known[0], known[1]);
   const unplayable = (): void => {
     const chip = renderFileChip(att, resolvedUrl);
     const note = createElement("div", { class: "msg-file-note", role: "status" });
@@ -1060,8 +1093,13 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
   };
   video.addEventListener("error", unplayable, { once: true });
   video.addEventListener("loadedmetadata", () => {
-    if (video.videoWidth > 0) {
-      video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      sizeVideo(video, video.videoWidth, video.videoHeight);
+      if (!videoDims.has(att.id) && videoDims.size >= VIDEO_DIMS_CAP) {
+        const oldest = videoDims.keys().next().value;
+        if (oldest !== undefined) videoDims.delete(oldest);
+      }
+      videoDims.set(att.id, [video.videoWidth, video.videoHeight]);
       return;
     }
     // No picture (audio-only, or a codec the engine lacks): keep playing as audio.
