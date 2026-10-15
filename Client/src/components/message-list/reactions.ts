@@ -4,6 +4,8 @@
 
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
+import { channelsStore } from "@stores/channels.store";
+import { messagingText } from "../../i18n/messaging";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
@@ -17,15 +19,21 @@ import { buildCustomEmojiNode } from "./custom-emoji";
 /** Why reacting is disabled: the socket is down (a reaction frame would be
  *  lost), or the user is timed out (B9-15, Q4), with the server's expiry.
  *  Null when reacting works. */
-export function reactionLockReason(): string | null {
+export function reactionLockReason(canReact?: boolean): string | null {
   const status = uiStore.getState().connectionStatus;
   if (status !== "connected") {
     return shellText(status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected");
   }
   const timeout = safetyStore.getState().timeout;
-  return timeout === null
-    ? null
-    : safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) });
+  if (timeout !== null)
+    return safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) });
+  // Only an explicit false locks; absent (an older server) leaves reacting on.
+  return canReact === false ? messagingText("reaction.channelLocked") : null;
+}
+
+/** The server's can_react verdict for a channel; undefined when it never said. */
+export function channelCanReact(channelId: number): boolean | undefined {
+  return channelsStore.getState().channels.get(channelId)?.canReact;
 }
 
 export function renderReactions(
@@ -34,7 +42,7 @@ export function renderReactions(
   signal: AbortSignal,
 ): HTMLDivElement {
   const container = createElement("div", { class: "msg-reactions" });
-  const locked = reactionLockReason();
+  const locked = reactionLockReason(channelCanReact(msg.channelId));
   for (const reaction of msg.reactions) {
     const chip = createElement("span", {
       class: reaction.me ? "reaction-chip me" : "reaction-chip",
@@ -133,8 +141,10 @@ export function applyReactionLock(el: HTMLElement, locked: string | null, defaul
 
 /** Apply the current lock to every reaction control under `root`. Called when
  *  the timeout or the connection changes; no row is rebuilt. */
-export function refreshReactionLocks(root: ParentNode): void {
-  const locked = reactionLockReason();
+export function refreshReactionLocks(root: ParentNode, channelId?: number): void {
+  const locked = reactionLockReason(
+    channelId === undefined ? undefined : channelCanReact(channelId),
+  );
   for (const el of root.querySelectorAll<HTMLElement>(
     ".reaction-chip, [data-testid^='msg-react-']",
   )) {

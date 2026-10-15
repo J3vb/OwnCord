@@ -185,6 +185,16 @@ export interface ReadyChannel {
    */
   readonly can_moderate_voice?: boolean;
   /**
+   * Whether the current user may delete other people's messages here, as the
+   * server computed it from the channel's effective permissions. Absent from
+   * older servers: fall back to the role's MANAGE_MESSAGES, never to false.
+   */
+  readonly can_delete_others?: boolean;
+  /** Whether the current user may pin and unpin here. Same absent rule as can_delete_others. */
+  readonly can_pin?: boolean;
+  /** Whether the current user may react here. Absent from older servers: treat as true. */
+  readonly can_react?: boolean;
+  /**
    * Per-channel cooldown in seconds (0 = off). Drives the composer's
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
@@ -567,6 +577,10 @@ export interface ChannelCreatePayload {
    * unchanged rules as can_send.
    */
   readonly can_moderate_voice?: boolean;
+  /** This viewer's message affordances — see ReadyChannel. Absent means unchanged. */
+  readonly can_delete_others?: boolean;
+  readonly can_pin?: boolean;
+  readonly can_react?: boolean;
 }
 
 export interface ChannelUpdatePayload {

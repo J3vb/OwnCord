@@ -111,6 +111,7 @@ and only when it changes something a contributor or fork holder must do
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
 - Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.
 - Editing a message showed you as typing to everyone in the channel. Editing no longer does.
+- Delete, Pin and React now follow the channel's permissions. A channel that grants or removes them for you now shows or hides those buttons, instead of the buttons following your role alone.
 
 **Voice and video**
 
