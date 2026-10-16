@@ -965,6 +965,51 @@ ul.md-list-nested {
   object-fit: contain;
   border-radius: var(--radius-md);
 }
+/* Several images in one message: a mosaic of fixed-height tiles (3A-11a). The
+   tiles' inline width/height (layout-shift reservation) give way to the grid. */
+.msg-image-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 140px;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 550px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.msg-image-grid > .msg-image {
+  grid-column: span 2;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-width: none;
+  margin-top: 0;
+  border-radius: 0;
+}
+.msg-image-grid > .msg-image:nth-child(-n + 2) {
+  grid-column: span 3;
+}
+.msg-image-grid .msg-image img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  border-radius: 0;
+}
+.msg-image-grid .placeholder-img {
+  height: 100%;
+}
+.msg-image-grid[data-count="2"] {
+  grid-auto-rows: 200px;
+}
+.msg-image-grid[data-count="2"] > .msg-image,
+.msg-image-grid[data-count="3"] > .msg-image,
+.msg-image-grid[data-count="4"] > .msg-image {
+  grid-column: span 3;
+}
+.msg-image-grid[data-count="3"] > .msg-image:first-child {
+  grid-row: span 2;
+}
 .msg-image .placeholder-img {
   width: 100%;
   height: 200px;

@@ -148,4 +148,41 @@ describe("renderers lightbox sequence", () => {
 
     expect(document.querySelector(".image-lightbox")).toBeNull();
   });
+
+  it("groups 2+ images into one ordered grid and leaves files and videos outside", async () => {
+    const msg = makeMessage({
+      attachments: [
+        att("a", "a.png", "image/png"),
+        att("f", "notes.txt", "text/plain"),
+        att("b", "b.png", "image/png"),
+        att("c", "c.png", "image/png"),
+      ],
+    });
+    messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map([[1, [msg]]]) }));
+    const imgs = await renderRow(msg);
+
+    const grids = document.querySelectorAll(".msg-image-grid");
+    expect(grids.length).toBe(1);
+    const grid = grids[0]!;
+    expect(grid.getAttribute("data-count")).toBe("3");
+    expect([...grid.querySelectorAll("img")].map((i) => i.alt)).toEqual([
+      "a.png",
+      "b.png",
+      "c.png",
+    ]);
+    expect(grid.children.length).toBe(3);
+    const chip = document.querySelector(".msg-file");
+    expect(chip).not.toBeNull();
+    expect(grid.contains(chip)).toBe(false);
+
+    imgs[1]!.click(); // tile 2 still opens the lightbox at index 1
+    await vi.waitFor(() => expect(counter()).toBe("2 of 3"));
+  });
+
+  it("renders a single image without a grid wrapper", async () => {
+    const msg = makeMessage({ attachments: [att("a", "a.png", "image/png")] });
+    await renderRow(msg);
+    expect(document.querySelector(".msg-image-grid")).toBeNull();
+    expect(document.querySelectorAll(".msg-image").length).toBe(1);
+  });
 });

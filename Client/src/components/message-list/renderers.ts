@@ -322,6 +322,11 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
       .getState()
       .messagesByChannel.get(msg.channelId)
       ?.find((m) => m.id === msg.id)?.deleted === true;
+  // Two or more images share one mosaic wrapper, placed where the first image was.
+  const grid =
+    images.length >= 2
+      ? createElement("div", { class: "msg-image-grid", "data-count": String(images.length) })
+      : null;
   for (const att of msg.attachments) {
     const index = images.indexOf(att);
     const gallery: LightboxGallery | undefined =
@@ -338,7 +343,13 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
             // The row is re-rendered as a tombstone: find the new element.
             row: () => document.querySelector(`[data-testid="message-${msg.id}"]`),
           };
-    el.appendChild(renderAttachment(att, gallery));
+    const node = renderAttachment(att, gallery);
+    if (grid !== null && index !== -1) {
+      if (grid.parentNode === null) el.appendChild(grid);
+      grid.appendChild(node);
+    } else {
+      el.appendChild(node);
+    }
   }
 }
 
