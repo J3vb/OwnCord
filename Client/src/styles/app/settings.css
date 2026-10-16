@@ -887,7 +887,7 @@ details.disclose[open] > summary .icon {
 /* The app version under Log Out: small, muted, not a nav item. */
 .settings-sidebar-version {
   padding: 4px 10px 0;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   user-select: text;
 }

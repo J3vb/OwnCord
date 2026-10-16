@@ -20,6 +20,7 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
 });
 
 import { buildCustomEmojiImage } from "../../src/components/message-list/custom-emoji";
+import { clearAttachmentCaches } from "../../src/components/message-list/attachments";
 import {
   animateEmojiEnabled,
   captureStill,
@@ -96,6 +97,17 @@ describe("Animate emoji", () => {
     showStillFrame(second, "blob:animated");
     expect(second.getAttribute("src")).toBe(STILL);
     expect(drawImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("off: clearing the image caches drops the captured frames too", () => {
+    const first = document.createElement("img");
+    showStillFrame(first, "blob:animated");
+    loaded(first);
+    first.dispatchEvent(new Event("load"));
+    clearAttachmentCaches();
+    const second = document.createElement("img");
+    showStillFrame(second, "blob:animated");
+    expect(second.getAttribute("src")).not.toBe(STILL);
   });
 
   it("off: a frame that cannot be captured leaves the loaded emoji showing", () => {
