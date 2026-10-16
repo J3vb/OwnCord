@@ -365,6 +365,25 @@ pub async fn native_voice_set_input_gain(
     Ok(())
 }
 
+/// Apply `audio` (echo cancellation, noise suppression, automatic gain
+/// control, Enhanced Noise Suppression) to `session`'s running call: the
+/// capture and the echo canceller's reference switch to it within a few
+/// frames, with the microphone unmuted or not.
+#[tauri::command]
+pub async fn native_voice_set_audio_processing(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    audio: AudioOptions,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_audio_processing(audio);
+    Ok(())
+}
+
 /// List the GStreamer `Video/Source` cameras (V4L2 and PipeWire), in or out
 /// of a call: the ids `native_voice_start_camera` takes.
 #[tauri::command]

@@ -475,6 +475,46 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("a room that applies the processing toggles itself", () => {
+    const nativeRoom = () => ({
+      localParticipant: { getTrackPublication: () => undefined },
+      setVoiceGate: vi.fn(),
+      setAudioProcessing: vi.fn(),
+    });
+
+    it("gets the four saved toggles from reapplyAudioProcessing, without a track restart", async () => {
+      prefs.set("echoCancellation", false);
+      prefs.set("noiseSuppression", true);
+      prefs.set("autoGainControl", false);
+      prefs.set("enhancedNoiseSuppression", true);
+      const pipeline = new AudioPipeline();
+      const room = nativeRoom();
+      pipeline.setRoom(room as never);
+      const onError = vi.fn();
+      await pipeline.reapplyAudioProcessing(onError);
+      expect(room.setAudioProcessing).toHaveBeenCalledExactlyOnceWith({
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: false,
+        enhancedNoiseSuppression: true,
+      });
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("gets them from reapplyEnhancedNoiseSuppression too, with defaults for unset prefs", async () => {
+      const pipeline = new AudioPipeline();
+      const room = nativeRoom();
+      pipeline.setRoom(room as never);
+      await pipeline.reapplyEnhancedNoiseSuppression();
+      expect(room.setAudioProcessing).toHaveBeenCalledExactlyOnceWith({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        enhancedNoiseSuppression: false,
+      });
+    });
+  });
+
   describe("reapplyEnhancedNoiseSuppression", () => {
     it("routes the live processor through RNNoise without restarting the capture", async () => {
       FakeAudioContext.workletsLoad = true;

@@ -334,7 +334,7 @@ export class NativeRoom {
    *  `screenshareVolumeOf` is their screen-share audio's, which the web path
    *  sets on its audio element; `applyScreenshareVolumes` re-reads it. */
   constructor(
-    private readonly audio: NativeVoiceAudioOptions,
+    private audio: NativeVoiceAudioOptions,
     private readonly volumeOf: (identity: string) => number = () => 1,
     private readonly screenshareVolumeOf: (identity: string) => number = () => 1,
   ) {}
@@ -423,6 +423,18 @@ export class NativeRoom {
     desktop.nativeVoice
       .setInputGain(this.sessionId, this.inputGainPercent)
       .catch((err) => log.warn("Input volume could not reach the native capture", err));
+  }
+  /** The mic processing toggles (echo cancellation, noise suppression,
+   *  automatic gain control, Enhanced Noise Suppression): kept for a
+   *  reconnect and, in a call, applied by the session's capture and echo
+   *  canceller within a few frames, as AudioPipeline.reapplyAudioProcessing
+   *  restarts the web mic track for them. */
+  setAudioProcessing(audio: NativeVoiceAudioOptions): void {
+    this.audio = audio;
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setAudioProcessing(this.sessionId, audio)
+      .catch((err) => log.warn("Audio processing could not reach the native capture", err));
   }
   /** Hear the capture's level reports (null to stop): the settings meter's
    *  feed while the native capture runs. */

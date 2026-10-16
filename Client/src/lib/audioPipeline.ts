@@ -279,6 +279,18 @@ interface InputGainRoom {
   setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void;
 }
 
+/** A room whose own capture takes the four processing toggles live
+ *  (NativeRoom): there is no web mic track to restart or processor to
+ *  reroute. */
+interface AudioProcessingRoom {
+  setAudioProcessing(audio: {
+    echoCancellation: boolean;
+    noiseSuppression: boolean;
+    autoGainControl: boolean;
+    enhancedNoiseSuppression: boolean;
+  }): void;
+}
+
 /** A capture level report: the detector's RMS and whether the gate is open. */
 /** A level report; null as the level means the capture stopped. */
 export type InputLevelListener = (rms: number | null, open: boolean) => void;
@@ -498,6 +510,7 @@ export class AudioPipeline {
   /** Route the live processor through or around RNNoise for the saved
    *  preference. The capture is not touched. */
   async reapplyEnhancedNoiseSuppression(onError?: (message: string) => void): Promise<void> {
+    if (this.applyNativeProcessing()) return;
     const processor = this.processor;
     if (processor === null) return;
     await this.applyEnhancedPreference();
@@ -505,6 +518,21 @@ export class AudioPipeline {
     if (loadPref<boolean>("enhancedNoiseSuppression", false) && !processor.enhanced) {
       onError?.(voiceText("audio.settingsFailed"));
     }
+  }
+
+  /** Hand the saved toggles to a room whose own capture applies them live.
+   *  False for a web room, whose mic track and processor the callers go on
+   *  to rework. */
+  private applyNativeProcessing(): boolean {
+    const room = this.room as Partial<AudioProcessingRoom> | null;
+    if (!room?.setAudioProcessing) return false;
+    room.setAudioProcessing({
+      echoCancellation: loadPref("echoCancellation", true),
+      noiseSuppression: loadPref("noiseSuppression", true),
+      autoGainControl: loadPref("autoGainControl", true),
+      enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+    });
+    return true;
   }
 
   // --- Volume / gates ---
@@ -614,6 +642,7 @@ export class AudioPipeline {
       log.debug("Skipping audio processing reapply — no active voice session");
       return;
     }
+    if (this.applyNativeProcessing()) return;
     const track = this.micTrack;
     if (track === undefined) {
       log.debug("Skipping audio processing reapply — no mic track");

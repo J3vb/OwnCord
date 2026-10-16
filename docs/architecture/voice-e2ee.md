@@ -274,7 +274,9 @@ settings tab hides the Input Volume control there with a note pointing at the
 system mixer. The sensitivity gate has since landed on that stage (below), so
 the Input Sensitivity slider shows on Linux too, without a live level in its
 bar; the processing toggles, Enhanced Noise Suppression included,
-apply at the next join. The automatic input sensitivity option and the mic
+apply live: the session rebuilds its audio processing module and the capture
+and the echo canceller's reference swap to it within a few frames, muted or
+not (`native_voice_set_audio_processing`). The automatic input sensitivity option and the mic
 test in Voice & Audio settings are web-path features and are not offered on
 Linux (`components/settings/VoiceAudioTab.ts`). Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
