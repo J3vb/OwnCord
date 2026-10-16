@@ -37,7 +37,8 @@ func (p readyPrivacy) private(channelID int64) bool {
 // and bulk-reads its overrides (one query, no N+1). Both belong to the same
 // ready build, so an override edited meanwhile shows up in the next ready or
 // the refresh frame, never as a half-applied state. No default role is not an
-// error: nothing is private. Among several flagged roles the one GetDefaultRole
+// error: nothing is private. A failed bulk read is returned; readReady logs it
+// at debug and falls back to readyPrivacy{}, as the single-frame path does. Among several flagged roles the one GetDefaultRole
 // picks wins (highest position, then lowest id).
 func readyChannelPrivacy(ctx context.Context, database ReadySnapshotReader, roles []*service.Role) (readyPrivacy, error) {
 	var def *service.Role
@@ -63,6 +64,35 @@ func readyChannelPrivacy(ctx context.Context, database ReadySnapshotReader, role
 	return readyPrivacy{defaultPerms: def.Permissions, overrides: overrides, hasDefault: true}, nil
 }
 
+// defaultRoleForPrivacy reads the default role once. A failed read or a
+// missing role is nil, which marks every channel not private; a read failure is
+// logged at debug and never fails a frame.
+func (h *Hub) defaultRoleForPrivacy(ctx context.Context) *service.Role {
+	if h.readers.Visibility == nil {
+		return nil
+	}
+	role, err := h.readers.Visibility.GetDefaultRole(ctx)
+	if err != nil {
+		slog.Debug("hub: private flag could not read the default role", "err", err)
+		return nil
+	}
+	return role
+}
+
+// channelIsPrivateFor is the per-channel half of channelIsPrivate: one read of
+// the default role's override on the channel. A nil role or a DM is not private.
+func (h *Hub) channelIsPrivateFor(ctx context.Context, role *service.Role, channelID int64, chanType string) bool {
+	if role == nil || chanType == "dm" || h.readers.Visibility == nil {
+		return false
+	}
+	allow, deny, err := h.readers.Visibility.GetChannelPermissions(ctx, channelID, role.ID)
+	if err != nil {
+		slog.Debug("hub: channelIsPrivate could not read the default role override", "channel_id", channelID, "err", err)
+		return false
+	}
+	return permissions.IsChannelPrivate(role.Permissions, permissions.ChannelOverride{Allow: allow, Deny: deny})
+}
+
 // channelIsPrivate is the private flag for one guild channel frame. It costs
 // one or two reads — the default role, then its override on the channel.
 //
@@ -72,21 +102,8 @@ func readyChannelPrivacy(ctx context.Context, database ReadySnapshotReader, role
 // never fails the frame. A read racing an override edit sees the old or the new
 // row; the refresh frame that edit triggers corrects it.
 func (h *Hub) channelIsPrivate(ctx context.Context, channelID int64, chanType string) bool {
-	if chanType == "dm" || h.readers.Visibility == nil {
+	if chanType == "dm" {
 		return false
 	}
-	role, err := h.readers.Visibility.GetDefaultRole(ctx)
-	if err != nil {
-		slog.Debug("hub: channelIsPrivate could not read the default role", "channel_id", channelID, "err", err)
-		return false
-	}
-	if role == nil {
-		return false
-	}
-	allow, deny, err := h.readers.Visibility.GetChannelPermissions(ctx, channelID, role.ID)
-	if err != nil {
-		slog.Debug("hub: channelIsPrivate could not read the default role override", "channel_id", channelID, "err", err)
-		return false
-	}
-	return permissions.IsChannelPrivate(role.Permissions, permissions.ChannelOverride{Allow: allow, Deny: deny})
+	return h.channelIsPrivateFor(ctx, h.defaultRoleForPrivacy(ctx), channelID, chanType)
 }

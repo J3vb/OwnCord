@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -203,5 +204,73 @@ func TestBuildReady_PrivateFlagUsesOneBulkSnapshot(t *testing.T) {
 	byID := readyChannelsByID(t, buf.Bytes())
 	if ch, ok := byID[keepID]; !ok || ch["private"] != true {
 		t.Errorf("surviving private channel = %v (present %v), want private=true", ch, ok)
+	}
+}
+
+func recvChannelCreatePrivate(t *testing.T, send chan []byte, chID int64) any {
+	t.Helper()
+	p, _ := drainForMsgType(t, send, "channel_create")["payload"].(map[string]any)
+	if id, _ := p["id"].(float64); int64(id) != chID {
+		t.Fatalf("channel_create id = %v, want %d", p["id"], chID)
+	}
+	return p["private"]
+}
+
+// BroadcastChannelCreate carries private=true for a channel the default role
+// cannot read (the moderator, who can, receives the frame).
+func TestBroadcastChannelCreate_CarriesPrivateFlag(t *testing.T) {
+	f := newAffordanceFixture(t, true)
+	chID := seedTestChannel(t, f.database, "private-new-room")
+	denyDefaultRoleRead(t, f.database, chID)
+	ch, err := f.database.GetChannel(context.Background(), chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	f.hub.BroadcastChannelCreate(ch)
+	if got := recvChannelCreatePrivate(t, f.modSend, chID); got != true {
+		t.Errorf("BroadcastChannelCreate private = %v, want true", got)
+	}
+}
+
+// The timeout refresh (NotifyModAction -> RefreshUserChannels) re-sends each
+// visible channel with its private flag.
+func TestNotifyModAction_TimeoutRefreshCarriesPrivateFlag(t *testing.T) {
+	f := newAffordanceFixture(t, true)
+	denyDefaultRoleRead(t, f.database, f.ch.ID)
+	f.hub.NotifyModAction(f.modID, 1, "timeout", "test", nil)
+	if got := recvChannelCreatePrivate(t, f.modSend, f.ch.ID); got != true {
+		t.Errorf("timeout refresh channel_create private = %v, want true", got)
+	}
+}
+
+// failingBulkReader errors the ready bulk override read.
+type failingBulkReader struct{ ws.ReadySnapshotReader }
+
+func (failingBulkReader) GetAllChannelPermissionsForRole(context.Context, int64) (map[int64]db.ChannelOverride, error) {
+	return nil, errors.New("bulk read failed")
+}
+
+// A failed bulk read must not fail ready: everything is private=false.
+func TestBuildReady_BulkOverrideReadFailureIsNotPrivate(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "private-bulkfail")
+	id, _ := database.CreateChannel(context.Background(), "locked", "text", "", "", 0)
+	denyDefaultRoleRead(t, database, id)
+	owner, err := database.GetRoleByID(context.Background(), 1)
+	if err != nil || owner == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := hub.WriteReadyForTest(failingBulkReader{database}, user.ID, owner, &buf); err != nil {
+		t.Fatalf("ready failed on bulk read error: %v", err)
+	}
+	byID := readyChannelsByID(t, buf.Bytes())
+	if len(byID) == 0 {
+		t.Fatal("no channels in ready")
+	}
+	for cid, ch := range byID {
+		if ch["private"] != false {
+			t.Errorf("channel %d private = %v, want false", cid, ch["private"])
+		}
 	}
 }

@@ -440,9 +440,12 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
+	// The lock is cosmetic: a failed bulk read must not fail ready. Nothing is
+	// private then, the same fallback the single-channel frames use.
 	privacy, err := readyChannelPrivacy(ctx, database, roles)
 	if err != nil {
-		return nil, err
+		slog.Debug("ws: buildReady private flag unavailable, sending private=false", "user_id", userID, "err", err)
+		privacy = readyPrivacy{}
 	}
 	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut, privacy)
 

@@ -499,8 +499,8 @@ the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
 
 `private` (3D-6) is the channel-level lock flag, always present on every guild
-channel object (`ready` `channels[]`, `channel_create`, `channel_update`; never
-on a DM, voice channels included) so a client can draw a lock icon. A channel is
+channel object (`ready` `channels[]`, `channel_create`, `channel_update`), voice
+channels included, and never on a DM, so a client can draw a lock icon. A channel is
 private when the default role (the `is_default` role, never a hard-coded id)
 cannot `READ_MESSAGES` there once that channel's override for the default role
 is applied to the role's base permissions, using the same permission math as
