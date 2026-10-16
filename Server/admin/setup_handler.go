@@ -269,8 +269,8 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		return req, "", false
 	}
 
-	// Validate username format (length, no control/invisible chars).
-	if err := auth.ValidateUsername(req.Username); err != nil {
+	// Validate username format (strict rules for a name being chosen).
+	if err := auth.ValidateNewUsername(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return req, "", false
 	}

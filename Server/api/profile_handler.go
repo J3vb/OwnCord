@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -194,20 +193,6 @@ func validateIdentityKey(key string) error {
 	return nil
 }
 
-// validateDisplayName rejects a nickname that would render as something other
-// than what it says. Length and emptiness are the service's job (empty clears
-// the field); this is the character-class check auth.ValidateUsername applies
-// for the same reason — a display name stands in for a username on every
-// message row, so a bidi override or a control character in one is a spoof.
-func validateDisplayName(name string) error {
-	for _, r := range name {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
-			return fmt.Errorf("display_name must not contain control or invisible characters")
-		}
-	}
-	return nil
-}
-
 // allowedAvatarMIME is the set of image types an avatar may be, matched against
 // the type sniffed from the file's own bytes. GIF is absent (an animated
 // avatar in every message row is a distraction the renderer cannot opt out of)
@@ -229,7 +214,7 @@ var allowedAvatarMIME = map[string]bool{
 // and returns ok=false, and the caller must return without writing anything
 // further. Split out of handleUpdateProfile only to keep that handler under the
 // funlen limit; the field logic is unchanged.
-func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string) (updateProfileRequest, bool) {
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
@@ -259,7 +244,15 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is required")
 		return req, false
 	}
-	if err := auth.ValidateUsername(req.Username); err != nil {
+	// A rename is held to the strict rules; resending the name the account
+	// already has (a display-name or about edit that carries it along) only
+	// gets the loose check, so an account that predates the strict rules can
+	// still edit the rest of its profile.
+	validateName := auth.ValidateNewUsername
+	if req.Username == currentUsername {
+		validateName = auth.ValidateUsername
+	}
+	if err := validateName(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}
@@ -309,7 +302,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is too long")
 			return req, false
 		}
-		trimmed := strings.TrimSpace(service.SanitizeText(*req.DisplayName))
+		trimmed := auth.CollapseSpaces(strings.TrimSpace(service.SanitizeText(*req.DisplayName)))
 		if err := validateDisplayName(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
@@ -337,7 +330,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 			return
 		}
 
-		req, ok := parseUpdateProfileRequest(w, r, selfHosts)
+		req, ok := parseUpdateProfileRequest(w, r, selfHosts, user.Username)
 		if !ok {
 			return
 		}

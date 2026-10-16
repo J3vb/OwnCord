@@ -110,6 +110,11 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Accounts & profiles**
+
+- New usernames (register, first-run setup, rename) are now 2–32 letters, digits, `_`, `.` or `-`, starting with a letter or digit, with no spaces; `everyone` and `here` are reserved. Existing accounts still sign in and recover as before.
+- Display names (32), custom statuses (128) and group DM names (100) must now fit on one line: line breaks, invisible characters and more than two stacked accent marks are refused, and runs of spaces become one. Emoji still work.
+
 **Login & connection**
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
