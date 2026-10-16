@@ -150,6 +150,9 @@ async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> |
   return result;
 }
 
+/** The native microphone opened but reported no audio. */
+class SilentMicrophone extends Error {}
+
 function connectionFailure(error: unknown): string {
   // Do not expose raw proxy errors (URLs, certificate fingerprints or tokens).
   if (error instanceof DOMException && error.name === "TimeoutError") {
@@ -243,8 +246,7 @@ export async function runConnectionDiagnostics(
           if (probe === "in-call") {
             return { status: "not-tested", detail: t("diagnostics.detail.micNativeInCall") };
           }
-          // i18n-exempt: internal guard mapped to the microphone failure catalog line
-          if (probe === "silent") throw new Error("No audio from the native microphone.");
+          if (probe === "silent") throw new SilentMicrophone();
           return present
             ? t("diagnostics.detail.micNativePresent")
             : t("diagnostics.detail.micNativeDefault");
@@ -275,6 +277,7 @@ export async function runConnectionDiagnostics(
         if (error instanceof DOMException && error.name === "TimeoutError") {
           return t("diagnostics.detail.micTimeout");
         }
+        if (error instanceof SilentMicrophone) return t("diagnostics.detail.micSilent");
         return t("diagnostics.detail.micFailed");
       },
     );

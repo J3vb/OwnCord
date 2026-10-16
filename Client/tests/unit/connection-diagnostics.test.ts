@@ -339,7 +339,7 @@ describe("connection diagnostics", () => {
         await run();
         expect(final("microphone")).toMatchObject({
           status: "failed",
-          detail: expect.stringContaining("could not open"),
+          detail: expect.stringContaining("no audio arrived"),
         });
       });
 

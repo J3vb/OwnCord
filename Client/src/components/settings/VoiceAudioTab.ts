@@ -59,6 +59,11 @@ import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
 
+/** A monitor start refused by a call that is still leaving is retried this
+ *  often, this many times, then left until the next trigger. */
+const MONITOR_RETRY_MS = 250;
+const MONITOR_RETRIES = 8;
+
 /** A microphone itself, not the browser's "default"/"communications" alias. */
 function isRealInput(d: MediaDeviceInfo): boolean {
   return d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications";
@@ -518,6 +523,8 @@ function buildVoiceAudioTabInner(
   /** Whether the current (or starting) native test is the meter's
    *  capture-only monitor rather than the mic test. */
   let nativeMonitoring = false;
+  /** Whether a call's capture is reporting levels, which the monitor yields to. */
+  let callCapturing = false;
   let nativeTestEndedEarly: number | null = null;
   let nativeTestFloor: NoiseFloorTracker | null = null;
   let unsubscribeTestEvents: (() => void) | null = null;
@@ -587,7 +594,7 @@ function buildVoiceAudioTabInner(
     if (next !== null) updateNativeTest({ kind: "voiceGate", threshold: next, retune: true });
   }
 
-  async function startNativeTest(monitor = false): Promise<void> {
+  async function startNativeTest(monitor = false, attempt = 0): Promise<void> {
     const request = ++nativeTestRequest;
     // A test replaces the monitor in the host, which ends it silently.
     if (nativeMonitoring && !monitor) nativeTestId = null;
@@ -632,6 +639,22 @@ function buildVoiceAudioTabInner(
         // device did not open: the bar stays empty.
         log.debug("The meter's monitor could not start", err);
         endNativeTest();
+        // A leaving call stops its levels before the host drops its session,
+        // so the first start can be refused: try a few more times, no more.
+        if (
+          err instanceof Error &&
+          err.message === NATIVE_MIC_TEST_IN_CALL &&
+          attempt < MONITOR_RETRIES
+        ) {
+          setOwnedTimeout(
+            signal,
+            () => {
+              if (request !== nativeTestRequest || micTesting || callCapturing) return;
+              void startNativeTest(true, attempt + 1);
+            },
+            MONITOR_RETRY_MS,
+          );
+        }
         return;
       }
       log.warn("The mic test could not start", err);
@@ -1466,6 +1489,7 @@ function buildVoiceAudioTabInner(
   function startNativeMeter(): void {
     lastHeardAt = Number.NEGATIVE_INFINITY;
     const stopCallLevels = onNativeInputLevel((level, gateOpen) => {
+      callCapturing = level !== null;
       if (level !== null) {
         paintMeter(level, gateOpen);
         return;

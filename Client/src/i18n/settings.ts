@@ -362,6 +362,8 @@ export const settingsText = defineCatalog("settings", {
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
     "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
+  "diagnostics.detail.micSilent":
+    "The microphone opened but no audio arrived. Check that it is not muted at the system level, or pick another microphone in Voice & Video settings.",
   "diagnostics.detail.micNativePresent":
     "Your microphone opened and reported audio. The test capture has stopped; nothing was recorded or sent.",
   "diagnostics.detail.micNativeDefault":

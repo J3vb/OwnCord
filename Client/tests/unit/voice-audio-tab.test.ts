@@ -2195,6 +2195,66 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(2));
     });
 
+    describe("while a leaving call still holds the capture", () => {
+      const inCall = () => new Error("mic test unavailable during a call");
+      /** A tab whose monitor runs, then fake timers for the retries. */
+      async function mountThenFakeTimers() {
+        const tab = await mount();
+        await settle();
+        expect(startMonitor).toHaveBeenCalledTimes(1);
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        // A call joined: the host ended the monitor.
+        testHandler?.({ test: 99, event: { type: "ended" } });
+        return tab;
+      }
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("retries the refused start until the host lets go", async () => {
+        const tab = await mountThenFakeTimers();
+        startMonitor.mockRejectedValueOnce(inCall()).mockRejectedValueOnce(inCall());
+        nativeLevelListener?.(null, false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(startMonitor).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(startMonitor).toHaveBeenCalledTimes(3);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(startMonitor).toHaveBeenCalledTimes(4);
+        // It took: no more retries.
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(startMonitor).toHaveBeenCalledTimes(4);
+        tab.ac.abort();
+      });
+
+      it("gives up after eight retries, so a muted call does not loop", async () => {
+        const tab = await mountThenFakeTimers();
+        startMonitor.mockRejectedValue(inCall());
+        nativeLevelListener?.(null, false);
+        await vi.advanceTimersByTimeAsync(250 * 20);
+        // The refused start and eight retries, after the first monitor.
+        expect(startMonitor).toHaveBeenCalledTimes(1 + 9);
+        tab.ac.abort();
+      });
+
+      it("stops retrying once the call's levels arrive or the tab closes", async () => {
+        const tab = await mountThenFakeTimers();
+        startMonitor.mockRejectedValue(inCall());
+        nativeLevelListener?.(null, false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(startMonitor).toHaveBeenCalledTimes(2);
+        nativeLevelListener?.(0.05, true);
+        await vi.advanceTimersByTimeAsync(250 * 3);
+        expect(startMonitor).toHaveBeenCalledTimes(2);
+        nativeLevelListener?.(null, false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(startMonitor).toHaveBeenCalledTimes(3);
+        tab.ac.abort();
+        await vi.advanceTimersByTimeAsync(250 * 3);
+        expect(startMonitor).toHaveBeenCalledTimes(3);
+      });
+    });
+
     it("does not start a monitor over a running mic test", async () => {
       const tab = await mount();
       await settle();

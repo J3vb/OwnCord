@@ -123,11 +123,7 @@ pub async fn release(test: Option<MicTest>) {
 
 impl MicTest {
     /// No streams yet: the processing and the slots only.
-    pub(super) fn idle(
-        audio: AudioOptions,
-        monitor: bool,
-        reports: tokio::task::JoinHandle<()>,
-    ) -> Self {
+    fn idle(audio: AudioOptions, monitor: bool, reports: tokio::task::JoinHandle<()>) -> Self {
         Self {
             capture: Capture::default(),
             playout: Playout::default(),
@@ -137,6 +133,15 @@ impl MicTest {
             retired: Vec::new(),
             reports,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn idle_for_test(
+        audio: AudioOptions,
+        monitor: bool,
+        reports: tokio::task::JoinHandle<()>,
+    ) -> Self {
+        Self::idle(audio, monitor, reports)
     }
 
     /// Open the output and the input and start looping. It blocks on the

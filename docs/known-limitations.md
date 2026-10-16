@@ -150,7 +150,7 @@ says exactly what the beta does and does not claim about who can read what.
   and a saved 120 fps setting falls back to 60.
 - **On Linux, the mic test does not run during a call.** The call and the test
   would both need the microphone, and the Linux voice engine lets only one
-  capture own it. **Settings › Voice & Audio** says to leave the voice channel
+  capture own it. **Settings › Voice & Video** says to leave the voice channel
   first. In a call the level bar already follows the call's own microphone, so
   you can still check your level and sensitivity there. On Windows the test
   also runs in a call.

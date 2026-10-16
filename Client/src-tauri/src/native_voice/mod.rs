@@ -1304,7 +1304,7 @@ mod tests {
             auto_gain_control: false,
             enhanced_noise_suppression: false,
         };
-        MicTest::idle(audio, monitor, tokio::spawn(async {}))
+        MicTest::idle_for_test(audio, monitor, tokio::spawn(async {}))
     }
 
     /// The meter's monitor holds the test slot: a test start takes it over, a
