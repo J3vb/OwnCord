@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   centered: 0,
   fullscreen: [] as boolean[],
   labelledFullscreen: [] as [string, boolean][],
+  zooms: [] as number[],
+  zoomError: null as unknown,
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -44,6 +46,15 @@ vi.mock("@tauri-apps/api/window", () => ({
   availableMonitors: () =>
     h.monitorsError !== null ? Promise.reject(h.monitorsError) : Promise.resolve(h.monitors),
 }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    setZoom: (scale: number) => {
+      if (h.zoomError !== null) return Promise.reject(h.zoomError);
+      h.zooms.push(scale);
+      return Promise.resolve();
+    },
+  }),
+}));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -58,6 +69,8 @@ describeWindowControlSuite(async () => {
     centered: 0,
     fullscreen: [],
     labelledFullscreen: [],
+    zooms: [],
+    zoomError: null,
   });
   const mod = await import("../../../src/platform/desktop/window");
   const desktopBinding: WindowControl = mod.windowControl;
@@ -80,6 +93,10 @@ describeWindowControlSuite(async () => {
       centered: () => h.centered,
       fullscreenCalls: () => h.fullscreen,
       labelledFullscreenCalls: () => h.labelledFullscreen,
+      zoomCalls: () => h.zooms,
+      zoomFailWith(error: unknown) {
+        h.zoomError = error;
+      },
     },
   };
 });

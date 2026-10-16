@@ -23,6 +23,7 @@ import {
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
 import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/timeFormat";
+import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -141,6 +142,51 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
   appendChildren(fontRow, fontSlider, fontLabel);
   appendChildren(section, fontHeader, fontRow);
+
+  // Zoom level: the native webview zoom, snapping to Discord's levels. The
+  // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
+  const zoomHeader = createElement("h3", {}, t("appearance.zoom"));
+  const zoomRow = createElement("div", { class: "slider-row" });
+  const zoomSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: String(ZOOM_LEVELS.length - 1),
+    step: "1",
+    value: String(zoomIndex(appZoom.current())),
+    "aria-label": t("appearance.zoom"),
+  });
+  const zoomLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.zoom.value", { percent: appZoom.current() }),
+  );
+  const zoomReset = createElement(
+    "button",
+    {
+      class: "btn btn-secondary",
+      type: "button",
+      "aria-label": t("appearance.zoom.resetAria"),
+    },
+    t("appearance.zoom.reset"),
+  );
+  const paintZoom = (level: number): void => {
+    zoomSlider.value = String(zoomIndex(level));
+    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
+    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
+  };
+  paintZoom(appZoom.current());
+  appZoom.subscribe(paintZoom, signal);
+  zoomSlider.addEventListener(
+    "input",
+    () => {
+      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
+    },
+    { signal },
+  );
+  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
+  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
+  appendChildren(section, zoomHeader, zoomRow);
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
