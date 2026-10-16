@@ -18,6 +18,9 @@ export interface NativeControl {
   fullscreenCalls(): readonly boolean[];
   /** Every full-screen state another window was set to, by its label. */
   labelledFullscreenCalls(): readonly (readonly [string, boolean])[];
+  /** Every zoom scale the webview was set to, in order. */
+  zoomCalls(): readonly number[];
+  zoomFailWith(error: unknown): void;
 }
 
 export interface WindowControlSubject {
@@ -80,6 +83,17 @@ export function describeWindowControlSuite(
         ["owncord-popout-7", false],
       ]);
       expect(ctx.native.fullscreenCalls()).toEqual([]);
+    });
+
+    check("zooms the webview and reports success", async () => {
+      await expect(ctx.subject.setZoom(1.25)).resolves.toBe(true);
+      await expect(ctx.subject.setZoom(1)).resolves.toBe(true);
+      expect(ctx.native.zoomCalls()).toEqual([1.25, 1]);
+    });
+
+    check("resolves false, never rejects, when the zoom cannot be set", async () => {
+      ctx.native.zoomFailWith(new Error("permission denied"));
+      await expect(ctx.subject.setZoom(1.5)).resolves.toBe(false);
     });
   });
 }

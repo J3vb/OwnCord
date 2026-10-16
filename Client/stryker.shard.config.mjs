@@ -228,6 +228,9 @@ export const shards = {
     "src/features/safety/store.ts",
     "src/features/safety/wsHandlers.ts",
     "src/features/settings/status.ts",
+    "src/features/zoom/index.ts",
+    "src/features/zoom/zoom.ts",
+    "src/features/zoom/zoomKeys.ts",
   ], // size hint only
 };
 
