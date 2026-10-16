@@ -95,10 +95,12 @@ describe("INITIAL_STATE", () => {
       "historyLoadState",
       "loadWatermark",
       "loadedChannels",
+      "messagePinRevision",
       "messagesByChannel",
       "olderLoadFailed",
       "pendingReactions",
       "pendingSends",
+      "pinRevision",
     ]);
   });
 

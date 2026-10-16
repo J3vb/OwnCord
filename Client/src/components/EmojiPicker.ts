@@ -34,8 +34,17 @@ export interface EmojiPickerOptions {
    * and the renderer turns that text back into the image.
    */
   readonly customEmoji?: readonly CustomEmoji[];
-  readonly onSelect: (emoji: string) => void;
+  /**
+   * The second argument is passed only when Shift was held (click or
+   * Shift+Enter): `keepOpen` then tells the owner to leave the picker open so
+   * several emoji can be picked in a row. A plain pick passes the emoji alone.
+   */
+  readonly onSelect: (emoji: string, select?: EmojiSelectOptions) => void;
   readonly onClose: () => void;
+}
+
+export interface EmojiSelectOptions {
+  readonly keepOpen: boolean;
 }
 
 /** The catalog key the server's own emoji appear under. */
@@ -221,7 +230,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       if (cell === null) return;
       const emoji = cell.dataset.emoji;
       if (emoji === undefined) return;
-      handleEmojiClick(emoji);
+      handleEmojiClick(emoji, e.shiftKey);
     },
     { signal },
   );
@@ -273,9 +282,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     return cats;
   }
 
-  function handleEmojiClick(emoji: string): void {
+  function handleEmojiClick(emoji: string, keepOpen: boolean): void {
     addRecentEmoji(emoji);
-    options.onSelect(emoji);
+    if (keepOpen) options.onSelect(emoji, { keepOpen: true });
+    else options.onSelect(emoji);
   }
 
   /** The load-failure row, built once while the load stays failed. It is kept
@@ -434,7 +444,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       if (first === null) return;
       e.preventDefault();
       const emoji = first.dataset.emoji;
-      if (emoji !== undefined) handleEmojiClick(emoji);
+      if (emoji !== undefined) handleEmojiClick(emoji, e.shiftKey);
     },
     { signal },
   );

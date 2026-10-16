@@ -16,7 +16,6 @@ const {
   resolveVideoCodec,
   vp9Offered,
 } = await import("./videoCodec");
-const { DEV_VP9_OPTION_KEY } = await import("./decodeCaps");
 const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
 const { channelPeerDecode } = await import("./peerDecode");
 const { authStore } = await import("../../stores/auth.store");
@@ -148,11 +147,10 @@ describe("getVideoCodecPref", () => {
 describe("resolveVideoCodec with VP9", () => {
   beforeEach(() => {
     savePref("vp9");
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
   });
 
-  it("publishes VP8 for a saved VP9 the settings no longer offer (no dev flag)", async () => {
-    localStorage.removeItem(DEV_VP9_OPTION_KEY);
+  it("publishes VP8 for a saved VP9 the settings no longer offer", async () => {
+    supportsVP9.mockReturnValue(false);
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 
@@ -207,23 +205,16 @@ describe("resolveVideoCodec with VP9", () => {
 });
 
 describe("vp9Offered", () => {
-  it("is false without the dev flag", () => {
-    expect(vp9Offered()).toBe(false);
-  });
-
-  it("is true with the dev flag where VP9 can be published", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
+  it("is true where VP9 can be published", () => {
     expect(vp9Offered()).toBe(true);
   });
 
-  it("is false with the flag when VP9 cannot be published", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
+  it("is false when VP9 cannot be published", () => {
     supportsVP9.mockReturnValue(false);
     expect(vp9Offered()).toBe(false);
   });
 
-  it("is false on Linux even with the flag", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
+  it("is false on Linux", () => {
     isLinuxDesktop.mockReturnValue(true);
     expect(vp9Offered()).toBe(false);
   });

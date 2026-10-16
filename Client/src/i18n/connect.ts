@@ -11,6 +11,7 @@ import { defineCatalog } from "./format";
  */
 export const connectText = defineCatalog("connect", {
   "common.cancel": "Cancel",
+  "link.openFailed": "Couldn't open the link",
   "common.close": "Close",
   "common.unknown": "Unknown",
   "common.settings": "Settings",

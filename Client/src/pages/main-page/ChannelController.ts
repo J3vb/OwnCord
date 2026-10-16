@@ -27,6 +27,7 @@ import type {
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
+  messagesStore,
   getChannelMessages,
   setMessagePinned,
   addOptimisticMessage,
@@ -190,6 +191,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
+  const pinsInFlight = new Set<string>();
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
@@ -1143,20 +1145,36 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         reactionCtrl.handleReaction(msgId, emoji);
       },
       onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
+        // One request per message at a time: a second click while one is
+        // pending would race its revert against the first.
+        const flightKey = `${chId}:${msgId}`;
+        if (pinsInFlight.has(flightKey)) return;
+        pinsInFlight.add(flightKey);
+        // Optimistic: the row flips now and snaps back if the server refuses,
+        // so the control answers the click instead of waiting on the round trip.
+        setMessagePinned(chId, msgId, !currentlyPinned);
+        const revisionAfterFlip = messagesStore.getState().messagePinRevision?.get(msgId);
         const action = currentlyPinned
           ? api.unpinMessage(chId, msgId)
           : api.pinMessage(chId, msgId);
         action
           .then(() => {
-            setMessagePinned(chId, msgId, !currentlyPinned);
             showToast(
               currentlyPinned ? messagingText("toast.unpinned") : messagingText("toast.pinned"),
               "success",
             );
           })
           .catch((err) => {
+            // A moved revision means a chat_pinned for this message already
+            // holds the truth; do not overwrite it.
+            if (messagesStore.getState().messagePinRevision?.get(msgId) === revisionAfterFlip) {
+              setMessagePinned(chId, msgId, currentlyPinned);
+            }
             log.error("Pin/unpin failed", { error: String(err) });
             showToast(messagingText("toast.pinFailed"), "error");
+          })
+          .finally(() => {
+            pinsInFlight.delete(flightKey);
           });
       },
       onReportClick: (msgId: number) => {

@@ -271,8 +271,8 @@ function reviseDmPreviewAfterDelete(
 }
 
 /** A message was pinned or unpinned elsewhere — keep this client's row in
- *  sync (F5). An open pinned panel is a fetched snapshot and does not follow
- *  this until it is reopened. */
+ *  sync (F5). The store's per-channel pin revision moves with it, which is what
+ *  an open pinned panel watches to refetch its list. */
 export function handleChatPinned(payload: Payload<"chat_pinned">): void {
   setMessagePinned(payload.channel_id, payload.message_id, payload.pinned);
 }

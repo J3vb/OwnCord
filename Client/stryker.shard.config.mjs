@@ -145,6 +145,7 @@ export const shards = {
     "src/lib/themes.ts",
     "src/lib/timeFormat.ts",
     "src/lib/toast.ts",
+    "src/lib/trustedDomains.ts",
     "src/features/updates/updateChecker.ts",
     "src/features/updates/UpdateCheckRow.ts",
     "src/features/updates/availableUpdate.ts",

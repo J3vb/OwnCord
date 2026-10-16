@@ -178,6 +178,11 @@ export const messagingText = defineCatalog("messaging", {
   "toast.editFailed": "Couldn't edit the message",
   "toast.editFailedRestored": "Couldn't edit the message — your text is back in the composer",
   "toast.deleteFailed": "Couldn't delete the message",
+  "maskedLink.title": "Leaving OwnCord",
+  "maskedLink.body":
+    "This link goes to a different address than the text shows. Only continue if you trust it:",
+  "maskedLink.go": "Go to site",
+  "maskedLink.trust": "Trust {domain} links from now on",
   "toast.pinned": "Message pinned",
   "toast.unpinned": "Message unpinned",
   "toast.pinFailed": "Failed to pin/unpin message",

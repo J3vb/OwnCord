@@ -607,3 +607,23 @@
   display: flex;
   gap: var(--space-2);
 }
+
+/* Masked-link warning: the real address, wrapped so a long one stays in the box. */
+.masked-link-url {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+  max-height: 8em;
+  overflow-y: auto;
+}
+.masked-link-trust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}

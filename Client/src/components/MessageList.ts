@@ -146,7 +146,8 @@ const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
 
 /** Regex for YouTube URLs in message content. */
-const YOUTUBE_URL_RE = /(?:youtube\.com\/watch|youtu\.be\/)/i;
+const YOUTUBE_URL_RE =
+  /(?:(?:www\.|m\.|music\.)?youtube(?:-nocookie)?\.com\/(?:watch|embed\/|shorts\/|live\/)|youtu\.be\/)/i;
 
 // -- Virtual item types -------------------------------------------------------
 

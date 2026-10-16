@@ -121,8 +121,9 @@ export function createReactionController(opts: ReactionControllerOptions): React
       // emoji_update while the app is alive must be in the next picker the
       // user opens (matches MessageInput.ts's composer picker).
       customEmoji: listCustomEmoji(),
-      onSelect: (selectedEmoji: string) => {
-        closePicker();
+      onSelect: (selectedEmoji: string, select) => {
+        // Shift-pick sends the reaction and leaves the picker up for more.
+        if (select?.keepOpen !== true) closePicker();
         sendReaction(msgId, selectedEmoji);
       },
       onClose: () => {
