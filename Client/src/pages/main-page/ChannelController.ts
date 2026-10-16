@@ -63,7 +63,8 @@ import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
-import { markChannelRead } from "@lib/read-state";
+import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
+import { readPointerEnabled } from "@lib/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
@@ -552,9 +553,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // channel's server-side read state; leaving one never does. Without this,
     // messages read while focused here restate as unread/mention badges on
     // the next full `ready`. mark_read is a local no-op (already zeroed on
-    // open) — it only repairs the server's view.
+    // open) — it only repairs the server's view. With a read pointer, leaving
+    // marks only what the reader saw (leaveChannel), never "everything".
     if (previousChannelId !== null) {
-      markChannelRead(previousChannelId);
+      if (readPointerEnabled()) leaveChannel(previousChannelId);
+      else markChannelRead(previousChannelId);
       // The server only delivers live broadcasts for the focused channel, so
       // the window being left stops updating the moment focus moves here.
       // Drop its loaded flag so the next visit refetches the live tail
@@ -640,8 +643,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
         // it, since incrementUnread's usual "active channel" skip is exactly
         // what a detached window opts out of. Jumping to present is reading
-        // it, so mark it read the same way leaving a channel does.
-        markChannelRead(channelId);
+        // it, so mark it read the same way leaving a channel does. With a read
+        // pointer that is what was seen, not everything.
+        if (readPointerEnabled()) markChannelReadSeen(channelId);
+        else markChannelRead(channelId);
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }

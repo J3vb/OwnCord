@@ -30,7 +30,19 @@ import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages } from "../../stores/messages.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
-import { isChannelAway, markChannelRead } from "../../lib/read-state";
+import {
+  forgetPendingMarkUnread,
+  isChannelAway,
+  markChannelRead,
+  markChannelReadSeen,
+  rollbackMarkUnread,
+  writeReadPointer,
+} from "../../lib/read-state";
+import {
+  applyReadyCapabilities,
+  hasReceivedReady,
+  readPointerEnabled,
+} from "../../lib/serverCapabilities";
 import { showToast } from "../../lib/toast";
 import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
@@ -114,8 +126,65 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
  */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
   if (currentActive !== null && !isChannelAway(currentActive)) {
-    markChannelRead(currentActive);
+    // With a read pointer the ready-time mark is only what the reader saw, not
+    // "everything": a resync that restated messages missed while the list was
+    // not on screen must not mark them read. Without one, as it always was.
+    if (readPointerEnabled()) markChannelReadSeen(currentActive);
+    else markChannelRead(currentActive);
   }
+}
+
+/**
+ * The capabilities slice of a full `ready`, applied first. A new `ready`
+ * restates every pointer, so a Mark Unread still waiting for its answer from
+ * the previous connection is forgotten rather than restored or toasted against
+ * the new one.
+ */
+export function applyReadyReadPointer(payload: Payload<"ready">): void {
+  applyReadyCapabilities(payload.capabilities);
+  forgetPendingMarkUnread();
+}
+
+/**
+ * read_state: the server moved this user's read pointer in a channel or DM and
+ * says where it is now. It replaces the pointer, unread_count and mention_count
+ * outright — and a channel or DM this client does not list is ignored, as is
+ * anything before the first ready. The one exception to "outright" is the
+ * channel the reader is watching: its badge stays at zero (as handleMentionCount
+ * keeps it), because the reader is looking at it; the pointer is still stored.
+ * The NEW line already in view does not move, as it follows the pointer the
+ * channel was opened with.
+ */
+export function handleReadState(payload: Payload<"read_state">): void {
+  if (!hasReceivedReady()) return;
+  const id = payload.channel_id;
+  const ch = channelsStore.getState().channels.get(id);
+  if (ch === undefined && !dmStore.getState().channels.some((c) => c.channelId === id)) return;
+  const watching = channelsStore.getState().activeChannelId === id && !isChannelAway(id);
+  writeReadPointer(
+    id,
+    payload.last_read_message_id,
+    watching
+      ? { unread: 0, mention: 0 }
+      : { unread: payload.unread_count, mention: payload.mention_count },
+  );
+}
+
+/**
+ * An error reply to a `mark_unread` the client sent. RATE_LIMITED and
+ * NOT_FOUND say the click did nothing: tell the user, and put the pointer back
+ * to where it was. Correlated by the frame id the server echoes, so an error
+ * for any other frame, or for a request a new connection has replaced, is left
+ * alone. Returns true when it consumed the frame.
+ */
+export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
+  if (payload.code !== "RATE_LIMITED" && payload.code !== "NOT_FOUND") return false;
+  if (!rollbackMarkUnread(id)) return false;
+  showToast(
+    connectText(payload.code === "RATE_LIMITED" ? "markUnread.rateLimited" : "markUnread.notFound"),
+    "error",
+  );
+  return true;
 }
 
 /** The custom-emoji slice of `ready`. */

@@ -18,6 +18,7 @@ import {
   type ContextMenuSeparator,
 } from "@lib/context-menu";
 import { Disposable } from "@lib/disposable";
+import { readPointerEnabled } from "@lib/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
 import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
@@ -53,6 +54,9 @@ export interface MessageMenuRequest {
   /** A control that opened the menu (3A-7's "..." button): marked expanded
    *  while open, and given focus back on close. */
   readonly invoker?: HTMLElement;
+  /** Marks a message unread from here (the list's own handler: it also moves the
+   *  NEW line). Absent, or without a server read pointer, the item is not offered. */
+  readonly markUnread?: (messageId: number) => void;
 }
 
 /** Quick-reaction emoji in the menu; the hover bar shows the same number. */
@@ -218,6 +222,14 @@ function buildItems(
       }),
     });
   }
+  const markUnread = req.markUnread;
+  if (markUnread !== undefined && readPointerEnabled()) {
+    items.push({
+      label: messageMenuText("markUnread"),
+      testId: "msg-menu-mark-unread",
+      onClick: act((m) => markUnread(m.id)),
+    });
+  }
   items.push({
     label: messagingText("action.copyLink"),
     testId: "msg-menu-copy-message-link",
@@ -267,6 +279,33 @@ export interface MessageMenuAt {
   readonly y: number;
   readonly target: EventTarget | null;
   readonly signal: AbortSignal;
+  readonly markUnread?: (messageId: number) => void;
+}
+
+/** What an Alt+click marks unread must not be: a control with an action of its own. */
+const OWN_ACTION_SELECTOR =
+  "a, button, input, textarea, select, img, video, audio, [role='button'], " +
+  ".msg-author, .msg-avatar, .mention, .spoiler";
+
+/**
+ * Alt+click on a message row: mark it unread. Does nothing on a link, button,
+ * image, text field or another control with its own click, nor on a row that
+ * is not a confirmed server message (pending, failed, deleted, system).
+ */
+export function markUnreadAt(at: {
+  readonly opts: MessageListOptions;
+  readonly target: EventTarget | null;
+  readonly markUnread: (messageId: number) => void;
+}): void {
+  const target = at.target instanceof Element ? at.target : null;
+  if (target === null || wantsNativeMenu(target) || target.closest(OWN_ACTION_SELECTOR) !== null) {
+    return;
+  }
+  const row = target.closest<HTMLElement>('.message[data-testid^="message-"]');
+  const id = Number(row?.dataset["testid"]?.slice("message-".length));
+  const msg = findMessage(at.opts.channelId, id);
+  if (msg === undefined || msg.user.id === 0 || !isActionableMessage(msg)) return;
+  at.markUnread(msg.id);
 }
 
 /**

@@ -8,11 +8,12 @@
  * one on screen. The server has a dedicated `mark_read` for exactly this.
  */
 
-import { channelsStore, clearUnread } from "@stores/channels.store";
-import { dmStore, clearDmUnread } from "@stores/dm.store";
-import { isWindowDetached } from "@stores/messages.store";
+import { channelsStore, clearUnread, setReadPointer } from "@stores/channels.store";
+import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
+import { getChannelMessages, isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
 import { dialogOpen } from "./dialogOpen";
+import { readPointerEnabled } from "./serverCapabilities";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();
@@ -23,8 +24,13 @@ const liveTailOutOfView = new Set<number>();
  * flag describes the position a new arrival lands against.
  */
 export function setLiveTailInView(channelId: number, inView: boolean): void {
-  if (inView) liveTailOutOfView.delete(channelId);
-  else liveTailOutOfView.add(channelId);
+  if (inView) {
+    liveTailOutOfView.delete(channelId);
+  } else {
+    liveTailOutOfView.add(channelId);
+    // The reader scrolled off the tail since Mark Unread: see `unreadHold`.
+    if (unreadHold.has(channelId)) unreadHold.set(channelId, true);
+  }
 }
 
 /**
@@ -52,10 +58,14 @@ export function isChannelCovered(): boolean {
   return settingsOpen || activeView !== null || dialogOpen();
 }
 
-/** Sends one `mark_read` over the socket. */
-export type MarkReadSender = (channelId: number) => void;
+/** Sends one `mark_read` over the socket, up to `messageId` when given. */
+export type MarkReadSender = (channelId: number, messageId?: number) => void;
+
+/** Sends one `mark_unread` and returns the frame id the server's reply will echo. */
+export type MarkUnreadSender = (channelId: number, messageId: number) => string;
 
 let sender: MarkReadSender | null = null;
+let unreadSender: MarkUnreadSender | null = null;
 
 /**
  * Register the socket sender. Called once from MainPage with the live WsClient,
@@ -63,8 +73,13 @@ let sender: MarkReadSender | null = null;
  * set, marking read still clears the local badges — the next `ready` re-asserts
  * the server's view, so a dropped send self-corrects rather than lying forever.
  */
-export function setMarkReadSender(next: MarkReadSender | null): void {
+export function setMarkReadSender(
+  next: MarkReadSender | null,
+  nextUnread: MarkUnreadSender | null = null,
+): void {
   sender = next;
+  unreadSender = nextUnread;
+  resetReadPointerState();
   cancelPendingLiveSeen();
   // A re-registration means a new connection (MainPage mounts once per
   // session), so anything `markAllRead` still had queued belongs to the
@@ -82,6 +97,9 @@ export function setMarkReadSender(next: MarkReadSender | null): void {
  * server to advance a read state for something that is not in the user's list.
  */
 export function markChannelRead(channelId: number): void {
+  // Asked for "read" outright (Mark as Read, jump to present): a Mark Unread
+  // hold has been overruled.
+  unreadHold.delete(channelId);
   const known =
     channelsStore.getState().channels.has(channelId) ||
     dmStore.getState().channels.some((c) => c.channelId === channelId);
@@ -240,7 +258,9 @@ export function noteLiveMessageSeen(channelId: number, signal: AbortSignal): voi
     signal.removeEventListener("abort", release);
     if (pendingLiveSeen.get(channelId) === timer) pendingLiveSeen.delete(channelId);
     // Settings or a dialog may have opened since the arrival that armed this.
-    if (!hasUnread(channelId) && !isChannelCovered()) markChannelRead(channelId);
+    if (hasUnread(channelId) || isChannelCovered()) return;
+    if (readPointerEnabled()) sendSeen(channelId);
+    else markChannelRead(channelId);
   }, LIVE_SEEN_MARK_READ_MS);
   pendingLiveSeen.set(channelId, timer);
   signal.addEventListener("abort", release, { once: true });
@@ -256,7 +276,195 @@ export function noteLiveMessageSeen(channelId: number, signal: AbortSignal): voi
  */
 export function markActiveChannelReadOnUnload(): void {
   const active = channelsStore.getState().activeChannelId;
-  if (active === null || isChannelAway(active) || isChannelCovered() || hasUnread(active)) return;
+  if (active === null || isChannelAway(active) || isChannelCovered()) return;
+  if (readPointerEnabled()) {
+    // The pointer only moves to what was seen, so no unread-badge gate: a
+    // message that arrived unseen is simply above the highest seen id.
+    cancelPendingLiveSeen();
+    sendSeen(active);
+    return;
+  }
+  if (hasUnread(active)) return;
   cancelPendingLiveSeen();
   markChannelRead(active);
+}
+
+// -- Read pointer (WP 3D-5) --------------------------------------------------
+//
+// With the server's `read_pointer` capability, leaving a channel no longer
+// marks it read: only what the reader saw does. The mark is a `mark_read` with
+// the highest message id that was on screen while they were not away.
+
+/** Highest message id the reader saw per channel while not away. */
+const highestSeen = new Map<number, number>();
+
+/**
+ * Channels the reader just marked unread (Mark Unread). While a channel is
+ * here nothing it shows counts as seen, or the next scroll or live arrival
+ * would mark the message read again straight away. The value is whether the
+ * reader has been away from the live tail since: only then may a live arrival
+ * release the hold. Leaving the channel releases it too.
+ */
+const unreadHold = new Map<number, boolean>();
+
+interface PendingMarkUnread {
+  readonly requestId: string;
+  readonly channelId: number;
+  /** The pointer before the optimistic move, to put back on a refusal. */
+  readonly previous: number | undefined;
+}
+
+let pendingMarkUnread: PendingMarkUnread | null = null;
+
+/**
+ * Drop everything the read pointer tracks: a new session or connection owns
+ * the state now. Called when the sender is re-registered and when the
+ * dispatcher is torn down.
+ */
+export function resetReadPointerState(): void {
+  highestSeen.clear();
+  unreadHold.clear();
+  pendingMarkUnread = null;
+}
+
+/** A new full `ready` restates every pointer, so a pending Mark Unread (sent on
+ *  the old connection) must neither be restored nor toasted against it. */
+export function forgetPendingMarkUnread(): void {
+  pendingMarkUnread = null;
+}
+
+function isKnownChannel(channelId: number): boolean {
+  return (
+    channelsStore.getState().channels.has(channelId) ||
+    dmStore.getState().channels.some((c) => c.channelId === channelId)
+  );
+}
+
+/** The reader's pointer for a channel or DM; 0 when none is known. */
+function pointerOf(channelId: number): number {
+  return (
+    channelsStore.getState().channels.get(channelId)?.lastReadMessageId ??
+    dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastReadMessageId ??
+    0
+  );
+}
+
+/**
+ * Write a pointer (and optionally counts) to whichever stores know the id: a
+ * DM lives in dmStore and, once opened, in channelsStore as well. With
+ * `forwardOnly` a pointer behind the stored one is ignored (the optimistic
+ * "read up to here" of a mark_read); without it the pointer may move back
+ * (Mark Unread, the server's `read_state`).
+ */
+export function writeReadPointer(
+  channelId: number,
+  pointer: number,
+  counts?: { readonly unread: number; readonly mention: number },
+  forwardOnly = false,
+): void {
+  const next = forwardOnly ? Math.max(pointer, pointerOf(channelId)) : pointer;
+  setReadPointer(channelId, next, counts);
+  setDmReadPointer(channelId, next, counts);
+}
+
+/**
+ * Record that the reader saw `messageId` (the newest message of the window) in
+ * a channel. Ignored without the capability, while the reader is away, and
+ * while the channel is held after Mark Unread. `live` marks an arrival that
+ * landed with the tail in view, the one thing that may release the hold.
+ */
+export function noteMessageSeen(channelId: number, messageId: number, live = false): void {
+  if (!readPointerEnabled() || messageId <= 0 || isChannelAway(channelId)) return;
+  if (unreadHold.has(channelId)) {
+    if (!live || unreadHold.get(channelId) !== true) return;
+    unreadHold.delete(channelId);
+  }
+  if (messageId > (highestSeen.get(channelId) ?? 0)) highestSeen.set(channelId, messageId);
+}
+
+/**
+ * Send `mark_read` up to the highest message seen, when that is above the
+ * pointer, and move the local pointer forward to match. Nothing else is
+ * recomputed here: the server answers with `read_state`.
+ */
+function sendSeen(channelId: number): void {
+  const seen = highestSeen.get(channelId);
+  if (sender === null || seen === undefined || seen <= pointerOf(channelId)) return;
+  if (!isKnownChannel(channelId)) return;
+  sender(channelId, seen);
+  writeReadPointer(channelId, seen, undefined, true);
+}
+
+/**
+ * The reader reached the bottom, or the channel must be settled (Escape, a
+ * ready resync, sending from a detached window): mark read what was seen and
+ * clear the local badges. Without the capability this is `markChannelRead`.
+ */
+export function markChannelReadSeen(channelId: number): void {
+  if (!readPointerEnabled()) {
+    markChannelRead(channelId);
+    return;
+  }
+  sendSeen(channelId);
+  if (hasUnread(channelId)) {
+    clearUnread(channelId);
+    clearDmUnread(channelId);
+  }
+}
+
+/**
+ * Leaving a channel. Without the capability that marks it read, as it always
+ * has. With it, only what was seen is marked — a channel left with messages
+ * unseen keeps its badge — and the channel's seen state is dropped.
+ */
+export function leaveChannel(channelId: number): void {
+  if (!readPointerEnabled()) {
+    markChannelRead(channelId);
+    return;
+  }
+  sendSeen(channelId);
+  highestSeen.delete(channelId);
+  unreadHold.delete(channelId);
+}
+
+/**
+ * Mark Unread: the reader asks for `messageId` and everything after it to be
+ * unread again. Sends `mark_unread`, moves the local pointer to the previous
+ * loaded message (0 when there is none), and holds off re-marking the channel.
+ * Returns that pointer, or null when nothing was sent: no capability, no
+ * sender or an unknown channel.
+ */
+export function markMessageUnread(channelId: number, messageId: number): number | null {
+  if (!readPointerEnabled() || unreadSender === null || !isKnownChannel(channelId)) return null;
+  let before = 0;
+  for (const m of getChannelMessages(channelId)) {
+    if (m.id > before && m.id < messageId) before = m.id;
+  }
+  const previous = channelsStore.getState().channels.get(channelId)?.lastReadMessageId;
+  const requestId = unreadSender(channelId, messageId);
+  pendingMarkUnread = {
+    requestId,
+    channelId,
+    previous:
+      previous ??
+      dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastReadMessageId,
+  };
+  highestSeen.delete(channelId);
+  unreadHold.set(channelId, isChannelAway(channelId));
+  writeReadPointer(channelId, before);
+  return before;
+}
+
+/**
+ * The server refused the Mark Unread whose frame id is `requestId`: put the
+ * pointer back. False when no such request is pending (another frame, or one
+ * from a connection a `ready` has since replaced), so nothing is restored.
+ */
+export function rollbackMarkUnread(requestId: string | undefined): boolean {
+  const pending = pendingMarkUnread;
+  if (pending === null || requestId === undefined || pending.requestId !== requestId) return false;
+  pendingMarkUnread = null;
+  unreadHold.delete(pending.channelId);
+  if (pending.previous !== undefined) writeReadPointer(pending.channelId, pending.previous);
+  return true;
 }

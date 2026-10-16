@@ -239,9 +239,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
-  setMarkReadSender((channelId) => {
-    ws.send({ type: "mark_read", payload: { channel_id: channelId } });
-  });
+  setMarkReadSender(
+    (channelId, messageId) => {
+      const payload = { channel_id: channelId };
+      ws.send({
+        type: "mark_read",
+        payload: messageId === undefined ? payload : { ...payload, message_id: messageId },
+      });
+    },
+    (channelId, messageId) =>
+      ws.send({ type: "mark_unread", payload: { channel_id: channelId, message_id: messageId } }),
+  );
 
   // The native screen-share picker adapter is a lower layer and may not import
   // a component (ARCH-06); the UI registers the dialog here. It is loaded on

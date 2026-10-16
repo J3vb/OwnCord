@@ -151,6 +151,8 @@ export const connectText = defineCatalog("connect", {
   "session.expired": "Your session expired — sign in again.",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
+  "markUnread.rateLimited": "Too many Mark Unread requests. Slow down.",
+  "markUnread.notFound": "Couldn't mark it unread.",
   "error.tlsFailed":
     "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
   "error.rateLimited": "Too many requests. Try again later.",

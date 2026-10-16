@@ -35,6 +35,9 @@ import {
   handleChannelDelete,
   handleChannelUpdate,
   handleMentionCount,
+  handleReadState,
+  handleMarkUnreadError,
+  applyReadyReadPointer,
   handleChannelActivity,
   resetChannelActivity,
   handleEmojiUpdate,
@@ -86,6 +89,8 @@ import {
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
+import { forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
+import { resetServerCapabilities } from "./serverCapabilities";
 import {
   applyReadySafety,
   handleAppealStatus,
@@ -187,6 +192,7 @@ export function wireDispatcher(
       // restate + reconcile -> identity publish -> active channel -> message
       // resync (reads the active channel just chosen) -> DMs -> mark read ->
       // blocks -> Message Requests -> emoji.
+      applyReadyReadPointer(payload);
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
       applyReadyChannels(payload);
@@ -262,6 +268,14 @@ export function wireDispatcher(
   // mention_count: a mention raised this user's badge in a channel they may not
   // be viewing (DP-27).
   unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
+
+  // read_state: this user's read pointer moved in a channel or DM (WP 3D-5).
+  unsubs.push(ws.on(S.READ_STATE, handleReadState));
+  // A Mark Unread still waiting for its answer cannot get one across a change
+  // of connection state; forget it rather than restore against the next.
+  unsubs.push(ws.onStateChange(forgetPendingMarkUnread));
+  // The capabilities and the seen/pending state belong to this session.
+  unsubs.push(resetServerCapabilities, resetReadPointerState);
 
   // channel_activity: new messages in readable channels this user is not
   // viewing, for their unread dot and alerts (WP 2B-2).
@@ -349,6 +363,8 @@ export function wireDispatcher(
       if (payload.code === "TIMED_OUT") getActivePresenceSender()?.rollbackTimedOut(id);
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
+      // A refused Mark Unread restores the pointer and says so.
+      if (handleMarkUnreadError(payload, id)) return;
       if (handleMessagingError(payload, id)) return;
       handleVoiceJoinRollback(payload, id);
       if (handleVoiceError(payload, id)) return;

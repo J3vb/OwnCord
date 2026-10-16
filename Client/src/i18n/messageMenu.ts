@@ -11,6 +11,7 @@ export const messageMenuText = defineCatalog("messageMenu", {
   edit: "Edit Message",
   copy: "Copy",
   copyText: "Copy Text",
+  markUnread: "Mark Unread",
   pin: "Pin Message",
   unpin: "Unpin Message",
   delete: "Delete Message",

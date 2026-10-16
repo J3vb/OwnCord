@@ -51,7 +51,7 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
-import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
+import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
@@ -66,12 +66,16 @@ import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
 import {
   markChannelRead,
+  markChannelReadSeen,
+  markMessageUnread,
   hasUnread,
   isChannelAway,
   isChannelCovered,
   noteLiveMessageSeen,
+  noteMessageSeen,
   setLiveTailInView,
 } from "@lib/read-state";
+import { readPointerEnabled } from "@lib/serverCapabilities";
 
 // -- Options ------------------------------------------------------------------
 
@@ -403,6 +407,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * visit regardless of how the window grows around it.
    */
   let newDividerAnchorId: number | null = null;
+  /**
+   * The read pointer the NEW line follows, when the server keeps one: the one
+   * the channel had when it was opened (a visit moves the live pointer), or
+   * the one Mark Unread just set. The line goes on the first loaded message
+   * above it. Undefined keeps the count-based line.
+   */
+  let linePointer: number | undefined = readPointerEnabled()
+    ? getPointerOnOpen(options.channelId)
+    : undefined;
   /** Set while the divider waits for a revisit's refetched tail. */
   let newDividerDeferred = false;
   /** The loaded-and-empty welcome state is what the region currently shows. */
@@ -425,8 +438,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
-      return messages.findIndex((m) => m.id === newDividerAnchorId);
+      const at = messages.findIndex((m) => m.id === newDividerAnchorId);
+      if (at !== -1 || linePointer === undefined) return at;
+      // The anchor left the window (a jump): place the line again by pointer.
+      newDividerAnchorId = null;
     }
+    // The first loaded message above the pointer, latched like the count-based
+    // one — except at the top of the window, where older history may still
+    // arrive above it and move the true boundary.
+    const byPointer = (): number => {
+      const idx = messages.findIndex((m) => m.id > (linePointer ?? 0));
+      if (idx > 0) newDividerAnchorId = messages[idx]!.id;
+      return idx;
+    };
     // An around-window centred on a jumped-to message is not the tail: counting
     // back from its end would mark an arbitrary row. Detachment is read here,
     // not at mount, because a cross-channel jump detaches after the mount.
@@ -435,13 +459,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // No divider will exist to open at, and a pending open left armed would
       // scroll the reader up to the line once the tail returns.
       openAtDividerPending = false;
-      return -1;
+      // A pointer places the line inside the around-window too (never scrolled to).
+      return linePointer === undefined ? -1 : byPointer();
     }
     // A revisit renders the cached window while its tail is refetched (DP-10).
     // Those rows predate what arrived while away, so counting back from their
     // end would mark messages already read; wait for the fetched tail.
     newDividerDeferred = unreadOnOpen > 0 && getHistoryLoadState(options.channelId) === "loading";
     if (newDividerDeferred) return -1;
+    if (linePointer !== undefined) {
+      // Only a channel that had unread when opened: with none, the first message
+      // above the pointer is just the first live arrival.
+      return unreadOnOpen > 0 ? byPointer() : -1;
+    }
     const idx = firstUnreadIndex(messages, unreadOnOpen);
     const anchor = idx !== -1 ? messages[idx] : undefined;
     if (anchor !== undefined && anchor.id !== 0 && messages.length >= unreadOnOpen) {
@@ -656,7 +686,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (root === null) return;
     dismissUnreadBar();
     // The gate keeps a held or repeated Escape off the 5/s mark_read budget.
-    if (hasUnread(options.channelId)) markChannelRead(options.channelId);
+    if (hasUnread(options.channelId) || readPointerEnabled()) {
+      markChannelReadSeen(options.channelId);
+    }
     if (isWindowDetached(options.channelId)) {
       options.onJumpToPresent?.();
       return;
@@ -697,8 +729,33 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // the bar until the refetched tail places the divider.
     if (newDividerDeferred) return;
     dismissUnreadBar();
-    if (!hasUnread(options.channelId)) return;
-    markChannelRead(options.channelId);
+    // With a read pointer the mark is what was seen, and what gates it is the
+    // pointer (nothing is sent unless the newest seen id is above it); without
+    // one, the local unread count gates it, as before.
+    if (readPointerEnabled()) noteMessageSeen(options.channelId, newestLoadedId());
+    else if (!hasUnread(options.channelId)) return;
+    markChannelReadSeen(options.channelId);
+  }
+
+  /** The newest confirmed message loaded here (pending rows have no id yet); 0 for none. */
+  function newestLoadedId(): number {
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      if (allMessages[i]!.id > 0) return allMessages[i]!.id;
+    }
+    return 0;
+  }
+
+  /**
+   * Mark Unread from `messageId` (the message menu, Alt+click): the server's
+   * pointer and the NEW line both move to just before it. A no-op unless the
+   * server keeps a read pointer.
+   */
+  function markUnreadFrom(messageId: number): void {
+    const pointer = markMessageUnread(options.channelId, messageId);
+    if (pointer === null) return;
+    linePointer = pointer;
+    newDividerAnchorId = messageId;
+    if (!patchRows()) renderAll();
   }
 
   /**
@@ -713,6 +770,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
     if (isChannelAway(options.channelId) || isChannelCovered()) return;
     if (newDividerDeferred) return;
+    noteMessageSeen(options.channelId, newestLoadedId(), true);
     noteLiveMessageSeen(options.channelId, disposable.signal);
   }
 
@@ -1658,7 +1716,27 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       (e) => {
         const { clientX: x, clientY: y, target } = e;
         withMessageMenu((m) =>
-          m.openMessageMenuAt({ opts: options, x, y, target, signal: disposable.signal }),
+          m.openMessageMenuAt({
+            opts: options,
+            x,
+            y,
+            target,
+            signal: disposable.signal,
+            markUnread: markUnreadFrom,
+          }),
+        );
+      },
+      { signal: disposable.signal },
+    );
+    // Alt+click on a message row marks it unread (the lazy module decides which
+    // targets count: not a link, button, image or text field).
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        if (!e.altKey || !readPointerEnabled()) return;
+        const { target } = e;
+        withMessageMenu((m) =>
+          m.markUnreadAt({ opts: options, target, markUnread: markUnreadFrom }),
         );
       },
       { signal: disposable.signal },
