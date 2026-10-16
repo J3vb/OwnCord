@@ -89,11 +89,7 @@ export const shards = {
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
   ], // ~982 mutants (estimated)
-  "transport-auth-1": [
-    "src/lib/api.ts",
-    "src/lib/permissions.ts",
-    "src/lib/hostValidation.ts",
-  ], // ~1182 mutants (estimated)
+  "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"], // ~1182 mutants (estimated)
   "transport-auth-2": [
     "src/lib/ws.ts",
     "src/lib/rate-limiter.ts",
@@ -277,7 +273,14 @@ export const shards = {
 
 // The six pre-split names stay accepted until a release carries the new matrix
 // to main: the schedule runs main's copy of the workflow against dev.
-const legacyNames = ["livekit", "audio-media", "transport-auth", "lib-rest", "stores", "safety-moderation"];
+const legacyNames = [
+  "livekit",
+  "audio-media",
+  "transport-auth",
+  "lib-rest",
+  "stores",
+  "safety-moderation",
+];
 const legacy = Object.fromEntries(
   legacyNames.map((name) => [
     name,
