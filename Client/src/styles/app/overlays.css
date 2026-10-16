@@ -550,6 +550,15 @@
   text-overflow: ellipsis;
 }
 
+.search-hit {
+  background: color-mix(in srgb, var(--text-warning) 35%, transparent);
+  color: var(--text-normal);
+  border-radius: 2px;
+}
+.search-overlay-retry {
+  margin: 0 20px 8px;
+}
+
 /* ── Report dialog (B9-10) ── */
 .report-dialog .report-note {
   margin: 0 0 var(--space-4);

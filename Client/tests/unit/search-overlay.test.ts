@@ -874,9 +874,127 @@ describe("createSearchOverlay", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     const content = container.querySelector(".search-result-content")!;
-    expect(content.textContent!.length).toBeLessThanOrEqual(203); // 200 + "..."
+    // 200 chars + a single trailing ellipsis (3A-11c: "…" replaces "...").
+    expect(content.textContent!.length).toBeLessThanOrEqual(201);
+    expect(content.textContent!.endsWith("\u2026")).toBe(true);
 
     overlay.destroy?.();
+  });
+
+  describe("results presentation (3A-11c)", () => {
+    async function run(
+      results: SearchResultItem[],
+      query: string,
+      onSearch = vi.fn().mockResolvedValue({ results }),
+    ) {
+      const overlay = createSearchOverlay(makeOptions({ onSearch }));
+      overlay.mount(container);
+      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+      input.value = query;
+      input.dispatchEvent(new Event("input"));
+      await vi.advanceTimersByTimeAsync(300);
+      return { overlay, onSearch, input };
+    }
+
+    it("shows the year in a result date", async () => {
+      const { overlay } = await run([makeResult({ timestamp: "2024-03-05T12:00:00Z" })], "hello");
+      expect(container.querySelector(".search-result-time")!.textContent).toContain("2024");
+      overlay.destroy?.();
+    });
+
+    it("strips markdown from the preview", async () => {
+      const { overlay } = await run([makeResult({ content: "**bold** `code`" })], "zzz");
+      expect(container.querySelector(".search-result-content")!.textContent).toBe("bold code");
+      overlay.destroy?.();
+    });
+
+    it("highlights the term case-insensitively but not filter tokens", async () => {
+      const { overlay } = await run(
+        [makeResult({ content: "Hello from alice, HELLO again" })],
+        "from:alice hello",
+      );
+      const marks = [...container.querySelectorAll("mark.search-hit")].map((m) => m.textContent);
+      expect(marks).toEqual(["Hello", "HELLO"]);
+      overlay.destroy?.();
+    });
+
+    it("does not highlight a quoted filter value or one-char terms", async () => {
+      const { overlay } = await run(
+        [makeResult({ content: "ann went to the park x" })],
+        'from:"ann lee" park x',
+      );
+      const marks = [...container.querySelectorAll("mark.search-hit")].map((m) => m.textContent);
+      expect(marks).toEqual(["park"]);
+      overlay.destroy?.();
+    });
+
+    it("windows a long message around a match at char 500 with a leading ellipsis", async () => {
+      const content = "a".repeat(500) + "needle" + "b".repeat(500);
+      const { overlay } = await run([makeResult({ content })], "needle");
+      const text = container.querySelector(".search-result-content")!.textContent!;
+      expect(text.startsWith("\u2026")).toBe(true);
+      expect(text).toContain("needle");
+      expect(text.endsWith("\u2026")).toBe(true);
+      expect(text.length).toBeLessThanOrEqual(202);
+      expect(container.querySelector("mark.search-hit")!.textContent).toBe("needle");
+      overlay.destroy?.();
+    });
+
+    it("does not throw on a hostile regex-like query", async () => {
+      const { overlay } = await run([makeResult({ content: "a.*( b" })], "a.*(");
+      expect(container.querySelector("mark.search-hit")!.textContent).toBe("a.*(");
+      overlay.destroy?.();
+    });
+
+    it("never renders result content as HTML", async () => {
+      const { overlay } = await run([makeResult({ content: "<img src=x onerror=1> hi" })], "hi");
+      expect(container.querySelector(".search-result-content img")).toBeNull();
+      overlay.destroy?.();
+    });
+
+    it("shows Retry on failure and re-runs the same search", async () => {
+      const onSearch = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("net"))
+        .mockResolvedValue({ results: [makeResult()] });
+      const { overlay } = await run([], "hello", onSearch);
+      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      expect(retryBtn.style.display).not.toBe("none");
+      expect(retryBtn.textContent).toBe("Retry");
+      retryBtn.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onSearch).toHaveBeenCalledTimes(2);
+      expect(onSearch.mock.calls[1]![0]).toBe("hello");
+      expect(container.querySelectorAll(".search-result-item").length).toBe(1);
+      expect(retryBtn.style.display).toBe("none");
+      overlay.destroy?.();
+    });
+
+    it("a stale earlier response does not overwrite a newer search", async () => {
+      let resolveOld: (r: SearchResponse) => void = () => {};
+      const onSearch = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("net"))
+        .mockImplementationOnce(
+          () =>
+            new Promise<SearchResponse>((res) => {
+              resolveOld = res;
+            }),
+        )
+        .mockResolvedValue({ results: [makeResult({ message_id: 9, content: "newer" })] });
+      const { overlay } = await run([], "hello", onSearch);
+      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      retryBtn.click(); // second call: stays pending
+      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+      input.value = "hello2";
+      input.dispatchEvent(new Event("input"));
+      await vi.advanceTimersByTimeAsync(600);
+      resolveOld({ results: [makeResult({ message_id: 5, content: "older" })] });
+      await vi.advanceTimersByTimeAsync(0);
+      const text = container.querySelector(".search-result-content")!.textContent;
+      expect(text).toBe("newer");
+      overlay.destroy?.();
+    });
   });
 
   describe("keyboard navigation — ArrowUp", () => {

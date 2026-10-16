@@ -14,6 +14,7 @@ import { channelsStore } from "@stores/channels.store";
 import { parseTimestamp, resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { markdownToPlainText } from "@lib/markdown";
 import { formatDate } from "../i18n/format";
 import { messagingText } from "../i18n/messaging";
 
@@ -47,6 +48,101 @@ const MIN_QUERY_LEN = 2;
 /** Minimum interval between actual search API calls (rate limiting). */
 const MIN_SEARCH_INTERVAL_MS = 500;
 
+/** Filter keys the server parses out of `q` (service.ParseSearch). */
+const FILTER_KEYS = new Set([
+  "from",
+  "in",
+  "before",
+  "after",
+  "during",
+  "has",
+  "mentions",
+  "pinned",
+]);
+/** A preview whose first hit lies beyond this many chars is windowed around it. */
+const WINDOW_LEAD = 60;
+const PREVIEW_MAX = 200;
+const MIN_TERM_LEN = 2;
+
+/**
+ * The words to highlight for a query: whitespace-split, `key:value` filter
+ * tokens (including a quoted value that holds spaces) dropped, quotes removed,
+ * terms under 2 chars ignored. Mirrors the server's lexSearch.
+ */
+export function highlightTerms(query: string): string[] {
+  const terms: string[] = [];
+  const n = query.length;
+  let i = 0;
+  while (i < n) {
+    if (/\s/.test(query[i]!)) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < n && !/\s/.test(query[j]!)) j++;
+    const token = query.slice(i, j);
+    const colon = token.indexOf(":");
+    if (colon > 0 && FILTER_KEYS.has(token.slice(0, colon).toLowerCase())) {
+      // A quoted filter value runs to the next quote, spaces included.
+      if (token[colon + 1] === '"') {
+        const close = query.indexOf('"', i + colon + 2);
+        j = close === -1 ? n : close + 1;
+      }
+    } else {
+      const term = token.replace(/"/g, "");
+      if (term.length >= MIN_TERM_LEN) terms.push(term);
+    }
+    i = j;
+  }
+  return terms;
+}
+
+/** Index of the earliest case-insensitive hit of any term, with its length, or null. */
+function firstHit(text: string, terms: readonly string[]): { at: number; len: number } | null {
+  const lower = text.toLowerCase();
+  let best: { at: number; len: number } | null = null;
+  for (const t of terms) {
+    const at = lower.indexOf(t.toLowerCase());
+    if (at !== -1 && (best === null || at < best.at)) best = { at, len: t.length };
+  }
+  return best;
+}
+
+/** Plain-text preview: markdown stripped, windowed around the first hit, capped. */
+function buildPreview(raw: string, terms: readonly string[], spoilerLabel: string): string {
+  const plain = markdownToPlainText(raw, spoilerLabel);
+  const hit = firstHit(plain, terms);
+  let start = 0;
+  if (hit !== null && hit.at > WINDOW_LEAD) start = hit.at - WINDOW_LEAD;
+  const body = plain.slice(start, start + PREVIEW_MAX);
+  return (start > 0 ? "\u2026" : "") + body + (start + PREVIEW_MAX < plain.length ? "\u2026" : "");
+}
+
+/** Fill `el` with `text`, each case-insensitive term hit wrapped in a <mark>. */
+function fillHighlighted(el: HTMLElement, text: string, terms: readonly string[]): void {
+  const lower = text.toLowerCase();
+  const lowered = terms.map((t) => t.toLowerCase());
+  let pos = 0;
+  while (pos < text.length) {
+    let at = -1;
+    let len = 0;
+    for (const t of lowered) {
+      const k = lower.indexOf(t, pos);
+      if (k !== -1 && (at === -1 || k < at || (k === at && t.length > len))) {
+        at = k;
+        len = t.length;
+      }
+    }
+    if (at === -1) break;
+    if (at > pos) el.appendChild(document.createTextNode(text.slice(pos, at)));
+    const mark = createElement("mark", { class: "search-hit" });
+    setText(mark, text.slice(at, at + len));
+    el.appendChild(mark);
+    pos = at + len;
+  }
+  if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -70,6 +166,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let resultsDiv: HTMLDivElement;
   let input: HTMLInputElement;
   let statusEl: HTMLDivElement;
+  let retryBtn: HTMLButtonElement | null = null;
+  let failedSearch: { query: string; before: number | undefined; append: boolean } | null = null;
   let loadMoreBtn: HTMLButtonElement | null = null;
   let channelOption: HTMLButtonElement | null = null;
   let serverOption: HTMLButtonElement | null = null;
@@ -97,7 +195,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     try {
       const d = parseTimestamp(ts);
       return (
-        formatDate(d, { month: "short", day: "numeric" }) +
+        formatDate(d, { year: "numeric", month: "short", day: "numeric" }) +
         " " +
         formatDate(d, { hour: "2-digit", minute: "2-digit" })
       );
@@ -115,6 +213,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     clearChildren(resultsDiv);
     activeIndex = Math.min(activeIndex, Math.max(0, results.length - 1));
 
+    const terms = highlightTerms(lastQuery);
     for (let i = 0; i < results.length; i++) {
       const r = results[i]!;
       const isActive = i === activeIndex;
@@ -146,7 +245,11 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       header.appendChild(time);
 
       const content = createElement("div", { class: "search-result-content" });
-      setText(content, r.content.length > 200 ? r.content.slice(0, 200) + "..." : r.content);
+      fillHighlighted(
+        content,
+        buildPreview(r.content, terms, messagingText("spoiler.revealed")),
+        terms,
+      );
 
       appendChildren(item, header, content);
 
@@ -182,6 +285,20 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   function setStatus(text: string): void {
     setText(statusEl, text);
     statusEl.style.display = text === "" ? "none" : "block";
+    failedSearch = null;
+    if (retryBtn !== null) retryBtn.style.display = "none";
+  }
+
+  function showFailure(query: string, before: number | undefined, append: boolean): void {
+    setStatus(messagingText("search.failed"));
+    failedSearch = { query, before, append };
+    if (retryBtn !== null) retryBtn.style.display = "inline-block";
+  }
+
+  function retry(): void {
+    const f = failedSearch;
+    if (f === null) return;
+    executeSearch(f.query, f.before, f.append);
   }
 
   function executeSearch(query: string, before: number | undefined, append: boolean): void {
@@ -191,6 +308,10 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     searchAbort = new AbortController();
     const thisSearch = searchAbort;
     lastSearchTime = Date.now();
+
+    // Any new attempt, including a retry, clears the previous failure.
+    failedSearch = null;
+    if (retryBtn !== null) retryBtn.style.display = "none";
 
     if (append) {
       loadingMore = true;
@@ -222,7 +343,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
         loadingMore = false;
         renderLoadMore();
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setStatus(messagingText("search.failed"));
+        showFailure(query, before, append);
       });
   }
 
@@ -457,6 +578,18 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       box.appendChild(scope);
     }
 
+    retryBtn = createElement(
+      "button",
+      {
+        class: "search-overlay-retry",
+        type: "button",
+        style: "display:none",
+        "data-testid": "search-retry",
+      },
+      messagingText("search.retry"),
+    );
+    retryBtn.addEventListener("click", retry, { signal });
+
     loadMoreBtn = createElement(
       "button",
       {
@@ -469,7 +602,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     );
     loadMoreBtn.addEventListener("click", loadMore, { signal });
 
-    appendChildren(box, statusEl, resultsDiv, loadMoreBtn);
+    appendChildren(box, statusEl, retryBtn, resultsDiv, loadMoreBtn);
     root.appendChild(box);
     container.appendChild(root);
 
