@@ -23,6 +23,23 @@ export function quickReactionEmoji(n: number): string[] {
   return picks.slice(0, n);
 }
 
+let passCache: string[] | null = null;
+
+/**
+ * The same picks, computed once per render pass: the rows of one pass are drawn
+ * synchronously, so they share one read of the recents and cannot disagree. The
+ * cache drops at the next microtask, so a later pass sees a new pick.
+ */
+export function quickReactionEmojiForPass(n: number): string[] {
+  if (passCache === null || passCache.length !== n) {
+    passCache = quickReactionEmoji(n);
+    queueMicrotask(() => {
+      passCache = null;
+    });
+  }
+  return passCache;
+}
+
 /** The glyph (or custom-emoji image) for a quick reaction, and its accessible name. */
 export function emojiNode(emoji: string): { node: Node; name: string } {
   const node = buildCustomEmojiNode(emoji);

@@ -157,7 +157,6 @@ export const messagingText = defineCatalog("messaging", {
   "action.unpin": "Unpin",
   "action.edit": "Edit",
   "action.copyLink": "Copy Message Link",
-  "action.copyId": "Copy ID",
   "toast.linkCopied": "Message link copied",
   "toast.linkCopyFailed": "Couldn't copy the message link",
   "toast.idCopied": "Message ID copied",

@@ -179,46 +179,121 @@ describe("message hover bar (WP 3A-7)", () => {
     expect(opts.onDeleteClick).toHaveBeenLastCalledWith(1, false);
   });
 
-  describe("More button", () => {
-    it("is a menu button, closed at first", () => {
-      render(makeMessage());
-      const more = btn("msg-more-1");
-      expect(more.getAttribute("aria-haspopup")).toBe("menu");
-      expect(more.getAttribute("aria-expanded")).toBe("false");
-      expect(more.getAttribute("aria-label")).toBe("More");
-    });
+  it("More is a menu button, closed at first", () => {
+    render(makeMessage());
+    const more = btn("msg-more-1");
+    expect(more.getAttribute("aria-haspopup")).toBe("menu");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(more.getAttribute("aria-label")).toBe("More");
+  });
 
-    it("opens the message menu with itself as the invoker, and Escape returns focus", async () => {
-      seed([makeMessage()]);
-      render(makeMessage());
-      const more = btn("msg-more-1");
-      more.focus();
-      more.click();
-      await vi.waitFor(() =>
-        expect(document.querySelector(".message-context-menu")).not.toBeNull(),
-      );
-      expect(more.getAttribute("aria-expanded")).toBe("true");
-      document
-        .querySelector(".message-context-menu")!
-        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await vi.waitFor(() => expect(document.querySelector(".message-context-menu")).toBeNull());
-      expect(more.getAttribute("aria-expanded")).toBe("false");
-      expect(document.activeElement).toBe(more);
-    });
+  it("Shift-only buttons are out of the tab order (tabindex -1)", () => {
+    render(mine());
+    for (const id of ["msg-reply-1", "msg-pin-1", "msg-delete-1"]) {
+      expect(btn(id).getAttribute("tabindex")).toBe("-1");
+    }
+    expect(btn("msg-more-1").hasAttribute("tabindex")).toBe(false);
+  });
 
-    it("menu holds the items the bar dropped: Copy Message Link and Report", async () => {
-      seed([makeMessage()]);
-      render(makeMessage(), { onReportClick: vi.fn() });
-      btn("msg-more-1").click();
-      await vi.waitFor(() =>
-        expect(document.querySelector(".message-context-menu")).not.toBeNull(),
-      );
-      const labels = [...document.querySelectorAll(".message-context-menu [role=menuitem]")].map(
-        (el) => el.getAttribute("aria-label") ?? el.textContent,
-      );
-      expect(labels).toContain("Copy Message Link");
-      expect(labels).toContain("Report Message");
-    });
+  it("refreshReactionLocks locks and unlocks the quick buttons in place", async () => {
+    const { refreshReactionLocks } = await import("@components/message-list/reactions");
+    render(makeMessage());
+    const first = btn("msg-quick-react-1-0");
+    expect(first.hasAttribute("aria-disabled")).toBe(false);
+    setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
+    refreshReactionLocks(container, 1);
+    expect(first.getAttribute("aria-disabled")).toBe("true");
+    expect(first.title).not.toBe(`React with ${UP}`);
+    setActiveTimeout(null);
+    refreshReactionLocks(container, 1);
+    expect(first.hasAttribute("aria-disabled")).toBe(false);
+    expect(first.title).toBe(`React with ${UP}`);
+  });
+});
+
+describe("hover bar More button (mounted list)", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMessageList>;
+  let opts: MessageListOptions;
+  const menu = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>(".message-context-menu");
+  const more = (): HTMLElement =>
+    container.querySelector<HTMLElement>("[data-testid='msg-more-1']")!;
+
+  beforeEach(() => {
+    resetGateStores();
+    localStorage.clear();
+    signInAs("member");
+    setChannel();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    seed([makeMessage()]);
+    opts = makeOpts({ onReportClick: vi.fn() });
+    list = createMessageList(opts);
+    list.mount(container);
+  });
+
+  afterEach(() => {
+    list.destroy?.();
+    container.remove();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+    resetGateStores();
+  });
+
+  it("opens the message menu with itself as invoker; Escape returns focus to it", async () => {
+    more().focus();
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    expect(more().getAttribute("aria-expanded")).toBe("true");
+    menu()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect(more().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(more());
+  });
+
+  it("the menu holds what the bar dropped: Copy Message Link and Report", async () => {
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    const labels = [...menu()!.querySelectorAll("[role=menuitem]")].map(
+      (el) => el.getAttribute("aria-label") ?? el.textContent,
+    );
+    expect(labels).toContain("Copy Message Link");
+    expect(labels).toContain("Report Message");
+  });
+
+  it("row rebuilt while open: the menu stays and Escape focuses the new More", async () => {
+    const old = more();
+    old.focus();
+    old.click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    // An edit replaces the row's elements.
+    seed([makeMessage({ content: "after", editedAt: "2024-01-15T12:05:00Z" })]);
+    await vi.waitFor(() => expect(old.isConnected).toBe(false));
+    expect(menu()).not.toBeNull();
+    const fresh = more();
+    expect(fresh).not.toBe(old);
+    menu()!
+      .querySelector<HTMLElement>("[role=menuitem]")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect(document.activeElement).toBe(fresh);
+  });
+
+  it("a second click on More closes its menu instead of reopening it", async () => {
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    // What a real click does: pointerdown, then the outside mousedown that
+    // closes the menu, then click.
+    more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    more().click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(menu()).toBeNull();
+    // A later click opens it again.
+    more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
   });
 });
 
@@ -272,6 +347,32 @@ describe("hover bar Shift tracking", () => {
   it("the list's rows carry Pin and Delete (CSS hides them without Shift)", () => {
     const del = container.querySelector("[data-testid='msg-delete-1']");
     expect(del?.classList.contains("msg-shift-only")).toBe(true);
+  });
+
+  it("releasing Shift moves focus from a Shift-only button to the row's More", () => {
+    key("keydown", true);
+    const del = container.querySelector<HTMLElement>("[data-testid='msg-delete-1']")!;
+    del.focus();
+    expect(document.activeElement).toBe(del);
+    key("keyup", false);
+    expect(document.activeElement).toBe(container.querySelector("[data-testid='msg-more-1']"));
+  });
+
+  it("releasing Shift leaves focus alone elsewhere", () => {
+    const input = document.createElement("input");
+    container.appendChild(input);
+    key("keydown", true);
+    input.focus();
+    key("keyup", false);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("Shift already down when the pointer arrives reveals the buttons", () => {
+    const row = container.querySelector<HTMLElement>("[data-testid='message-1']")!;
+    row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, shiftKey: true }));
+    expect(root().classList.contains("shift-held")).toBe(true);
+    row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, shiftKey: false }));
+    expect(root().classList.contains("shift-held")).toBe(false);
   });
 
   it("stops listening after destroy", () => {

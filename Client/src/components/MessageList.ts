@@ -123,9 +123,6 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
-  /** Set by the list itself for the rows it renders (the hover bar's "..."
-   *  menu); callers never pass it. */
-  readonly markUnread?: (messageId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -145,6 +142,13 @@ const OLDER_RETRY_COOLDOWN_MS = 5000;
 const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
+
+/** The hover bar's "..." button the event came from, if any. */
+function moreButtonOf(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLElement>(".msg-actions-bar [data-testid^='msg-more-']")
+    : null;
+}
 
 /** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
 const UNREAD_BAR_CLEARANCE = 40;
@@ -495,16 +499,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
 
-  /** What every row is rendered with: the options plus the list's own Mark
-   *  Unread, so a row's "..." menu offers it like the right-click menu does. */
-  const rowOptions: MessageListOptions = { ...options, markUnread: markUnreadFrom };
-
   /** Render one virtual item — the single place the three item kinds map to DOM. */
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
-    const el = renderMessage(item.message, item.isGrouped, allMessages, rowOptions, owner.signal);
+    const el = renderMessage(item.message, item.isGrouped, allMessages, options, owner.signal);
     rowOwners.set(el, owner);
     return el;
   }
@@ -1829,6 +1829,45 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       },
       { signal: disposable.signal },
     );
+    // The hover bar's "..." button: one delegated listener, so the menu is
+    // owned by the list's signal and survives its row being patched or rebuilt.
+    // A click on "..." while its menu is open closes it (the outside mousedown
+    // already has), so the open state is noted at pointerdown, before that.
+    let moreWasOpen = false;
+    contentContainer.addEventListener(
+      "pointerdown",
+      (e) => {
+        moreWasOpen = moreButtonOf(e.target)?.getAttribute("aria-expanded") === "true";
+      },
+      { signal: disposable.signal },
+    );
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        const button = moreButtonOf(e.target);
+        if (button === null) return;
+        const skip = moreWasOpen;
+        moreWasOpen = false;
+        if (skip) return;
+        withMessageMenu((m) =>
+          m.openMessageMenuFromButton({
+            opts: options,
+            button,
+            signal: disposable.signal,
+            markUnread: markUnreadFrom,
+          }),
+        );
+      },
+      { signal: disposable.signal },
+    );
+    // Shift pressed before the pointer arrived still reveals Pin and Delete.
+    contentContainer.addEventListener(
+      "mouseover",
+      (e) => {
+        root?.classList.toggle("shift-held", e.shiftKey);
+      },
+      { signal: disposable.signal },
+    );
     // Alt+click on a message row marks it unread (the lazy module decides which
     // targets count: not a link, button, image or text field).
     contentContainer.addEventListener(
@@ -1854,7 +1893,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const setShiftHeld = (held: boolean): void => {
       root?.classList.toggle("shift-held", held);
     };
-    const trackShift = (e: KeyboardEvent): void => setShiftHeld(e.shiftKey);
+    const trackShift = (e: KeyboardEvent): void => {
+      // Releasing Shift hides the Shift-only buttons: if one holds focus, hand
+      // it to the row's "..." first so it does not drop to <body>.
+      if (e.type === "keyup" && !e.shiftKey) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.classList.contains("msg-shift-only")) {
+          active
+            .closest(".msg-actions-bar")
+            ?.querySelector<HTMLElement>("[data-testid^='msg-more-']")
+            ?.focus();
+        }
+      }
+      setShiftHeld(e.shiftKey);
+    };
     window.addEventListener("keydown", trackShift, { signal: disposable.signal });
     window.addEventListener("keyup", trackShift, { signal: disposable.signal });
     window.addEventListener("blur", () => setShiftHeld(false), { signal: disposable.signal });

@@ -578,9 +578,27 @@ describe("Copy Message Link action", () => {
     );
     document.body.appendChild(row);
 
-    // Copy Message Link left the hover bar: it is in the "..." menu.
+    // Copy Message Link left the hover bar: it is in the message menu.
     expect(row.querySelector('[data-testid="msg-copy-link-42"]')).toBeNull();
-    row.querySelector<HTMLButtonElement>('[data-testid="msg-more-42"]')!.click();
+    const { openMessageMenu } = await import("../../src/components/message-list/message-menu");
+    openMessageMenu({
+      msg,
+      opts: {
+        channelId: 7,
+        channelName: "general",
+        currentUserId: 1,
+        onScrollTop: vi.fn(),
+        onReplyClick: vi.fn(),
+        onEditClick: vi.fn(),
+        onDeleteClick: vi.fn(),
+        onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
+      } as MessageListOptions,
+      x: 1,
+      y: 1,
+      target: null,
+      signal: new AbortController().signal,
+    });
     await vi.waitFor(() =>
       expect(document.querySelector('[data-testid="msg-menu-copy-message-link"]')).not.toBeNull(),
     );

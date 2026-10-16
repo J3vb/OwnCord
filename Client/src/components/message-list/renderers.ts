@@ -8,8 +8,7 @@
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { connectionLockReason, messageActionGates } from "./message-actions";
-import { withMessageMenu } from "./message-menu-loader";
-import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";
@@ -470,7 +469,7 @@ export function renderMessage(
 
     // The lock is applied at render from the current timeout, then updated in
     // place by refreshReactionLocks when the timeout changes (P4-02).
-    quickReactionEmoji(QUICK_REACTIONS).forEach((emoji, index) => {
+    quickReactionEmojiForPass(QUICK_REACTIONS).forEach((emoji, index) => {
       // A new emoji on a message at the cap is left out, as in the menu.
       if (atReactionLimit(msg.reactions, emoji)) return;
       const { node, name } = emojiNode(emoji);
@@ -519,6 +518,7 @@ export function renderMessage(
 
     const replyBtn = createElement("button", {
       class: own ? "msg-shift-only" : "",
+      ...(own ? { tabindex: "-1" } : {}),
       "data-testid": `msg-reply-${msg.id}`,
       "aria-label": messagingText("action.reply"),
     });
@@ -530,6 +530,7 @@ export function renderMessage(
     if (gates.pin.shown) {
       const pinBtn = createElement("button", {
         class: "msg-shift-only",
+        tabindex: "-1",
         "data-testid": `msg-pin-${msg.id}`,
         "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
       });
@@ -544,6 +545,7 @@ export function renderMessage(
     if (gates.delete.shown) {
       const deleteBtn = createElement("button", {
         class: "msg-shift-only",
+        tabindex: "-1",
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
       });
@@ -572,27 +574,7 @@ export function renderMessage(
     });
     moreBtn.appendChild(createIcon("ellipsis", 16));
     moreBtn.title = messagingText("action.more");
-    moreBtn.addEventListener(
-      "click",
-      () => {
-        // Below and left-aligned with the button, as Discord opens it.
-        const rect = moreBtn.getBoundingClientRect();
-        const markUnread = opts.markUnread;
-        withMessageMenu((menu) =>
-          menu.openMessageMenu({
-            msg,
-            opts,
-            x: rect.left,
-            y: rect.bottom,
-            target: null,
-            signal,
-            invoker: moreBtn,
-            ...(markUnread !== undefined ? { markUnread } : {}),
-          }),
-        );
-      },
-      { signal },
-    );
+    // Opened by MessageList's delegated listener, which owns the menu's signal.
     actionsBar.appendChild(moreBtn);
 
     el.appendChild(actionsBar);
