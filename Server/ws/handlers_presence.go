@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -160,6 +162,9 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return Result{SetChannelID: &chID, Events: []Event{channelReadEvt(info.UserID, chID, readThroughNoted)}}
 }
 
+// markReadNoMessageSvcWarn limits the no-MessageSvc warning to one line.
+var markReadNoMessageSvcWarn sync.Once
+
 // handleMarkReadV2 is the V2 handler for mark_read messages. It runs the same
 // access check as channel_focus and moves the read pointer, but deliberately
 // leaves SetChannelID unset: marking a channel read from its context menu must
@@ -182,7 +187,12 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	if d.MessageSvc == nil {
-		// No message service wired (a bare test fixture): the pre-pointer path.
+		// No message service wired. Production always wires one; some test
+		// fixtures build PresenceDeps without it, so keep the pre-pointer
+		// path and say so once.
+		markReadNoMessageSvcWarn.Do(func() {
+			slog.Warn("mark_read: PresenceDeps has no MessageSvc, using the pre-pointer path (no read_state frame)")
+		})
 		_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, markCmd.ChannelID)
 		if err != nil {
 			if errors.Is(err, service.ErrForbidden) {

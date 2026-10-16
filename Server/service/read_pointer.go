@@ -47,6 +47,24 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 
 	s.mentionEmitMu.Lock()
 	defer s.mentionEmitMu.Unlock()
+
+	// Read-at-latest fires on every refocus and "Mark as Read" click, and a
+	// transaction occupies the single writer even when it changes nothing.
+	// Same skip as HandleChannelFocus (OC-0436): when the reader pool already
+	// shows the pointer at the newest live message and no mentions, answer
+	// from those reads without a transaction. A failed read falls through to
+	// the write, which is the load-bearing half. The check runs under
+	// mentionEmitMu like the write, so no increment can commit between the
+	// reads and the frame, and no mention_count frame can overtake it.
+	if op == db.ReadAtLatest {
+		if rs, ok := s.readAtLatestIsCurrent(ctx, userID, channelID); ok {
+			if s.readStateNotifier != nil {
+				s.readStateNotifier.NotifyReadState(userID, channelID, rs)
+			}
+			return rs, nil
+		}
+	}
+
 	rs, err := s.st.MoveReadPointer(ctx, userID, channelID, op, messageID)
 	if err != nil {
 		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w", err)
@@ -55,4 +73,19 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 		s.readStateNotifier.NotifyReadState(userID, channelID, rs)
 	}
 	return rs, nil
+}
+
+// readAtLatestIsCurrent reports whether the stored row already says "read at
+// the newest live message, no mentions", and if so the ReadPointer the write
+// path would return: nothing is unread past the newest live message.
+func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, channelID int64) (db.ReadPointer, bool) {
+	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
+	if err != nil {
+		return db.ReadPointer{}, false
+	}
+	lastRead, mentions, found, err := s.st.GetReadState(ctx, userID, channelID)
+	if err != nil || !found || lastRead != latestID || mentions != 0 {
+		return db.ReadPointer{}, false
+	}
+	return db.ReadPointer{LastReadMessageID: lastRead}, true
 }

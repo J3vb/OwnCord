@@ -421,3 +421,46 @@ func TestReady_CapabilityReadPointer(t *testing.T) {
 		t.Errorf("capabilities.read_pointer = %v, want true", env.Payload.Capabilities["read_pointer"])
 	}
 }
+
+func TestMarkUnread_DMParticipantOnly(t *testing.T) {
+	f := newActivityFixture(t)
+	a := f.user(t, "dm-a", permissions.MemberRoleID)
+	b := f.user(t, "dm-b", permissions.MemberRoleID)
+	outsider := f.user(t, "dm-outsider", permissions.MemberRoleID)
+	dmChannel, _, err := f.db.GetOrCreateDMChannel(context.Background(), a.ID, b.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	dmCh := dmChannel.ID
+	m1, err := f.db.CreateMessage(context.Background(), dmCh, b.ID, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	m2, err := f.db.CreateMessage(context.Background(), dmCh, b.ID, "again", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	aSend := f.connect(a, 0)
+	deps := f.presenceDeps(nil)
+	run := func(u *db.User) Result {
+		return handleMarkUnreadV2(context.Background(), MarkUnreadCmd{userID: u.ID, ChannelID: dmCh, MessageID: m2},
+			ClientInfo{UserID: u.ID, Username: u.Username}, deps)
+	}
+
+	if res := run(a); res.Error != nil {
+		t.Fatalf("participant mark_unread: %v", res.Error)
+	}
+	reads, _ := frameCounts(aSend)
+	if len(reads) != 1 || reads[0] != (readStateFrame{dmCh, m1, 1, 0}) {
+		t.Errorf("participant frames = %+v, want one {%d %d 1 0}", reads, dmCh, m1)
+	}
+
+	res := run(outsider)
+	var ce ClientError
+	if !errors.As(res.Error, &ce) || ce.Code != ErrCodeForbidden {
+		t.Errorf("non-participant: error = %v, want FORBIDDEN", res.Error)
+	}
+	if _, _, found := f.readStateOf(t, outsider, dmCh); found {
+		t.Error("a refused non-participant left a read_states row")
+	}
+}
