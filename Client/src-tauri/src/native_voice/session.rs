@@ -1092,16 +1092,19 @@ impl NativeSession {
             .camera_change
             .take_if(|c| c.id == capture)
             .ok_or("the camera change was superseded")?;
-        if !self.camera_published() {
-            return Err("the camera stopped during the change".into());
-        }
         let Some(live) = self.camera_capture.as_mut() else {
             return Err("the camera stopped during the change".into());
         };
-        // The source keeps the size it was published at: the encoder follows
-        // each frame's own size (as on the web path's replaceTrack).
-        next.capture.take_over(&live.capture);
-        if let Some(publication) = self.camera.lock().unwrap().as_mut() {
+        {
+            // One guard for the published check and the write: a release
+            // clearing the slot in between must not be written over.
+            let mut slot = self.camera.lock().unwrap();
+            let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                return Err("the camera stopped during the change".into());
+            };
+            // The source keeps the size it was published at: the encoder follows
+            // each frame's own size (as on the web path's replaceTrack).
+            next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
         }
         // Dropping the old capture joins its thread and frees its device; the
@@ -1278,17 +1281,20 @@ impl NativeSession {
             .screen_change
             .take_if(|c| c.id == capture)
             .ok_or("the screen source change was superseded")?;
-        if !self.screen_published() {
-            return Err("the screen share stopped during the source change".into());
-        }
         let Some(live) = self.screen.as_mut() else {
             return Err("the screen share stopped during the source change".into());
         };
-        // The source keeps the size it was published at: the encoder follows
-        // each frame's own size, but the layer sizes the server was told stay
-        // (as on the web path's replaceTrack).
-        next.capture.take_over(&live.capture);
-        if let Some(publication) = self.screen_publication.lock().unwrap().as_mut() {
+        {
+            // One guard for the published check and the write: a release
+            // clearing the slot in between must not be written over.
+            let mut slot = self.screen_publication.lock().unwrap();
+            let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                return Err("the screen share stopped during the source change".into());
+            };
+            // The source keeps the size it was published at: the encoder follows
+            // each frame's own size, but the layer sizes the server was told stay
+            // (as on the web path's replaceTrack).
+            next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
         }
         // Dropping the old share joins its capture thread (and, on Wayland,
