@@ -101,9 +101,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     up.progress(0.5);
     expect((chip.querySelector("progress") as HTMLProgressElement).value).toBeCloseTo(0.5);
 
-    send(container);
-    expect(opts.onSend).not.toHaveBeenCalled();
-
+    // (Send here no longer refuses: 3A-9 queues it, see message-input-send-queue.test.ts.)
     up.resolve({ id: "srv-7", url: "/f/7", filename: "big.zip" });
     await vi.waitFor(() => expect(chip.classList.contains("uploading")).toBe(false));
     (container.querySelector(".msg-textarea") as HTMLTextAreaElement).value = "done";

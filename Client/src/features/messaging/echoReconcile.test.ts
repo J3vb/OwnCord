@@ -80,6 +80,10 @@ describe("isUnreconciledEcho", () => {
       expect(isUnreconciledEcho(row({ content: "<b>hi</b>" }), echo)).toBe(true);
     });
 
+    it("never consumes an uploading row with equal content (3A-9)", () => {
+      expect(isUnreconciledEcho(row({ status: "uploading" }), echo)).toBe(false);
+    });
+
     it.each([
       ["a server-rejected failure", { status: "failed", errorCode: "SLOW_MODE" }],
       ["a failure with no code", { status: "failed", errorCode: null }],

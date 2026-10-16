@@ -291,6 +291,10 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "UPLOAD_FAILED":
+      return messagingText("send.uploadFailed");
+    case "UPLOAD_CANCELLED":
+      return messagingText("send.uploadCancelled");
     case "BEFORE_RESTORE":
       return connectText("app.sendBeforeRestore");
     default:
@@ -318,7 +322,11 @@ export function renderMessage(
   }
 
   const statusClass =
-    msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
+    msg.status === "pending" || msg.status === "uploading"
+      ? " pending"
+      : msg.status === "failed"
+        ? " failed"
+        : "";
   const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
   // A deleted row shows no content, so it must not keep the mention accent.
   const mentionedClass =
@@ -420,7 +428,14 @@ export function renderMessage(
     // unconfirmed-optimistic sentinel shared by every pending row, so it is not
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
-    el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
+    const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
+    if (msg.status === "uploading" && msg.correlationId !== null) {
+      // A queued row's Cancel describes itself by this text (3A-9).
+      const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
+      wrap.style.display = "contents";
+      wrap.appendChild(body);
+      el.appendChild(wrap);
+    } else el.appendChild(body);
     if (msg.editedAt !== null) {
       el.appendChild(
         createElement(
@@ -444,6 +459,13 @@ export function renderMessage(
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }
+  }
+
+  // A send queued behind its files shows them, with progress and Cancel while
+  // they upload and plain once it failed (3A-9).
+  if ((msg.status === "uploading" || msg.status === "failed") && msg.correlationId !== null) {
+    const strip = opts.renderUploadStrip?.(msg.correlationId, signal);
+    if (strip != null) el.appendChild(strip);
   }
 
   // Failed optimistic send: show the reason and offer retry / discard.
