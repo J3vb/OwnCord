@@ -104,10 +104,12 @@ export class CodecSwitchController {
       : screenLiveCodec(this.host.getScreenState());
   }
 
-  /** Only a VP9 publish switches live. Every shipped client plays VP8 and
-   *  H.264, so a peer list without them never moves an H.264 or VP8 publish. */
+  /** Only a VP9 or H.265 publish switches live: down to VP8, which every
+   *  shipped client plays, when a peer cannot decode it, and back up when
+   *  every peer can. Every shipped client plays VP8 and H.264, so a peer list
+   *  without them never moves an H.264 or VP8 publish. */
   private pick(live: LiveCodec): PublishCodec {
-    if (live.preferred !== "vp9") return live.published;
+    if (live.preferred !== "vp9" && live.preferred !== "h265") return live.published;
     return pickCommonCodec(live.preferred, channelPeerDecode());
   }
 
