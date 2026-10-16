@@ -126,6 +126,7 @@ and only when it changes something a contributor or fork holder must do
 - Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
 - Editing a message now happens inside the message itself, as in Discord: press ↑ in an empty message box or choose Edit, change the text in place, then Enter saves, Shift+Enter adds a line and Esc cancels. Saving an empty edit asks to delete the message. A save that fails reopens the editor with your text.
 - Deleted messages now disappear from the channel instead of leaving a "[message deleted]" row, and a reply to a deleted message says "Original message was deleted".
+- You can press Enter while files are still uploading: the message box clears at once and the message shows in the chat with a progress bar per file and a **Cancel upload** button, then posts by itself when the files are in, also if you have switched channels. Messages you send meanwhile are not held back. If an upload fails or you cancel, the message shows **Retry** (uploads again) and **Delete**; closing the app drops a message that is still uploading.
 
 **Voice and video**
 

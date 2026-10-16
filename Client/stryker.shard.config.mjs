@@ -210,7 +210,10 @@ export const shards = {
     "src/stores/voice.store.ts",
     "src/features/messaging/readingAnchor.ts",
     "src/features/messaging/emojiCatalog.ts",
-  ], // ~984 mutants (estimated)
+    "src/features/messaging/attachmentTtl.ts",
+    "src/features/messaging/sendQueue-loader.ts",
+    "src/features/messaging/sendQueue.ts",
+  ], // ~1,250 mutants (estimated)
   "stores-2": [
     "src/stores/blocks.store.ts",
     "src/stores/channels.store.ts",
