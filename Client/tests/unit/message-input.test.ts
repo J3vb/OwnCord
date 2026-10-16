@@ -1270,7 +1270,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("removing a finished upload keeps Send blocked on a later in-flight one", async () => {
+  it("removing a finished upload leaves only the in-flight one in the queued send", async () => {
     const onUploadFile = vi
       .fn<
         (file: File, signal?: AbortSignal) => Promise<{ id: string; url: string; filename: string }>
@@ -1301,8 +1301,18 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "hello";
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).not.toHaveBeenCalled();
-    expect(container.querySelector(".attachment-preview-item")).not.toBeNull();
+    // 3A-9: the removed upload's id is never sent; only b.pdf is queued.
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    const call = vi.mocked(opts.onSend).mock.calls[0]!;
+    expect(call.slice(0, 5)).toEqual(["hello", null, [], [], false]);
+    expect(call[5]).toEqual([
+      {
+        filename: "b.pdf",
+        file: expect.any(File),
+        upload: expect.objectContaining({ filename: "b.pdf" }),
+      },
+    ]);
+    expect(container.querySelector(".attachment-preview-item")).toBeNull();
 
     comp.destroy?.();
   });
@@ -1358,8 +1368,8 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("blocks send while uploads are still in flight", async () => {
-    // Create an upload that never resolves during the test
+  it("queues the send while uploads are still in flight", async () => {
+    // Create an upload that stays pending until the test resolves it
     let resolveUpload: ((v: { id: string; url: string; filename: string }) => void) | null = null;
     const onUploadFile = vi.fn(
       () =>
@@ -1382,16 +1392,23 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    // Should NOT have sent -- upload still pending
-    expect(opts.onSend).not.toHaveBeenCalled();
-    // Should show "wait" error
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("wait for uploads");
+    // 3A-9: the send goes to the host as a queued one, the composer is empty
+    // at once, and nothing is refused.
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    const call = vi.mocked(opts.onSend).mock.calls[0]!;
+    expect(call.slice(0, 5)).toEqual(["trying to send", null, [], [], false]);
+    expect(call[5]).toEqual([
+      { filename: "doc.txt", file, upload: expect.objectContaining({ filename: "doc.txt" }) },
+    ]);
+    expect(textarea.value).toBe("");
+    expect(container.querySelector(".attachment-preview-item")).toBeNull();
+    expect(container.querySelector(".attachment-upload-error")?.textContent ?? "").toBe("");
 
-    // Now resolve the upload
+    // Once the upload resolves the composer sends nothing more and shows no error.
     resolveUpload!({ id: "done", url: "http://x", filename: "doc.txt" });
     await new Promise((r) => setTimeout(r, 10));
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    expect(container.querySelector(".attachment-upload-error")?.textContent ?? "").toBe("");
 
     comp.destroy?.();
   });

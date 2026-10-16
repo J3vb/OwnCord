@@ -63,6 +63,24 @@ test.describe("Settings Overlay", () => {
     await expect(overlay).not.toHaveClass(/open/);
   });
 
+  test("lists the app settings in Discord's order", async ({ page }) => {
+    await openSettings(page);
+
+    await expect(page.locator(".settings-sidebar > button.settings-nav-item")).toHaveText([
+      "Account",
+      "Safety",
+      "Appearance",
+      "Accessibility",
+      "Voice & Video",
+      "Text & Images",
+      "Notifications",
+      "Keybinds",
+      "Advanced",
+      "Diagnostics & logs",
+      "About",
+    ]);
+  });
+
   test("has Log Out button with danger class", async ({ page }) => {
     await openSettings(page);
 

@@ -181,6 +181,8 @@ async function openSafety(page: Page): Promise<Locator> {
 async function relogin(page: Page, server: TestServer, username: string): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.locator(".settings-nav-item.danger").click();
+  // Log Out asks first.
+  await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, username);
 }
@@ -650,6 +652,8 @@ test.describe("B9-26 recovery lifecycle journey (real server)", () => {
 
     // Log out: the client returns to the connect page.
     await bob.locator(".settings-nav-item.danger").click();
+    // Log Out asks first.
+    await bob.locator("[data-testid='logout-confirm']").click();
     await expect(bob.locator("#host")).toBeVisible({ timeout: 30_000 });
 
     // Recover with the kit secret and a new password: the returned session

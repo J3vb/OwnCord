@@ -2,12 +2,20 @@
  * E2E tests for the logout flow.
  * Covers: settings → Log Out → returns to connect page.
  */
+import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   mockTauriFullSession,
   mockTauriFullSessionWithAutoConnect,
   navigateToMainPage,
 } from "./helpers";
+
+/** Log Out asks first; answer the prompt. */
+async function confirmLogout(page: Page): Promise<void> {
+  const dialog = page.locator("[data-testid='logout-confirm-dialog']");
+  await expect(dialog).toContainText("Are you sure you want to log out?");
+  await dialog.locator("[data-testid='logout-confirm']").click();
+}
 
 test.describe("Logout Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -27,10 +35,25 @@ test.describe("Logout Flow", () => {
       hasText: "Log Out",
     });
     await logoutBtn.click();
+    await confirmLogout(page);
 
     // Should navigate back to connect page
     const connectForm = page.locator(".connect-form, .login-form");
     await expect(connectForm).toBeVisible({ timeout: 5000 });
+  });
+
+  test("Log Out asks first: cancelling keeps you signed in", async ({ page }) => {
+    await page.locator("button[aria-label='Settings']").click();
+    await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
+
+    await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    const dialog = page.locator("[data-testid='logout-confirm-dialog']");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("[data-testid='logout-cancel']").click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".settings-overlay.open")).toBeVisible();
+    await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
   });
 
   test("after logout, main page is no longer visible", async ({ page }) => {
@@ -43,6 +66,7 @@ test.describe("Logout Flow", () => {
       hasText: "Log Out",
     });
     await logoutBtn.click();
+    await confirmLogout(page);
 
     // Main app layout should not be visible
     await expect(page.locator(".app")).not.toBeVisible({ timeout: 5000 });
@@ -82,6 +106,7 @@ test.describe("Logout Flow — auto-connect profile", () => {
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
     await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await confirmLogout(page);
 
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });
 

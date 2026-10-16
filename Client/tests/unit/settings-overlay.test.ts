@@ -16,6 +16,11 @@ const APP_LIFETIME_MODULES = [
   ["@lib/channel-mutes", channelMutes],
 ] as const;
 
+const mockAppVersion = vi.hoisted(() => vi.fn());
+vi.mock("../../src/features/whats-new/appVersion", () => ({
+  readAppVersion: mockAppVersion,
+}));
+
 // Mock logger
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
@@ -117,6 +122,7 @@ describe("SettingsOverlay", () => {
     document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
+    mockAppVersion.mockResolvedValue("1.2.3-test");
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
     mockUiState.settingsOpen = false;
     mockUiState.settingsTab = null;
@@ -147,10 +153,10 @@ describe("SettingsOverlay", () => {
     expect(tabNames).toEqual([
       "Account",
       "Appearance",
-      "Notifications",
-      "Text & Images",
       "Accessibility",
       "Voice & Video",
+      "Text & Images",
+      "Notifications",
       "Keybinds",
       "Advanced",
       "Diagnostics & logs",
@@ -365,7 +371,7 @@ describe("SettingsOverlay", () => {
   it("renders notification toggles", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 2).click();
+    getTab(container, 5).click();
 
     // Desktop, flash, @everyone, message sounds, the call sound (D2) and the
     // voice UI sounds (DP-40), plus the seven per-sound switches (WP M-8).
@@ -378,7 +384,7 @@ describe("SettingsOverlay", () => {
   it("persists notification toggle state", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 2).click();
+    getTab(container, 5).click();
 
     const toggles = container.querySelectorAll(".toggle");
     const suppressToggle = toggles[2] as HTMLElement;
@@ -395,7 +401,7 @@ describe("SettingsOverlay", () => {
   it("renders Voice & Video tab with device selectors", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const selects = container.querySelectorAll("select.form-input");
     // input device, output device, camera quality, screen share quality,
@@ -417,7 +423,7 @@ describe("SettingsOverlay", () => {
   it("renders voice sensitivity meter bar", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     // Sensitivity is now a draggable meter bar, not a slider.
     const meterBar = container.querySelector(".mic-meter-bar") as HTMLElement;
@@ -431,7 +437,7 @@ describe("SettingsOverlay", () => {
   it("persists audio device selection on change", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const selects = container.querySelectorAll("select.form-input");
     const inputSelect = selects[0] as HTMLSelectElement;
@@ -445,7 +451,7 @@ describe("SettingsOverlay", () => {
   it("toggles echo cancellation", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const echoToggle = container.querySelector(
       ".toggle[aria-label='Echo Cancellation']",
@@ -473,13 +479,99 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("calls onLogout when logout button clicked", () => {
+  it("asks before logging out: one click only opens the prompt, confirming logs out", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
-    expect(defaultOptions.onLogout).toHaveBeenCalled();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
+    expect(dialog?.textContent).toContain("Are you sure you want to log out?");
 
+    clickEl(document.querySelector("[data-testid='logout-confirm']"));
+    expect(defaultOptions.onLogout).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("mounts the Log Out prompt inside the settings overlay so it stacks above it", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
+    expect(dialog?.closest(".settings-overlay")).not.toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("Escape with the Log Out prompt open closes only the prompt", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onClose).toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("cancelling the Log Out prompt does not log out", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    clickEl(document.querySelector("[data-testid='logout-cancel']"));
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("destroying the overlay with the Log Out prompt open removes it and does not log out", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).not.toBeNull();
+    overlay.destroy?.();
+
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    // Nothing left to answer: a later Escape or click has no handler to run.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+  });
+
+  it("shows the app version in small text under Log Out", async () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    await vi.waitFor(() => {
+      expect(container.querySelector(".settings-sidebar-version")?.textContent).toBe(
+        "Version 1.2.3-test",
+      );
+    });
+    const sidebar = container.querySelector(".settings-sidebar")!;
+    const logout = sidebar.querySelector(".settings-sidebar-logout")!;
+    expect(logout.nextElementSibling?.className).toContain("settings-sidebar-version");
+    overlay.destroy?.();
+  });
+
+  it("leaves the nav without a version when the host reports none", async () => {
+    mockAppVersion.mockResolvedValueOnce(null);
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(container.querySelector(".settings-sidebar-version")).toBeNull();
     overlay.destroy?.();
   });
 
@@ -1053,7 +1145,7 @@ describe("SettingsOverlay", () => {
     expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-account");
 
     // "Text & Images" — the slugged id drops the ampersand
-    getTab(container, 3).click();
+    getTab(container, 4).click();
     expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-text-images");
 
     overlay.destroy?.();
@@ -1384,7 +1476,7 @@ describe("SettingsOverlay", () => {
     const fontSlider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(fontSlider).not.toBeNull();
 
-    getTab(container, 2).click(); // Notifications — discards the Appearance pane
+    getTab(container, 5).click(); // Notifications — discards the Appearance pane
     expect(container.contains(fontSlider)).toBe(false);
 
     document.documentElement.style.removeProperty("--font-size");

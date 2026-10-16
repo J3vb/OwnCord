@@ -124,9 +124,8 @@ export const shards = {
     "src/components/message-list/avatar.ts",
     "src/lib/channel-mutes.ts",
     "src/lib/gifProvider.ts",
-    "src/lib/icons.ts",
     "src/features/updates/UpdateCheckRow.ts",
-  ], // 1248 measured with lib-rest-7 on run 38902717516, timed out at 89%
+  ], // timed out at 90 min on run 38926807609 while it still held icons.ts
   "lib-rest-7": [
     "src/lib/markdown.ts",
     "src/features/updates/availableUpdate.ts",
@@ -204,6 +203,11 @@ export const shards = {
     "src/lib/voiceShortcuts.ts",
     "src/lib/globalKeys.ts",
   ], // ~1171 mutants (estimated)
+  // icons.ts is a table of Lucide SVG path strings at module level. Every
+  // mutant there is static, so each one re-runs the whole suite; on runs
+  // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
+  // This shard skips static mutants (see ignoreStaticShards below).
+  "lib-rest-9": ["src/lib/icons.ts"],
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
@@ -211,7 +215,10 @@ export const shards = {
     "src/stores/voice.store.ts",
     "src/features/messaging/readingAnchor.ts",
     "src/features/messaging/emojiCatalog.ts",
-  ], // ~984 mutants (estimated)
+    "src/features/messaging/attachmentTtl.ts",
+    "src/features/messaging/sendQueue-loader.ts",
+    "src/features/messaging/sendQueue.ts",
+  ], // ~1,250 mutants (estimated)
   "stores-2": [
     "src/stores/blocks.store.ts",
     "src/stores/channels.store.ts",
@@ -277,7 +284,9 @@ export const shards = {
     "src/features/moderation/Evidence.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/moderation/api.ts",
+    "src/features/messaging/emojiStill.ts",
     "src/features/profiles/openUserProfilePopup.ts",
+    "src/features/settings/logoutConfirm.ts",
     "src/features/zoom/zoomKeys.ts",
   ], // ~1122 mutants (estimated)
 };
@@ -317,9 +326,14 @@ if (!Object.hasOwn(shards, shard) && !Object.hasOwn(legacy, shard)) {
 // Report-only: no `break`, so a score drop never fails the shard. The flip to a
 // `break` threshold is gated on the error population being triaged and ~5
 // consecutive nightly runs establishing the spread (see the plan, Task 5).
+// Shards whose files are mostly module-level data: static mutants there cost a
+// full-suite run each and test nothing a unit test could assert on.
+const ignoreStaticShards = new Set(["lib-rest-9"]);
+
 export default {
   ...base,
   mutate: shards[shard] ?? legacy[shard],
+  ...(ignoreStaticShards.has(shard) ? { ignoreStatic: true } : {}),
   // The base list has no "json", so jsonReporter.fileName alone writes nothing.
   reporters: [...base.reporters, "json"],
   // Per-shard report paths: parallel shard jobs (and a local serial run) each

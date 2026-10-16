@@ -1,11 +1,17 @@
 /**
- * Accessibility settings tab — reduced motion, high contrast, role colors, OS motion sync, large font.
+ * Accessibility settings tab — reduced motion, high contrast, role colors, OS motion sync, large font,
+ * always-underlined links, saturation.
  */
 
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { appendToggleRows, loadPref, type ToggleItem } from "./helpers";
+import { appendToggleRows, loadPref, savePref, type ToggleItem } from "./helpers";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
-import { applyFontSize, effectiveFontSize } from "@lib/appearance";
+import {
+  applyFontSize,
+  applySaturation,
+  effectiveFontSize,
+  effectiveSaturation,
+} from "@lib/appearance";
 import { settingsText as t } from "../../i18n/settings";
 
 // Built per render, not at module load, so every label reads the catalog.
@@ -63,6 +69,15 @@ const readabilityToggles = (onFontChange: () => void): ReadonlyArray<ToggleItem>
       onFontChange();
     },
   },
+  {
+    key: "underlineLinks",
+    label: t("accessibility.underlineLinks.label"),
+    desc: t("accessibility.underlineLinks.desc"),
+    fallback: false,
+    sideEffect: (nowOn) => {
+      document.documentElement.classList.toggle("underline-links", nowOn);
+    },
+  },
 ];
 
 const chatToggles = (): ReadonlyArray<ToggleItem> => [
@@ -79,6 +94,45 @@ function group(title: string): HTMLDivElement {
   const el = createElement("div", { class: "setting-group" });
   el.appendChild(createElement("h3", { class: "setting-group-title" }, title));
   return el;
+}
+
+/** The Saturation row: a 0-100 % slider that writes the pref and re-applies it. */
+function buildSaturationRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row setting-slider" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("accessibility.saturation.label")),
+    createElement("div", { class: "setting-desc" }, t("accessibility.saturation.desc")),
+  );
+  const slider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "100",
+    step: "1",
+    value: String(effectiveSaturation()),
+    "aria-label": t("accessibility.saturation.label"),
+  });
+  const value = createElement("span", { class: "slider-val" });
+  const paint = (): void => {
+    setText(value, t("accessibility.saturation.value", { percent: effectiveSaturation() }));
+  };
+  paint();
+  slider.addEventListener(
+    "input",
+    () => {
+      savePref("saturation", Number(slider.value));
+      // Re-derive from the stored pref, so the label shows what is applied.
+      applySaturation();
+      paint();
+    },
+    { signal },
+  );
+  const control = createElement("div", { class: "slider-row" });
+  appendChildren(control, slider, value);
+  appendChildren(row, info, control);
+  return row;
 }
 
 export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
@@ -123,6 +177,9 @@ export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
   const chat = group(t("accessibility.group.chat"));
   appendToggleRows(chat, chatToggles(), signal);
 
-  appendChildren(section, motion, readability, chat);
+  const colors = group(t("accessibility.group.colors"));
+  colors.appendChild(buildSaturationRow(signal));
+
+  appendChildren(section, motion, readability, colors, chat);
   return section;
 }

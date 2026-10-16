@@ -20,14 +20,21 @@ import { findUnnamedControls } from "./support/b9-accessibility";
 // their journeys here.
 // ---------------------------------------------------------------------------
 
-// In the tab's grouped order (Motion, Readability, Chat). The playwright
+// The switch rows in the tab's grouped order (Motion, Readability, Colors,
+// Chat); the Saturation slider is checked on its own. The playwright
 // config emulates prefers-reduced-motion: reduce, so the OS row says so.
 const ENGLISH = [
   ["Reduce Motion", "Disable animations and transitions"],
   ["Sync with OS", "Follow your system setting. It is asking for less motion right now."],
   ["High Contrast", "Increase contrast for better readability"],
   ["Large Font", "Use larger text throughout the app for better readability"],
+  ["Always underline links", "Underline links in messages even when you are not pointing at them"],
   ["Role Colors", "Show colored usernames based on role in chat"],
+] as const;
+/** The Saturation row, a slider rather than a switch. */
+const SATURATION = [
+  "Saturation",
+  "Make colored names and primary buttons more or less vivid. Images and video are not changed",
 ] as const;
 /** The text-size readout row, which has no switch. */
 const READOUT = ["Text size", "Set in Appearance"] as const;
@@ -68,7 +75,11 @@ test.describe("B9-3 Accessibility tab text", () => {
     const readout = pane(page).locator(".setting-readout");
     await expect(readout.locator(".setting-label")).toHaveText(READOUT[0]);
     await expect(readout.locator(".setting-desc")).toHaveText(READOUT[1]);
-    const rows = pane(page).locator(".setting-row:not(.setting-readout)");
+    const slider = pane(page).locator(".setting-slider");
+    await expect(slider.locator(".setting-label")).toHaveText(SATURATION[0]);
+    await expect(slider.locator(".setting-desc")).toHaveText(SATURATION[1]);
+    await expect(slider.getByRole("slider", { name: SATURATION[0], exact: true })).toBeVisible();
+    const rows = pane(page).locator(".setting-row:not(.setting-readout):not(.setting-slider)");
     await expect(rows).toHaveCount(ENGLISH.length);
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);
@@ -83,7 +94,7 @@ test.describe("B9-3 Accessibility tab text", () => {
   }, testInfo) => {
     await openAccessibility(page, true);
     const root = pane(page);
-    const rows = root.locator(".setting-row:not(.setting-readout)");
+    const rows = root.locator(".setting-row:not(.setting-readout):not(.setting-slider)");
     await expect(rows).toHaveCount(ENGLISH.length);
     expect(await findUnnamedControls(root)).toEqual([]);
 

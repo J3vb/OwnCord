@@ -301,6 +301,31 @@ describe("failPendingOnDisconnect", () => {
   });
 });
 
+describe("failPendingOnDisconnect with an uploading row (WP 3A-9)", () => {
+  it("leaves the uploading row alone while failing the pending sends beside it", () => {
+    addOptimisticMessage({
+      correlationId: "up-1",
+      channelId: 1,
+      user: me,
+      content: "waiting for files",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+      status: "uploading",
+    });
+    pendingSend("corr-a");
+
+    failPendingOnDisconnect("reconnecting");
+    failPendingOnDisconnect("disconnected");
+
+    const rows = messagesStore.getState().messagesByChannel.get(1) ?? [];
+    expect(rows.map((m) => [m.correlationId, m.status])).toEqual([
+      ["corr-a", "failed"],
+      ["up-1", "uploading"],
+    ]);
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+});
+
 describe("handleSendFailure", () => {
   it("fails the matching pending send", () => {
     pendingSend("corr-c");
