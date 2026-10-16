@@ -1057,6 +1057,19 @@ describe("media.ts", () => {
       expect(scale).toBeGreaterThan(1);
     });
 
+    it("leaves the image alone on Ctrl/Cmd zoom keys (those zoom the app)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const before = img.style.transform;
+      for (const key of ["+", "=", "-", "0"]) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true }));
+      }
+
+      expect(img.style.transform).toBe(before);
+    });
+
     it("zooms in on = key (same as +)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
