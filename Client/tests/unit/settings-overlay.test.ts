@@ -300,7 +300,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 1).click();
 
     const themeOptions = container.querySelectorAll(".theme-opt");
-    expect(themeOptions.length).toBe(4);
+    // Four palettes plus Sync with computer.
+    expect(themeOptions.length).toBe(5);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();

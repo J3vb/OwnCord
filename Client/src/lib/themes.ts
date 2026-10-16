@@ -5,6 +5,7 @@
  * The active theme name is persisted to localStorage.
  */
 
+import { Disposable } from "./disposable";
 import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
 
 /** Built-in theme palettes. Moved here from `@components/settings/helpers` so
@@ -97,8 +98,71 @@ const STORAGE_KEY_LEGACY = "owncord:settings:theme";
 
 const BUILT_IN_THEMES: ReadonlySet<string> = new Set(Object.keys(THEMES));
 
+/**
+ * The stored choice that follows the computer's light/dark setting. It is not
+ * a palette, so it is not in THEMES or ThemeName: it resolves to one of them.
+ */
+export const SYSTEM_THEME = "system";
+
+const SYSTEM_DARK_THEME: ThemeName = "dark";
+const SYSTEM_LIGHT_THEME: ThemeName = "light";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
 function isKnownThemeName(name: string): boolean {
-  return BUILT_IN_THEMES.has(name);
+  return name === SYSTEM_THEME || BUILT_IN_THEMES.has(name);
+}
+
+/** Owns the live prefers-color-scheme listener while "system" is the choice. */
+let systemOwner: Disposable | null = null;
+
+function stopSystemSync(): void {
+  systemOwner?.destroy();
+  systemOwner = null;
+}
+
+function osPrefersDark(mq: MediaQueryList | null): boolean {
+  // No matchMedia (or no answer) keeps the dark default the app ships with.
+  return mq === null ? true : mq.matches;
+}
+
+/**
+ * Choose a theme by stored name: a built-in palette, or "system".
+ *
+ * "system" paints the dark or light palette for the OS setting, persists
+ * "system" (not the palette) and keeps following the OS until another theme is
+ * applied. Applying any concrete theme ends the sync.
+ */
+export function applyThemeChoice(choice: string): void {
+  if (choice !== SYSTEM_THEME) {
+    applyTheme(choice as ThemeName);
+    return;
+  }
+  stopSystemSync();
+  const mq = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;
+  const paint = (): void => {
+    paintTheme(osPrefersDark(mq) ? SYSTEM_DARK_THEME : SYSTEM_LIGHT_THEME);
+    localStorage.setItem(STORAGE_KEY_ACTIVE, SYSTEM_THEME);
+  };
+  paint();
+  restoreAccent();
+  if (mq === null) return;
+  const owner = new Disposable();
+  systemOwner = owner;
+  mq.addEventListener(
+    "change",
+    () => {
+      paint();
+      // paintTheme clears the body's inline tokens, which carry the accent.
+      restoreAccent();
+    },
+    { signal: owner.signal },
+  );
+}
+
+/** The palette "system" resolves to right now. */
+export function resolveSystemTheme(): ThemeName {
+  const mq = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;
+  return osPrefersDark(mq) ? SYSTEM_DARK_THEME : SYSTEM_LIGHT_THEME;
 }
 
 /**
@@ -139,6 +203,11 @@ export function applyThemeByName(name: string): void {
  * without importing the component layer.
  */
 export function applyTheme(name: ThemeName): void {
+  stopSystemSync();
+  paintTheme(name);
+}
+
+function paintTheme(name: ThemeName): void {
   const theme = THEMES[name];
   const root = document.documentElement;
   // Clear every key any built-in theme owns first, so switching to a theme
@@ -157,7 +226,7 @@ export function applyTheme(name: ThemeName): void {
   applyThemeByName(name);
 }
 
-/** Returns the currently active theme name, defaulting to "neon-glow". */
+/** Returns the stored theme choice (a palette name or "system"), defaulting to "neon-glow". */
 export function getActiveThemeName(): string {
   const active = localStorage.getItem(STORAGE_KEY_ACTIVE);
   if (active !== null && active.length > 0 && isKnownThemeName(active)) {
@@ -299,6 +368,11 @@ export function restoreAccent(): void {
  * Used by the Appearance tab when there is no explicit theme selected.
  */
 export function restoreTheme(): void {
-  applyThemeByName(getActiveThemeName());
+  const active = getActiveThemeName();
+  if (active === SYSTEM_THEME) {
+    applyThemeChoice(active);
+    return;
+  }
+  applyThemeByName(active);
   restoreAccent();
 }

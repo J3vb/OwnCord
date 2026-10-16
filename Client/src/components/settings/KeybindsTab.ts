@@ -53,6 +53,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     [t("keybinds.action.markChannelRead"), t("keybinds.key.escape")],
     [t("keybinds.action.markServerRead"), t("keybinds.key.shiftEscape")],
     [t("keybinds.action.scrollChat"), t("keybinds.key.pageUpDown")],
+    [t("keybinds.action.zoom"), t("keybinds.key.zoom")],
   ];
   for (const [label, shortcut] of navBinds) {
     const row = createElement("div", { class: "keybind-row" });

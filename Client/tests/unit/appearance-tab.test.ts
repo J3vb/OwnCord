@@ -43,7 +43,8 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-opt");
-    expect(tiles.length).toBe(4);
+    // Four palettes plus Sync with computer.
+    expect(tiles.length).toBe(5);
 
     for (const tile of tiles) {
       expect(tile.tagName).toBe("BUTTON");
@@ -498,5 +499,69 @@ describe("AppearanceTab — Accessibility", () => {
       .querySelector('[data-testid="time-format"]')!
       .querySelector("[aria-checked='true']") as HTMLElement;
     expect(selected.dataset["value"]).toBe("24h");
+  });
+});
+
+describe("AppearanceTab - zoom and system theme", () => {
+  let container: HTMLDivElement;
+  let ac: AbortController;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+    document.documentElement.removeAttribute("style");
+    document.body.removeAttribute("style");
+    vi.clearAllMocks();
+    mockGetActiveThemeName.mockReturnValue("neon-glow");
+    ac = new AbortController();
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: true,
+      media,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    ac.abort();
+    container.remove();
+    vi.unstubAllGlobals();
+    document.documentElement.removeAttribute("style");
+  });
+
+  const zoomSlider = (): HTMLInputElement =>
+    container.querySelector<HTMLInputElement>('input[aria-label="Zoom"]')!;
+
+  it("renders a 50-200 zoom slider at 100% by default", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const slider = zoomSlider();
+    expect([slider.min, slider.max, slider.step, slider.value]).toEqual(["50", "200", "10", "100"]);
+  });
+
+  it("moving the slider stores and applies the zoom and updates its label", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const slider = zoomSlider();
+    slider.value = "150";
+    slider.dispatchEvent(new Event("input"));
+    expect(localStorage.getItem("owncord:settings:zoomLevel")).toBe("150");
+    expect(document.documentElement.style.getPropertyValue("zoom")).toBe("150%");
+    expect(slider.nextElementSibling?.textContent).toBe("150%");
+  });
+
+  it("adds a Sync with computer tile that stores the system choice", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const tile = container.querySelector<HTMLElement>(".theme-opt.system")!;
+    expect(tile.textContent).toBe("Sync with computer");
+    tile.click();
+    expect(localStorage.getItem("owncord:theme:active")).toBe("system");
+    expect(tile.getAttribute("aria-checked")).toBe("true");
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  });
+
+  it("marks the system tile active when system is the stored choice", () => {
+    mockGetActiveThemeName.mockReturnValue("system");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    expect(container.querySelector(".theme-opt.active")?.classList.contains("system")).toBe(true);
   });
 });
