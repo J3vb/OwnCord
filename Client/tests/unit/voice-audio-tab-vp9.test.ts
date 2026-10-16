@@ -33,7 +33,6 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
-import { DEV_VP9_OPTION_KEY } from "../../src/features/voice/decodeCaps";
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 
 function codecOptions(): string[] {
@@ -65,28 +64,22 @@ afterEach(() => {
 });
 
 describe("VoiceAudioTab VP9 entry (WP M-5a)", () => {
-  it("is hidden without the dev flag", () => {
-    expect(codecOptions()).toEqual(["vp8", "h264", "auto"]);
-  });
-
-  it("is shown with the dev flag where VP9 can be published", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
+  it("is shown where VP9 can be published", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "vp9", "auto"]);
   });
 
-  it("stays hidden with the dev flag when VP9 is not supported", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
+  it("is hidden when VP9 is not supported", () => {
     supportsVP9.mockReturnValue(false);
     expect(codecOptions()).toEqual(["vp8", "h264", "auto"]);
   });
 
   it("is never shown on Linux: the whole codec choice is hidden", () => {
-    localStorage.setItem(DEV_VP9_OPTION_KEY, "1");
     isLinuxDesktop.mockReturnValue(true);
     expect(codecOptions()).toEqual([]);
   });
 
   it("shows a saved VP9 that is no longer offered as VP8", () => {
+    supportsVP9.mockReturnValue(false);
     localStorage.setItem("owncord:settings:videoCodec", '"vp9"');
     const ac = new AbortController();
     const el = createVoiceAudioTab(ac.signal).build();
