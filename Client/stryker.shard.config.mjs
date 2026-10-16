@@ -281,7 +281,7 @@ const legacyNames = [
   "stores",
   "safety-moderation",
 ];
-const legacy = Object.fromEntries(
+export const legacy = Object.fromEntries(
   legacyNames.map((name) => [
     name,
     Object.entries(shards)
