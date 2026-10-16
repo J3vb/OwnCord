@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -112,5 +113,19 @@ func TestSend_ReplyToCallRowRefused(t *testing.T) {
 		ChannelID: dmID, UserID: fixtureMember2, Username: "u5", Content: "hello", ReplyTo: &plain.MessageID,
 	}); err != nil {
 		t.Errorf("reply to an ordinary message: %v", err)
+	}
+}
+
+// A non-member gets the same answer for a call row as for a missing id.
+func TestReaction_CallRowNonMemberSameAsMissing(t *testing.T) {
+	f, _, msgID := callRowFixture(t)
+	ctx := context.Background()
+	_, callErr := f.messages.AddReaction(ctx, fixtureOwner, msgID, "👍")
+	_, missingErr := f.messages.AddReaction(ctx, fixtureOwner, 999999, "👍")
+	if !errors.Is(callErr, ErrBadRequest) || !errors.Is(missingErr, ErrBadRequest) {
+		t.Fatalf("call row err = %v, missing id err = %v, want both ErrBadRequest", callErr, missingErr)
+	}
+	if strings.Contains(callErr.Error(), "call") {
+		t.Errorf("non-member learns the id is a call: %v", callErr)
 	}
 }

@@ -764,7 +764,9 @@ point. `content` is fallback text that only clients
 that do not know `kind` show. `chat_send` ignores any `kind` or `call` a client sends: only the server writes a
 call row, and nobody can edit, delete, pin, react to or reply to one. The same
 fields ride on each message in `GET /channels/{id}/messages` (`before`, `after`
-and `around`) and in the pins list. Clients treat an unknown `kind` as an ordinary message.
+and `around`). Every member of the DM sees `participants`, including members who
+join a group DM later, the same audience that sees the channel's `voice_state`
+and its history. Clients treat an unknown `kind` as an ordinary message.
 
 | Field                | Type           | Description                                                                                                                                              |
 | -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

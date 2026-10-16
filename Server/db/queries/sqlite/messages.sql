@@ -33,7 +33,7 @@ UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind = 0;
 -- name: SetMessagePinned :execresult
 -- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
 -- pinning and NULL when unpinning (a re-pin stamps freshly).
-UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0;
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0 AND kind = 0;
 
 -- name: GetLatestMessageID :one
 SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0;

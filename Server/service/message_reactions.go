@@ -102,13 +102,15 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrBadRequest)
 	}
-	if msg.Kind == db.MessageKindCall {
-		return nil, fmt.Errorf("%w: cannot react to a call", ErrBadRequest)
-	}
 
 	participantIDs, isDM, err := s.reactionAudience(ctx, userID, msg.ChannelID)
 	if err != nil {
 		return nil, err
+	}
+	// After the audience check, so a non-member gets the same answer for a
+	// call row as for a missing id.
+	if msg.Kind == db.MessageKindCall {
+		return nil, fmt.Errorf("%w: cannot react to a call", ErrBadRequest)
 	}
 
 	action := "add"

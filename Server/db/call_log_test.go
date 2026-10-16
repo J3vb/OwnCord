@@ -3,7 +3,11 @@ package db_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -344,5 +348,97 @@ func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 	}
 	if got := count(t, f.database, `SELECT COUNT(*) FROM messages WHERE id = ?`, row.Message.ID); got != 0 {
 		t.Errorf("call message survived the channel delete")
+	}
+}
+
+// A call row is read-only wherever messages are written. This keeps call rows
+// written only by the call log: no statement outside call_log.sql may set the
+// kind column, so a new insert or update cannot create or retype one.
+func TestCallLog_OnlyWriterOfKind(t *testing.T) {
+	stmt := regexp.MustCompile(`(?is)(INSERT\s+(?:OR\s+\w+\s+)?INTO\s+messages\b[^;` + "`" + `]*|UPDATE\s+messages\s+SET\b[^;` + "`" + `]*)`)
+	kind := regexp.MustCompile(`(?i)\bkind\b\s*(=|,|\))`)
+	var files []string
+	for _, pattern := range []string{"queries/sqlite/*.sql", "*.go"} {
+		m, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("glob %s: %v", pattern, err)
+		}
+		files = append(files, m...)
+	}
+	checked := 0
+	for _, f := range files {
+		base := filepath.Base(f)
+		if strings.HasSuffix(base, "_test.go") || base == "call_log.sql" || base == "call_log.go" {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for _, s := range stmt.FindAllString(string(raw), -1) {
+			checked++
+			// "kind = 0" in a WHERE clause is a guard, not a write.
+			head := s
+			if i := strings.Index(strings.ToUpper(s), "WHERE"); i >= 0 {
+				head = s[:i]
+			}
+			if kind.MatchString(head) {
+				t.Errorf("%s writes messages.kind outside the call log: %s", f, strings.TrimSpace(s))
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("matched no messages writer; the scan is broken")
+	}
+}
+
+func TestPurgeChannelMessages_SkipsCallRows(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	row := f.startCall(t, f.alice)
+	plain, err := f.database.CreateMessage(ctx, f.dm, f.bob, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	ids, err := f.database.PurgeChannelMessages(ctx, f.dm, 0, 10)
+	if err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+	if !slices.Equal(ids, []int64{plain}) {
+		t.Errorf("purged ids = %v, want only %d", ids, plain)
+	}
+	if got := count(t, f.database, `SELECT deleted FROM messages WHERE id = ?`, row.Message.ID); got != 0 {
+		t.Errorf("call row deleted = %d, want 0", got)
+	}
+}
+
+func TestPurgeUserChannelMessagesSince_SkipsCallRows(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	row := f.startCall(t, f.alice) // authored by alice
+	plain, err := f.database.CreateMessage(ctx, f.dm, f.alice, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	ids, err := f.database.PurgeUserChannelMessagesSince(ctx, f.dm, f.alice, "2000-01-01 00:00:00", 10)
+	if err != nil {
+		t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
+	}
+	if !slices.Equal(ids, []int64{plain}) {
+		t.Errorf("purged ids = %v, want only %d", ids, plain)
+	}
+	if got := count(t, f.database, `SELECT deleted FROM messages WHERE id = ?`, row.Message.ID); got != 0 {
+		t.Errorf("call row deleted = %d, want 0", got)
+	}
+}
+
+func TestSetMessagePinned_CallRowNotFound(t *testing.T) {
+	f := newCallFixture(t)
+	row := f.startCall(t, f.alice)
+	if err := f.database.SetMessagePinned(context.Background(), row.Message.ID, true); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("pin call row: err = %v, want ErrNotFound", err)
+	}
+	if got := count(t, f.database, `SELECT pinned FROM messages WHERE id = ?`, row.Message.ID); got != 0 {
+		t.Errorf("pinned = %d, want 0", got)
 	}
 }

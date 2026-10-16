@@ -305,7 +305,7 @@ func (q *Queries) MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelRe
 }
 
 const setMessagePinned = `-- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0 AND kind = 0
 `
 
 type SetMessagePinnedParams struct {
