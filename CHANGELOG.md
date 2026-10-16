@@ -77,6 +77,7 @@ and only when it changes something a contributor or fork holder must do
 - Typing `#` in the message box suggests channels to link, as `@` does for people.
 - Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
 - Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
+- Linux: spell checking in the message composer, in the system language (needs a hunspell dictionary).
 - Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
 - A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.

@@ -21,6 +21,8 @@ mod idle;
 mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
+#[cfg(target_os = "linux")]
+mod linux_spellcheck;
 mod livekit_proxy;
 // Message notifications that open their message on click (the plugin's desktop
 // backend drops clicks). Desktop-only: the plugin's mobile backend has its own
@@ -438,6 +440,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // voice/video works on Linux (no-op elsewhere; see linux_media).
     #[cfg(target_os = "linux")]
     linux_media::enable_media_capture(app.handle());
+    // WebKitGTK ships spell checking off — enable it in the system language.
+    #[cfg(target_os = "linux")]
+    linux_spellcheck::enable_spell_checking(app.handle());
     Ok(())
 }
 
