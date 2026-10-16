@@ -170,6 +170,16 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 		sub.id, sub.channel, sub.other); err != nil {
 		t.Fatalf("seed mention receipt: %v", err)
 	}
+	// Call log participation (migration 064): a call a third member authored,
+	// with the subject as a participant, so class 11b is proved non-empty too.
+	caller := seedUser(t, database, "caller-user")
+	if _, err := database.CreateCallLog(ctx, db.CallLogParams{
+		ChannelID: sub.channel, AuthorID: caller, Content: "started a call.",
+		StartedAt: "2026-10-16 10:00:00", LastSeenAt: "2026-10-16 10:00:00",
+		ParticipantIDs: []int64{caller, sub.id},
+	}); err != nil {
+		t.Fatalf("seed call log: %v", err)
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)

@@ -105,3 +105,10 @@ const (
 	RestartReasonSetup         RestartReason = "setup"          // the setup wizard finished
 	RestartReasonShutdown      RestartReason = "shutdown"       // a stop or restart from outside the server (signal, supervisor)
 )
+
+// MessageKind is the closed set of values for chat_message.kind.
+type MessageKind string
+
+const (
+	MessageKindCall MessageKind = "call" // a call log row in a DM, written and updated only by the server
+)

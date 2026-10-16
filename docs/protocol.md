@@ -754,6 +754,18 @@ error instead (see Error Codes). Clients that do not know the field ignore it.
 `user.display_name` is the author's nickname to render instead of `username`;
 present only when the author has one, omitted otherwise (see `member_join`).
 
+A call log row in a DM is a `chat_message` with two more payload fields, both
+omitted for an ordinary message: `kind` (`"call"`, the closed set
+`chat_message.kind` in `protocol/schema.json`) and `call`, `{started_at,
+ended_at, participants}`. `started_at` and `ended_at` use the same layout as
+`timestamp` of the surface they ride on (`ended_at` is `null` while the call is
+live), and `participants` is the list of user IDs who were in the call at any
+point. `content` is fallback text that only clients
+that do not know `kind` show. `chat_send` ignores any `kind` or `call` a client sends: only the server writes a
+call row, and nobody can edit, delete, pin, react to or reply to one. The same
+fields ride on each message in `GET /channels/{id}/messages` (`before`, `after`
+and `around`) and in the pins list. Clients treat an unknown `kind` as an ordinary message.
+
 | Field                | Type           | Description                                                                                                                                              |
 | -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mentions`           | number[]       | User IDs the server resolved from `@username` tokens, plus the replied-to author when `reply_ping` was set. Always present; empty when nothing resolved. |

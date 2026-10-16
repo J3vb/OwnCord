@@ -1,11 +1,11 @@
 -- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at;
+          mentions_everyone, pinned_at, kind;
 
 -- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone, pinned_at
+       mentions_everyone, pinned_at, kind
 FROM messages WHERE id = ?;
 
 -- name: GetMessagesForAPI :many
@@ -19,13 +19,16 @@ ORDER BY m.id DESC LIMIT ?;
 -- The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 -- already carry (OC-0284): an edit that races a delete must not rewrite a
 -- tombstone. No row comes back when it loses, which the wrapper reports as
--- ErrNotFound rather than a silent success (OC-0358).
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
+-- ErrNotFound rather than a silent success (OC-0358). kind = 0 keeps a call log
+-- row (kind 1) read-only: only the server rewrites its content, through
+-- call_log.sql.
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at;
+          mentions_everyone, pinned_at, kind;
 
 -- name: SoftDeleteMessage :execresult
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;
+-- kind = 0: a call log row (kind 1) is never soft-deleted by a user.
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind = 0;
 
 -- name: SetMessagePinned :execresult
 -- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when

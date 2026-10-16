@@ -25,6 +25,7 @@ func messageFromGen(m dbgen.Message) *Message {
 		Pinned:           m.Pinned != 0,
 		Timestamp:        m.Timestamp,
 		MentionsEveryone: m.MentionsEveryone != 0,
+		Kind:             m.Kind,
 	}
 }
 
@@ -525,7 +526,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
-			        m.mentions_everyone
+			        m.mentions_everyone, m.kind
 			 FROM messages m JOIN users u ON m.user_id = u.id
 			 WHERE m.channel_id = ? AND m.id < ? AND m.deleted = 0
 			 ORDER BY m.id DESC LIMIT ?`,
@@ -535,7 +536,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
-			        m.mentions_everyone
+			        m.mentions_everyone, m.kind
 			 FROM messages m JOIN users u ON m.user_id = u.id
 			 WHERE m.channel_id = ? AND m.deleted = 0
 			 ORDER BY m.id DESC LIMIT ?`,
@@ -558,7 +559,7 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
-		        m.mentions_everyone
+		        m.mentions_everyone, m.kind
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.id > ? AND m.deleted = 0
 		 ORDER BY m.id ASC LIMIT ?`,
@@ -592,7 +593,7 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
-		        m.mentions_everyone
+		        m.mentions_everyone, m.kind
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.id IN (
 		     SELECT id FROM (
@@ -810,7 +811,7 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
-		        m.mentions_everyone
+		        m.mentions_everyone, m.kind
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
 		 ORDER BY m.pinned_at DESC, m.id DESC LIMIT ?`,
@@ -832,16 +833,20 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	for rows.Next() {
 		var m MessageAPIResponse
 		var deleted, pinned, everyone int
+		var kind int64
 		if scanErr := rows.Scan(
 			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
 			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
-			&everyone,
+			&everyone, &kind,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scanAndEnrichMessages scan: %w", scanErr)
 		}
 		m.Deleted = deleted != 0
 		m.Pinned = pinned != 0
 		m.MentionsEveryone = everyone != 0
+		if kind == MessageKindCall {
+			m.Kind = MessageKindNameCall
+		}
 		m.Attachments = []AttachmentInfo{}
 		m.Reactions = []ReactionInfo{}
 		m.Mentions = []int64{}
@@ -886,6 +891,10 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		if mIDs, ok := mentionMap[msgs[i].ID]; ok {
 			msgs[i].Mentions = mIDs
 		}
+	}
+
+	if err := d.attachCalls(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages calls: %w", err)
 	}
 
 	return d.attachReferencedMessages(ctx, msgs)

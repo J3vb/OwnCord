@@ -214,6 +214,20 @@
           "note": "a stop or restart from outside the server (signal, supervisor)"
         }
       ]
+    },
+    {
+      "name": "chat_message.kind",
+      "go": "MessageKind",
+      "ts": "ChatMessageKind",
+      "values": [
+        {
+          "wire": "call",
+          "go": "MessageKindCall",
+          "ts": "CALL",
+          "note": "a call log row in a DM, written and updated only by the server"
+        }
+      ]
     }
   ]
 }
+

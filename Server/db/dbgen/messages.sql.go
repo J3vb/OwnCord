@@ -13,7 +13,7 @@ import (
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at
+          mentions_everyone, pinned_at, kind
 `
 
 type CreateMessageParams struct {
@@ -43,14 +43,15 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const editMessageContent = `-- name: EditMessageContent :one
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at
+          mentions_everyone, pinned_at, kind
 `
 
 type EditMessageContentParams struct {
@@ -61,7 +62,9 @@ type EditMessageContentParams struct {
 // The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 // already carry (OC-0284): an edit that races a delete must not rewrite a
 // tombstone. No row comes back when it loses, which the wrapper reports as
-// ErrNotFound rather than a silent success (OC-0358).
+// ErrNotFound rather than a silent success (OC-0358). kind = 0 keeps a call log
+// row (kind 1) read-only: only the server rewrites its content, through
+// call_log.sql.
 func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error) {
 	row := q.db.QueryRowContext(ctx, editMessageContent, arg.Content, arg.ID)
 	var i Message
@@ -77,6 +80,7 @@ func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContent
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -162,7 +166,7 @@ func (q *Queries) GetLatestMessageID(ctx context.Context, channelID int64) (inte
 
 const getMessage = `-- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone, pinned_at
+       mentions_everyone, pinned_at, kind
 FROM messages WHERE id = ?
 `
 
@@ -181,6 +185,7 @@ func (q *Queries) GetMessage(ctx context.Context, id int64) (Message, error) {
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -316,9 +321,10 @@ func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedPara
 }
 
 const softDeleteMessage = `-- name: SoftDeleteMessage :execresult
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind = 0
 `
 
+// kind = 0: a call log row (kind 1) is never soft-deleted by a user.
 func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error) {
 	return q.db.ExecContext(ctx, softDeleteMessage, id)
 }
