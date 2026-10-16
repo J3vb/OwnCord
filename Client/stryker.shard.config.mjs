@@ -179,6 +179,7 @@ export const shards = {
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/shortcodes.ts",
+    "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
   ], // 1249 measured with lib-rest-8 on run 38902717516, timed out at 96%

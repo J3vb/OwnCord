@@ -104,6 +104,12 @@ export const messagingText = defineCatalog("messaging", {
   "mention.userDetail": "@{username} · {role}",
   "channelMention.voice": "Voice channel",
 
+  "slash.shrug": "Appends ¯\\_(ツ)_/¯ to your message",
+  "slash.tableflip": "Appends (╯°□°)╯︵ ┻━┻ to your message",
+  "slash.unflip": "Appends ┬─┬ノ( º _ ºノ) to your message",
+  "slash.spoiler": "Marks your message as a spoiler",
+  "slash.me": "Shows your message in italics",
+
   "search.placeholder": "Search messages...",
   "search.label": "Search messages",
   "search.minChars": "Type at least {count} characters",
