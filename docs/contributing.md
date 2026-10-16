@@ -419,7 +419,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    `dev` and `main` sharing history. Squash is still the rule for PRs into
    `dev`.
 
-7. **Check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
+7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
    the merge commit.
    - The release ruleset forbids deleting a tag. So a failed first run costs
      you the next version number, not a rewrite.
@@ -431,6 +431,10 @@ This is the end-to-end procedure for cutting a release. Every step runs on
      latest scheduled run is not `success` or is more than 72 hours old. The
      release's own rehearsal skips the failure and recovery drills, so the
      nightly is the only place they run.
+   - Before tagging, the [Linux release checklist](linux-release-checklist.md)
+     must pass on all three sessions: X11, GNOME Wayland (48 or newer) and KDE
+     Plasma Wayland. If any item fails on any session, do not tag. Keep the
+     filled-in tables with the release PR.
    - Emergency override: set the `RELEASE_ALLOW_RED_NIGHTLY` repository
      variable to `true` before tagging, and remove it afterwards. A dry run
      uses the `allow_red_nightly` input instead. The job then passes with a

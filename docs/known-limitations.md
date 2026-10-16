@@ -97,19 +97,29 @@ says exactly what the beta does and does not claim about who can read what.
   We have decided not to code-sign during the beta.
 - **There is no browser version yet.** The desktop app is the only supported
   client. A browser version is planned for after the beta.
-- **On Linux, app sounds ignore your chosen output device.** These sounds play
-  on the system default output: the message chime, the call ringtone, the
-  caller's ringback, and the voice join, leave, mute and deafen sounds. The
-  Linux web view (WebKitGTK) cannot send an `AudioContext` to a chosen device,
-  because `setSinkId` is missing. On Windows, sounds follow **Settings › Voice
-  & Audio**. Voice itself is not affected on either platform: on Linux the
-  native voice engine routes it. See
-  [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
 - **A `.deb` install updates itself only where it can ask for a password.**
   The in-app update runs a root helper through `pkexec`, so it needs `pkexec`
   and a polkit agent. A bare window manager has none: the update then says
   OwnCord could not get permission, and you install the new `.deb` by hand. An
   RPM install always updates by hand.
+- **On Linux, stock GNOME shows no tray icon.** GNOME has no tray of its
+  own. OwnCord's tray icon shows only with the AppIndicator extension (or on
+  KDE and other desktops with a tray). Without a tray host, **Close to Tray**
+  does nothing: closing the window quits OwnCord. The tray's red dot for
+  unread mentions needs the extension too. With the extension, left-click on
+  the icon may not reach OwnCord on some desktops; use **Show/Hide** in the tray
+  menu.
+- **On Linux with Wayland, global keys need a recent desktop.** Global push to
+  talk, mute and deafen use the desktop's GlobalShortcuts portal. That
+  exists on GNOME 48 and newer and on KDE Plasma. GNOME 47 and older, and
+  wlroots desktops such as Sway, have no portal for it, so there are no global
+  keys there; the tray menu's Mute and Deafen still work. On the portal,
+  push to talk takes function keys (F1 to F24) only, and the desktop owns the
+  keys while they are bound: the focused app no longer receives them. X11 is
+  not affected.
+- **On Linux, screen-share audio is probably heard in mono for now.** Viewers
+  most likely hear the shared sound in mono. This needs PulseAudio or
+  pipewire-pulse to be running.
 - **On Linux, some media needs extra distro packages.**
   - Video attachments and YouTube embeds that use H264/AAC play only with
     `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`.
