@@ -603,6 +603,42 @@ pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, Stri
         .map_err(|e| e.to_string())
 }
 
+/// Which video codecs the native engine can encode beyond VP8 (WP LP-7c).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoCodecs {
+    /// libwebrtc's sender capabilities list `video/H264`: its software
+    /// encoder (OpenH264) is built in.
+    pub h264: bool,
+}
+
+/// Whether a sender-capability mime type is H.264, ignoring case.
+fn is_h264_mime(mime: &str) -> bool {
+    mime.eq_ignore_ascii_case("video/H264")
+}
+
+/// Ask libwebrtc which video codecs it can send. Synchronous: callers off the
+/// async runtime (the interop example) use it directly.
+pub fn probe_video_codecs() -> VideoCodecs {
+    // Outside a call this makes `LkRuntime::instance()` build the libwebrtc
+    // factory just for the probe; acceptable, as the webview asks once (memoised).
+    let caps = livekit::rtc_engine::lk_runtime::LkRuntime::instance()
+        .pc_factory()
+        .get_rtp_sender_capabilities(livekit::webrtc::MediaType::Video);
+    VideoCodecs {
+        h264: caps.codecs.iter().any(|c| is_h264_mime(&c.mime_type)),
+    }
+}
+
+/// The codecs this build's libwebrtc can send. The picker enables H.264 only
+/// when this says so; a probe that fails reads as no H.264 in the webview.
+#[tauri::command]
+pub async fn native_voice_video_codecs() -> Result<VideoCodecs, String> {
+    tokio::task::spawn_blocking(probe_video_codecs)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraStarted {
@@ -701,6 +737,24 @@ pub async fn native_voice_publish_camera(
         .current(session)?
         .publish_camera(capture, options)
         .await
+}
+
+/// Unpublish the screen share of running capture `capture`, keeping the
+/// capture alive for a republish (a codec change). A stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_unpublish_screen(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .unpublish_screen_keep_capture(capture)
+        .await;
+    Ok(())
 }
 
 /// Unpublish camera `sid` if it is still the published one; a stale sid is a
@@ -1086,6 +1140,14 @@ mod tests {
         let info = native_voice_build_info();
         assert!(info.contains("livekit 0.9.3"), "unexpected: {info}");
         assert!(info.contains("libwebrtc-ok"), "unexpected: {info}");
+    }
+
+    #[test]
+    fn video_codecs_probe_runs() {
+        // Either answer is valid for a build; the probe must not panic.
+        let _ = probe_video_codecs();
+        assert!(is_h264_mime("video/h264"));
+        assert!(!is_h264_mime("video/VP8"));
     }
 
     #[test]

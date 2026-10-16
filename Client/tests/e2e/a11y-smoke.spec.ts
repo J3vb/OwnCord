@@ -103,7 +103,10 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
   }) => {
     const row = page.locator("[data-testid='message-101']");
     await row.hover();
-    await page.locator("[data-testid='msg-delete-101']").click();
+    // Plain Delete is Shift-only and skips this dialog (WP 3A-7): open it
+    // from the "..." menu's Delete Message.
+    await page.locator("[data-testid='msg-more-101']").click();
+    await page.locator("[data-testid='msg-menu-delete']").click();
 
     const modal = page.locator("[data-testid='msg-delete-modal'] .modal");
     await expect(modal).toBeVisible({ timeout: 5_000 });
@@ -117,8 +120,8 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
 
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-testid='msg-delete-modal']")).toHaveCount(0);
-    // Focus returned to the delete button that opened the dialog.
-    await expect(page.locator("[data-testid='msg-delete-101']")).toBeFocused();
+    // Focus returned to the "..." button the menu was opened from.
+    await expect(page.locator("[data-testid='msg-more-101']")).toBeFocused();
   });
 
   test("toast and typing surfaces are polite live regions", async ({ page }) => {

@@ -40,6 +40,10 @@ export interface NativeControl {
     started: NativeVoiceScreenStarted,
     sid: string,
   ): void;
+  /** The host answers the next video-codec probe with this H.264 answer. */
+  reportsVideoCodecs(h264: boolean): void;
+  /** The host rejects the next video-codec probe. */
+  failsVideoCodecs(): void;
   /** The host refuses the next camera change with this reason. */
   refusesCameraChange(reason: string): void;
   /** The host refuses the next screen source change with this reason. */
@@ -154,6 +158,7 @@ export function describeNativeVoiceSuite(
         maxBitrate: 1_700_000,
         maxFramerate: 30,
         simulcast: true,
+        codec: "h264" as const,
       };
       ctx.native.hasCameras(
         cameras,
@@ -180,6 +185,17 @@ export function describeNativeVoiceSuite(
     check("reports whether the host can capture cameras at all", async () => {
       await expect(ctx.subject.cameraSupport()).resolves.toEqual({ available: true, missing: [] });
       expect(ctx.native.commands()).toEqual([["native_voice_camera_support", undefined]]);
+    });
+
+    check("reports whether the engine can encode H.264, and no when the probe fails", async () => {
+      ctx.native.reportsVideoCodecs(true);
+      await expect(ctx.subject.videoCodecs()).resolves.toEqual({ h264: true });
+      ctx.native.failsVideoCodecs();
+      await expect(ctx.subject.videoCodecs()).resolves.toEqual({ h264: false });
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_video_codecs", undefined],
+        ["native_voice_video_codecs", undefined],
+      ]);
     });
 
     check("starts and stops the out-of-call camera preview", async () => {
@@ -213,6 +229,7 @@ export function describeNativeVoiceSuite(
         maxBitrate: 6_000_000,
         maxFramerate: 30,
         simulcast: true,
+        codec: "vp8" as const,
       };
       ctx.native.sharesScreenAs(sources, { capture: 2, width: 1920, height: 1080 }, "TR_screen");
       await expect(ctx.subject.screenSources()).resolves.toEqual(sources);
@@ -222,11 +239,13 @@ export function describeNativeVoiceSuite(
         height: 1080,
       });
       await expect(ctx.subject.publishScreen(7, 2, publish)).resolves.toBe("TR_screen");
+      await ctx.subject.unpublishScreen(7, 2);
       await ctx.subject.stopScreen(7, 2);
       expect(ctx.native.commands()).toEqual([
         ["native_voice_screen_sources", undefined],
         ["native_voice_start_screen", { session: 7, source: "screen:1", capture }],
         ["native_voice_publish_screen", { session: 7, capture: 2, options: publish }],
+        ["native_voice_unpublish_screen", { session: 7, capture: 2 }],
         ["native_voice_stop_screen", { session: 7, capture: 2 }],
       ]);
     });

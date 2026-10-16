@@ -26,12 +26,17 @@
 //      its local preview arrives on the frame socket, and repeated share
 //      stop/start releases every capturer;
 //   9. the screen-share negative control: with a wrong key the browser
-//      decodes not one frame of it.
+//      decodes not one frame of it;
+//  10. a native H.264 camera (the Linux codec choice, WP LP-7c) decodes in the
+//      browser (Google Chrome) with the same key; skipped locally, with the
+//      reason, where the native engine cannot encode H.264 or the browser
+//      cannot decode it, and a failure under CI.
 // Not exercised here: the X11 capturer and the Wayland portal (CI has no
 // display); see docs/architecture/voice-e2ee.md.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
 import { test, expect } from "@playwright/test";
 import { createHmac, randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -556,6 +561,91 @@ test("a simulcast native camera keeps decoding in the browser", async ({ page })
   expect(Math.min(...perSecond)).toBeGreaterThan(10);
   expect(browser.videoWidth).toBeGreaterThan(0);
   expect(browser.encErrors).toBe(0);
+});
+
+// Playwright's bundled Chromium has no H.264, so this case launches Google
+// Chrome itself (GitHub-hosted Ubuntu runners ship it). It cannot be a
+// describe with `test.use({ channel })` (Playwright refuses a channel there),
+// and launching here leaves every other case's browser alone. Where Chrome is
+// not installed it skips locally; in CI a missing Chrome fails.
+const chromePath = "/opt/google/chrome/chrome";
+test("a native H.264 camera decodes in the browser with the same key", async ({ playwright }) => {
+  if (!process.env.CI)
+    test.skip(!existsSync(chromePath), `Google Chrome is not installed at ${chromePath}`);
+  // The picker enables H.264 only where the engine's probe says it can encode
+  // it, so the probe decides here too: `--probe-codecs` prints it and exits.
+  const probe = await runNativePeer(["--probe-codecs"]).done;
+  const nativeH264 = probe.some((l) => l.event.type === "codecs" && l.event.h264 === true);
+  // In CI a missing encoder is a failure: H.264 stays off the picker until
+  // this case has run green there. Locally it skips with the reason.
+  if (process.env.CI) expect(nativeH264, "the native engine cannot encode H.264").toBe(true);
+  else test.skip(!nativeH264, "the native engine cannot encode H.264 in this build");
+  const browser = await playwright.chromium
+    .launch({
+      channel: "chrome",
+      args: [
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        "--autoplay-policy=no-user-gesture-required",
+      ],
+    })
+    .catch((err: unknown) => {
+      throw new Error(`Google Chrome (channel "chrome") could not launch: ${String(err)}`);
+    });
+  try {
+    const context = await browser.newContext({ permissions: ["microphone", "camera"] });
+    const page = await context.newPage();
+    const key = randomBytes(32).toString("base64");
+    const url = `ws://127.0.0.1:${livekitPort}`;
+    await joinBrowserPeer(page, url, joinToken("user-1"), key);
+    const browserH264 = await page.evaluate(
+      () =>
+        RTCRtpReceiver.getCapabilities("video")?.codecs.some(
+          (c) => c.mimeType.toLowerCase() === "video/h264",
+        ) ?? false,
+    );
+    if (process.env.CI) expect(browserH264, "Google Chrome cannot decode H.264").toBe(true);
+    else test.skip(!browserH264, "this browser cannot decode H.264");
+    const peer = runNativePeer([
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "20",
+      "--video",
+      "1280x720",
+      "--simulcast",
+      "--codec",
+      "h264",
+    ]);
+    await expect
+      .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    await page.waitForTimeout(4_000);
+    const perSecond: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      await resetBrowserMeters(page);
+      await page.waitForTimeout(1_000);
+      perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
+    }
+    const seen = await readBrowserPeer(page, "user-2");
+    await peer.done;
+    console.log(
+      `browser decoded H.264 native camera, frames/s: ${perSecond.join(",")} at ${seen.videoWidth}x${seen.videoHeight}`,
+    );
+    // Every second of the window: a camera that sends one frame and stalls fails.
+    expect(Math.min(...perSecond)).toBeGreaterThan(10);
+    expect(seen.videoWidth).toBeGreaterThan(0);
+    // Decrypted with the same key: no frame failed its authentication.
+    expect(seen.encErrors).toBe(0);
+  } finally {
+    await browser.close();
+  }
 });
 
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({

@@ -23,7 +23,8 @@ export const shards = {
     "src/features/voice/native/videoRenderer.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/mediaLostNotice.ts",
-  ], // ~1093 mutants (estimated)
+    "src/features/voice/native/videoCodecs.ts",
+  ], // ~1093 mutants (estimated) + videoCodecs.ts (new)
   "livekit-2": [
     "src/lib/livekitSession.ts",
     "src/features/voice/remoteTracks.ts",

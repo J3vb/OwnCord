@@ -7,7 +7,6 @@ import { defineCatalog } from "./format";
 export const messageMenuText = defineCatalog("messageMenu", {
   label: "Message actions",
   addReaction: "Add Reaction",
-  reactWith: "React with {name}",
   edit: "Edit Message",
   copy: "Copy",
   copyText: "Copy Text",

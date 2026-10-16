@@ -64,12 +64,14 @@ async function send(page: Page, text: string, file?: string): Promise<void> {
   await composer.locator("textarea").press("Enter");
 }
 
-/** The Report button on the row showing `text`, focused and pressed from the keyboard. */
+/** The "..." button on the row showing `text`, pressed from the keyboard, then
+ *  the menu's Report Message. Returns the "..." button, the dialog's opener. */
 async function openMessageReport(page: Page, text: string): Promise<Locator> {
-  const button = page
-    .locator(".message", { hasText: text })
-    .locator("[data-testid^='msg-report-']");
+  const button = page.locator(".message", { hasText: text }).locator("[data-testid^='msg-more-']");
   await button.focus();
+  await page.keyboard.press("Enter");
+  // Keyboard all the way: a mouse click would change the focus-visible modality.
+  await page.locator("[data-testid='msg-menu-report']").focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Report message" })).toBeVisible();
   return button;
@@ -230,8 +232,10 @@ test.describe("Local report intake (real server)", () => {
     await openMessageReport(bob, text);
     const own = alice.locator(".message", { hasText: text });
     await own.hover();
-    const del = own.locator("[data-testid^='msg-delete-']");
-    await del.click();
+    // The confirmed delete goes through the menu: the bar's Delete is
+    // Shift-only and skips the confirmation (WP 3A-7).
+    await own.locator("[data-testid^='msg-more-']").click();
+    await alice.locator("[data-testid='msg-menu-delete']").click();
     await alice.locator("[data-testid='msg-delete-confirm']").click();
     await expect(bob.locator(".message", { hasText: text })).toHaveCount(0);
     const dialog = await submit(bob, "Spam");

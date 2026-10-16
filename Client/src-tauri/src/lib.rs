@@ -297,6 +297,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_camera_support,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_video_codecs,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_start_camera,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_publish_camera,
@@ -320,6 +322,8 @@ pub fn run() {
             native_voice::native_voice_start_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_publish_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_unpublish_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_stop_screen,
             #[cfg(target_os = "linux")]

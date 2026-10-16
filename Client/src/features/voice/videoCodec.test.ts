@@ -5,6 +5,11 @@ vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 
+const nativeH264 = vi.hoisted(() => ({ value: false }));
+vi.mock("./native/videoCodecs", () => ({
+  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value }),
+}));
+
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 const supportsH265 = vi.hoisted(() => vi.fn(() => true));
 vi.mock("livekit-client", () => ({
@@ -15,6 +20,7 @@ vi.mock("livekit-client", () => ({
 const {
   getVideoCodecPref,
   gpuRenderer,
+  h264Offered,
   h265Offered,
   pickAutoCodec,
   resolveCodecChoice,
@@ -63,6 +69,7 @@ function savePref(value: string): void {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  nativeH264.value = false;
   supportsVP9.mockReset();
   supportsVP9.mockReturnValue(true);
   supportsH265.mockReset();
@@ -208,6 +215,63 @@ describe("resolveVideoCodec with VP9", () => {
   it("publishes VP8 on the Linux native engine", async () => {
     isLinuxDesktop.mockReturnValue(true);
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+});
+
+describe("Linux native codec choice (WP LP-7c)", () => {
+  beforeEach(() => {
+    isLinuxDesktop.mockReturnValue(true);
+  });
+
+  it("Linux publishes H.264 when chosen and the native encoder has it", async () => {
+    nativeH264.value = true;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+  });
+
+  it("Linux falls back to VP8 when the native encoder lacks H.264", async () => {
+    nativeH264.value = false;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    // The saved choice is not rewritten: a build with H.264 honours it later.
+    expect(getVideoCodecPref()).toBe("h264");
+  });
+
+  it("Auto is VP8 on Linux", async () => {
+    nativeH264.value = true;
+    encodingInfo.mockResolvedValue(HARDWARE);
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("maps a saved VP9 or H.265 to VP8 on Linux", async () => {
+    nativeH264.value = true;
+    for (const saved of ["vp9", "h265"]) {
+      savePref(saved);
+      // oxlint-disable-next-line no-await-in-loop -- one pref at a time
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    }
+  });
+
+  it("falls back to VP8 for a chosen H.264 when a peer cannot decode it", async () => {
+    nativeH264.value = true;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8"]])).resolves.toBe("vp8");
+  });
+});
+
+describe("h264Offered (WP LP-7c)", () => {
+  it("is true off Linux", async () => {
+    await expect(h264Offered()).resolves.toBe(true);
+  });
+
+  it("follows the native encoder on Linux", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    nativeH264.value = true;
+    await expect(h264Offered()).resolves.toBe(true);
+    nativeH264.value = false;
+    await expect(h264Offered()).resolves.toBe(false);
   });
 });
 
@@ -415,7 +479,7 @@ describe("resolveVideoCodec", () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 
-  it("always publishes VP8 on the Linux native path, whatever is saved", async () => {
+  it("publishes VP8 on the Linux native path when the encoder lacks H.264, whatever is saved", async () => {
     isLinuxDesktop.mockReturnValue(true);
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
     for (const saved of ["h264", "auto"]) {
@@ -524,7 +588,7 @@ describe("resolveVideoCodec with channel peers", () => {
     );
   });
 
-  it("still gives VP8 on the Linux native engine", async () => {
+  it("still gives VP8 on the Linux native engine without an H.264 encoder", async () => {
     isLinuxDesktop.mockReturnValue(true);
     savePref("h264");
     inChannel({ 2: ["vp8", "h264"] });

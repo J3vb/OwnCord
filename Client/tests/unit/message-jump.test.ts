@@ -551,6 +551,14 @@ describe("Copy Message Link action", () => {
     });
 
     const msg = makeMessage({ id: 42, channelId: 7 });
+    messagesStore.setState(() => ({
+      messagesByChannel: new Map([[7, [msg]]]),
+      pendingSends: new Map(),
+      loadedChannels: new Set(),
+      hasMore: new Map(),
+      historyLoadState: new Map(),
+      detachedChannels: new Set(),
+    }));
     const row = renderMessage(
       msg,
       false,
@@ -568,13 +576,40 @@ describe("Copy Message Link action", () => {
       } as MessageListOptions,
       new AbortController().signal,
     );
+    document.body.appendChild(row);
 
-    const btn = row.querySelector<HTMLButtonElement>('[data-testid="msg-copy-link-42"]');
-    expect(btn).not.toBeNull();
-    btn!.click();
+    // Copy Message Link left the hover bar: it is in the message menu.
+    expect(row.querySelector('[data-testid="msg-copy-link-42"]')).toBeNull();
+    const { openMessageMenu } = await import("../../src/components/message-list/message-menu");
+    openMessageMenu({
+      msg,
+      opts: {
+        channelId: 7,
+        channelName: "general",
+        currentUserId: 1,
+        onScrollTop: vi.fn(),
+        onReplyClick: vi.fn(),
+        onEditClick: vi.fn(),
+        onDeleteClick: vi.fn(),
+        onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
+      } as MessageListOptions,
+      x: 1,
+      y: 1,
+      target: null,
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="msg-menu-copy-message-link"]')).not.toBeNull(),
+    );
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="msg-menu-copy-message-link"]')!
+      .click();
     await Promise.resolve();
 
     expect(writeText).toHaveBeenCalledWith("owncord://message/7/42");
+    row.remove();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
   });
 });
 
