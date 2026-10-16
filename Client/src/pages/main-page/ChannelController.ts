@@ -21,9 +21,13 @@ import { createMessageInput } from "@components/MessageInput";
 import type {
   ComposerDraft,
   MessageInputComponent,
+  QueuedAttachment,
   ReplyTarget,
   SentAttachment,
 } from "@components/MessageInput";
+import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
+import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
+import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
@@ -172,6 +176,13 @@ function renderDeletePreview(msg: Message): HTMLElement {
     );
   }
   return preview;
+}
+
+/** Stop a queued send's uploads (Delete, teardown, a stale account); the
+ *  module's Cancel does the same once it is loaded. */
+function abortQueued(entry: QueuedSend): void {
+  entry.cancelled = true;
+  for (const item of entry.items) item.upload?.owner.destroy();
 }
 
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
@@ -355,6 +366,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let sendChainBusy = false;
   let sendChainGen = 0;
   const sendTimers = new Map<string, { timer: number; release?: () => void }>();
+
+  // 3A-9: a message sent with files still uploading waits here, keyed by its
+  // "uploading" row's correlation id, and posts once its uploads land. Like
+  // draftByCorrelation it is controller-scoped, so the send keeps going (and
+  // posts to its own channel) after a channel switch. The queue module is
+  // loaded on the first upload, and kept here once it is.
+  const queuedSends = new Map<string, QueuedSend>();
+  let sendQueueMod: SendQueueModule | null = null;
 
   // CLI-08: chat_edit and chat_delete are fire-and-forget — no ack carries
   // their envelope id back, so before this they were toasted "success" on
@@ -638,35 +657,153 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
     }
 
+    /** Mirrors onJumpToPresent — reattach clears "loaded" so the tail is refetched. */
+    function jumpToPresentForSend(): void {
+      reattachToPresent(channelId);
+      // OC-0204: while detached, this (already-active) channel could have
+      // picked up an unread/mention badge for messages that arrived below
+      // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
+      // it, since incrementUnread's usual "active channel" skip is exactly
+      // what a detached window opts out of. Jumping to present is reading
+      // it, so mark it read the same way leaving a channel does. With a read
+      // pointer that is what was seen, not everything.
+      if (readPointerEnabled()) markChannelReadSeen(channelId);
+      else markChannelRead(channelId);
+      void msgCtrl.loadMessages(channelId, signal);
+    }
+
+    /** A reply whose target was deleted while composing sends as a plain message. */
+    function liveReplyTo(replyTo: number | null): number | null {
+      const target =
+        replyTo === null ? undefined : getChannelMessages(channelId).find((m) => m.id === replyTo);
+      return target?.deleted === true ? null : replyTo;
+    }
+
+    // 3A-9: the queue's hooks into this mount. Built here, so a send queued in
+    // this channel posts, fails and puts files back for this channel even after
+    // the user has switched away.
+    function queueDeps(entry: QueuedSend): QueueDeps {
+      return {
+        upload: uploadFile,
+        putBack: (files) => putBackUnsent(entry.channelId, files, "skipped"),
+        fail: (code) => {
+          if (queuedSends.get(entry.cid) === entry && ownsAccountSession()) {
+            markSendFailed(entry.cid, code);
+          }
+        },
+        dispatch: (files) => {
+          if (queuedSends.get(entry.cid) !== entry) return;
+          queuedSends.delete(entry.cid);
+          // Remove and add run in this one task, so no frame shows the gap.
+          removeOptimistic(entry.cid);
+          // Everything went back to the composer and there is no text: nothing to post.
+          if (files.length === 0 && entry.content === "") return;
+          const reply = liveReplyTo(entry.replyTo);
+          performSend(entry.content, reply, files, undefined, reply !== null && entry.replyPing, {
+            queued: true,
+          });
+        },
+      };
+    }
+
+    /** Show `entry` as an "uploading" row (replacing `previous`, Retry's old row)
+     *  and run it. Waits for the lazy module, which the first upload preloaded. */
+    function startQueued(entry: QueuedSend, retry: boolean, previous?: string): void {
+      // A failed load is already logged by the loader's preload.
+      void loadSendQueue()
+        .catch(() => null)
+        .then((mod) => {
+          if (queuedSends.get(entry.cid) !== entry) return;
+          const user = currentMessageUser();
+          if (user === null || !ownsAccountSession()) {
+            // Another account's send: nothing may post or keep uploading.
+            abortQueued(entry);
+            queuedSends.delete(entry.cid);
+            return;
+          }
+          if (previous !== undefined) removeOptimistic(previous);
+          // The strip reads this when the row first renders: Cancel only while it runs.
+          entry.failed = false;
+          if (isWindowDetached(channelId) && !signal.aborted) jumpToPresentForSend();
+          addOptimisticMessage({
+            correlationId: entry.cid,
+            channelId,
+            user,
+            content: entry.content,
+            replyTo: entry.replyTo,
+            timestamp: new Date().toISOString(),
+            status: "uploading",
+          });
+          if (mod === null) {
+            // The uploads keep going; the text is on the row, and Retry loads again.
+            entry.failed = true;
+            markSendFailed(entry.cid, "UPLOAD_FAILED");
+            return;
+          }
+          sendQueueMod = mod;
+          void (retry ? mod.retryQueuedSend : mod.runQueuedSend)(entry, queueDeps(entry));
+        });
+    }
+
+    function enqueueSend(
+      content: string,
+      replyTo: number | null,
+      replyPing: boolean,
+      queued: readonly QueuedAttachment[],
+    ): void {
+      const entry: QueuedSend = {
+        cid: crypto.randomUUID(),
+        channelId,
+        userId: owner.userId,
+        content,
+        replyTo,
+        replyPing,
+        items: queued.map((q) => ({ ...q })),
+      };
+      queuedSends.set(entry.cid, entry);
+      startQueued(entry, false);
+    }
+
+    /** The file upload, shared by the composer and a queued send's re-uploads. */
+    const uploadFile = async (
+      file: File,
+      uploadSignal?: AbortSignal,
+      onProgress?: (fraction: number) => void,
+    ): Promise<{ id: string; url: string; filename: string }> => {
+      // The first upload loads the queue module, so a send queued while it runs finds it ready.
+      preloadSendQueue();
+      try {
+        const result = await api.uploadFile(file, uploadSignal, onProgress);
+        return { id: result.id, url: result.url, filename: result.filename };
+      } catch (err) {
+        // A user-cancelled upload is not a failure — the composer already
+        // removed its preview and does not want an error for it. A real
+        // failure is reported once, inline, by the composer from this
+        // rejection, so it is not toasted here too.
+        if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
+        throw err;
+      }
+    };
+
     function performSend(
       content: string,
       replyTo: number | null,
       files: readonly SentAttachment[],
       existingClientMessageId?: string,
       replyPing = false,
+      sendOptions: { readonly queued?: boolean } = {},
     ): void {
       const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
-      if (user === null || !ownsSession()) return;
+      // A queued send (3A-9) was built by this mount but may post after the
+      // user left the channel: it needs the account, not the mount.
+      const owns = sendOptions.queued === true ? ownsAccountSession : ownsSession;
+      if (user === null || !owns()) return;
       // Sending while viewing a detached history window jumps to present: the
       // optimistic row belongs in the live tail, and addMessage would refuse
-      // to append the echo into a detached window anyway. Mirrors
-      // onJumpToPresent — reattach clears "loaded" so the tail is refetched.
-      if (isWindowDetached(channelId)) {
-        reattachToPresent(channelId);
-        // OC-0204: while detached, this (already-active) channel could have
-        // picked up an unread/mention badge for messages that arrived below
-        // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
-        // it, since incrementUnread's usual "active channel" skip is exactly
-        // what a detached window opts out of. Jumping to present is reading
-        // it, so mark it read the same way leaving a channel does. With a read
-        // pointer that is what was seen, not everything.
-        if (readPointerEnabled()) markChannelReadSeen(channelId);
-        else markChannelRead(channelId);
-        if (channelAbort !== null) {
-          void msgCtrl.loadMessages(channelId, channelAbort.signal);
-        }
-      }
+      // to append the echo into a detached window anyway. A queued send that
+      // outlived this mount leaves it, since that window is no longer shown.
+      if (isWindowDetached(channelId) && !signal.aborted) jumpToPresentForSend();
       const timestamp = new Date().toISOString();
       const clientMessageId =
         existingClientMessageId ??
@@ -690,7 +827,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }).then(
           () => true,
           () => {
-            if (ownsSession()) showToast(messagingText("toast.pendingSaveFailed"), "error");
+            if (owns()) showToast(messagingText("toast.pendingSaveFailed"), "error");
             return false;
           },
         );
@@ -724,7 +861,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // a failed write means it is gone at restart. Distinguish that from a
           // plain offline row, whose retry window is still open.
           void persistPendingText(persistId).then((saved) => {
-            if (!saved && ownsSession()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
+            if (!saved && owns()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
           });
         }
         return;
@@ -800,6 +937,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     function retrySend(correlationId: string): void {
       if (!ownsSession()) return;
+      const queued = queuedSends.get(correlationId);
+      if (queued !== undefined) {
+        // 3A-9: a failed queued send uploads what it lacks and posts again, as
+        // a new row under a new id.
+        if (queued.channelId !== channelId) return;
+        queuedSends.delete(correlationId);
+        queued.cid = crypto.randomUUID();
+        queuedSends.set(queued.cid, queued);
+        startQueued(queued, true, correlationId);
+        return;
+      }
       const recovered = recoveredPendingText(owner, correlationId);
       const draft =
         draftByCorrelation.get(correlationId) ??
@@ -847,8 +995,24 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
     }
 
+    /** Withdraw a stored upload that will never be sent; the server sweeps it anyway if this fails. */
+    function discardQuietly(id: string): void {
+      void api.discardUpload(id).catch(() => {});
+    }
+
     function deleteDraft(correlationId: string): void {
       if (!ownsSession()) return;
+      const queued = queuedSends.get(correlationId);
+      if (queued !== undefined) {
+        // 3A-9: stop its uploads and withdraw the ones already stored.
+        abortQueued(queued);
+        for (const item of queued.items) {
+          if (item.id !== undefined) discardQuietly(item.id);
+        }
+        queuedSends.delete(correlationId);
+        removeOptimistic(correlationId);
+        return;
+      }
       const id =
         draftByCorrelation.get(correlationId)?.clientMessageId ??
         recoveredPendingText(owner, correlationId)?.clientMessageId;
@@ -1247,6 +1411,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
+      renderUploadStrip: (correlationId, stripSignal) => {
+        const entry = queuedSends.get(correlationId);
+        return entry === undefined || sendQueueMod === null
+          ? null
+          : sendQueueMod.renderUploadStrip(entry, stripSignal);
+      },
     });
     messageList.mount(slots.messagesSlot);
     if (storedChannel?.nsfw === true) mountConsentBar();
@@ -1269,33 +1439,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         _attachments: readonly string[],
         files: readonly SentAttachment[],
         replyPing: boolean,
+        queued?: readonly QueuedAttachment[],
       ) => {
-        // A reply whose target was deleted while composing sends as a plain
-        // message.
-        const target =
-          replyTo === null
-            ? undefined
-            : getChannelMessages(channelId).find((m) => m.id === replyTo);
-        const reply = target?.deleted === true ? null : replyTo;
-        performSend(content, reply, files, undefined, reply !== null && replyPing === true);
+        const reply = liveReplyTo(replyTo);
+        const ping = reply !== null && replyPing === true;
+        if (queued === undefined) performSend(content, reply, files, undefined, ping);
+        else enqueueSend(content, reply, ping, queued);
       },
-      onUploadFile: async (
-        file: File,
-        uploadSignal?: AbortSignal,
-        onProgress?: (fraction: number) => void,
-      ) => {
-        try {
-          const result = await api.uploadFile(file, uploadSignal, onProgress);
-          return { id: result.id, url: result.url, filename: result.filename };
-        } catch (err) {
-          // A user-cancelled upload is not a failure — the composer already
-          // removed its preview and does not want an error for it. A real
-          // failure is reported once, inline, by the composer from this
-          // rejection, so it is not toasted here too.
-          if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
-          throw err;
-        }
-      },
+      onUploadFile: uploadFile,
       onDiscardUpload: async (id: string) => {
         try {
           await api.discardUpload(id);
@@ -1682,6 +1833,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       for (const upload of draft.uploads ?? []) upload.owner.destroy();
     }
     draftByChannel.clear();
+    for (const entry of queuedSends.values()) abortQueued(entry);
+    queuedSends.clear();
   }
 
   return {

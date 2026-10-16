@@ -291,6 +291,10 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "UPLOAD_FAILED":
+      return messagingText("send.uploadFailed");
+    case "UPLOAD_CANCELLED":
+      return messagingText("send.uploadCancelled");
     case "BEFORE_RESTORE":
       return connectText("app.sendBeforeRestore");
     default:
@@ -318,7 +322,11 @@ export function renderMessage(
   }
 
   const statusClass =
-    msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
+    msg.status === "pending" || msg.status === "uploading"
+      ? " pending"
+      : msg.status === "failed"
+        ? " failed"
+        : "";
   const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
   // A deleted row shows no content, so it must not keep the mention accent.
   const mentionedClass =
@@ -444,6 +452,13 @@ export function renderMessage(
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }
+  }
+
+  // A send queued behind its files shows them, with progress and Cancel while
+  // they upload and plain once it failed (3A-9).
+  if ((msg.status === "uploading" || msg.status === "failed") && msg.correlationId !== null) {
+    const strip = opts.renderUploadStrip?.(msg.correlationId, signal);
+    if (strip != null) el.appendChild(strip);
   }
 
   // Failed optimistic send: show the reason and offer retry / discard.

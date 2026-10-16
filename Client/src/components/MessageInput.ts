@@ -29,6 +29,7 @@ import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatal
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
+import { ATTACHMENT_TTL_MS } from "../features/messaging/attachmentTtl";
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
@@ -51,6 +52,10 @@ export interface MessageInputOptions {
     files: readonly SentAttachment[],
     /** Whether a reply mentions the author it answers (3A-12). False with no reply. */
     replyPing: boolean,
+    /** Set when an upload was still running (3A-9): every chip in chip order,
+     *  the running ones with their handle. `attachments`/`files` then carry
+     *  only the settled ones, and the host posts the message once all land. */
+    queued?: readonly QueuedAttachment[],
   ) => void;
   readonly onUploadFile?: (
     file: File,
@@ -74,6 +79,17 @@ export interface SentAttachment {
   readonly id: string;
   readonly filename: string;
   readonly file?: File;
+}
+
+/** One chip of a send queued behind its uploads (3A-9). A settled chip has
+ *  `id` and `uploadedAt`; a running one has `upload`, whose handle the host
+ *  takes over (its `onProgress` slot is free). `file` lets the host re-upload. */
+export interface QueuedAttachment {
+  readonly filename: string;
+  readonly file?: File;
+  readonly id?: string;
+  readonly uploadedAt?: number;
+  readonly upload?: DraftUpload;
 }
 
 /** The message a draft replies to. `username` is the name the bar shows (the
@@ -217,12 +233,6 @@ const COUNTER_FROM_REMAINING = 200;
 const DROP_SLOTS = ".messages-slot, .typing-slot, .input-slot";
 /** The file a too-long paste becomes, the name Discord gives it. */
 const LONG_PASTE_FILENAME = "message.txt"; // i18n-exempt: a file name, not UI text
-// The server's maintenance sweep deletes unlinked attachments about an hour
-// after upload (Server/internal/app/maintenance.go), and a send silently skips
-// an id it no longer knows. A staged chip past this age (a margin under the
-// sweep) is never sent: it re-uploads from its file, or is marked expired when
-// the file is gone (a restored draft), and Send refuses until it is fresh.
-const ATTACHMENT_TTL_MS = 50 * 60 * 1000;
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
 
@@ -301,10 +311,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let channelStart = -1;
 
   /** Pending attachment IDs to send with the next message. `upload` is set
-   *  exactly while the upload is in flight, which blocks Send (as does a chip
-   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying its owner cancels
-   *  that upload when the user removes the preview, and it is detached once
-   *  the upload succeeds. A `Disposable` rather than a raw AbortController
+   *  exactly while the upload is in flight: Send then queues the message behind
+   *  it (3A-9), while a chip past ATTACHMENT_TTL_MS still blocks Send, see
+   *  refreshStale. Destroying its owner cancels that upload when the user
+   *  removes the preview, and it is detached once the upload succeeds. A `Disposable` rather than a raw AbortController
    *  keeps the upload token in the lifecycle primitives, matching
    *  MessageList's per-row owner. */
   const pendingAttachments: {
@@ -794,12 +804,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
 
-    // Block send while uploads are still in flight
-    if (pendingAttachments.some((a) => a.upload !== undefined)) {
-      showUploadError(messagingText("error.uploadsPending"));
-      return;
-    }
-
     // The age timer can fire late (a sleeping machine, a throttled window), so
     // Send checks the age itself and never posts an id the sweep may have taken.
     const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
@@ -820,18 +824,34 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
     lastSendTime = now;
 
-    // Only include attachments that have finished uploading (have a real server ID)
+    // Only include attachments that have finished uploading (have a real server
+    // ID); a chip refreshing a stale id is still uploading, its old id unsent.
     const files = pendingAttachments.flatMap((a): SentAttachment[] =>
-      a.id.startsWith("pending-")
+      a.upload !== undefined || a.id.startsWith("pending-")
         ? []
         : [{ id: a.id, filename: a.filename, ...(a.file === undefined ? {} : { file: a.file }) }],
     );
+    // An upload still running does not hold the message back: the host queues
+    // it, takes the handles over and posts once they all land (3A-9).
+    const queued = pendingAttachments.some((a) => a.upload !== undefined)
+      ? pendingAttachments.map((a): QueuedAttachment => {
+          if (a.upload !== undefined) a.upload.onProgress = null;
+          return {
+            filename: a.filename,
+            ...(a.file === undefined ? {} : { file: a.file }),
+            ...(a.upload === undefined
+              ? { id: a.id, ...(a.uploadedAt === undefined ? {} : { uploadedAt: a.uploadedAt }) }
+              : { upload: a.upload }),
+          };
+        })
+      : undefined;
     options.onSend(
       content,
       state.replyTo?.messageId ?? null,
       files.map((f) => f.id),
       files,
       replyPing(),
+      ...(queued === undefined ? [] : [queued]),
     );
     clearReply();
     clearPendingAttachments();
@@ -1179,8 +1199,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       handle.refreshing = { id: pending.id, uploadedAt: staleUploadedAt };
     }
     pending.uploadedAt = undefined;
-    // Removed preview (cancelled) or composer torn down (handed to a draft).
-    const abandoned = (): boolean => handle.owner.signal.aborted || signal.aborted;
+    // Removed preview (cancelled), composer torn down (handed to a draft), or
+    // the chip left with a queued send, which reads the result itself (3A-9).
+    const abandoned = (): boolean =>
+      handle.owner.signal.aborted || signal.aborted || !pendingAttachments.includes(pending);
 
     try {
       const result = await handle.result;

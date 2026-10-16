@@ -295,6 +295,49 @@ test("a server restart keeps the reader where they were in older history", async
   await expect(alice.locator(".messages-loading")).toHaveCount(0);
 });
 
+test("pressing Enter while a file uploads posts the message with its attachment once the upload ends", async ({
+  alice,
+  bob,
+  aliceTransport,
+}) => {
+  const id = crypto.randomUUID().slice(0, 8);
+  const composer = alice.locator("[data-testid='message-input']");
+  // Hold the upload at the transport, so Enter always lands while it is running.
+  const release = aliceTransport.holdHttpRequests(
+    ({ path, method }) => method === "POST" && path.endsWith("/uploads"),
+  );
+  await composer.locator("input[type='file']").setInputFiles({
+    name: `notes-${id}.txt`,
+    mimeType: "text/plain",
+    buffer: Buffer.from(`notes ${id}\n`),
+  });
+  await expect(composer.locator(".attachment-preview-item")).toHaveClass(/uploading/);
+  await composer.locator("textarea").fill(`quick-${id}`);
+  await composer.locator("textarea").press("Enter");
+
+  // The composer is free at once and the message waits in the chat, uploading.
+  await expect(composer.locator("textarea")).toHaveValue("");
+  await expect(composer.locator(".attachment-preview-item")).toHaveCount(0);
+  const mine = alice.locator(".message.pending", {
+    has: alice.locator(".msg-text", { hasText: `quick-${id}` }),
+  });
+  await expect(mine.locator(".msg-upload-chip progress")).toBeVisible();
+  await expect(bob.locator(".msg-text", { hasText: `quick-${id}` })).toHaveCount(0);
+
+  release();
+
+  // Once the upload ends it posts for both users, with the file.
+  for (const page of [alice, bob]) {
+    const row = page.locator(".message", {
+      has: page.locator(".msg-text", { hasText: `quick-${id}` }),
+    });
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".msg-file-name")).toHaveText(`notes-${id}.txt`);
+  }
+  await expect(alice.locator(".msg-upload-strip")).toHaveCount(0);
+  await expect(alice.locator(".message.pending, .message.failed")).toHaveCount(0);
+});
+
 test("a playing video keeps playing while bob reacts to another message 20 times", async ({
   alice,
   bob,

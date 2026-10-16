@@ -121,6 +121,9 @@ export interface MessageListOptions {
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */
   readonly onDeleteDraft?: (correlationId: string) => void;
+  /** The upload strip of a send queued behind its files (3A-9), for the row with this
+   *  correlation id; null when the row has none. `signal` ends with the row's render. */
+  readonly renderUploadStrip?: (correlationId: string, signal: AbortSignal) => HTMLElement | null;
   /** Retry a failed first-page history fetch. */
   readonly onRetryLoad?: () => void;
   /**
@@ -703,7 +706,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       (m) =>
         m.id === 0 &&
         m.user.id === options.currentUserId &&
-        (m.status === "pending" || m.status === "failed") &&
+        (m.status === "pending" || m.status === "failed" || m.status === "uploading") &&
         !(m.correlationId?.startsWith("recovered:") ?? false),
     ).length;
   const followOwnSend = (): boolean =>

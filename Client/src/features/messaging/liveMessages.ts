@@ -88,15 +88,22 @@ export function reduceAddMessage(prev: MessagesState, message: Message): Message
   return { ...prev, messagesByChannel: updated, hasMore: updatedHasMore };
 }
 
-/** addOptimisticMessage's reducer: append the pending row and register its correlation id. */
+/** addOptimisticMessage's reducer: add the row. A pending row is registered by correlation id and
+ *  goes before the trailing uploading rows, which stay last until they post (3A-9). */
 export function reduceAddOptimisticMessage(
   prev: MessagesState,
   params: { readonly channelId: number; readonly correlationId: string },
   optimistic: Message,
 ): MessagesState {
   const existing = prev.messagesByChannel.get(params.channelId) ?? [];
+  const uploading = optimistic.status === "uploading";
+  let at = existing.length;
+  if (!uploading) {
+    while (at > 0 && existing[at - 1]!.status === "uploading") at--;
+  }
   const updated = new Map(prev.messagesByChannel);
-  updated.set(params.channelId, [...existing, optimistic]);
+  updated.set(params.channelId, [...existing.slice(0, at), optimistic, ...existing.slice(at)]);
+  if (uploading) return { ...prev, messagesByChannel: updated };
   const updatedPending = new Map(prev.pendingSends);
   updatedPending.set(params.correlationId, params.channelId);
   return { ...prev, messagesByChannel: updated, pendingSends: updatedPending };

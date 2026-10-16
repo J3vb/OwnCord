@@ -46,7 +46,6 @@ export const messagingText = defineCatalog("messaging", {
   "composer.slowMode": "Slow mode — {seconds}s",
   "composer.slowModeNote": "Slow mode is on: one message every {seconds}s",
   "error.tooLong": "Messages are limited to {max} characters",
-  "error.uploadsPending": "Please wait for uploads to finish",
   "error.fileTooLarge": "File too large: {filename} exceeds {limit} MB limit",
   "error.fileTypeBlocked": "{filename} can't be uploaded: this server doesn't allow .{ext} files",
   "error.fileTypeNoExtension":
@@ -142,6 +141,8 @@ export const messagingText = defineCatalog("messaging", {
   "send.recovered": "Recovered pending message — retry when you're ready",
   "send.rejected": "Message rejected",
   "send.failed": "Failed to send",
+  "send.uploadFailed": "Upload failed",
+  "send.uploadCancelled": "Upload cancelled",
   "message.deleted": "[message deleted]",
   "message.edited": "(edited)",
   "action.retry": "Retry",

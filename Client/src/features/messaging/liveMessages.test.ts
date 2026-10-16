@@ -128,6 +128,75 @@ describe("reduceAddOptimisticMessage", () => {
   });
 });
 
+describe("an uploading row (WP 3A-9)", () => {
+  const uploading = row({ status: "uploading", correlationId: "u-1", content: "files" });
+  const uploading2 = row({ status: "uploading", correlationId: "u-2", content: "more files" });
+
+  it("is not registered in pendingSends", () => {
+    const next = reduceAddOptimisticMessage(
+      state([row({ id: 1 })]),
+      { channelId: 1, correlationId: "u-1" },
+      uploading,
+    );
+    expect(next.messagesByChannel.get(1)?.at(-1)).toBe(uploading);
+    expect(next.pendingSends.size).toBe(0);
+  });
+
+  it("goes after the rows already there, including earlier uploading ones", () => {
+    const next = reduceAddOptimisticMessage(
+      state([row({ id: 1 }), pending, uploading]),
+      { channelId: 1, correlationId: "u-2" },
+      uploading2,
+    );
+    expect(next.messagesByChannel.get(1)?.map((m) => m.correlationId)).toEqual([
+      null,
+      "c-1",
+      "u-1",
+      "u-2",
+    ]);
+  });
+
+  it("keeps a pending optimistic row ahead of the trailing uploading rows", () => {
+    const prev = state([row({ id: 1 }), uploading, uploading2]);
+    const next = reduceAddOptimisticMessage(prev, { channelId: 1, correlationId: "c-1" }, pending);
+    expect(next.messagesByChannel.get(1)?.map((m) => m.correlationId)).toEqual([
+      null,
+      "c-1",
+      "u-1",
+      "u-2",
+    ]);
+    expect(next.pendingSends.get("c-1")).toBe(1);
+  });
+
+  it("keeps a live message ahead of the trailing uploading rows", () => {
+    const prev = state([row({ id: 1 }), pending, uploading]);
+    const next = reduceAddMessage(prev, row({ id: 2, user: bob, content: "yo" }));
+    expect(next.messagesByChannel.get(1)?.map((m) => m.id)).toEqual([1, 2, 0, 0]);
+    expect(next.messagesByChannel.get(1)?.map((m) => m.status)).toEqual([
+      "sent",
+      "sent",
+      "pending",
+      "uploading",
+    ]);
+  });
+
+  it("is never consumed by an echo with the same text", () => {
+    const echo = row({ id: 9, user: me, content: "files", correlationId: null });
+    const next = reduceAddMessage(state([uploading]), echo);
+    expect(next.messagesByChannel.get(1)?.map((m) => m.status)).toEqual(["sent", "uploading"]);
+  });
+
+  it("fails like any optimistic row, found by scanning, and can be removed", () => {
+    const prev = state([uploading]);
+    const failed = reduceMarkSendFailed(prev, "u-1", "UPLOAD_FAILED");
+    expect(failed.messagesByChannel.get(1)?.[0]).toMatchObject({
+      status: "failed",
+      errorCode: "UPLOAD_FAILED",
+    });
+    expect(reduceRemoveOptimistic(prev, "u-1").messagesByChannel.get(1)).toEqual([]);
+  });
+});
+
 describe("reduceMarkSendFailed", () => {
   it("marks a registered send failed and unregisters it", () => {
     const next = reduceMarkSendFailed(state([pending], { pendingSends }), "c-1", "SLOW_MODE");

@@ -392,6 +392,82 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("renders an uploading row as pending, with the strip from the hook and no bars", () => {
+      const strip = document.createElement("div");
+      strip.className = "msg-upload-strip";
+      const renderUploadStrip = vi.fn((_cid: string, _signal: AbortSignal) => strip);
+      const msg = makeMessage({ status: "uploading", correlationId: "u1", id: 0 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts({ renderUploadStrip }), ac.signal);
+      container.appendChild(el);
+
+      expect(el.classList.contains("pending")).toBe(true);
+      expect(el.classList.contains("failed")).toBe(false);
+      expect(el.querySelector(".msg-upload-strip")).toBe(strip);
+      // The strip belongs to the row's render: it gets the row's own signal.
+      expect(renderUploadStrip).toHaveBeenCalledWith("u1", ac.signal);
+      expect(container.querySelector(".msg-actions-bar")).toBeNull();
+      expect(container.querySelector(".msg-send-failed")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("renders an uploading row without a strip when the host has none", () => {
+      const msg = makeMessage({ status: "uploading", correlationId: "u1", id: 0 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+
+      expect(el.classList.contains("pending")).toBe(true);
+      expect(el.querySelector(".msg-upload-strip")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("keeps the strip on a failed queued row, above 'Upload failed' with Retry and Delete", () => {
+      const strip = document.createElement("div");
+      strip.className = "msg-upload-strip";
+      const renderUploadStrip = vi.fn(() => strip);
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "u2",
+        id: 0,
+        errorCode: "UPLOAD_FAILED",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts({ renderUploadStrip }), ac.signal);
+      container.appendChild(el);
+
+      expect(el.querySelector(".msg-upload-strip")).toBe(strip);
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe("Upload failed");
+      expect(container.querySelector('[data-testid="msg-retry-u2"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="msg-discard-u2"]')).not.toBeNull();
+      // The strip comes before the failed bar.
+      expect(
+        strip.compareDocumentPosition(container.querySelector(".msg-send-failed")!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      ac.abort();
+    });
+
+    it("names a cancelled upload on the failed bar", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "u3",
+        id: 0,
+        errorCode: "UPLOAD_CANCELLED",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "Upload cancelled",
+      );
+
+      ac.abort();
+    });
+
     it("renders a transport-failure (NETWORK) row with the connection-problem reason", () => {
       const msg = makeMessage({
         status: "failed",
