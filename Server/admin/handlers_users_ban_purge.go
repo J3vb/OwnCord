@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -55,6 +56,33 @@ func patchUserValidatePurge(w http.ResponseWriter, req patchUserRequest) (int, b
 		return 0, false
 	}
 	return secs, true
+}
+
+// patchUserValidateBan checks the ban fields of a PATCH (ban_duration_hours
+// and, for a ban, the reason) before anything is changed or any rate-limit
+// token is spent, and returns the temporary ban's expiry (nil = permanent or
+// no ban). On false it has already written the 400.
+func patchUserValidateBan(w http.ResponseWriter, req patchUserRequest) (*time.Time, bool) {
+	if req.Banned == nil {
+		return nil, true
+	}
+	var banExpires *time.Time
+	if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
+		hours := *req.BanDurationHours
+		if hours < 0 || hours > maxBanDurationHours {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
+			return nil, false
+		}
+		t := time.Now().Add(time.Duration(hours) * time.Hour)
+		banExpires = &t
+	}
+	if *req.Banned && req.BanReason != nil {
+		if err := service.ValidateActionReason(*req.BanReason); err != nil {
+			writeModerationErr(w, err)
+			return nil, false
+		}
+	}
+	return banExpires, true
 }
 
 // patchUserAuthorizePurge runs every precondition of deleting the target's
@@ -138,6 +166,9 @@ func patchUserPurge(r *http.Request, hub HubBroadcaster, mod *service.Moderation
 		for _, b := range res.Batches {
 			hub.BroadcastChatBulkDeleted(b.ChannelID, b.MessageIDs)
 		}
+	}
+	if res.Err != nil {
+		slog.Warn("admin ban purge incomplete", "actor_id", actor, "target_id", id, "deleted", res.Deleted, "err", res.Err)
 	}
 	return &banPurgeOutcome{Deleted: res.Deleted, Complete: res.Complete && res.Err == nil}
 }

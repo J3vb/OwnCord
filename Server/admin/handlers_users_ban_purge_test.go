@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -32,6 +34,7 @@ func (h *purgeOrderHub) BroadcastChatBulkDeleted(channelID int64, messageIDs []i
 }
 
 type banPurgeEnv struct {
+	limiter  *auth.RateLimiter
 	database *db.DB
 	svc      *service.Services
 	hub      *purgeOrderHub
@@ -41,10 +44,12 @@ type banPurgeEnv struct {
 func newBanPurgeEnv(t *testing.T) *banPurgeEnv {
 	t.Helper()
 	database := openMigratedAdminDB(t)
-	svc := service.New(database, auth.NewRateLimiter())
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
 	svc.Auth = service.NewAuthService(database, auth.NewRateLimiter(), nil, nil)
 	hub := &purgeOrderHub{mockHub: &mockHub{}}
 	return &banPurgeEnv{
+		limiter:  limiter,
 		database: database,
 		svc:      svc,
 		hub:      hub,
@@ -265,7 +270,7 @@ func TestPatchUser_DeleteSecondsWithoutManageMessages_403_NotBanned(t *testing.T
 
 func TestPatchUser_DeleteSecondsRateLimited_429_NotBanned(t *testing.T) {
 	e := newBanPurgeEnv(t)
-	_, ownerToken := sessionFor(t, e.database, "limit-owner", 1)
+	ownerID, ownerToken := sessionFor(t, e.database, "limit-owner", 1)
 	firstID, _ := sessionFor(t, e.database, "limit-first", 4)
 	secondID, _ := sessionFor(t, e.database, "limit-second", 4)
 
@@ -273,6 +278,9 @@ func TestPatchUser_DeleteSecondsRateLimited_429_NotBanned(t *testing.T) {
 	if w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(firstID), ownerToken, body); w.Code != http.StatusOK {
 		t.Fatalf("first: status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
+	// Same key AuthorizeBanPurge uses; the lockout makes the refusal
+	// independent of timing.
+	e.limiter.Lockout(context.Background(), auth.Key("ban_purge", ownerID), time.Hour)
 	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(secondID), ownerToken, body)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("second: status = %d, want 429; body: %s", w.Code, w.Body.String())
@@ -411,5 +419,76 @@ func TestPatchUser_DeleteSecondsOnAlreadyBannedTarget_SkipsSecondBanWrite(t *tes
 	}
 	if banRows() != 2 {
 		t.Errorf("ban ledger rows = %d, want 2 after the reason changed", banRows())
+	}
+}
+
+func TestPatchUser_InvalidBanFieldsDoNotSpendPurgeToken(t *testing.T) {
+	e := newBanPurgeEnv(t)
+	_, ownerToken := sessionFor(t, e.database, "token-owner", 1)
+	targetID, _ := sessionFor(t, e.database, "token-target", 4)
+
+	for name, body := range map[string]map[string]any{
+		"hours out of range": {"banned": true, "ban_duration_hours": 99999, "delete_message_seconds": 60},
+		"reason too long":    {"banned": true, "ban_reason": strings.Repeat("a", 5000), "delete_message_seconds": 60},
+	} {
+		w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken, body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400; body: %s", name, w.Code, w.Body.String())
+		}
+	}
+	if e.banned(t, targetID) {
+		t.Fatal("a refused request banned the target")
+	}
+
+	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken,
+		map[string]any{"banned": true, "ban_duration_hours": 24, "delete_message_seconds": 60})
+	if w.Code != http.StatusOK {
+		t.Fatalf("corrected request: status = %d, want 200 (the 400s must not spend the rate-limit token); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPatchUser_PartialPurge_ReportsIncompleteThenContinues(t *testing.T) {
+	e := newBanPurgeEnv(t)
+	e.svc.Moderation.SetBanPurgeRowCapForTest(2)
+	_, ownerToken := sessionFor(t, e.database, "partial-owner", 1)
+	// A second actor for the repeat: one purge per actor every 2 seconds.
+	_, adminToken := sessionFor(t, e.database, "partial-admin", 2)
+	targetID, _ := sessionFor(t, e.database, "partial-target", 4)
+	ch := e.channel(t, "partial-a")
+	for _, c := range []string{"one", "two", "three"} {
+		e.message(t, ch, targetID, c)
+	}
+	banRows := func() int {
+		return e.count(t, `SELECT COUNT(*) FROM moderation_actions WHERE kind = 'ban' AND target_id = ?`, targetID)
+	}
+	body := map[string]any{"banned": true, "ban_reason": "spam", "delete_message_seconds": 3600}
+
+	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 2 || complete {
+		t.Fatalf("first purge = {deleted:%d complete:%v}, want {2 false}", deleted, complete)
+	}
+	// The cap is below the batch size, so the one batch holds the two rows.
+	if len(e.hub.bulkDeletes) != 1 || len(e.hub.bulkDeletes[0].messageIDs) != 2 || e.hub.bulkDeletes[0].channelID != ch {
+		t.Fatalf("bulk deletes = %v, want one batch of 2 in channel %d", e.hub.bulkDeletes, ch)
+	}
+	if n := e.count(t, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND deleted = 0`, targetID); n != 1 {
+		t.Fatalf("live messages = %d, want 1", n)
+	}
+
+	w = doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), adminToken, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("repeat: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 1 || !complete {
+		t.Fatalf("repeat purge = {deleted:%d complete:%v}, want {1 true}", deleted, complete)
+	}
+	if len(e.hub.bulkDeletes) != 2 {
+		t.Errorf("bulk deletes = %d, want 2 batches in total", len(e.hub.bulkDeletes))
+	}
+	if banRows() != 1 {
+		t.Errorf("ban ledger rows = %d, want 1 (the repeat does not rewrite the ban)", banRows())
 	}
 }

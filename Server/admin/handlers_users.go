@@ -183,7 +183,7 @@ func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service
 // result out to connected clients; a request without banned is a no-op. It
 // reports whether the handler may continue; on false it has already written
 // the error response.
-func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest, banExpires *time.Time) bool {
 	if req.Banned == nil {
 		return true
 	}
@@ -195,16 +195,6 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	banReason := ""
 	if req.BanReason != nil {
 		banReason = *req.BanReason
-	}
-	var banExpires *time.Time
-	if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
-		hours := *req.BanDurationHours
-		if hours < 0 || hours > maxBanDurationHours {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
-			return false
-		}
-		t := time.Now().Add(time.Duration(hours) * time.Hour)
-		banExpires = &t
 	}
 	var actionErr error
 	if *req.Banned {
@@ -305,6 +295,13 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 			return
 		}
 
+		// Validate the ban's own fields before the purge check spends the
+		// actor's rate-limit token, so a corrected retry is not throttled.
+		banExpires, ok := patchUserValidateBan(w, req)
+		if !ok {
+			return
+		}
+
 		// The purge's checks (including its rate limit) also run before the
 		// ban is written, so a refusal leaves the target unbanned.
 		if purgeSeconds > 0 && !patchUserAuthorizePurge(w, r, mod, actor, id) {
@@ -318,7 +315,7 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 		// role change, if requested, was already authorized above, so a ban
 		// committing here cannot be followed by a refused role change leaving
 		// a half-applied PATCH behind.
-		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req) {
+		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req, banExpires) {
 			return
 		}
 

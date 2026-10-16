@@ -3721,9 +3721,11 @@ clients receive a `chat_bulk_deleted` event per batch. Omitting the field, or
 sending `0`, deletes nothing.
 
 The purge may stop early. When the response has `"complete": false`, send the
-same request again to continue: if the target is already banned and the ban
-fields are unchanged, the ban is not written a second time (no new ledger row,
-no refreshed reason or expiry) and only the deletion continues.
+same request again to continue. A retry must resend `ban_reason` and
+`ban_duration_hours` unchanged: if the target is already banned and the ban
+fields match, the ban is not written a second time (no new ledger row, no
+refreshed reason or expiry) and only the deletion continues. For a temporary
+ban, the same `ban_duration_hours` retried within an hour counts as unchanged.
 
 #### Response 200 OK -- the updated user (same shape as the list entry).
 
