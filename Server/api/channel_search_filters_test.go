@@ -94,8 +94,10 @@ func TestSearch_InUnreadableTargetsLookIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = chTestCreateToken(t, f.database, "inid-third", 4)
+	_ = chTestCreateToken(t, f.database, "inid-fourth", 4)
 	thirdUser, _ := f.database.GetUserByUsername(ctx, "inid-third")
-	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.owner.ID, thirdUser.ID)
+	fourthUser, _ := f.database.GetUserByUsername(ctx, "inid-fourth")
+	dm, err := f.database.CreateGroupDMChannel(ctx, "dmgroup", []int64{f.owner.ID, thirdUser.ID, fourthUser.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +105,7 @@ func TestSearch_InUnreadableTargetsLookIdentical(t *testing.T) {
 		f.say(t, ch, f.owner.ID, "needle everywhere")
 	}
 
-	var dmName string
-	if err := f.database.QueryRowContext(ctx, `SELECT name FROM channels WHERE id = ?`, dm.ID).Scan(&dmName); err != nil {
-		t.Fatal(err)
-	}
-	targets := []string{"secret", "adult", "nope-nothing"}
-	if dmName != "" {
-		targets = append(targets, strings.ReplaceAll(dmName, `"`, ""))
-	}
+	targets := []string{"secret", "adult", "dmgroup", "nope-nothing"}
 	for _, extra := range [][]string{nil, {fmt.Sprintf("channel_id=%d", pub)}} {
 		var wantCode int
 		var wantBody string

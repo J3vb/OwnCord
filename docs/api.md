@@ -1407,7 +1407,7 @@ the end of `q`.
 ```
 
 `next_before` is the `before` value for the next `sort=recent` page, or `null`
-when there are no more results. It is always `null` for `sort=relevance`.
+when there are no more results. It is always `null` for `sort=relevance` when `q` has words.
 
 #### Error Responses
 

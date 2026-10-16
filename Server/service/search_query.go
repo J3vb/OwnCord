@@ -212,11 +212,10 @@ func (w *searchWindow) stored() (after, before string, empty bool) {
 // local time; a zero bound is unbounded. before:D is (-inf, D), after:D is
 // [D+1, inf) and during:D is [D, D+1), each at local midnight.
 func searchDayRange(key, val string, loc *time.Location) (lo, hi time.Time, err error) {
-	day, err := parseSearchDay(key, val, loc)
+	day, next, err := parseSearchDay(key, val, loc)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	next := day.AddDate(0, 0, 1)
 	switch key {
 	case "before":
 		return time.Time{}, day, nil
@@ -242,13 +241,17 @@ func loadSearchLocation(tz string) (*time.Location, error) {
 	return loc, nil
 }
 
-// parseSearchDay parses a YYYY-MM-DD value as local midnight in loc. Years
-// outside 1..9998 are refused so the stored-format string comparison stays
-// well defined.
-func parseSearchDay(key, val string, loc *time.Location) (time.Time, error) {
+// parseSearchDay parses a YYYY-MM-DD value as local midnight in loc and
+// returns that day's start and the next day's start. Both are built from the
+// calendar date, so a zone whose DST change skips midnight still gets the
+// right next-day bound. Years outside 1..9998 are refused so the
+// stored-format string comparison stays well defined.
+func parseSearchDay(key, val string, loc *time.Location) (day, next time.Time, err error) {
 	d, err := time.Parse(searchDateLayout, val)
 	if err != nil || d.Year() < 1 || d.Year() > 9998 {
-		return time.Time{}, fmt.Errorf("%w: %s: expects a date as YYYY-MM-DD", ErrBadRequest, key)
+		return time.Time{}, time.Time{}, fmt.Errorf("%w: %s: expects a date as YYYY-MM-DD", ErrBadRequest, key)
 	}
-	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc), nil
+	day = time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc)
+	next = time.Date(d.Year(), d.Month(), d.Day()+1, 0, 0, 0, 0, loc)
+	return day, next, nil
 }

@@ -113,7 +113,8 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 // binary-searches messages.id (monotonic with timestamp on every insert path)
 // in about 2x20 rowid probes, so a date bound becomes an id range scan with no
 // timestamp index. The caller still applies the exact timestamp predicate, so
-// a clock step can cost speed but never correctness. Hard-deleted id gaps are
+// there are no false positives; a backward clock step can hide rows near a
+// bound (accepted in the 3A-14 design, D7). Hard-deleted id gaps are
 // skipped by probing for the first existing id at or above each midpoint.
 func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 	var minID, maxID sql.NullInt64

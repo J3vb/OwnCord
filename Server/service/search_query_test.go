@@ -129,6 +129,14 @@ func TestParseSearch_TZ(t *testing.T) {
 	if p.AfterTS != "2026-03-28 23:00:00" || p.BeforeTS != "2026-03-29 22:00:00" {
 		t.Errorf("dst day: got %q..%q", p.AfterTS, p.BeforeTS)
 	}
+	// Santiago skips 00:00 on 2026-09-06; the next-day bound must stay at midnight.
+	p, err = ParseSearch("during:2026-09-06", "America/Santiago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AfterTS != "2026-09-06 03:00:00" || p.BeforeTS != "2026-09-07 03:00:00" {
+		t.Errorf("midnight dst: got %q..%q", p.AfterTS, p.BeforeTS)
+	}
 }
 
 func TestParseSearch_BadInputIsBadRequest(t *testing.T) {
