@@ -24,6 +24,17 @@ const clickTab = (root: HTMLElement, label: string) => {
   tab.click();
 };
 
+const openWithAudio = async () => {
+  const picking = showScreenSharePicker({
+    sources,
+    portal: false,
+    audioAvailable: true,
+    defaultQuality: "high",
+    defaultFps: 30,
+  });
+  return { picking, root: await mounted() };
+};
+
 describe("showScreenSharePicker", () => {
   afterEach(() => {
     document.body.replaceChildren();
@@ -65,10 +76,43 @@ describe("showScreenSharePicker", () => {
     const root = await mounted();
     expect(root.querySelector('[role="switch"]')).toBeNull();
     expect(root.querySelector(".ssp-opt-text")?.textContent).toContain(
-      "Audio sharing is not available on Linux yet",
+      "Audio sharing needs a PulseAudio or PipeWire sound server",
     );
     root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
     await expect(picking).resolves.not.toHaveProperty("audio");
+  });
+
+  it("shows a share-audio switch on Linux when the host can capture audio", async () => {
+    const first = await openWithAudio();
+    const toggle = first.root.querySelector<HTMLElement>('[role="switch"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(first.root.querySelector(".ssp-opt-text")).toBeNull();
+    first.root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(first.picking).resolves.toMatchObject({ audio: true });
+    await vi.waitFor(() => expect(document.querySelector('[role="switch"]')).toBeNull());
+
+    const second = await openWithAudio();
+    const off = second.root.querySelector<HTMLElement>('[role="switch"]')!;
+    off.click();
+    expect(off.getAttribute("aria-checked")).toBe("false");
+    second.root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(second.picking).resolves.toMatchObject({ audio: false });
+  });
+
+  it("toggles the share-audio switch with Space and Enter", async () => {
+    const { picking, root } = await openWithAudio();
+    const toggle = root.querySelector<HTMLElement>('[role="switch"]')!;
+    for (const [key, expected] of [
+      [" ", "false"],
+      ["Enter", "true"],
+    ] as const) {
+      toggle.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      expect(toggle.getAttribute("aria-checked")).toBe(expected);
+    }
+    toggle.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ audio: true });
   });
 
   it("asks only for the source when changing a live share's source", async () => {

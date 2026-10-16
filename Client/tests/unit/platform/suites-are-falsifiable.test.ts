@@ -456,6 +456,7 @@ describeNativeVoiceSuite(async () => {
     failsVideoCodecs: () => undefined,
     refusesCameraChange: () => undefined,
     refusesScreenChange: () => undefined,
+    refusesScreenAudio: () => undefined,
     startsMicTestAs: () => undefined,
     refusesMicTest: () => undefined,
     reportsStats: () => undefined,

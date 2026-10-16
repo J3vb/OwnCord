@@ -38,7 +38,7 @@ three Linux-only mic-test commands (`native_voice_start_mic_test`,
 (2026-10-16) added `native_voice_change_camera`, and WP LP-7c (2026-10-16)
 added `native_voice_video_codecs` and `native_voice_unpublish_screen`, and WP
 LP-8b (2026-10-16) added `native_voice_publish_screen_audio` and
-`native_voice_unpublish_screen_audio`, which the webview calls from LP-8c on. The
+`native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on. The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -89,7 +89,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
-| Distinct `invoke` command names called from `Client/src/`  | 81    |
+| Distinct `invoke` command names called from `Client/src/`  | 83    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 86    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
