@@ -89,8 +89,18 @@ describe("reduceSetMessagePinned", () => {
     expect(list(reduceSetMessagePinned(next, 1, 2, false))[1]?.pinned).toBe(false);
   });
 
-  it("returns prev by identity for an unloaded channel", () => {
-    expect(reduceSetMessagePinned(prev, 9, 2, true)).toBe(prev);
+  it("leaves the message lists untouched for an unloaded channel", () => {
+    const next = reduceSetMessagePinned(prev, 9, 2, true);
+    expect(next.messagesByChannel).toBe(prev.messagesByChannel);
+  });
+
+  it("bumps the channel's pin revision on every change, loaded or not", () => {
+    const first = reduceSetMessagePinned(prev, 1, 2, true);
+    expect(first.pinRevision?.get(1)).toBe(1);
+    expect(reduceSetMessagePinned(first, 1, 2, false).pinRevision?.get(1)).toBe(2);
+    const other = reduceSetMessagePinned(first, 9, 2, true);
+    expect(other.pinRevision?.get(9)).toBe(1);
+    expect(other.pinRevision?.get(1)).toBe(1);
   });
 });
 

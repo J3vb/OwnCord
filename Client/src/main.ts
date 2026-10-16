@@ -125,16 +125,28 @@ document.addEventListener("keydown", (e) => {
 // A file dropped where no composer listens must not navigate the webview.
 installFileDropGuard(new Disposable().signal);
 
-// Open external links (target="_blank") in the user's default browser.
+// Open external links (target="_blank") in the user's default browser. A
+// masked link ([text](url): the visible text is not the address) asks first,
+// through a dialog loaded only when one is clicked.
 document.addEventListener("click", (e) => {
   const link = (e.target as HTMLElement).closest("a[target='_blank']");
   if (link === null) return;
   e.preventDefault();
   const href = (link as HTMLAnchorElement).href;
   if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    desktop.urlOpener
-      .open(href)
-      .catch((err: unknown) => log.warn("external link open failed", err));
+    const open = (url: string): void => {
+      desktop.urlOpener
+        .open(url)
+        .catch((err: unknown) => log.warn("external link open failed", err));
+    };
+    if (!link.classList.contains("masked")) {
+      open(href);
+      return;
+    }
+    import("@components/MaskedLinkGuard").then(
+      (m) => m.guardMaskedLink(href, open),
+      (err: unknown) => log.warn("masked link warning failed to load", err),
+    );
   }
 });
 

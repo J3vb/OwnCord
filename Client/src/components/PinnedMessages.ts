@@ -10,6 +10,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { parseTimestamp } from "@lib/formatting";
 import { messagingText } from "../i18n/messaging";
 import { createAvatarElement } from "./message-list/avatar";
+import { renderMessageContent } from "./message-list/content-parser";
 
 export interface PinnedMessage {
   readonly id: number;
@@ -19,6 +20,9 @@ export interface PinnedMessage {
   readonly avatar: string | null;
   readonly timestamp: string;
   readonly avatarColor: string;
+  /** Server-resolved mentioned user ids; absent from an older server. */
+  readonly mentions?: readonly number[];
+  readonly mentionsEveryone?: boolean;
 }
 
 export interface PinnedMessagesOptions {
@@ -34,17 +38,24 @@ export interface PinnedMessagesOptions {
   readonly onClose: () => void;
 }
 
+/** The mounted panel, plus the handles the live controller drives. */
+export interface PinnedMessagesPanel extends MountableComponent {
+  destroy(): void;
+  /** Replace the list (a refetch after a pin change). */
+  setPins(pins: readonly PinnedMessage[]): void;
+  /** Drop one card in place and update the count; the empty state shows at zero. */
+  removePin(messageId: number): void;
+  /** Offer (a handler) or withdraw (undefined) Unpin as the viewer's permission changes. */
+  setOnUnpin(onUnpin: ((messageId: number) => void) | undefined): void;
+}
+
 function formatPinTime(iso: string): string {
   const d = parseTimestamp(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function renderPinnedItem(
-  msg: PinnedMessage,
-  options: PinnedMessagesOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
+function renderPinnedItem(msg: PinnedMessage, canUnpin: boolean): HTMLDivElement {
   const card = createElement("div", { class: "pinned-msg" });
   card.dataset.messageId = String(msg.id);
 
@@ -63,7 +74,15 @@ function renderPinnedItem(
   const timeEl = createElement("span", { class: "pinned-msg__time" }, formatPinTime(msg.timestamp));
   appendChildren(head, authorEl, timeEl);
 
-  const content = createElement("div", { class: "pinned-msg__content" }, msg.content);
+  // Rendered like the message list (markdown, mentions, emoji, spoilers); the
+  // card's CSS clamps it, so a long pin cannot outgrow the panel.
+  const content = createElement("div", { class: "pinned-msg__content" });
+  content.appendChild(
+    renderMessageContent(msg.content, {
+      ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
+      ...(msg.mentionsEveryone !== undefined ? { mentionsEveryone: msg.mentionsEveryone } : {}),
+    }),
+  );
   appendChildren(body, head, content);
   appendChildren(row, avatar, body);
 
@@ -72,26 +91,23 @@ function renderPinnedItem(
   // Icon-only buttons: title= only tooltips for mouse users, so mirror it as
   // an aria-label for screen readers.
   const jumpBtn = createElement("button", {
+    class: "pinned-msg__jump",
     title: messagingText("pins.jump"),
     "aria-label": messagingText("pins.jump"),
   });
   jumpBtn.appendChild(createIcon("external-link", 14));
-
-  jumpBtn.addEventListener("click", () => options.onJumpToMessage(msg.id), { signal });
   actions.appendChild(jumpBtn);
 
   // Unpin only when the viewer may act; a reader without MANAGE_MESSAGES (or
   // DM membership) gets a read-only panel instead of a button that always
   // fails (F1).
-  if (options.onUnpin !== undefined) {
-    const onUnpin = options.onUnpin;
+  if (canUnpin) {
     const unpinBtn = createElement("button", {
       class: "pinned-msg__unpin",
       title: messagingText("pins.unpin"),
       "aria-label": messagingText("pins.unpin"),
     });
     unpinBtn.appendChild(createIcon("x", 14));
-    unpinBtn.addEventListener("click", () => onUnpin(msg.id), { signal });
     actions.appendChild(unpinBtn);
   }
 
@@ -111,9 +127,39 @@ function renderEmptyState(): HTMLDivElement {
   return empty;
 }
 
-export function createPinnedMessages(options: PinnedMessagesOptions): MountableComponent {
+export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMessagesPanel {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  let list: HTMLDivElement | null = null;
+  let emptyEl: HTMLDivElement | null = null;
+  let countEl: HTMLSpanElement | null = null;
+  let pins: readonly PinnedMessage[] = options.pinnedMessages;
+  let onUnpin: ((messageId: number) => void) | undefined = options.onUnpin;
+
+  /** Rebuild the list (or swap in the empty state) and the count from `pins`. */
+  function renderBody(): void {
+    if (root === null || list === null || countEl === null) return;
+    countEl.textContent = String(pins.length);
+    if (pins.length === 0) {
+      list.remove();
+      list.textContent = "";
+      if (emptyEl === null) {
+        emptyEl = renderEmptyState();
+        root.appendChild(emptyEl);
+      }
+      return;
+    }
+    if (emptyEl !== null) {
+      emptyEl.remove();
+      emptyEl = null;
+    }
+    list.textContent = "";
+    const canUnpin = onUnpin !== undefined;
+    for (const msg of pins) {
+      list.appendChild(renderPinnedItem(msg, canUnpin));
+    }
+    if (list.parentElement === null) root.appendChild(list);
+  }
 
   function mount(container: Element): void {
     // A side panel, not a modal: complementary landmark (no aria-modal, no
@@ -131,8 +177,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     title.appendChild(createIcon("pin", 16));
     title.appendChild(document.createTextNode(messagingText("pins.title")));
 
-    const count = createElement("span", { class: "pinned-panel__count" });
-    count.textContent = String(options.pinnedMessages.length);
+    countEl = createElement("span", { class: "pinned-panel__count" });
 
     const closeBtn = createElement("button", {
       class: "pinned-panel__close",
@@ -144,20 +189,27 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     const titleGroup = createElement("div", {
       class: "pinned-panel__title-group",
     });
-    appendChildren(titleGroup, title, count);
+    appendChildren(titleGroup, title, countEl);
     appendChildren(header, titleGroup, closeBtn);
 
-    // Body — list or empty state
-    if (options.pinnedMessages.length === 0) {
-      const empty = renderEmptyState();
-      appendChildren(root, header, empty);
-    } else {
-      const list = createElement("div", { class: "pinned-panel__list" });
-      for (const msg of options.pinnedMessages) {
-        list.appendChild(renderPinnedItem(msg, options, disposable.signal));
-      }
-      appendChildren(root, header, list);
-    }
+    // Body — list or empty state. One delegated listener serves every card, so
+    // re-rendering the list never stacks listeners.
+    list = createElement("div", { class: "pinned-panel__list" });
+    list.addEventListener(
+      "click",
+      (e) => {
+        if (!(e.target instanceof Element)) return;
+        const button = e.target.closest("button");
+        const card = button?.closest<HTMLElement>(".pinned-msg");
+        const id = Number(card?.dataset.messageId);
+        if (button === null || button === undefined || Number.isNaN(id)) return;
+        if (button.classList.contains("pinned-msg__jump")) options.onJumpToMessage(id);
+        else if (button.classList.contains("pinned-msg__unpin")) onUnpin?.(id);
+      },
+      { signal: disposable.signal },
+    );
+    root.appendChild(header);
+    renderBody();
 
     container.appendChild(root);
   }
@@ -168,7 +220,26 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
       root.remove();
       root = null;
     }
+    list = null;
+    emptyEl = null;
+    countEl = null;
   }
 
-  return { mount, destroy };
+  return {
+    mount,
+    destroy,
+    setPins(next) {
+      pins = next;
+      renderBody();
+    },
+    removePin(messageId) {
+      pins = pins.filter((p) => p.id !== messageId);
+      renderBody();
+    },
+    setOnUnpin(next) {
+      if (next === onUnpin) return;
+      onUnpin = next;
+      renderBody();
+    },
+  };
 }

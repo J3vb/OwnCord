@@ -1720,7 +1720,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         // Read the set at open time, not at mount: an emoji_update while the
         // composer is alive must be in the next picker the user opens.
         customEmoji: listCustomEmoji(),
-        onSelect: (emoji: string) => {
+        onSelect: (emoji: string, select) => {
+          const keepOpen = select?.keepOpen === true;
           if (textarea !== null) {
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
@@ -1728,9 +1729,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             const after = textarea.value.slice(end);
             textarea.value = before + emoji + after;
             textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
-            textarea.focus();
+            // Shift-pick keeps focus in the picker so the next pick lands at
+            // the caret just advanced.
+            if (!keepOpen) textarea.focus();
           }
-          closeEmojiPicker();
+          if (!keepOpen) closeEmojiPicker();
         },
         onClose: () => {
           closeEmojiPicker();

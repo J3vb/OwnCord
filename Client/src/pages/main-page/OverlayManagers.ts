@@ -6,6 +6,7 @@
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
+import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
@@ -16,7 +17,8 @@ import type { PinnedMessage } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
-import { setMessagePinned } from "@stores/messages.store";
+import { messagesStore, setMessagePinned } from "@stores/messages.store";
+import { membersStore } from "@stores/members.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
@@ -25,6 +27,9 @@ import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/dialogOpen";
 
 const log = createLogger("overlays");
+
+/** Quiet period before an open pinned panel refetches after a pin change. */
+const PIN_REFETCH_DEBOUNCE_MS = 250;
 
 // ---------------------------------------------------------------------------
 // Invite response mapping
@@ -96,6 +101,8 @@ export function mapToPinnedMessage(msg: {
   readonly content: string;
   readonly created_at?: string;
   readonly timestamp?: string;
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
 }): PinnedMessage {
   const author = resolveAuthor(msg.user);
   return {
@@ -107,6 +114,8 @@ export function mapToPinnedMessage(msg: {
     // Hashed from the raw username (not the resolved display name) so the hue
     // stays stable across renames — matches every other avatar-color surface.
     avatarColor: pickPinAvatarColor(msg.user.username),
+    ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
+    ...(msg.mentions_everyone !== undefined ? { mentionsEveryone: msg.mentions_everyone } : {}),
   };
 }
 
@@ -356,36 +365,80 @@ export function createPinnedPanelController(opts: {
     load: () => opts.api.getPins(channelId as number),
     build: (resp, _liveRoot, close) => {
       const id = channelId as number;
-      const pins = resp.messages.map(mapToPinnedMessage);
-      const mayUnpin = opts.canPin?.(id) === true;
-      return createPinnedMessages({
+      const live = new Disposable();
+      let refetchTicket = 0;
+      let mayUnpin = opts.canPin?.(id) === true;
+
+      const unpin = (msgId: number): void => {
+        void opts.api
+          .unpinMessage(id, msgId)
+          .then(() => {
+            // Update the row now rather than waiting for the server's
+            // chat_pinned broadcast, so it cannot still say "Unpin" after
+            // this panel closes; the card leaves the open panel in place.
+            setMessagePinned(id, msgId, false);
+            if (!live.signal.aborted) panel.removePin(msgId);
+          })
+          .catch((err: unknown) => {
+            log.error("Failed to unpin message", { msgId, error: String(err) });
+            showToast(shellText("pins.unpinFailed"), "error");
+          });
+      };
+
+      const panel = createPinnedMessages({
         channelId: id,
-        pinnedMessages: pins,
+        pinnedMessages: resp.messages.map(mapToPinnedMessage),
         onJumpToMessage: (msgId: number) => {
           opts.onJumpToMessage?.(id, msgId);
           close();
         },
-        ...(mayUnpin
-          ? {
-              onUnpin: (msgId: number) => {
-                void opts.api
-                  .unpinMessage(id, msgId)
-                  .then(() => {
-                    // Update the row now rather than waiting for the server's
-                    // chat_pinned broadcast, so it cannot still say "Unpin"
-                    // after this panel closes.
-                    setMessagePinned(id, msgId, false);
-                    close();
-                  })
-                  .catch((err: unknown) => {
-                    log.error("Failed to unpin message", { msgId, error: String(err) });
-                    showToast(shellText("pins.unpinFailed"), "error");
-                  });
-              },
-            }
-          : {}),
+        ...(mayUnpin ? { onUnpin: unpin } : {}),
         onClose: close,
       });
+
+      // The panel is a fetched snapshot, so a chat_pinned for this channel (it
+      // names only the message) refetches the list, trailing-debounced. A
+      // response landing after the panel closed is dropped.
+      const refetch = (): void => {
+        const ticket = ++refetchTicket;
+        setOwnedTimeout(
+          live.signal,
+          () => {
+            if (ticket !== refetchTicket) return;
+            opts.api.getPins(id).then(
+              (next) => {
+                if (live.signal.aborted || ticket !== refetchTicket) return;
+                panel.setPins(next.messages.map(mapToPinnedMessage));
+              },
+              (err: unknown) => {
+                log.warn("Failed to refresh pinned messages", { error: String(err) });
+              },
+            );
+          },
+          PIN_REFETCH_DEBOUNCE_MS,
+        );
+      };
+
+      // Unpin follows the viewer's live permission, not the one read at build.
+      const syncPermission = (): void => {
+        const next = opts.canPin?.(id) === true;
+        if (next === mayUnpin) return;
+        mayUnpin = next;
+        panel.setOnUnpin(next ? unpin : undefined);
+      };
+
+      return {
+        mount(container: Element): void {
+          panel.mount(container);
+          live.onStoreChange(messagesStore, (s) => s.pinRevision?.get(id) ?? 0, refetch);
+          live.onStoreChange(channelsStore, (s) => s.channels.get(id)?.canPin, syncPermission);
+          live.onStoreChange(membersStore, (s) => s.roleRevision ?? 0, syncPermission);
+        },
+        destroy(): void {
+          live.destroy();
+          panel.destroy();
+        },
+      };
     },
     errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
     errorToast: shellText("pins.loadFailed"),

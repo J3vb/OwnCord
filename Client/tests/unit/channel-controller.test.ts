@@ -1941,10 +1941,13 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
 
+      // Optimistic: the row flips before the request settles.
+      expect(mockSetMessagePinned).toHaveBeenCalledExactlyOnceWith(42, 5, true);
+
       await vi.waitFor(() => {
-        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, true);
         expect(opts.showToast).toHaveBeenCalledWith("Message pinned", "success");
       });
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
     });
 
     it("onPinClick unpins a message and shows toast", async () => {
@@ -1957,10 +1960,12 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onPinClick(5, 42, true);
 
+      expect(mockSetMessagePinned).toHaveBeenCalledExactlyOnceWith(42, 5, false);
+
       await vi.waitFor(() => {
-        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, false);
         expect(opts.showToast).toHaveBeenCalledWith("Message unpinned", "success");
       });
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
     });
 
     it("onPinClick shows error toast on failure", async () => {
@@ -1976,6 +1981,30 @@ describe("createChannelController", () => {
       await vi.waitFor(() => {
         expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
       });
+      // Flipped first, then reverted to the state it started in.
+      expect(mockSetMessagePinned.mock.calls).toEqual([
+        [42, 5, true],
+        [42, 5, false],
+      ]);
+    });
+
+    it("onPinClick failure on an unpin restores the pinned state", async () => {
+      const opts = makeOpts();
+      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi
+        .fn()
+        .mockRejectedValue(new Error("network error"));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, true);
+
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
+      });
+      expect(mockSetMessagePinned.mock.calls).toEqual([
+        [42, 5, false],
+        [42, 5, true],
+      ]);
     });
 
     it("onScrollTop does not load when channelAbort is null (after destroy)", () => {

@@ -99,6 +99,7 @@ describe("INITIAL_STATE", () => {
       "olderLoadFailed",
       "pendingReactions",
       "pendingSends",
+      "pinRevision",
     ]);
   });
 

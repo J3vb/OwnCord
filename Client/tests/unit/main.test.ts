@@ -1666,3 +1666,60 @@ describe("main.ts pending-approval notice (DP-54)", () => {
     expect(page.showError).not.toHaveBeenCalled();
   });
 });
+
+describe("main.ts external links (C16)", () => {
+  async function clickLink(attrs: { href: string; masked: boolean }): Promise<void> {
+    const a = document.createElement("a");
+    a.href = attrs.href;
+    a.target = "_blank";
+    a.className = attrs.masked ? "msg-link masked" : "msg-link";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // The masked-link dialog is a lazy chunk; wait for it to load and run.
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(10);
+  }
+
+  afterEach(() => {
+    // Close through the modal's own Escape path so its document listener goes too.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.querySelectorAll('[data-testid="masked-link-dialog"]').forEach((el) => el.remove());
+  });
+
+  it("opens a plain link directly, with no dialog", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    vi.mocked(openUrl).mockClear();
+
+    await clickLink({ href: "https://example.com/a", masked: false });
+
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://example.com/a");
+    expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
+  });
+
+  it("holds a masked link behind the dialog until Go to site", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    vi.mocked(openUrl).mockClear();
+
+    await clickLink({ href: "https://masked.example/p", masked: true });
+
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="masked-link-url"]')?.textContent).toBe(
+      "https://masked.example/p",
+    );
+    document.querySelector<HTMLButtonElement>('[data-testid="masked-link-go"]')!.click();
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://masked.example/p");
+  });
+
+  it("opens a masked link to a trusted domain without the dialog", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    const { trustDomain } = await import("@lib/trustedDomains");
+    vi.mocked(openUrl).mockClear();
+    trustDomain("trusted.example");
+
+    await clickLink({ href: "https://trusted.example/x", masked: true });
+
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://trusted.example/x");
+    expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
+  });
+});

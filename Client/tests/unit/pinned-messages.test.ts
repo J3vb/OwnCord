@@ -262,4 +262,65 @@ describe("PinnedMessages", () => {
     panel.destroy?.();
     expect(container.querySelector(".pinned-panel")).toBeNull();
   });
+
+  it("renders message content as markdown, not plain text", () => {
+    const { panel } = makePanel({
+      pinnedMessages: [{ ...samplePins[0]!, content: "**bold** and `code`" }],
+    });
+    const content = container.querySelector(".pinned-msg__content")!;
+    expect(content.querySelector("strong")?.textContent).toBe("bold");
+    expect(content.querySelector("code")?.textContent).toBe("code");
+    expect(content.textContent).not.toContain("**");
+    panel.destroy?.();
+  });
+
+  it("removePin drops one card in place and updates the count", () => {
+    const { panel } = makePanel();
+    panel.removePin(2);
+    const ids = [...container.querySelectorAll<HTMLElement>(".pinned-msg")].map(
+      (el) => el.dataset.messageId,
+    );
+    expect(ids).toEqual(["1", "3"]);
+    expect(container.querySelector(".pinned-panel__count")?.textContent).toBe("2");
+    panel.destroy?.();
+  });
+
+  it("removing the last pin shows the empty state, and setPins brings the list back", () => {
+    const { panel } = makePanel({ pinnedMessages: [samplePins[0]!] });
+    panel.removePin(1);
+    expect(container.querySelector(".pinned-msg")).toBeNull();
+    expect(container.querySelector(".pinned-panel__empty")).not.toBeNull();
+    expect(container.querySelector(".pinned-panel__count")?.textContent).toBe("0");
+
+    panel.setPins(samplePins);
+    expect(container.querySelector(".pinned-panel__empty")).toBeNull();
+    expect(container.querySelectorAll(".pinned-msg").length).toBe(3);
+    expect(container.querySelector(".pinned-panel__count")?.textContent).toBe("3");
+    panel.destroy?.();
+  });
+
+  it("jump and unpin still reach their handlers after a re-render", () => {
+    const onUnpin = vi.fn();
+    const onJumpToMessage = vi.fn();
+    const { panel } = makePanel({ onUnpin, onJumpToMessage });
+    panel.removePin(1);
+    container.querySelector<HTMLButtonElement>('[data-message-id="2"] .pinned-msg__unpin')!.click();
+    container.querySelector<HTMLButtonElement>('[data-message-id="3"] .pinned-msg__jump')!.click();
+    expect(onUnpin).toHaveBeenCalledExactlyOnceWith(2);
+    expect(onJumpToMessage).toHaveBeenCalledExactlyOnceWith(3);
+    panel.destroy?.();
+  });
+
+  it("setOnUnpin withdraws and restores the Unpin buttons live", () => {
+    const onUnpin = vi.fn();
+    const { panel } = makePanel({ onUnpin });
+    expect(container.querySelectorAll(".pinned-msg__unpin").length).toBe(3);
+
+    panel.setOnUnpin(undefined);
+    expect(container.querySelectorAll(".pinned-msg__unpin").length).toBe(0);
+
+    panel.setOnUnpin(onUnpin);
+    expect(container.querySelectorAll(".pinned-msg__unpin").length).toBe(3);
+    panel.destroy?.();
+  });
 });

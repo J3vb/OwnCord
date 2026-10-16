@@ -127,8 +127,11 @@ export function reduceSetMessagePinned(
   messageId: number,
   pinned: boolean,
 ): MessagesState {
+  const pinRevision = new Map(prev.pinRevision);
+  pinRevision.set(channelId, (pinRevision.get(channelId) ?? 0) + 1);
+
   const channelMessages = prev.messagesByChannel.get(channelId);
-  if (!channelMessages) return prev;
+  if (!channelMessages) return { ...prev, pinRevision };
 
   const updatedList = channelMessages.map((msg) =>
     msg.id === messageId ? { ...msg, pinned } : msg,
@@ -136,5 +139,5 @@ export function reduceSetMessagePinned(
 
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(channelId, updatedList);
-  return { ...prev, messagesByChannel: updatedMessages };
+  return { ...prev, messagesByChannel: updatedMessages, pinRevision };
 }

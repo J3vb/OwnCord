@@ -87,6 +87,11 @@ and only when it changes something a contributor or fork holder must do
 - Three people typing are now named ("Ana, Ben, and Cy are typing..."), with the names in bold. Four or more still read "Several people are typing...".
 - The delete confirmation now shows who wrote the message and the start of its text, and tells you that holding Shift when you click Delete skips the question.
 - A channel with slow mode now says so under the message box, with the interval ("Slow mode is on: one message every 5s"), before you send anything. Moderators, who are not limited, do not see it.
+- The pinned messages panel now shows each pin as formatted text (bold, links, mentions, emoji) instead of raw characters, stays open when you unpin a message (the card just leaves the list), and follows pins and unpins made by anyone while it is open. Unpin appears or disappears as your permission changes.
+- Pinning or unpinning a message from its menu now updates the message straight away, and puts it back if the server refuses.
+- A link whose text hides its address (`[text](address)`) now asks before leaving OwnCord, showing the full address; tick "Trust this site's links from now on" to skip the question for that site. Plain links open as before.
+- Links from `m.youtube.com`, `music.youtube.com`, `youtube-nocookie.com` and YouTube `/live/` addresses now get a video player in chat, like other YouTube links.
+- Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
 
 **Voice and video**
 

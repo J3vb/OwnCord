@@ -239,6 +239,34 @@ describe("media.ts", () => {
     it("returns null for youtube.com with non-watch path", () => {
       expect(extractYouTubeId("https://www.youtube.com/channel/abc")).toBeNull();
     });
+
+    it.each([
+      ["m.youtube.com watch", "https://m.youtube.com/watch?v=mob1"],
+      ["music.youtube.com watch", "https://music.youtube.com/watch?v=mob1"],
+      ["youtube.com /live/ID", "https://www.youtube.com/live/mob1"],
+      ["no-www /live/ID", "https://youtube.com/live/mob1"],
+      ["m.youtube.com /shorts/ID", "https://m.youtube.com/shorts/mob1"],
+      ["youtube-nocookie.com watch", "https://www.youtube-nocookie.com/watch?v=mob1"],
+      ["youtube-nocookie.com /embed/ID", "https://www.youtube-nocookie.com/embed/mob1"],
+      ["bare youtube-nocookie.com /embed/ID", "https://youtube-nocookie.com/embed/mob1"],
+    ])("extracts the ID from %s", (_label, url) => {
+      expect(extractYouTubeId(url)).toBe("mob1");
+    });
+
+    it.each([
+      "https://www.youtube.com/watch?v=mob1&t=90s",
+      "https://youtu.be/mob1?t=90",
+      "https://www.youtube.com/embed/mob1?start=90",
+      "https://www.youtube.com/live/mob1?t=1h2m",
+    ])("keeps the ID clean when %s carries a time offset", (url) => {
+      expect(extractYouTubeId(url)).toBe("mob1");
+    });
+
+    it("returns null for an empty /live/ ID and for other hosts using the same paths", () => {
+      expect(extractYouTubeId("https://www.youtube.com/live/")).toBeNull();
+      expect(extractYouTubeId("https://example.com/live/mob1")).toBeNull();
+      expect(extractYouTubeId("https://music.example.com/watch?v=mob1")).toBeNull();
+    });
   });
 
   // =========================================================================
