@@ -218,6 +218,8 @@ export const shards = {
     "src/stores/dm.store.ts",
     "src/features/messaging/messageModel.ts",
     "src/features/messaging/echoReconcile.ts",
+    "src/features/messaging/markdownMarkers.ts",
+    "src/features/messaging/messageLimits.ts",
     "src/features/messaging/liveMessages.ts",
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionState.ts",
