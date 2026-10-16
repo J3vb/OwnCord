@@ -99,7 +99,7 @@ describe("TypingIndicator", () => {
     expect(bar.textContent).toContain("alice and bob are typing...");
   });
 
-  it('shows "Several people are typing..." for 3+ users', () => {
+  it("names all three typers, each in bold", () => {
     comp = createTypingIndicator({ channelId: 1, currentUserId: 100 });
     comp.mount(container);
 
@@ -110,7 +110,39 @@ describe("TypingIndicator", () => {
     ]);
 
     const bar = container.querySelector(".typing-bar") as HTMLDivElement;
+    expect(bar.textContent).toContain("alice, bob, and charlie are typing...");
+    expect([...bar.querySelectorAll("strong")].map((n) => n.textContent)).toEqual([
+      "alice",
+      "bob",
+      "charlie",
+    ]);
+  });
+
+  it('shows "Several people are typing..." for 4+ users', () => {
+    comp = createTypingIndicator({ channelId: 1, currentUserId: 100 });
+    comp.mount(container);
+
+    setTypingUsers([
+      { id: 1, username: "alice" },
+      { id: 2, username: "bob" },
+      { id: 3, username: "charlie" },
+      { id: 4, username: "dana" },
+    ]);
+
+    const bar = container.querySelector(".typing-bar") as HTMLDivElement;
     expect(bar.textContent).toContain("Several people are typing...");
+    expect(bar.querySelector("strong")).toBeNull();
+  });
+
+  it("sets a name containing markup as text, never as HTML", () => {
+    comp = createTypingIndicator({ channelId: 1, currentUserId: 100 });
+    comp.mount(container);
+
+    setTypingUsers([{ id: 1, username: "<img src=x>" }]);
+
+    const bar = container.querySelector(".typing-bar") as HTMLDivElement;
+    expect(bar.querySelector("img")).toBeNull();
+    expect(bar.querySelector("strong")?.textContent).toBe("<img src=x>");
   });
 
   it("filters out current user from typing list", () => {

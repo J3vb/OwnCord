@@ -161,6 +161,12 @@ export type MessageInputComponent = MountableComponent & {
    */
   setSendGate(reason: string | null): void;
   /**
+   * Show a persistent note under the composer (slow mode is on), or hide it
+   * with null. Unlike setSendGate it never refuses a send: it only tells the
+   * user about the limit before the first message.
+   */
+  setSlowModeNote(text: string | null): void;
+  /**
    * Open the attachment file picker, as the "+" button does. Backs the
    * Ctrl+Shift+U shortcut. No-op while the composer is disabled or when the host
    * didn't wire an upload handler.
@@ -378,6 +384,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
    *  reused node, not a fresh one per call. */
   let uploadErrorEl: HTMLDivElement | null = null;
+  let slowModeNote: string | null = null;
+  let slowModeNoteEl: HTMLDivElement | null = null;
   let charCounter: HTMLSpanElement | null = null;
   const uploadErrorId = `composer-refusal-${++nextComposerId}`;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
@@ -861,6 +869,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     sendGateReason = reason;
     applyDisabledState();
+  }
+
+  function setSlowModeNote(text: string | null): void {
+    slowModeNote = text;
+    applySlowModeNote();
+  }
+
+  function applySlowModeNote(): void {
+    if (slowModeNoteEl === null) return;
+    slowModeNoteEl.hidden = slowModeNote === null;
+    slowModeNoteEl.textContent = slowModeNote ?? "";
   }
 
   function handleSend(): void {
@@ -1830,7 +1849,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     });
     charCounter.hidden = true;
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, charCounter, sendBtn);
-    appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
+    slowModeNoteEl = createElement("div", {
+      class: "composer-slow-note",
+      "data-testid": "slow-mode-note",
+    });
+    appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
+    applySlowModeNote();
     container.appendChild(root);
     // Apply any initial disabled reason before focusing.
     applyDisabledState();
@@ -1858,6 +1882,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
     pendingAttachments.length = 0;
+    slowModeNoteEl = null;
     root?.remove();
     root = null;
     textarea = null;
@@ -2033,6 +2058,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     isIdle,
     setDisabled,
     setSendGate,
+    setSlowModeNote,
     openFilePicker,
     togglePicker,
     getDraft,

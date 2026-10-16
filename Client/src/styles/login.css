@@ -1152,6 +1152,31 @@
 .modal-danger-text strong {
   color: var(--header-primary);
 }
+.msg-delete-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+.msg-delete-preview-author {
+  color: var(--header-primary);
+  font-weight: 600;
+}
+.msg-delete-preview-text {
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+.msg-delete-tip {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
 .btn-danger {
   padding: 8px 20px;
   border-radius: var(--radius-sm);

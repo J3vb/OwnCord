@@ -92,6 +92,7 @@ export function describeNativeVoiceSuite(
       await ctx.subject.setVoiceGate(7, 0.05);
       await ctx.subject.setVoiceGate(7, 0.01, true);
       await ctx.subject.setInputGain(7, 150);
+      await ctx.subject.setAudioProcessing(7, audio);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
       await ctx.subject.setVideoView(7, "user-9", "TR_2", true, "low");
       await ctx.subject.setVolume(7, "user-9", 0.5);
@@ -104,6 +105,7 @@ export function describeNativeVoiceSuite(
         ["native_voice_set_voice_gate", { session: 7, threshold: 0.05 }],
         ["native_voice_set_voice_gate", { session: 7, threshold: 0.01, retune: true }],
         ["native_voice_set_input_gain", { session: 7, percent: 150 }],
+        ["native_voice_set_audio_processing", { session: 7, audio }],
         [
           "native_voice_set_subscribed",
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },

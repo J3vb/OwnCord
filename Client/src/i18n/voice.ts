@@ -56,7 +56,6 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.shareVideoLimit": "This channel has reached its video limit",
   "widget.control.disconnect": "Disconnect",
   "widget.control.noiseSuppression": "Enhanced Noise Suppression",
-  "widget.control.nextJoin": "Enhanced Noise Suppression (applies the next time you join)",
   "widget.grantMic": "Grant Microphone",
   "widget.grantMicLabel": "Grant microphone permission",
   "widget.requesting": "Requesting...",

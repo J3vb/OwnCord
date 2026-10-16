@@ -55,6 +55,24 @@
   color: var(--text-muted);
   pointer-events: none;
 }
+/* Older-page failure: a small banner over the top of the history. */
+.messages-older-failed {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+}
+.messages-older-failed[hidden] {
+  display: none;
+}
 .messages-loading .spinner {
   width: 24px;
   height: 24px;

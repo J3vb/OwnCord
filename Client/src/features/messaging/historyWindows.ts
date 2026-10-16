@@ -44,6 +44,21 @@ export function reduceSetChannelLoading(prev: MessagesState, channelId: number):
   return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
 }
 
+/** setOlderLoadFailed's reducer. Returns `prev` itself when nothing changes, so
+ *  clearing an unset flag wakes no subscriber. */
+export function reduceSetOlderLoadFailed(
+  prev: MessagesState,
+  channelId: number,
+  failed: boolean,
+): MessagesState {
+  const current = prev.olderLoadFailed ?? new Set<number>();
+  if (current.has(channelId) === failed) return prev;
+  const next = new Set(current);
+  if (failed) next.add(channelId);
+  else next.delete(channelId);
+  return { ...prev, olderLoadFailed: next };
+}
+
 /** setChannelLoadError's reducer. Rows the failed fetch did not reconcile may
  *  end short of the live tail, so a window that has any is detached: live
  *  broadcasts stop appending across the gap and "Jump to Present" refetches. */

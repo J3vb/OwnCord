@@ -343,7 +343,7 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
 
 /// Microphone audio processing, from the same preferences the web path feeds
 /// `audioCaptureDefaults`, plus its Enhanced Noise Suppression (RNNoise).
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOptions {
     pub echo_cancellation: bool,
@@ -351,6 +351,52 @@ pub struct AudioOptions {
     pub auto_gain_control: bool,
     #[serde(default)]
     pub enhanced_noise_suppression: bool,
+}
+
+/// Keep `old` until nothing but this list holds it. A lagging audio
+/// callback can still hold an older generation after a second rebuild, so
+/// drop only the entries every follower has let go of, here on the caller's
+/// thread.
+fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+    retired.retain(|r| Arc::strong_count(r) > 1);
+    retired.extend(old);
+}
+
+/// What a request to change the audio processing asks of a session.
+#[derive(Debug, PartialEq, Eq)]
+enum ProcessingChange {
+    /// Audio is not enabled yet: only remember the options.
+    Remember,
+    /// The options are what the running processing already has.
+    Unchanged,
+    /// Only Enhanced Noise Suppression changed: RNNoise runs outside
+    /// libwebrtc, so keep the processing (and the echo canceller's
+    /// adaptation) and only switch the denoiser.
+    Reroute,
+    /// Build the processing again (libwebrtc's flags are fixed at
+    /// construction) and swap it in.
+    Rebuild,
+}
+
+fn processing_change(
+    enabled: bool,
+    current: Option<AudioOptions>,
+    next: AudioOptions,
+) -> ProcessingChange {
+    if !enabled {
+        ProcessingChange::Remember
+    } else if current == Some(next) {
+        ProcessingChange::Unchanged
+    } else if current.is_some_and(|c| {
+        AudioOptions {
+            enhanced_noise_suppression: next.enhanced_noise_suppression,
+            ..c
+        } == next
+    }) {
+        ProcessingChange::Reroute
+    } else {
+        ProcessingChange::Rebuild
+    }
 }
 
 /// Rust-side resource counts for the facade's debug surface (B7-11: the
@@ -587,6 +633,13 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     /// Set by `enable_audio`: the processing capture and playout share.
     apm: Option<Arc<Apm>>,
+    /// The options `apm` was built from, or the latest asked for before
+    /// `enable_audio` ran.
+    audio: Option<AudioOptions>,
+    /// Processing that rebuilds replaced, each kept until the capture and
+    /// playout have both moved past it, so its last reference is never
+    /// dropped on an audio thread.
+    retired: Vec<Arc<Apm>>,
     /// The published microphone track — not its publication: a full
     /// reconnect republishes the same track under a new publication and
     /// detaches the old one, so muting through a stored publication would
@@ -703,6 +756,8 @@ impl NativeSession {
             room,
             key_provider,
             apm: None,
+            retired: Vec::new(),
+            audio: None,
             mic: None,
             mic_source: None,
             mic_withdrawn,
@@ -774,6 +829,9 @@ impl NativeSession {
         if self.apm.is_some() {
             return;
         }
+        // Options asked for before this ran win over the connect-time ones.
+        let opts = self.audio.unwrap_or(opts);
+        self.audio = Some(opts);
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
         let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
@@ -787,6 +845,34 @@ impl NativeSession {
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
+        }
+    }
+
+    /// Apply new audio processing options in a running call: libwebrtc's
+    /// processing takes its flags at construction, so build a new one and
+    /// hand it to both the capture (forward stream) and the playout (the
+    /// echo canceller's reverse stream). Both follow it on a later audio
+    /// frame, whether or not the microphone is unmuted. Before
+    /// `enable_audio` the options are only remembered.
+    pub fn set_audio_processing(&mut self, audio: AudioOptions) {
+        match processing_change(self.apm.is_some(), self.audio, audio) {
+            ProcessingChange::Unchanged => {}
+            ProcessingChange::Remember => self.audio = Some(audio),
+            ProcessingChange::Reroute => {
+                if let Some(apm) = &self.apm {
+                    self.capture
+                        .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                }
+                self.audio = Some(audio);
+            }
+            ProcessingChange::Rebuild => {
+                let apm = Apm::new(&audio);
+                self.playout.set_reference(apm.clone());
+                self.capture
+                    .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                retire(&mut self.retired, self.apm.replace(apm));
+                self.audio = Some(audio);
+            }
         }
     }
 
@@ -1472,6 +1558,19 @@ mod tests {
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
     use livekit_protocol as proto;
 
+    #[test]
+    fn retire_keeps_every_generation_a_follower_still_holds() {
+        let mut retired = Vec::new();
+        let first = Arc::new(1);
+        let held_by_lagging_callback = first.clone();
+        retire(&mut retired, Some(first));
+        retire(&mut retired, Some(Arc::new(2)));
+        assert_eq!(retired.len(), 2, "the first generation is still held");
+        drop(held_by_lagging_callback);
+        retire(&mut retired, None);
+        assert!(retired.is_empty(), "unheld generations are freed here");
+    }
+
     fn permission(
         can_publish: bool,
         sources: &[proto::TrackSource],
@@ -1854,5 +1953,47 @@ mod tests {
     #[test]
     fn process_threads_reads_procfs() {
         assert!(process_threads() >= 1);
+    }
+
+    fn audio(ec: bool, enhanced: bool) -> AudioOptions {
+        AudioOptions {
+            echo_cancellation: ec,
+            noise_suppression: true,
+            auto_gain_control: true,
+            enhanced_noise_suppression: enhanced,
+        }
+    }
+
+    /// A toggle that changes nothing must not replace the processing (and
+    /// reset the echo canceller's adaptation); an Enhanced Noise Suppression
+    /// change only switches the denoiser; any other change rebuilds it, and
+    /// before audio is enabled it is only remembered.
+    #[test]
+    fn set_audio_processing_rebuilds_only_on_a_change() {
+        let on = audio(true, false);
+        assert_eq!(
+            processing_change(true, Some(on), on),
+            ProcessingChange::Unchanged
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, false)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(true, true)),
+            ProcessingChange::Reroute
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, true)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(false, None, on),
+            ProcessingChange::Remember
+        );
+        assert_eq!(
+            processing_change(false, Some(on), audio(false, false)),
+            ProcessingChange::Remember
+        );
     }
 }

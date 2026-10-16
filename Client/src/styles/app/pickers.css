@@ -122,6 +122,25 @@
   color: var(--text-faint);
   font-size: var(--font-size-sm);
 }
+.ep-load-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.ep-retry {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.ep-retry:hover {
+  background: var(--bg-hover);
+}
 .ep-categories {
   display: flex;
   align-items: center;
