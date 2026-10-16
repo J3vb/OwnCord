@@ -36,7 +36,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"DispatchV2: hardware fault, exiting for supervisor restart":                                              "dispatchv2_hardware_fault_exiting",
 	"EmitEvents: unknown event type":                                                                          "emitevents_unknown_event_type",
 	"ModerationService: RefreshTimeouts":                                                                      "moderationservice_refreshtimeouts",
-	"mark_read: PresenceDeps has no MessageSvc, using the pre-pointer path (no read_state frame)":             "mark_read_no_message_service",
 	"boot: load active timeouts":                                                                              "boot_load_active_timeouts",
 	"FinalizeTimeoutLift: HasActiveTimeout":                                                                   "finalizetimeoutlift_hasactivetimeout",
 	"LeaveVoiceChannelIfMatch exhausted retries — ghost state may persist":                                    "voice_cleanup_exhausted",

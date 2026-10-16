@@ -162,7 +162,7 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return Result{SetChannelID: &chID, Events: []Event{channelReadEvt(info.UserID, chID, readThroughNoted)}}
 }
 
-// markReadNoMessageSvcWarn limits the no-MessageSvc warning to one line.
+// markReadNoMessageSvcWarn limits the no-MessageSvc notice to one line.
 var markReadNoMessageSvcWarn sync.Once
 
 // handleMarkReadV2 is the V2 handler for mark_read messages. It runs the same
@@ -191,7 +191,7 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		// fixtures build PresenceDeps without it, so keep the pre-pointer
 		// path and say so once.
 		markReadNoMessageSvcWarn.Do(func() {
-			slog.Warn("mark_read: PresenceDeps has no MessageSvc, using the pre-pointer path (no read_state frame)")
+			slog.Info("mark_read: PresenceDeps has no MessageSvc, using the pre-pointer path (no read_state frame)")
 		})
 		_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, markCmd.ChannelID)
 		if err != nil {
