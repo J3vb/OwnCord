@@ -11,7 +11,7 @@
 //! answer lists nothing (`None`), so it is skipped and the baseline is kept.
 
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle as Thread;
 use std::time::Duration;
 
@@ -43,8 +43,11 @@ pub(super) struct DevicesWatch {
 impl DevicesWatch {
     /// Take a baseline with `list` at once (emitting nothing), then poll every
     /// `every`. `list` returns `None` when the sound server did not answer; such
-    /// a tick is skipped and the baseline kept. A differing `Some` is passed to
-    /// `emit` and becomes the new baseline.
+    /// a tick is skipped and the baseline kept. A server that comes back is
+    /// often listed in stages (a partial list, a placeholder device first), so
+    /// after any `None` the next `Some` is only pending: it is compared and
+    /// emitted once a following tick returns the same lists. A differing,
+    /// settled `Some` is passed to `emit` and becomes the new baseline.
     pub(super) fn start(
         every: Duration,
         mut list: impl FnMut() -> Option<Devices> + Send + 'static,
@@ -53,12 +56,26 @@ impl DevicesWatch {
         let (stop, stopped) = mpsc::channel();
         let thread = std::thread::spawn(move || {
             let mut last = list();
+            let mut settling = last.is_none();
+            let mut pending: Option<Devices> = None;
             while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                let Some(now) = list() else { continue };
+                let Some(now) = list() else {
+                    settling = true;
+                    pending = None;
+                    continue;
+                };
+                if settling {
+                    if pending.as_ref() != Some(&now) {
+                        pending = Some(now);
+                        continue;
+                    }
+                    settling = false;
+                    pending = None;
+                }
                 match &last {
                     Some(prev) if !changed(prev, &now) => {}
                     // No baseline yet (the server was down at the start): the
-                    // first answer is the baseline, not a change.
+                    // first settled answer is the baseline, not a change.
                     None => last = Some(now),
                     Some(_) => {
                         emit(&now);
@@ -72,6 +89,11 @@ impl DevicesWatch {
             thread: Some(thread),
         }
     }
+
+    /// Whether the thread has ended on its own (it panicked).
+    fn is_dead(&self) -> bool {
+        self.thread.as_ref().is_some_and(Thread::is_finished)
+    }
 }
 
 impl Drop for DevicesWatch {
@@ -83,33 +105,48 @@ impl Drop for DevicesWatch {
     }
 }
 
-/// Fill `slot` with `make()` when it is empty; whether it did. Idempotent, so
-/// every webview load can ask.
+/// Fill `slot` with `make()` when it is empty, or when its thread has died;
+/// whether it did. Idempotent, so every webview load can ask.
 pub(super) fn ensure_watch(
     slot: &Mutex<Option<DevicesWatch>>,
     make: impl FnOnce() -> DevicesWatch,
 ) -> bool {
     let mut slot = lock(slot);
-    if slot.is_some() {
-        return false;
+    match slot.as_ref() {
+        Some(watch) if !watch.is_dead() => return false,
+        Some(_) => log::warn!("[native_voice] device watcher thread ended; restarting it"),
+        None => {}
     }
     *slot = Some(make());
     true
 }
 
+/// One tick's snapshot: `None` when the sound server did not answer (no
+/// default device) or listed nothing at all, which is a restart, not an unplug.
+fn snapshot(answered: bool, devices: impl FnOnce() -> Devices) -> Option<Devices> {
+    if !answered {
+        return None;
+    }
+    let devices = devices();
+    (!(devices.inputs.is_empty() && devices.outputs.is_empty())).then_some(devices)
+}
+
 /// The production lister: its own `WatchedHost`, which rebuilds a dead host and
 /// never settles on a lower backend, so a restarting server reads as `None`
 /// rather than as every device unplugged (`session::list_devices` builds a
-/// fresh default host that falls back to ALSA meanwhile).
+/// fresh default host that falls back to ALSA meanwhile). The host is built on
+/// the first call, inside the watcher thread, since connecting can block.
 pub(super) fn host_lister() -> impl FnMut() -> Option<Devices> + Send + 'static {
-    let host = WatchedHost::new();
+    let mut host: Option<Arc<WatchedHost>> = None;
     move || {
-        host.default_id(cpal::Host::default_output_device)?;
-        let devices = host.with(|h| Devices {
-            inputs: input_devices(h).into_iter().map(|(i, _)| i).collect(),
-            outputs: output_devices(h).into_iter().map(|(i, _)| i).collect(),
-        });
-        (!(devices.inputs.is_empty() && devices.outputs.is_empty())).then_some(devices)
+        let host = host.get_or_insert_with(WatchedHost::new);
+        let answered = host.default_id(cpal::Host::default_output_device).is_some();
+        snapshot(answered, || {
+            host.with(|h| Devices {
+                inputs: input_devices(h).into_iter().map(|(i, _)| i).collect(),
+                outputs: output_devices(h).into_iter().map(|(i, _)| i).collect(),
+            })
+        })
     }
 }
 
@@ -117,7 +154,6 @@ pub(super) fn host_lister() -> impl FnMut() -> Option<Devices> + Send + 'static 
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
 
     use super::super::session::DeviceInfo;
 
@@ -196,20 +232,100 @@ mod tests {
         let (_watch, source, events) = watch(Some(before.clone()));
         *lock(&source) = None;
         assert!(events.recv_timeout(QUIET).is_err(), "no answer");
-        // The production lister maps empty lists to `None`, so a restart that
-        // lists nothing reaches the loop as no answer too.
-        assert!(events.recv_timeout(QUIET).is_err());
         *lock(&source) = Some(before);
         assert!(events.recv_timeout(QUIET).is_err(), "same lists again");
     }
 
+    /// Run a watch over `script` (one answer per call, the last repeating) and
+    /// return what it emitted once the script is spent and the thread joined.
+    fn run_script(script: Vec<Option<Devices>>) -> Vec<Devices> {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let total = script.len();
+        let (sent, events) = mpsc::channel();
+        let watch = DevicesWatch::start(
+            TICK,
+            move || {
+                let i = counted.fetch_add(1, Ordering::Relaxed);
+                script[i.min(total - 1)].clone()
+            },
+            move |d| sent.send(d.clone()).unwrap(),
+        );
+        while calls.load(Ordering::Relaxed) < total + 3 {
+            std::thread::sleep(TICK);
+        }
+        drop(watch);
+        events.try_iter().collect()
+    }
+
     #[test]
     fn a_server_down_at_the_start_leaves_the_first_answer_as_the_baseline() {
-        let (_watch, source, events) = watch(None);
-        *lock(&source) = Some(lists(&["speakers"]));
-        assert!(events.recv_timeout(QUIET).is_err());
-        *lock(&source) = Some(lists(&["usb"]));
-        events.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (x, y) = (lists(&["speakers"]), lists(&["usb"]));
+        let emitted = run_script(vec![
+            None,
+            Some(x.clone()),
+            Some(x),
+            Some(y.clone()),
+            Some(y.clone()),
+        ]);
+        assert_eq!(emitted, vec![y]);
+    }
+
+    #[test]
+    fn a_server_coming_back_in_stages_emits_only_the_settled_lists() {
+        let (base, partial, full) = (
+            lists(&["speakers"]),
+            lists(&["dummy"]),
+            lists(&["speakers", "usb"]),
+        );
+        let emitted = run_script(vec![
+            Some(base),
+            None,
+            Some(partial),
+            Some(full.clone()),
+            Some(full.clone()),
+        ]);
+        assert_eq!(emitted, vec![full]);
+    }
+
+    #[test]
+    fn a_server_back_with_the_baseline_lists_emits_nothing() {
+        let base = lists(&["speakers", "usb"]);
+        let emitted = run_script(vec![
+            Some(base.clone()),
+            None,
+            Some(lists(&["dummy"])),
+            Some(base.clone()),
+            Some(base),
+        ]);
+        assert!(emitted.is_empty());
+    }
+
+    #[test]
+    fn no_answer_or_two_empty_lists_is_no_snapshot() {
+        let listed = lists(&["speakers"]);
+        assert_eq!(snapshot(false, || listed.clone()), None);
+        assert_eq!(snapshot(true, Devices::default), None);
+        assert_eq!(snapshot(true, || listed.clone()), Some(listed));
+        let outputs_only = Devices {
+            inputs: vec![],
+            outputs: vec![dev("speakers", 0)],
+        };
+        assert_eq!(snapshot(true, || outputs_only.clone()), Some(outputs_only));
+    }
+
+    #[test]
+    fn a_dead_watcher_thread_is_replaced() {
+        let slot = Mutex::new(None);
+        let dying = || DevicesWatch::start(TICK, || panic!("lister failed"), |_| {});
+        assert!(ensure_watch(&slot, dying));
+        while !lock(&slot).as_ref().unwrap().is_dead() {
+            std::thread::sleep(TICK);
+        }
+        let live = || DevicesWatch::start(Duration::from_secs(60), || None, |_| {});
+        assert!(ensure_watch(&slot, live));
+        assert!(!lock(&slot).as_ref().unwrap().is_dead());
+        assert!(!ensure_watch(&slot, live));
     }
 
     #[test]
