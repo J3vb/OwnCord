@@ -103,7 +103,7 @@ Supporting pieces:
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
   `src/lib/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
-  Linux native always publishes VP8), `src/features/voice/codecSwitch.ts`
+  Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
   (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
   a peer that cannot decode it joins, and back once they leave),
   `src/lib/audioElements.ts` (per-user

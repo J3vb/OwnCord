@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   devices: { inputs: [], outputs: [] } as unknown,
   cameras: [] as unknown,
   support: { available: true, missing: [] } as unknown,
+  videoCodecs: { h264: false } as unknown,
+  videoCodecsFail: false,
   camera: { capture: 0, width: 0, height: 0 },
   preview: { width: 0, height: 0, frames: "" },
   cameraSid: "",
@@ -35,6 +37,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "native_voice_list_devices") return Promise.resolve(state.devices);
     if (cmd === "native_voice_list_cameras") return Promise.resolve(state.cameras);
     if (cmd === "native_voice_camera_support") return Promise.resolve(state.support);
+    if (cmd === "native_voice_video_codecs") {
+      const fail = state.videoCodecsFail;
+      state.videoCodecsFail = false;
+      return fail ? Promise.reject("no libwebrtc") : Promise.resolve(state.videoCodecs);
+    }
     if (cmd === "native_voice_start_camera") return Promise.resolve(state.camera);
     if (cmd === "native_voice_start_camera_preview") return Promise.resolve(state.preview);
     if (cmd === "native_voice_publish_camera") return Promise.resolve(state.cameraSid);
@@ -112,6 +119,12 @@ describeNativeVoiceSuite(async () => {
       },
       sharesScreenAs(sources, started, sid) {
         state.screen = { sources, started, sid };
+      },
+      reportsVideoCodecs(h264) {
+        state.videoCodecs = { h264 };
+      },
+      failsVideoCodecs() {
+        state.videoCodecsFail = true;
       },
       refusesCameraChange(reason) {
         state.cameraChangeRefusal = reason;

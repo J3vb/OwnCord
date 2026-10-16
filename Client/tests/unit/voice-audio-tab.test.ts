@@ -1772,6 +1772,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const stopCameraPreview = vi.fn();
   const nativeCameraDevices = vi.fn();
   const nativeCameraSupport = vi.fn();
+  const nativeVideoCodecs = vi.fn();
   const startMicTest = vi.fn();
   const updateMicTest = vi.fn();
   const stopMicTest = vi.fn();
@@ -1806,6 +1807,10 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       .mockReset()
       .mockResolvedValue([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
     nativeCameraSupport.mockReset().mockResolvedValue({ available: true, missing: [] });
+    nativeVideoCodecs.mockReset().mockResolvedValue({ h264: true });
+    vi.doMock("../../src/features/voice/native/videoCodecs", () => ({
+      nativeVideoCodecs: () => nativeVideoCodecs() as unknown,
+    }));
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
     vi.doMock("../../src/features/voice/native/devices", () => ({
@@ -1858,6 +1863,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   afterEach(() => {
     vi.doUnmock("../../src/features/voice/native/platform");
     vi.doUnmock("../../src/features/voice/native/devices");
+    vi.doUnmock("../../src/features/voice/native/videoCodecs");
     vi.doUnmock("../../src/platform/desktop");
     vi.doUnmock("../../src/features/voice/native/videoRenderer");
     vi.doUnmock("@lib/logger");
@@ -1886,15 +1892,66 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return select!;
   }
 
-  it("hides the video codec choice: the native engine always publishes VP8", async () => {
-    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+  /** The Video Codec select once the native probe has filled its slot. */
+  async function codecSelect(element: HTMLElement): Promise<HTMLSelectElement> {
+    let select: HTMLSelectElement | null = null;
+    await vi.waitFor(() => {
+      select = element.querySelector('select[aria-label="Video Codec"]');
+      expect(select).not.toBeNull();
+    });
+    return select!;
+  }
+
+  it("shows VP8, H.264 and Auto on Linux", async () => {
     const tab = await mount();
-    expect(tab.element.querySelector('select[aria-label="Video Codec"]')).toBeNull();
+    const select = await codecSelect(tab.element);
+    // VP9 and H.265 are never offered on Linux.
+    expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
+    expect([...select.options].every((o) => !o.disabled)).toBe(true);
+    // Software H.264 and an Auto that is always VP8 are named as such.
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "VP8 (default, most compatible)",
+      "H.264 (software)",
+      "Auto (VP8)",
+    ]);
+    expect(tab.element.textContent).toContain(
+      "Linux encodes video in software; VP8 uses the least CPU.",
+    );
+    expect(tab.element.textContent).not.toContain("Intel graphics");
+    // The 120 fps hardware H.264 rule does not apply to the native engine.
+    expect(tab.element.textContent).not.toContain("A 120 fps screen share uses H.264");
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
-    expect(headings).not.toContain("Video Codec");
+    expect(headings).toContain("Video Codec");
     expect(headings).toContain("Screen Share FPS");
+  });
+
+  it("disables H.264 with the reason when the native encoder lacks it", async () => {
+    nativeVideoCodecs.mockResolvedValue({ h264: false });
+    const tab = await mount();
+    const select = await codecSelect(tab.element);
+    const h264 = [...select.options].find((o) => o.value === "h264")!;
+    expect(h264.disabled).toBe(true);
+    expect(h264.textContent).toBe("H.264 (not available in this build)");
+    expect([...select.options].filter((o) => o.disabled).map((o) => o.value)).toEqual(["h264"]);
+  });
+
+  it("a saved H.264 shows as VP8 when unavailable", async () => {
+    nativeVideoCodecs.mockResolvedValue({ h264: false });
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const tab = await mount();
+    const select = await codecSelect(tab.element);
+    expect(select.value).toBe("vp8");
+    // Shown as VP8, not rewritten: a build with H.264 honours it again.
+    expect(localStorage.getItem("owncord:settings:videoCodec")).toBe('"h264"');
+  });
+
+  it("shows a saved H.264 as H.264 when the native encoder has it", async () => {
+    localStorage.setItem("owncord:settings:videoCodec", '"h264"');
+    const tab = await mount();
+    const select = await codecSelect(tab.element);
+    expect(select.value).toBe("h264");
   });
 
   // The engine's capture applies the input volume, as the web processor does.

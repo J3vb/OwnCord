@@ -638,7 +638,14 @@ describe("LiveKitSession on the Linux native backend", () => {
         [
           1,
           3,
-          { width: 1920, height: 1080, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+          {
+            width: 1920,
+            height: 1080,
+            maxBitrate: 3_000_000,
+            maxFramerate: 30,
+            simulcast: true,
+            codec: "vp8",
+          },
         ],
       ],
     ]);

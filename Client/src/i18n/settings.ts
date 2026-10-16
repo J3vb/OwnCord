@@ -426,6 +426,12 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
   "voiceAudio.videoCodec.h265": "H.265 (hardware only)",
   "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
+  "voiceAudio.videoCodec.h264Linux": "H.264 (software)",
+  "voiceAudio.videoCodec.autoLinux": "Auto (VP8)",
+  "voiceAudio.videoCodec.h264Unavailable": "H.264 (not available in this build)",
+  "voiceAudio.videoCodecDescLinux":
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
+  "voiceAudio.videoCodecLinux": "Linux encodes video in software; VP8 uses the least CPU.",
   "voiceAudio.videoCodecIntel":
     "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
   "voiceAudio.videoCodec.auto": "Auto (H.264 when your graphics card can encode it, otherwise VP8)",

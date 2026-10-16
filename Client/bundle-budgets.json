@@ -37,9 +37,9 @@
       "note": "B7-7 follow-up (2026-10-08): measured 3,069 B at dev 49b850f8. Ratchet rule: measured + 1,000 B rounded up to the next 500 B = 4,500 B."
     },
     "screenShare": {
-      "budget": 5500,
+      "budget": 6000,
       "lazy": true,
-      "note": "WP M-4 (2026-10-15): measured 4,668 B with the peer codec pick (camera and share both resolve through it). Budget corrected 6,000 -> 5,000 B, one 500 B step over the old 4,500 B (B7-7 follow-up, 3,052 B at 49b850f8); the earlier 6,000 B was a re-baseline the ratchet rule does not allow. Raised 5,000 -> 5,500 B (live codec switch, WP M-5b): base 04a8e9e measures 4,789 B and this change 5,331 B (+542 B); one 500 B step, no re-baseline."
+      "note": "WP M-4 (2026-10-15): measured 4,668 B with the peer codec pick (camera and share both resolve through it). Budget corrected 6,000 -> 5,000 B, one 500 B step over the old 4,500 B (B7-7 follow-up, 3,052 B at 49b850f8); the earlier 6,000 B was a re-baseline the ratchet rule does not allow. Raised 5,000 -> 5,500 B (live codec switch, WP M-5b): base 04a8e9e measures 4,789 B and this change 5,331 B (+542 B); one 500 B step, no re-baseline. Raised 5,500 -> 6,000 B (WP LP-7c, Linux codec choice): the H.264 probe path in videoCodec.ts measures 5,500 B at 9292fc7 and 5,501 B on its review fix, over the 5,500 B budget by one byte; dev 95a8b8e plus LP-7b and LP-7c; one 500 B step, no re-baseline."
     }
   },
   "forbidEmbeddedWasm": {
