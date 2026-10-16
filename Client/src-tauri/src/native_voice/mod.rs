@@ -659,7 +659,8 @@ fn decode_names<'a>(mimes: impl Iterator<Item = &'a str>) -> Vec<String> {
 pub fn probe_video_codecs() -> VideoCodecs {
     // Outside a call this makes `LkRuntime::instance()` build the libwebrtc
     // factory just for the probe; acceptable, as the webview asks once (memoised).
-    let factory = livekit::rtc_engine::lk_runtime::LkRuntime::instance().pc_factory();
+    let runtime = livekit::rtc_engine::lk_runtime::LkRuntime::instance();
+    let factory = runtime.pc_factory();
     let send = factory.get_rtp_sender_capabilities(livekit::webrtc::MediaType::Video);
     let receive = factory.get_rtp_receiver_capabilities(livekit::webrtc::MediaType::Video);
     VideoCodecs {
