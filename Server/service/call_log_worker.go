@@ -28,10 +28,26 @@ func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Co
 		return func(context.Context) {}
 	}
 	s.running = true
+	prev := s.done
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	s.done = done
 	s.callLogMu.Unlock()
+
+	// A previous loop whose stop gave up waiting may still be finishing. Wait
+	// for it, so two loops never overlap and recovery cannot end a call that
+	// loop still tends. If ctx ends first, this Start does not run.
+	if prev != nil {
+		select {
+		case <-prev:
+		case <-ctx.Done():
+			s.callLogMu.Lock()
+			s.running = false
+			s.done = prev
+			s.callLogMu.Unlock()
+			return func(context.Context) {}
+		}
+	}
 
 	// ClearAllVoiceStates already ran at boot, so nobody can be in a call yet:
 	// every open row is a leftover and ends at the last time it was seen.
@@ -256,13 +272,14 @@ func (s *CallLogService) startCall(ctx context.Context, channelID int64, p *call
 	}
 	author, startedAt := joiners[0].id, joiners[0].at
 	ok, audience, err := s.callAllowed(ctx, channelID, author)
-	if err != nil || !ok {
-		// A lookup error fails closed, the same as a DM that has not been
-		// accepted by both sides: no row, until the room has been empty.
+	if err != nil {
+		// A failed lookup writes no row and is retried on the channel's
+		// backoff with its notes kept, so one busy read does not lose the call.
+		return nil, fmt.Errorf("call allowed: %w", err)
+	}
+	if !ok {
+		// Not accepted by both sides: no row until the room has been empty.
 		s.setSuppressed(channelID, true)
-		if err != nil {
-			slog.Warn("call log: delivery targets", "err", err, "channel_id", channelID)
-		}
 		return nil, nil
 	}
 	ids := make([]int64, 0, len(joiners))

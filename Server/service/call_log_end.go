@@ -94,7 +94,8 @@ func (s *CallLogService) recoverOpenCalls(ctx context.Context) {
 
 // stampLastSeen records "someone was here" on every live call, so the next
 // boot ends it at shutdown time: now for a call with someone present, and the
-// moment the room emptied for a call waiting out its end grace. A database
+// moment the room emptied (or its leave note, still pending) for a call
+// waiting out its end grace. A database
 // write only; nothing is broadcast.
 func (s *CallLogService) stampLastSeen(ctx context.Context) {
 	open, err := s.st.ListOpenCalls(ctx)
@@ -110,6 +111,9 @@ func (s *CallLogService) stampLastSeen(ctx context.Context) {
 		seen := s.now()
 		if len(states) == 0 {
 			since, ok := s.getEmptySince(c.ChannelID)
+			if left := s.pendingLeave(c.ChannelID); left.After(since) {
+				since, ok = left, true
+			}
 			if !ok {
 				continue
 			}

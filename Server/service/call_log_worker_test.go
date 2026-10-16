@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -374,23 +375,44 @@ func TestCallLog_OneToOneUntrustedWritesNothing(t *testing.T) {
 	}
 }
 
-// failingTargetsStore fails the delivery-target read, as a database error would.
-type failingTargetsStore struct{ Store }
-
-func (failingTargetsStore) GetDMDeliveryTargets(context.Context, int64, int64) (bool, []db.DMDeliveryTarget, error) {
-	return false, nil, errors.New("boom")
+// flakyTargetsStore fails the delivery-target read while fail is set.
+type flakyTargetsStore struct {
+	Store
+	fail atomic.Bool
 }
 
+func (s *flakyTargetsStore) GetDMDeliveryTargets(ctx context.Context, ch, u int64) (bool, []db.DMDeliveryTarget, error) {
+	if s.fail.Load() {
+		return false, nil, errors.New("busy")
+	}
+	return s.Store.GetDMDeliveryTargets(ctx, ch, u)
+}
+
+// A failed trust read writes no row and keeps the notes; once the read works
+// again the call is logged while the room is still occupied.
 func TestCallLog_TrustLookupErrorWritesNothing(t *testing.T) {
 	f := newCallLogFixture(t)
-	f.svc.st = failingTargetsStore{Store: f.database}
+	st := &flakyTargetsStore{Store: f.database}
+	st.fail.Store(true)
+	f.svc.st = st
 	f.join(t, clAlice, clDM)
 	f.pass(t)
 	if n := f.callRows(t); n != 0 {
 		t.Errorf("call rows = %d, want none when the trust read fails", n)
 	}
-	if !f.svc.isSuppressed(clDM) {
-		t.Error("a lookup error must suppress the channel")
+	if f.svc.isSuppressed(clDM) {
+		t.Error("a lookup error must not suppress the channel")
+	}
+	f.clock.advance(f.svc.tick)
+	f.pass(t)
+	if n := f.callRows(t); n != 0 {
+		t.Errorf("call rows = %d, want none while the error persists", n)
+	}
+	st.fail.Store(false)
+	f.clock.advance(f.svc.tick)
+	f.pass(t)
+	if n := f.callRows(t); n != 1 {
+		t.Errorf("call rows = %d, want 1 after the lookup recovers", n)
 	}
 }
 

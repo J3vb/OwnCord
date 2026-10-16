@@ -303,3 +303,53 @@ func TestCallLog_FailingEndIsRetriedOnABackoff(t *testing.T) {
 		t.Error("the call ended although EndCall always failed")
 	}
 }
+
+// A leave note that has not been reconciled yet still dates the stop stamp.
+func TestCallLog_StopStampsPendingLeave(t *testing.T) {
+	f := newCallLogFixture(t)
+	f.join(t, clAlice, clDM)
+	f.pass(t)
+	f.clock.advance(30 * time.Second)
+	f.leave(t, clAlice, clDM)
+	left := f.clock.now()
+	f.clock.advance(5 * time.Second) // no pass: the leave stays pending
+	f.svc.stampLastSeen(t.Context())
+	oc := f.open(t, clDM)
+	if oc == nil || oc.LastSeenAt != formatCallTime(left) {
+		t.Fatalf("open call = %+v, want last_seen_at at the pending leave (%s)", oc, formatCallTime(left))
+	}
+}
+
+// A Start while the previous loop is still finishing waits for it, so
+// recovery never ends a call that loop still tends.
+func TestCallLog_StartWaitsForPreviousLoop(t *testing.T) {
+	f := newCallLogFixture(t)
+	ctx := t.Context()
+	if _, err := f.database.CreateCallLog(ctx, db.CallLogParams{
+		ChannelID: clDM, AuthorID: clAlice, Content: "started a call.",
+		StartedAt: "2026-10-16 09:50:00", LastSeenAt: "2026-10-16 09:52:30", ParticipantIDs: []int64{clAlice},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old := make(chan struct{})
+	f.svc.callLogMu.Lock()
+	f.svc.running = false
+	f.svc.done = old
+	f.svc.callLogMu.Unlock()
+	started := make(chan func(context.Context))
+	go func() { started <- f.svc.StartCallLogWorker(ctx) }()
+	select {
+	case <-started:
+		t.Fatal("Start returned while the previous loop was alive")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if f.open(t, clDM) == nil {
+		t.Fatal("recovery ran while the previous loop was alive")
+	}
+	close(old)
+	stop := <-started
+	defer stop(ctx)
+	if f.open(t, clDM) != nil {
+		t.Error("recovery did not run after the previous loop exited")
+	}
+}

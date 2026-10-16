@@ -324,6 +324,17 @@ func (s *CallLogService) dueChannels(now time.Time) []int64 {
 	return due
 }
 
+// pendingLeave returns the latest leave time still waiting in the channel's
+// pending notes, zero when there is none.
+func (s *CallLogService) pendingLeave(channelID int64) time.Time {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	if p := s.dirty[channelID]; p != nil {
+		return p.lastLeave
+	}
+	return time.Time{}
+}
+
 // takeDirtyFor removes and returns one channel's pending notes.
 func (s *CallLogService) takeDirtyFor(channelID int64) *callLogPending {
 	s.callLogMu.Lock()
@@ -336,22 +347,24 @@ func (s *CallLogService) takeDirtyFor(channelID int64) *callLogPending {
 // inBackoff reports whether a failed reconcile of the channel is still being
 // waited out.
 func (s *CallLogService) inBackoff(channelID int64) bool {
+	now := s.now()
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
 	r, ok := s.retryAt[channelID]
-	return ok && s.now().Before(r)
+	return ok && now.Before(r)
 }
 
 // noteFailure backs the channel off: at least the coalesce interval, doubling
 // per failure up to the tick.
 func (s *CallLogService) noteFailure(channelID int64) {
+	now := s.now()
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
 	d := s.retryDelay[channelID] * 2
 	d = max(d, s.coalesce)
 	d = min(d, max(s.tick, s.coalesce))
 	s.retryDelay[channelID] = d
-	s.retryAt[channelID] = s.now().Add(d)
+	s.retryAt[channelID] = now.Add(d)
 }
 
 func (s *CallLogService) clearRetry(channelID int64) {
