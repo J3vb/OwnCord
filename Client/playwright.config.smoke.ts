@@ -57,6 +57,11 @@ export default defineConfig({
     "b9-text-expansion.spec.ts",
     "b9-voice-polish.spec.ts",
     "b9-zoom.spec.ts",
+    // The same holds for these media specs (they reach the voice and stream
+    // modules), so they too run only here.
+    "reconnect-media-notice.spec.ts",
+    "stream-mini-player.spec.ts",
+    "stream-popout.spec.ts",
     // Dev-versus-production differences, by construction.
     "emoji-voicemod.parity.spec.ts",
     "gating-badges.parity.spec.ts",
