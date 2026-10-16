@@ -43,6 +43,7 @@ export type IconName =
   | "download"
   | "chevron-down"
   | "chevron-up"
+  | "chevron-left"
   | "chevron-right"
   | "x"
   | "message-square"
@@ -163,6 +164,8 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Right chevron
   "chevron-up": `<path d="m18 15-6-6-6 6"/>`,
+
+  "chevron-left": `<path d="m15 18-6-6 6-6"/>`,
 
   "chevron-right": `<path d="m9 18 6-6-6-6"/>`,
 

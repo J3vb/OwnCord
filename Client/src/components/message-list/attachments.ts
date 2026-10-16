@@ -29,6 +29,51 @@ import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
 import type { ImageMenuTarget } from "./image-menu";
 
+/** One image of a message's lightbox sequence. `url` is the resolved server URL. */
+export interface LightboxGalleryItem {
+  readonly url: string;
+  readonly filename: string;
+  readonly mime: string;
+}
+
+/** The images of the clicked message, for the viewer's previous/next arrows. */
+export interface LightboxGallery {
+  readonly items: readonly LightboxGalleryItem[];
+  readonly index: number;
+  /** True once the message was deleted; checked when the viewer opens. */
+  readonly isGone?: () => boolean;
+  /** Calls `onGone` when the message is deleted; returns the unsubscribe. */
+  readonly watch?: (onGone: () => void) => () => void;
+  /** The message's row, for focus when the viewer closes over a deletion. */
+  readonly row?: () => Element | null;
+}
+
+/** What the viewer shows now: Download, Open original, the image menu and
+ *  eviction recovery all read this at use time, never at bind time. */
+export interface LightboxCurrent {
+  readonly external: ExternalImageSource | undefined;
+  readonly alt: string;
+}
+
+/** What the lazy gallery module drives (3A-10c). */
+export interface LightboxHandle {
+  readonly overlay: HTMLElement;
+  readonly img: HTMLImageElement;
+  /** Tab cycle, in order; the gallery puts its arrows first. */
+  readonly controls: HTMLButtonElement[];
+  readonly signal: AbortSignal;
+  setCurrent(current: LightboxCurrent): void;
+  /** Resets zoom and pan and ends a drag in progress. */
+  resetView(): void;
+  closeMenu(): void;
+  /** True while the image menu is open; it owns the arrow keys. */
+  isImageMenuOpen(): boolean;
+  /** Passed in so the lazy gallery module imports only types from here. */
+  fetchImageAsObjectUrl(url: string): Promise<string | null>;
+  thumbnailUrl(fileUrl: string, mime: string): string;
+  close(): void;
+}
+
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
 let animateGifsPref = loadPref<boolean>("animateGifs", true);
@@ -339,7 +384,7 @@ function isExternalUrl(url: string): boolean {
 /** The server's bounded preview of an image file (P4-08), or the file itself
  *  on a server that does not advertise thumbnails or for a type the server
  *  passes through unchanged (only JPEG and PNG are scaled). */
-function thumbnailUrl(fileUrl: string, mime: string): string {
+export function thumbnailUrl(fileUrl: string, mime: string): string {
   if (
     authStore.getState().uploadPolicy?.thumbnails !== true ||
     (mime !== "image/jpeg" && mime !== "image/png") ||
@@ -870,13 +915,18 @@ function reloadImage(source: ExternalImageSource): Promise<ExternalContentResult
  *  error listener: a recovered load stops the error from reaching them. */
 export function recoverEvictedImage(
   img: HTMLImageElement,
-  source: ExternalImageSource,
+  source: ExternalImageSource | (() => ExternalImageSource),
   onExpired?: () => void,
+  /** Identity of what `img` should show now; a reload that finishes after it
+   *  changed (a lightbox gallery step) is dropped. */
+  stillCurrent?: () => unknown,
 ): void {
   const recover = (event: Event): void => {
     if (!img.src.startsWith("blob:") || isLiveImageUrl(img.src)) return;
     event.stopImmediatePropagation();
-    void reloadImage(source).then((result) => {
+    const started = stillCurrent?.();
+    void reloadImage(typeof source === "function" ? source() : source).then((result) => {
+      if (stillCurrent !== undefined && stillCurrent() !== started) return;
       if (result.ok) {
         img.src = result.value;
         return;
@@ -1173,7 +1223,13 @@ function renderFileChip(att: Attachment, resolvedUrl: string): HTMLDivElement {
   return wrap;
 }
 
-export function renderAttachment(att: Attachment): HTMLDivElement {
+/** Whether `att` renders as an inline image, so it belongs in its message's
+ *  lightbox sequence (3A-10c). The same test `renderAttachment` applies. */
+export function isGalleryImage(att: Attachment): boolean {
+  return isImageMime(att.mime) && isSafeUrl(resolveServerUrl(att.url)) && !isVideoAttachment(att);
+}
+
+export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
   if (inlineable && isVideoAttachment(att)) {
@@ -1216,7 +1272,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         img.click();
       });
       img.addEventListener("click", () => {
-        openImageLightbox(img.src, att.filename, { url: resolvedUrl });
+        openImageLightbox(img.src, att.filename, { url: resolvedUrl }, gallery);
       });
     }
 
@@ -1392,7 +1448,12 @@ export function closeActiveLightbox(): void {
 }
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
-export function openImageLightbox(src: string, alt: string, external?: ExternalImageSource): void {
+export function openImageLightbox(
+  src: string,
+  alt: string,
+  external?: ExternalImageSource,
+  gallery?: LightboxGallery,
+): void {
   // Close any existing lightbox (including its document listeners)
   if (activeLightboxClose !== null) {
     activeLightboxClose();
@@ -1412,11 +1473,31 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
-  if (external !== undefined) recoverEvictedImage(img, external);
+  // The image on show; a gallery step replaces it (3A-10c).
+  let current: LightboxCurrent = { external, alt };
+  const sourceOf = (c: LightboxCurrent): string | null =>
+    c.external !== undefined && "url" in c.external ? c.external.url : null;
+  // Only a public address opens in the system browser; a server attachment's
+  // address needs the session token, which the browser would not have.
+  const originalOf = (c: LightboxCurrent): string | null => {
+    const url = sourceOf(c);
+    return url !== null && isExternalUrl(url) ? url : null;
+  };
+  if (external !== undefined) {
+    recoverEvictedImage(
+      img,
+      () => current.external ?? { url: "" },
+      undefined,
+      () => current,
+    );
+  }
   // `src` can be the server's thumbnail (P4-08): show it at once, then the
   // full file. A server image shown in full is a memory-cache hit here.
   if (external !== undefined && "url" in external && isServerUrl(external.url)) {
+    const opened = current;
     void fetchImageAsObjectUrl(external.url).then((full) => {
+      // A gallery step since the open owns the picture now.
+      if (current !== opened) return;
       if (full !== null && img.isConnected && img.src !== full) img.src = full;
     });
   }
@@ -1441,17 +1522,13 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     toolbar.appendChild(btn);
     return btn;
   };
-  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
-  // Only a public address opens in the system browser; a server attachment's
-  // address needs the session token, which the browser would not have.
-  const originalUrl = sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null;
   const downloadBtn = lightboxButton(
     "image-lightbox-action",
     mediaControlsText("lightbox.download"),
     "download",
   );
   const openBtn =
-    originalUrl === null
+    originalOf(current) === null
       ? null
       : lightboxButton(
           "image-lightbox-action",
@@ -1462,6 +1539,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   // DOM order is the visual order left to right, and so the Tab order.
   const controls: HTMLButtonElement[] =
     openBtn === null ? [downloadBtn, closeBtn] : [downloadBtn, openBtn, closeBtn];
+
   overlay.appendChild(toolbar);
 
   // Zoom & pan state
@@ -1570,27 +1648,35 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
-  // One save path for the menu's Save Image and the Download button.
+  // One save path for the menu's Save Image and the Download button. It reads
+  // the current image once, at the click, so a step cannot redirect it.
   const save = (): Promise<void> => {
-    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, alt);
-    if (sourceUrl === null) return saveImageBytes(img.src, "");
+    const c = current;
+    const sourceUrl = sourceOf(c);
+    const shown = img.src;
+    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, c.alt);
+    if (sourceUrl === null) return saveImageBytes(shown, "");
     // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
     // shows a one-frame preview.
     return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
-      saveImageBytes(bytes ?? img.src, sourceUrl),
+      saveImageBytes(bytes ?? shown, sourceUrl),
     );
   };
   bindImageMenu(
     {
       img,
-      link: originalUrl,
+      get link() {
+        return originalOf(current);
+      },
       // img may still show the thumbnail or a frozen GIF frame it opened with.
-      full:
-        sourceUrl === null
+      get full() {
+        const sourceUrl = sourceOf(current);
+        return sourceUrl === null
           ? undefined
           : isServerUrl(sourceUrl)
             ? () => fetchImageAsObjectUrl(sourceUrl)
-            : () => fetchExternalImage({ url: sourceUrl }),
+            : () => fetchExternalImage({ url: sourceUrl });
+      },
       save,
     },
     disposable.signal,
@@ -1603,11 +1689,12 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     e.stopPropagation();
     if (saving) return;
     saving = true;
+    const filename = current.alt;
     downloadBtn.setAttribute("aria-disabled", "true");
     save()
       .catch((err: unknown) => {
-        log.error("Lightbox download failed", { filename: alt, error: String(err) });
-        showToast(messageStatusText("file.downloadFailed", { filename: alt }), "error");
+        log.error("Lightbox download failed", { filename, error: String(err) });
+        showToast(messageStatusText("file.downloadFailed", { filename }), "error");
       })
       .finally(() => {
         saving = false;
@@ -1616,6 +1703,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   });
   openBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
+    const originalUrl = originalOf(current);
     if (originalUrl === null) return;
     desktop.urlOpener.open(originalUrl).catch((err: unknown) => {
       log.warn("Open original image failed", { error: String(err) });
@@ -1665,4 +1753,36 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   activeLightboxClose = close;
   document.body.appendChild(overlay);
   closeBtn.focus();
+
+  // Two or more images: the arrows, counter and stepping load on demand, so a
+  // single-image open never pays for them.
+  if (gallery !== undefined && gallery.items.length > 1) {
+    const handle: LightboxHandle = {
+      overlay,
+      img,
+      controls,
+      signal: disposable.signal,
+      setCurrent: (next) => {
+        current = next;
+      },
+      resetView: () => {
+        isDragging = false;
+        overlay.classList.remove("dragging");
+        resetZoom();
+      },
+      closeMenu: () => imageMenuModule?.closeImageMenu(),
+      // The menu's own class (image-menu.ts MENU_CLASS): asked of the DOM so it
+      // holds even before the lazy menu module has loaded.
+      isImageMenuOpen: () => document.querySelector(".image-context-menu") !== null,
+      fetchImageAsObjectUrl,
+      thumbnailUrl,
+      close,
+    };
+    import("./lightbox-gallery").then(
+      (m) => {
+        if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
+      },
+      (err: unknown) => log.warn("Lightbox gallery failed to load", { error: String(err) }),
+    );
+  }
 }

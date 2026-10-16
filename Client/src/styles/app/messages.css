@@ -1091,6 +1091,45 @@ ul.md-list-nested {
   background: var(--scrim-hover);
 }
 
+.image-lightbox-prev,
+.image-lightbox-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.image-lightbox-prev {
+  left: 16px;
+}
+.image-lightbox-next {
+  right: 16px;
+}
+.image-lightbox-prev:hover,
+.image-lightbox-next:hover {
+  background: var(--scrim-hover);
+}
+.image-lightbox-counter {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 6px 12px;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: 14px;
+  z-index: 1;
+}
+
 /* File attachment */
 .msg-file {
   margin-top: 4px;

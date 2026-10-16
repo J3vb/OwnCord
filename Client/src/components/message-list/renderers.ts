@@ -9,7 +9,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
-import type { Message } from "@stores/messages.store";
+import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
@@ -54,7 +54,12 @@ import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
-import { renderAttachment } from "./attachments";
+import {
+  isGalleryImage,
+  renderAttachment,
+  resolveServerUrl,
+  type LightboxGallery,
+} from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
@@ -302,6 +307,41 @@ function sendErrorReason(code: string | null): string {
   }
 }
 
+/** Append a message's attachments. Its inline images form one lightbox
+ *  sequence, in attachment order (3A-10c); an unconfirmed row (id 0) has none,
+ *  and a lone image opens as it always did. */
+function appendAttachments(el: HTMLElement, msg: Message): void {
+  const images = msg.id === 0 ? [] : msg.attachments.filter(isGalleryImage);
+  const items = images.map((att) => ({
+    url: resolveServerUrl(att.url),
+    filename: att.filename,
+    mime: att.mime,
+  }));
+  const isDeleted = (): boolean =>
+    messagesStore
+      .getState()
+      .messagesByChannel.get(msg.channelId)
+      ?.find((m) => m.id === msg.id)?.deleted === true;
+  for (const att of msg.attachments) {
+    const index = images.indexOf(att);
+    const gallery: LightboxGallery | undefined =
+      index === -1 || items.length < 2
+        ? undefined
+        : {
+            items,
+            index,
+            isGone: isDeleted,
+            watch: (onGone) =>
+              messagesStore.subscribeSelector(isDeleted, (gone) => {
+                if (gone) onGone();
+              }),
+            // The row is re-rendered as a tombstone: find the new element.
+            row: () => document.querySelector(`[data-testid="message-${msg.id}"]`),
+          };
+    el.appendChild(renderAttachment(att, gallery));
+  }
+}
+
 export function renderMessage(
   msg: Message,
   isGrouped: boolean,
@@ -409,9 +449,7 @@ export function renderMessage(
   if (editor !== undefined) {
     // The editor takes the body's place; attachments and reactions stay.
     el.appendChild(editor);
-    for (const att of msg.attachments) {
-      el.appendChild(renderAttachment(att));
-    }
+    appendAttachments(el, msg);
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }
@@ -446,9 +484,7 @@ export function renderMessage(
       );
     }
 
-    for (const att of msg.attachments) {
-      el.appendChild(renderAttachment(att));
-    }
+    appendAttachments(el, msg);
 
     // URL embeds (YouTube players, link previews)
     const embeds = renderUrlEmbeds(msg.content);
