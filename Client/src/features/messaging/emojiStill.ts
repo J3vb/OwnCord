@@ -40,14 +40,40 @@ export function captureStill(img: HTMLImageElement): string | null {
  * shows (animated) rather than going blank.
  */
 export function showStillFrame(img: HTMLImageElement, objectUrl: string): void {
+  const cached = stills.get(objectUrl);
+  if (cached !== undefined) {
+    img.src = cached;
+    return;
+  }
   // The listener lives on the image itself and goes with it.
   img.addEventListener(
     "load",
     () => {
       const still = captureStill(img);
-      if (still !== null && img.src !== still) img.src = still;
+      if (still === null || img.src === still) return;
+      rememberStill(objectUrl, still);
+      img.src = still;
     },
     { once: true },
   );
   img.src = objectUrl;
+}
+
+// One capture per loaded emoji source, so a picker or a busy channel encodes
+// each emoji once. Bounded; the oldest entry goes first.
+const MAX_STILLS = 256;
+const stills = new Map<string, string>();
+
+function rememberStill(objectUrl: string, still: string): void {
+  stills.delete(objectUrl);
+  stills.set(objectUrl, still);
+  if (stills.size > MAX_STILLS) {
+    const oldest = stills.keys().next().value;
+    if (oldest !== undefined) stills.delete(oldest);
+  }
+}
+
+/** Test seam: forget every cached still. */
+export function clearStillCache(): void {
+  stills.clear();
 }

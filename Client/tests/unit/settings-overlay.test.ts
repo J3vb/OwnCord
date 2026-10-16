@@ -495,6 +495,35 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("mounts the Log Out prompt inside the settings overlay so it stacks above it", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
+    expect(dialog?.closest(".settings-overlay")).not.toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("Escape with the Log Out prompt open closes only the prompt", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onClose).toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
   it("cancelling the Log Out prompt does not log out", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);

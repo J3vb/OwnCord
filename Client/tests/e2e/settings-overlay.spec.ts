@@ -68,6 +68,7 @@ test.describe("Settings Overlay", () => {
 
     await expect(page.locator(".settings-sidebar > button.settings-nav-item")).toHaveText([
       "Account",
+      "Safety",
       "Appearance",
       "Accessibility",
       "Voice & Video",

@@ -23,6 +23,7 @@ import { buildCustomEmojiImage } from "../../src/components/message-list/custom-
 import {
   animateEmojiEnabled,
   captureStill,
+  clearStillCache,
   showStillFrame,
 } from "../../src/features/messaging/emojiStill";
 
@@ -41,6 +42,7 @@ describe("Animate emoji", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    clearStillCache();
     fetchImageAsObjectUrlMock.mockClear();
     fetchImageAsObjectUrlMock.mockResolvedValue("blob:animated");
     drawImage = vi.fn();
@@ -82,6 +84,17 @@ describe("Animate emoji", () => {
     expect(img.getAttribute("src")).toBe(STILL);
     // The still's own load must not capture again.
     img.dispatchEvent(new Event("load"));
+    expect(drawImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("off: the same emoji source is captured once and reused", () => {
+    const first = document.createElement("img");
+    showStillFrame(first, "blob:animated");
+    loaded(first);
+    first.dispatchEvent(new Event("load"));
+    const second = document.createElement("img");
+    showStillFrame(second, "blob:animated");
+    expect(second.getAttribute("src")).toBe(STILL);
     expect(drawImage).toHaveBeenCalledTimes(1);
   });
 

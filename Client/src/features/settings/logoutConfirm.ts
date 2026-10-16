@@ -25,6 +25,9 @@ export interface LogoutConfirmOptions {
   onClosed?(): void;
   /** Focus target on close when the opener is gone. */
   fallbackFocus?(): HTMLElement | null;
+  /** Where to mount the prompt; the settings overlay passes its own root so
+   *  the prompt stacks above it. Defaults to `document.body`. */
+  container?: Element;
 }
 
 /**
@@ -55,18 +58,21 @@ export function confirmLogout(options: LogoutConfirmOptions): (() => void) | nul
   const content = createElement("div");
   appendChildren(content, header, body, footer);
 
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "logout-confirm-dialog" },
-    signal: options.signal,
-    fallbackFocus: options.fallbackFocus,
-    onClose: () => {
-      openPrompt = null;
-      owner.destroy();
-      options.onClosed?.();
+  const modal = createModal(
+    {
+      content,
+      ariaLabelledBy: titleId,
+      overlayAttrs: { "data-testid": "logout-confirm-dialog" },
+      signal: options.signal,
+      fallbackFocus: options.fallbackFocus,
+      onClose: () => {
+        openPrompt = null;
+        owner.destroy();
+        options.onClosed?.();
+      },
     },
-  });
+    options.container,
+  );
   openPrompt = modal;
   cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
   confirm.addEventListener(

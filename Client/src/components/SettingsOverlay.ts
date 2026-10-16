@@ -528,14 +528,16 @@ export function createSettingsOverlay(
       logoutBtn.addEventListener(
         "click",
         () => {
-          closeLogoutPrompt = confirmLogout({
-            signal: disposable.signal,
-            onConfirm: () => options.onLogout(),
-            onClosed: () => {
-              closeLogoutPrompt = null;
-            },
-            fallbackFocus: () => logoutBtn,
-          });
+          closeLogoutPrompt =
+            confirmLogout({
+              signal: disposable.signal,
+              onConfirm: () => options.onLogout(),
+              onClosed: () => {
+                closeLogoutPrompt = null;
+              },
+              fallbackFocus: () => logoutBtn,
+              container: root ?? undefined,
+            }) ?? closeLogoutPrompt;
         },
         { signal: disposable.signal },
       );
