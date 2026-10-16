@@ -620,6 +620,8 @@ fn is_h264_mime(mime: &str) -> bool {
 /// Ask libwebrtc which video codecs it can send. Synchronous: callers off the
 /// async runtime (the interop example) use it directly.
 pub fn probe_video_codecs() -> VideoCodecs {
+    // Outside a call this makes `LkRuntime::instance()` build the libwebrtc
+    // factory just for the probe; acceptable, as the webview asks once (memoised).
     let caps = livekit::rtc_engine::lk_runtime::LkRuntime::instance()
         .pc_factory()
         .get_rtp_sender_capabilities(livekit::webrtc::MediaType::Video);
@@ -1143,8 +1145,7 @@ mod tests {
     #[test]
     fn video_codecs_probe_runs() {
         // Either answer is valid for a build; the probe must not panic.
-        let codecs = probe_video_codecs();
-        assert!(codecs.h264 || !codecs.h264);
+        let _ = probe_video_codecs();
         assert!(is_h264_mime("video/h264"));
         assert!(!is_h264_mime("video/VP8"));
     }

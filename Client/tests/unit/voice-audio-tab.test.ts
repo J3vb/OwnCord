@@ -1908,6 +1908,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     // VP9 and H.265 are never offered on Linux.
     expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
     expect([...select.options].every((o) => !o.disabled)).toBe(true);
+    // Software H.264 and an Auto that is always VP8 are named as such.
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "VP8 (default, most compatible)",
+      "H.264 (software)",
+      "Auto (VP8)",
+    ]);
     expect(tab.element.textContent).toContain(
       "Linux encodes video in software; VP8 uses the least CPU.",
     );

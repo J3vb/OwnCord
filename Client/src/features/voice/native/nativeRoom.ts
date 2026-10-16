@@ -919,7 +919,8 @@ export class NativeRoom {
 
   /** Unpublishing a screen share stops its track, and with it the host
    *  capture (which unpublishes): the shared code stops the track next
-   *  anyway, and stop() is idempotent. */
+   *  anyway, and stop() is idempotent. With `stopCapture` false (a codec
+   *  republish) it unpublishes alone and the capture keeps running. */
   private async unpublishScreen(stopCapture = true): Promise<void> {
     const screen = this.localParticipant.trackPublications.get("screen_share");
     if (screen === undefined) return;

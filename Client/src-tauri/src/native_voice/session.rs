@@ -778,6 +778,12 @@ impl NativeSession {
         let key_provider = KeyProvider::with_shared_key(key_provider_options(), key_material);
         let options = room_options(key_provider.clone());
         let frames = FrameServer::bind().await?;
+        log::info!(
+            "[native_voice] video encoder backends: {:?}",
+            livekit::webrtc::rtp_sender::VideoEncoderBackend::list_available()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
         let (room, events) = Room::connect(url, token, options)
             .await
             .map_err(|e| e.to_string())?;

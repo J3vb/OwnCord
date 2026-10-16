@@ -992,12 +992,12 @@ function buildVoiceAudioTabInner(
           [
             "h264",
             h264Available
-              ? t("voiceAudio.videoCodec.h264")
+              ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
               : t("voiceAudio.videoCodec.h264Unavailable"),
           ],
           ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
           ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
-          ["auto", t("voiceAudio.videoCodec.auto")],
+          ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
         ],
         h264Available ? new Set() : new Set(["h264"]),
       ),
