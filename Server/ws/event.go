@@ -36,6 +36,10 @@ type Result struct {
 	// the rate window frees, so a burst of channel switches (holding Alt+Down)
 	// still ends subscribed to the channel the user landed on.
 	DeferChannelFocus *int64
+	// DeferChannelFocusNoRead is true when the deferred frame said read:false,
+	// so the drain does not mark the channel read. Meaningful only with
+	// DeferChannelFocus.
+	DeferChannelFocusNoRead bool
 	// SetPresence, if non-nil, records the presence the handler just
 	// committed as the client's live presence (presentableMembers and
 	// presence snapshots read it). Applied before Events are emitted, so a
@@ -191,12 +195,25 @@ type channelActivityEvt struct {
 	everyone  bool
 	hereOnly  bool
 	readBy    int64
+	// readUpTo is the pointer a read mark is set to; readSet is false for a
+	// mark through everything noted so far (see readThroughNoted).
+	readUpTo int64
+	readSet  bool
 }
 
-// channelReadEvt tells the coalescer a user marked a channel read or opened
-// it, so a pending hint for what they have read is not sent.
-func channelReadEvt(userID, channelID int64) ActivityEvent {
-	return channelActivityEvt{channelID: channelID, readBy: userID}
+// readThroughNoted is the upTo that channelReadEvt takes for a focus that marks
+// the channel read at its latest message: the coalescer then reads through
+// every message it has noted, as before the pointer moved.
+const readThroughNoted int64 = -1
+
+// channelReadEvt tells the coalescer a user marked a channel read, so a pending
+// hint for what they have read is not sent. upTo is the pointer the database
+// returned after a mark_read or mark_unread (it may be lower than before, for
+// mark_unread); 0 means a focus that marks the channel read at everything
+// noted so far. upTo 0 is a real pointer (mark_unread of a channel's first
+// message), so the through-everything case is readThroughNoted, not 0.
+func channelReadEvt(userID, channelID, upTo int64) ActivityEvent {
+	return channelActivityEvt{channelID: channelID, readBy: userID, readUpTo: upTo, readSet: upTo >= 0}
 }
 
 func (e channelActivityEvt) EventType() string { return MsgTypeChannelActivity }

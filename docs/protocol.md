@@ -95,15 +95,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                  |
-| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                      |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                    |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                   |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                          |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                   |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                |
+| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                                    |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                  |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                 |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                              |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                        |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                 |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -474,7 +474,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0 }`.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true }`. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -531,7 +531,11 @@ a client then keeps its role-only behaviour and must not treat absent as
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
 raised by the send that mentions them (never by an edit) and reset to 0 by
-`channel_focus` or `mark_read`. Unlike `unread_count` it is never capped.
+`channel_focus` or `mark_read` at the latest message. A read-state move to the
+middle of a channel (`mark_read` with `message_id`, `mark_unread`) recomputes it
+from the mentions that raised the badge, with a forward move never raising it
+and a backward move never lowering it (see Channel Focus and Read State).
+Unlike `unread_count` it is never capped.
 
 `unread_count` counts unread messages but is **capped at 100**: any channel with
 100 or more unread messages reports exactly `100`, and the client renders the cap
@@ -1093,28 +1097,92 @@ member's custom text, which is what `ready` shows.
 
 ```json
 { "type": "channel_focus", "payload": { "channel_id": 5 } }
+{ "type": "channel_focus", "payload": { "channel_id": 5, "read": false } }
 ```
 
-Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
+Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: by default it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
+
+`read` is an optional boolean and is `true` when absent, so older clients behave as before. With `"read": false` the frame focuses and subscribes only: it writes no read state and sends no `read_state` frame, and a pending `channel_activity` hint for the channel is still delivered. A deferred focus (see the rate limits) keeps its `read` flag. `read: false` is meant for a client that places the NEW line by the read pointer and marks read itself (see `mark_read`); a server without the `read_pointer` capability ignores the field.
 
 ### mark_read (Client -> Server)
 
 ```json
 { "type": "mark_read", "payload": { "channel_id": 5 } }
+{ "type": "mark_read", "payload": { "channel_id": 5, "message_id": 812 } }
 ```
 
-Advances the caller's read state for `channel_id` to that channel's latest
-message and resets its `mention_count` to 0 — exactly what `channel_focus` does
-to unread state — **without** changing which channel the connection is focused
-on. This is what backs "Mark as Read" in the channel context menu and "Mark All
-as Read": marking a channel the user is _not_ looking at must not rebind the
-connection's focused channel, which would misroute unread bookkeeping for the
-channel actually on screen.
+Without `message_id`, advances the caller's read state for `channel_id` to that
+channel's latest message and resets its `mention_count` to 0 — exactly what
+`channel_focus` does to unread state — **without** changing which channel the
+connection is focused on. This is what backs "Mark as Read" in the channel
+context menu and "Mark All as Read": marking a channel the user is _not_ looking
+at must not rebind the connection's focused channel, which would misroute unread
+bookkeeping for the channel actually on screen.
+
+With `message_id`, reads the channel up to that message. The move is
+**forward only**: a `message_id` at or below the current pointer changes
+nothing (a late mark from a device that was displaced cannot undo newer
+progress), and an id past the channel's newest message is clamped to it. The id
+need not name an existing message. When the pointer moves, `mention_count`
+becomes the lower of its current value and the number of live mentions after the
+new pointer; when it does not move, `mention_count` is unchanged. A
+`message_id` that is not a positive integer answers `BAD_REQUEST`.
 
 Same access check as `channel_focus`: `READ_MESSAGES` on the channel, or DM
 participation. A denied channel answers `FORBIDDEN`; a non-positive
-`channel_id` answers `BAD_REQUEST`. There is no response on success — the client
-clears its local badge optimistically and the next `ready` confirms.
+`channel_id` answers `BAD_REQUEST`. Every accepted `mark_read`, including one
+that changes nothing, is answered with a `read_state` frame to the caller. Over
+its 5/sec budget a frame is dropped silently.
+
+### mark_unread (Client -> Server)
+
+```json
+{ "type": "mark_unread", "payload": { "channel_id": 5, "message_id": 790 } }
+```
+
+Moves the caller's read pointer to the message just before `message_id`, so that
+message and every later one are unread again (the pointer is `0` when it is the
+channel's first message). It may move the pointer either way. `message_id` is
+required and must be a positive integer (`BAD_REQUEST` otherwise) naming a live
+message of `channel_id`, otherwise the answer is `NOT_FOUND` and nothing
+changes. The same access check as `channel_focus` applies (`FORBIDDEN`).
+
+`mention_count` is recomputed from the mentions that raised the badge: a
+backward move raises it to the number of live mentions after the new pointer
+unless it is already higher, and a forward move lowers it to that number unless
+it is already lower. Mentions that reached the user before the server began
+recording them (see `docs/schema.md`, `mention_receipts`) are not restored.
+
+`mark_unread` has its own 5/sec budget and, unlike `mark_read`, answers
+`RATE_LIMITED` over it. On success the caller gets a `read_state` frame.
+
+### read_state (Server -> Client, direct)
+
+```json
+{
+  "type": "read_state",
+  "payload": {
+    "channel_id": 5,
+    "last_read_message_id": 789,
+    "unread_count": 23,
+    "mention_count": 1
+  }
+}
+```
+
+The caller's read pointer in `channel_id` after a `mark_read` or `mark_unread`
+was accepted. It replaces the client's pointer, `unread_count` (capped at 100,
+like the one in `ready`) and `mention_count` for that channel or DM outright,
+including the one on screen. Sent after every accepted `mark_read` and
+`mark_unread`, even a no-op, and never after `channel_focus`. A rejected command
+sends no frame.
+
+Targeted to the caller's one live connection, unsequenced and never replayed;
+it shares the queue of `mention_count`, and each is written and sent under one
+lock, so a reader's last frame carries the latest committed state. A client that
+resumes keeps its own pointer, and the next full `ready` is the truth. A frame
+that reaches a connection just before its `ready` can be overwritten by an
+older snapshot; the next `ready` corrects it.
 
 ### mention_count (Server -> Client, direct)
 
@@ -2278,7 +2346,7 @@ request exists, not its state, not whether it was ever decided.
 
 ### DM Authorization
 
-All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
+All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `mark_unread`, `call_ring`, `call_decline`.
 
 Group DMs need no special case: `dm_participants` holds one row per
 participant, and every check is a lookup on `(user_id, channel_id)`.
@@ -2531,7 +2599,7 @@ recipient from being flooded.
 A `channel_focus` over its budget is deferred rather than dropped: the server
 remembers the latest refused channel and applies it (subscription and read
 state) as soon as the window frees, so a burst of channel switches ends on the
-channel the user landed on. A newer `channel_focus` supersedes a pending one,
+channel the user landed on, with the `read` flag it carried. A newer `channel_focus` supersedes a pending one,
 whether it succeeds or fails. If the user can no longer read the deferred
 channel when it is applied, the reply is a `FORBIDDEN` error carrying that
 frame's `id`.
@@ -2557,7 +2625,8 @@ tables below add per-type behavioral notes.
 | `reaction_remove`     | 5/sec                                |                                                                 |
 | `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
 | `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
-| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus                         |
+| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
+| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                              |                                                                 |
 | `voice_join`          | 5/sec                                |                                                                 |
 | `voice_leave`         | 5/sec                                | Empty payload                                                   |
@@ -2623,6 +2692,7 @@ tables below add per-type behavioral notes.
 | `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
 | `appeal_status`       | No       | Direct to the appellant only                                                                           |
 | `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
+| `read_state`          | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
 | `error`               | No       | Direct to requester                                                                                    |
 | `pong`                | No       | Direct to pinger                                                                                       |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                                                     |

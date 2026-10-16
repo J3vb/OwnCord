@@ -45,7 +45,8 @@
             "capabilities": {
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "read_pointer": true
             },
             "channels": [
               {
@@ -290,7 +291,8 @@
             "capabilities": {
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "read_pointer": true
             },
             "channels": [
               {

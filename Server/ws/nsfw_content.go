@@ -144,6 +144,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
+	MsgTypeReadState:           false, // a channel id and this user's own read pointer and counts only (3D-5c); never message content
 	MsgTypeChannelActivity:     false, // ids and flags only (2B-2); the author id is withheld from an unacknowledged reader of a labelled channel
 }
 

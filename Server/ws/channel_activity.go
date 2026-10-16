@@ -69,6 +69,10 @@ type activityNote struct {
 	// readBy, when set, makes the note a read mark for that user instead of a
 	// send (see channelReadEvt).
 	readBy int64
+	// readUpTo and readSet carry the pointer a read mark is set to (see
+	// channelReadEvt); readSet false marks through everything noted so far.
+	readUpTo int64
+	readSet  bool
 }
 
 type activityMention struct {
@@ -154,15 +158,21 @@ func (a *activityState) note(n activityNote) {
 	}
 }
 
-// markRead records that uid read channel ch through every message noted so
-// far; hints for those are dropped at send time.
-func (a *activityState) markRead(uid, ch int64, now time.Time) {
+// markRead records how far uid has read channel ch; hints at or below it are
+// dropped at send time. With set, upTo is the pointer the database returned and
+// replaces the mark, which may lower it (mark_unread), so hints for messages
+// after a partial read still reach the reader. Without set it is a focus that
+// marks the channel read: through every message noted so far.
+func (a *activityState) markRead(uid, ch, upTo int64, set bool, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.readUpTo == nil {
 		a.readUpTo = make(map[readKey]readMark)
 	}
-	a.readUpTo[readKey{uid, ch}] = readMark{msgID: a.highest[ch], at: now}
+	if !set {
+		upTo = a.highest[ch]
+	}
+	a.readUpTo[readKey{uid, ch}] = readMark{msgID: upTo, at: now}
 }
 
 // readMarks is a copy of the read marks, for the flush's send loop.
