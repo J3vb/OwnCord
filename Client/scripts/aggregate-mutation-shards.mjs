@@ -98,5 +98,5 @@ function main() {
 }
 
 // The shard config throws without STRYKER_SHARD; any valid name satisfies it.
-process.env.STRYKER_SHARD ||= "livekit";
+process.env.STRYKER_SHARD ||= "livekit-1";
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();
