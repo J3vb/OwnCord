@@ -67,6 +67,8 @@ describe("older-history Retry row", () => {
       onScrollTop,
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

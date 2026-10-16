@@ -28,7 +28,6 @@ function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInput
     gifApi: stubGifApi,
     onSend: vi.fn(),
     onTyping: vi.fn(),
-    onEditMessage: vi.fn(),
     ...overrides,
   };
 }

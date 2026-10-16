@@ -498,7 +498,6 @@ describe("composer integration", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
   });

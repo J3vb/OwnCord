@@ -26,7 +26,6 @@ describe("composer spelling menu", () => {
       gifApi,
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
     const area = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
