@@ -690,7 +690,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           if (live()) putBackUnsent(entry.channelId, files, "skipped");
         },
         // The server refuses a send inside the channel's slow-mode window, so wait it out.
-        slowWindow: () => slowModeSentAtByChannel.get(entry.channelId),
+        // Like the composer gate: the channel's current slow_mode, none for moderators.
+        slowWindow: () => {
+          const sent = slowModeSentAtByChannel.get(entry.channelId);
+          if (sent === undefined || canManageMessages()) return undefined;
+          const window = channelsStore.getState().channels.get(entry.channelId)?.slowMode ?? 0;
+          return { sentAt: sent.sentAt, window };
+        },
         fail: (code) => {
           if (live()) markSendFailed(entry.cid, code);
         },

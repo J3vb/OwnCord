@@ -516,8 +516,8 @@ describe("review follow-ups", () => {
       entryOf([running(held("b.pdf"))], { cid: "x2" }),
       new AbortController().signal,
     );
-    expect(describedBy(one)).toBe("msg-body-x1 msg-upload-strip-x1");
-    expect(describedBy(two)).toBe("msg-body-x2 msg-upload-strip-x2");
+    expect(describedBy(one)).toBe("msg-body-x1");
+    expect(describedBy(two)).toBe("msg-body-x2");
     expect(one.id).toBe("msg-upload-strip-x1");
   });
 

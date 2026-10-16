@@ -700,6 +700,58 @@ describe("send while uploading (controller)", () => {
     ctrl.destroy();
   });
 
+  it("stops holding a queued send when slow mode is turned off", async () => {
+    setChannels([
+      {
+        id: 42,
+        name: "general",
+        type: "text",
+        category: null,
+        position: 0,
+        can_send: true,
+        slow_mode: 5,
+      },
+    ] as never);
+    setActiveChannel(42);
+    setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+    channelsStore.flush();
+    const { ctrl, chatSends, fire, opts } = setup();
+
+    ctrl.mountChannel(42, "general", "text");
+    const a = held("a.pdf");
+    onSend("files", [a.item]);
+    await flush();
+
+    // A quick text goes out and is accepted: the server's window starts.
+    onSend("quick");
+    await flush();
+    const sendIndex = opts.ws.send.mock.calls.findIndex(
+      (c) => (c[0] as { type: string }).type === "chat_send",
+    );
+    const quickCid = opts.ws.send.mock.results[sendIndex]!.value as string;
+    fire("chat_send_ok", { message_id: 5, timestamp: "" }, quickCid);
+    vi.useFakeTimers();
+    a.resolve("srv-a");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(chatSends().map((m) => m.content)).toEqual(["quick"]);
+
+    setChannels([
+      {
+        id: 42,
+        name: "general",
+        type: "text",
+        category: null,
+        position: 0,
+        can_send: true,
+        slow_mode: 0,
+      },
+    ] as never);
+    channelsStore.flush();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(chatSends().map((m) => m.content)).toEqual(["quick", "files"]);
+    ctrl.destroy();
+  });
+
   it("does not put files back for a send whose account changed", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let user = 1;

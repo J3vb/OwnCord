@@ -276,7 +276,7 @@ export function renderUploadStrip(entry: QueuedSend, signal: AbortSignal): HTMLE
       type: "button",
       "data-testid": `msg-upload-cancel-${entry.cid}`,
       // Several rows can show "Cancel upload": the row's text tells them apart.
-      "aria-describedby": `msg-body-${entry.cid} msg-upload-strip-${entry.cid}`,
+      "aria-describedby": `msg-body-${entry.cid}`,
     },
     sendQueueText("strip.cancel"),
   );
