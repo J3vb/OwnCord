@@ -767,3 +767,31 @@ test.describe("Composer — per-channel drafts (UX-1)", () => {
     await expect(textarea(page)).toHaveAttribute("aria-disabled", "true");
   });
 });
+
+// ---------------------------------------------------------------------------
+test.describe("Composer — slash commands (3A-10a)", () => {
+  test.beforeEach(async ({ page }) => {
+    await bootComposer(page);
+  });
+
+  test("/shrug hi sends the rewritten text and renders the shrug literally", async ({ page }) => {
+    await textarea(page).fill("/shrug hi");
+    await textarea(page).press("Enter");
+
+    const send = await waitForWsSend(page, (m) => m.type === "chat_send");
+    expect((send.payload as Record<string, unknown>).content).toBe("hi ¯\\\\\\_(ツ)\\_/¯");
+    await expect(page.locator(".message", { hasText: "hi ¯\\_(ツ)_/¯" }).first()).toBeVisible();
+  });
+
+  test('typing "/" lists the commands and Enter inserts the picked one', async ({ page }) => {
+    await textarea(page).fill("/sp");
+    const popup = page.locator("[data-testid='slash-autocomplete']");
+    await expect(popup).toBeVisible();
+    await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
+    await expect(textarea(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("[data-testid='slash-option-spoiler']")).toBeVisible();
+    await textarea(page).press("Enter");
+    await expect(textarea(page)).toHaveValue("/spoiler ");
+    await expect(popup).not.toBeVisible();
+  });
+});

@@ -168,7 +168,20 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
   "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
-    "Push to Talk needs global key observation, which this desktop does not support (macOS or a Wayland session). The key can be captured but never gates your microphone; use the mic button or Tray instead.",
+    "Push to Talk needs a global key service, which this desktop does not have (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop). The key can be captured but never gates your microphone; use the mic button or Tray instead.",
+  "keybinds.pttPortalHint":
+    "On Wayland your desktop reserves this key for OwnCord in every app. Pick a function key; you can choose another in the system dialog. Clear turns Push to Talk off in OwnCord, but your desktop keeps the key until you change it in system settings.",
+  "keybinds.portalClickToSet": "Click, then press a function key",
+  "keybinds.pressFunctionKey": "Press a function key (F1-F24)...",
+  "keybinds.portalWaiting": "Waiting for your desktop...",
+  "keybinds.portalSetUp": "Set up global shortcuts",
+  "keybinds.portalChange": "Change in system settings",
+  "keybinds.portalWhereToChange":
+    "To change these keys, open your desktop's shortcut settings: GNOME Settings > Keyboard > Shortcuts, or KDE System Settings > Shortcuts.",
+  "keybinds.portalHint":
+    "Your desktop manages these shortcuts. They work while OwnCord is unfocused, but your desktop keeps the keys for OwnCord in every app, so choose keys you do not need elsewhere.",
+  "keybinds.portalCancelled": "Setup was cancelled. No global shortcuts were changed.",
+  "keybinds.portalFailed": "Your desktop could not set up global shortcuts. Try again.",
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
@@ -177,7 +190,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
-    "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
+    "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
   "keybinds.globalSection": "Global Shortcuts",
   "keybinds.globalConflict": "That combination is already used by another shortcut.",
   "keybinds.globalKey": "Ctrl + Shift + {key}",

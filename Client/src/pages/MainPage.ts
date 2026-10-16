@@ -32,6 +32,13 @@ import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.st
 import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import {
+  anyTriggerBound,
+  clearPortalBound,
+  globalKeysErrorCode,
+  portalBoundBefore,
+} from "@lib/globalKeys";
+import { loadPref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
@@ -1084,18 +1091,54 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Once the poller runs it also sees the keys while the window is focused,
     // so the in-app handler stands down to avoid a double toggle. The flag is
     // set before start() so a press during startup is missed, never doubled.
+    // On a Wayland session the desktop's shortcut service is the "poller": it
+    // is live only once both keys are bound, so the flag follows the host's
+    // status changes too (a bind, the user editing the keys, a portal restart).
+    // Answers can arrive out of order (a status change during startup), so
+    // only the latest query may set the flag.
+    let refreshSeq = 0;
+    const refreshGlobalKeys = (): void => {
+      const seq = ++refreshSeq;
+      void desktop.globalShortcuts
+        .supported()
+        .then(async (supported) => {
+          if (seq !== refreshSeq || tornDown) return;
+          globalPollerActive = supported;
+          if (!supported) return;
+          await desktop.globalShortcuts.start();
+        })
+        .catch(() => {
+          // Not a Tauri host, or the command was refused: the tray and the in-app
+          // shortcuts still work; the global key path simply is not live.
+          if (seq === refreshSeq && !tornDown) globalPollerActive = false;
+        });
+    };
+    refreshGlobalKeys();
+    unsubscribers.push(desktop.globalShortcuts.onStatusChange(refreshGlobalKeys));
+    // An earlier successful portal bind is restored with the saved keys; a
+    // desktop that remembers the approval answers without a dialog. Nothing
+    // is asked when the desktop already holds a trigger, and a dialog the
+    // user cancels forgets the earlier bind, so the next start is quiet.
     void desktop.globalShortcuts
-      .supported()
-      .then(async (supported) => {
-        if (tornDown) return;
-        globalPollerActive = supported;
-        if (!supported) return;
-        await desktop.globalShortcuts.start();
+      .status()
+      .then(async (status) => {
+        if (tornDown || status.backend !== "portal" || !portalBoundBefore()) return;
+        if (anyTriggerBound(status)) return;
+        const keys = loadGlobalShortcutVks();
+        try {
+          await desktop.globalShortcuts.bindPortal({
+            pttVk: loadPref<number>("pttVk", 0),
+            muteVk: keys.mute,
+            deafenVk: keys.deafen,
+          });
+        } catch (err) {
+          if (globalKeysErrorCode(err) === "bind_cancelled") clearPortalBound();
+          return;
+        }
+        if (!tornDown) refreshGlobalKeys();
       })
       .catch(() => {
-        // Not a Tauri host, or the command was refused: the tray and the in-app
-        // shortcuts still work; the global key path simply is not live.
-        globalPollerActive = false;
+        // The host could not answer: the keys stay as they were.
       });
     // Push the persisted rebind onto the running poller at startup, so a
     // choice made in Settings survives a restart (the native default is

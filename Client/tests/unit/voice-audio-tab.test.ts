@@ -1837,6 +1837,16 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
           stop: async () => {},
           updateKey: async () => {},
         },
+        // The PTT control asks which global-keys backend the host reports.
+        globalShortcuts: {
+          status: async () => ({
+            backend: "polling",
+            portalVersion: 0,
+            triggers: { ptt: null, mute: null, deafen: null },
+            canConfigure: false,
+          }),
+          onStatusChange: () => () => {},
+        },
       },
     }));
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({

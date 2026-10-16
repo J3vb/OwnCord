@@ -95,6 +95,8 @@ More detail: [docs/architecture/](docs/architecture/README.md) and
 | Desktop app   | Yes (installer) | Yes (installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
 | Docker server | No              | No              | Yes                  | Yes                  |
 
+Installing the app on Linux: [docs/linux-install.md](docs/linux-install.md).
+
 The Docker image is `ghcr.io/j3vb/owncord-server`. One tag covers both `amd64`
 and `arm64`.
 

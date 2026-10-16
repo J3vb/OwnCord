@@ -878,7 +878,8 @@ export function buildTauriMockScript(opts: {
         if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
              "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message", "clear_call_notification",
-             "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
+             // plugin:dialog|save cancels; a spec that needs a real save must override it.
+             "plugin:opener|open_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
@@ -888,6 +889,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
         if (cmd === "voice_shortcuts_supported") return false;
+        // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
+        if (cmd === "global_keys_status")
+          return { backend: "none", portalVersion: 0, triggers: { ptt: null, mute: null, deafen: null }, canConfigure: false };
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
         // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
