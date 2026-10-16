@@ -207,7 +207,11 @@ type frameRefs struct {
 		UserID     *int64  `json:"user_id"`
 		FromUserID *int64  `json:"from_user_id"`
 		Mentions   []int64 `json:"mentions"`
-		User       *struct {
+		// A call log row lists the users who joined the call.
+		Call *struct {
+			Participants []int64 `json:"participants"`
+		} `json:"call"`
+		User *struct {
 			ID int64 `json:"id"`
 		} `json:"user"`
 		Updates []struct {
@@ -237,7 +241,7 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 
 // userIn returns the first user the frame names that is a key of set:
 // payload.user_id, payload.from_user_id, payload.user.id, the replied-to
-// message's author, payload.mentions or payload.updates[].user_id.
+// message's author, payload.mentions, payload.call.participants or payload.updates[].user_id.
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -254,6 +258,9 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 		ids = append(ids, pl.Referenced.User.ID)
 	}
 	ids = append(ids, pl.Mentions...)
+	if pl.Call != nil {
+		ids = append(ids, pl.Call.Participants...)
+	}
 	for _, u := range pl.Updates {
 		ids = append(ids, u.UserID)
 	}

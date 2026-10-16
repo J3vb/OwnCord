@@ -155,6 +155,8 @@ type VoiceStore interface {
 	// Membership.
 	Join(ctx context.Context, userID, channelID int64, maxUsers int) error
 	LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error)
+	// NoteJoinCompleted tells the DM call log that a join finished (WP 3B-9).
+	NoteJoinCompleted(channelID, userID int64)
 
 	// The member's own flags.
 	SetSelfMute(ctx context.Context, userID int64, muted bool) error

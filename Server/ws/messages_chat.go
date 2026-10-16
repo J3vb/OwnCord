@@ -33,6 +33,18 @@ type chatMessagePayload struct {
 	// or the parent is unavailable). A deleted parent is redacted to
 	// {id, deleted: true}. An older server omits the field.
 	ReferencedMessage *service.ReferencedMessage `json:"referenced_message"`
+	// Kind and Call are set only on a call log row and omitted for an
+	// ordinary message (WP 3B-9). See callBlock.
+	Kind string     `json:"kind,omitempty"`
+	Call *callBlock `json:"call,omitempty"`
+}
+
+// callBlock is the call object of a call log row: the same shape as the
+// history payload's db.CallInfo. EndedAt is null while the call is live.
+type callBlock struct {
+	StartedAt    string  `json:"started_at"`
+	EndedAt      *string `json:"ended_at"`
+	Participants []int64 `json:"participants"`
 }
 
 // chatMessageArgs is the input to buildChatMessage. It is a struct rather than
@@ -54,6 +66,9 @@ type chatMessageArgs struct {
 	MentionsEveryone  bool
 	MentionsHere      bool
 	ReferencedMessage *service.ReferencedMessage
+	// Kind and Call are set only for a call log row.
+	Kind string
+	Call *callBlock
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -90,6 +105,8 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			MentionsEveryone:  a.MentionsEveryone,
 			MentionsHere:      a.MentionsHere,
 			ReferencedMessage: a.ReferencedMessage,
+			Kind:              a.Kind,
+			Call:              a.Call,
 		},
 	})
 }

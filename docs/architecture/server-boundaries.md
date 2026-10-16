@@ -568,6 +568,13 @@ on every return — a failed start, a serve error and a clean shutdown alike.
 | 18  | `signals`              | `signals` — unregisters the signal handler; armed before the bind retry below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 19  | `http`                 | `http` — ACME shutdown and the drain of in-flight handlers (an open admin Logs stream is ended as `Shutdown` begins), then `hub-notice` stops the hub, then `listener` releases the bound port                                                                                                                                                                                                                                                                                                                                                                          |
 
+The DM call log worker (WP 3B-9) is its own stage, `call-log`, started after
+`status-expiry` and before `http`: it needs event persistence up so the end it
+logs for a call left open by the previous run is persisted for replay, and it
+must finish that recovery before the listener opens. Its close step joins the
+worker loop and stamps `last_seen_at` on calls that still have someone in them,
+and runs before `event-persistence` closes.
+
 Close order is therefore `http`, `hub-notice`, `listener`, `signals`, `maintenance`, `audit-writer`,
 `event-persistence`, `router`, `mention-worker`, `hub`, `conn-writes`, `plugins`, `telemetry`,
 `erasure-markers`, `boot-marker`, `database`, `background-context`. All four facts hold, and

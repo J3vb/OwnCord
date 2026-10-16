@@ -568,6 +568,16 @@ column rather than a sentinel row in `message_mentions` so that table never
 holds a `mentioned_user_id` that is not a real user. The message row and its
 mention rows are written in one writer transaction, and an edit rewrites both.
 
+`kind` (migration 064, `INTEGER NOT NULL DEFAULT 0`) is 0 for a message a user
+sent and 1 for a call log row. Only the server's call log worker writes kind 1
+(`db.CreateCallLog`), one row per DM call, with its `message_calls` and
+`message_call_participants` rows. While someone is in the call the worker keeps
+`message_calls.last_seen_at` current; when the room has been empty for 10
+seconds it sets `ended_at` to the last leave and rewrites the fallback
+`content`. At start-up it ends any call still open at its `last_seen_at`, since
+a restart clears voice and no call survives it. Call rows are never edited,
+soft-deleted or pinned by a user.
+
 ---
 
 ### message_mentions
