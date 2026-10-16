@@ -48,13 +48,44 @@ func TestFindClientAssets_ByTarget(t *testing.T) {
 		{"windows-aarch64-nsis", "https://example.com/arm64-installer.zip", "https://example.com/arm64-installer.zip.sig"},
 		{"linux-x86_64-appimage", "https://example.com/amd64.AppImage.tar.gz", "https://example.com/amd64.AppImage.tar.gz.sig"},
 		{"linux-aarch64-appimage", "https://example.com/aarch64.AppImage.tar.gz", "https://example.com/aarch64.AppImage.tar.gz.sig"},
-		// No deb updater artifact is published — a deb client must get
-		// nothing rather than an AppImage archive its installer rejects.
+		// No deb asset in this release — a deb client must get nothing
+		// rather than an AppImage archive its installer rejects.
 		{"linux-x86_64-deb", "", ""},
 		{"darwin-aarch64-app", "", ""},
 		{"windows-x86_64-unknown", "", ""},
 		{"windows-aarch64-msi", "", ""},
 		{"", "", ""},
+	}
+	for _, tc := range cases {
+		ca := u.FindClientAssets(tc.target)
+		if ca.InstallerURL != tc.wantInstaller || ca.SignatureURL != tc.wantSig {
+			t.Errorf("FindClientAssets(%q) = {%q, %q}, want {%q, %q}",
+				tc.target, ca.InstallerURL, ca.SignatureURL, tc.wantInstaller, tc.wantSig)
+		}
+	}
+}
+
+func TestFindClientAssets_DebTargets(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.mu.Lock()
+	u.cache = &UpdateInfo{
+		Assets: []Asset{
+			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz", DownloadURL: "https://example.com/amd64.AppImage.tar.gz"},
+			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz.sig", DownloadURL: "https://example.com/amd64.AppImage.tar.gz.sig"},
+			{Name: "OwnCord_1.0.0_amd64.deb", DownloadURL: "https://example.com/amd64.deb"},
+			{Name: "OwnCord_1.0.0_amd64.deb.sig", DownloadURL: "https://example.com/amd64.deb.sig"},
+			{Name: "OwnCord_1.0.0_arm64.deb", DownloadURL: "https://example.com/arm64.deb"},
+			{Name: "OwnCord_1.0.0_arm64.deb.sig", DownloadURL: "https://example.com/arm64.deb.sig"},
+		},
+	}
+	u.mu.Unlock()
+
+	cases := []struct {
+		target, wantInstaller, wantSig string
+	}{
+		{"linux-x86_64-deb", "https://example.com/amd64.deb", "https://example.com/amd64.deb.sig"},
+		{"linux-aarch64-deb", "https://example.com/arm64.deb", "https://example.com/arm64.deb.sig"},
+		{"linux-x86_64-rpm", "", ""},
 	}
 	for _, tc := range cases {
 		ca := u.FindClientAssets(tc.target)

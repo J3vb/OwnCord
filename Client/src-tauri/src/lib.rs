@@ -37,6 +37,8 @@ mod mouse_buttons;
 mod notification_bus;
 #[cfg(desktop)]
 mod popout;
+#[cfg(target_os = "linux")]
+mod portal_shortcuts;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]
 pub mod native_voice;
@@ -245,6 +247,9 @@ pub fn run() {
             shortcuts::voice_shortcuts_start,
             shortcuts::voice_shortcuts_supported,
             shortcuts::voice_shortcuts_set_keys,
+            shortcuts::global_keys_status,
+            shortcuts::global_keys_portal_bind,
+            shortcuts::global_keys_portal_configure,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
@@ -368,6 +373,10 @@ pub fn run() {
                     ptt::ptt_stop_internal();
                     // Same for the global voice-shortcut poller.
                     shortcuts::voice_shortcuts_stop_internal();
+                    // And the Wayland portal thread: closes its session and
+                    // joins.
+                    #[cfg(target_os = "linux")]
+                    portal_shortcuts::stop_internal();
                 }
             });
         }

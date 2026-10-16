@@ -5272,12 +5272,25 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact get 204. The `linux-x86_64-deb` and `linux-aarch64-deb` targets are served only with `?deb_install=pkexec` (see below). |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                                                                                                                  |
 
-#### Response 200 OK (update available)
+#### Query Parameters
+
+| Param         | Type   | Description                                                                                                                                                                                                                                                                                   |
+| ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deb_install` | string | Opt-in for the `linux-*-deb` targets. Exactly `pkexec` (case-sensitive) says the client can install a signed `.deb` through a privileged helper. Without it a `-deb` target always gets 204, so older `.deb` clients keep their "cannot update itself" notice. Ignored on every other target. |
+
+For an opted-in `-deb` client the server also answers **200 with the latest
+version** when the client is already current or newer, instead of 204. The
+Tauri plugin resolves the platform entry before it compares versions; the 200
+tells the client that the server can serve its package, so it can tell
+"up to date" from "this server cannot serve me". The protocol-epoch withhold
+and a release without a signed `.deb` still give 204.
+
+#### Response 200 OK (update available, or an opted-in `-deb` client)
 
 ```json
 {
@@ -5295,7 +5308,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date, no client build is published for `target`, or
+Client is already up-to-date (except an opted-in `-deb` client, see above), no client build is published for `target`, or
 the newest release speaks a **newer protocol epoch than this server** (read
 from the release's signed server-update manifest, `protocol_epoch`; a manifest
 that fails signature verification is withheld the same way). The server

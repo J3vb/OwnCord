@@ -32,15 +32,21 @@ type textAssetCacheEntry struct {
 // clientAssetSuffixByTarget maps a Tauri updater target
 // ("{os}-{arch}-{installer}") to the release asset suffix for that platform's
 // updater artifact. The matching signature asset is the same suffix plus
-// ".sig". Targets without a published updater artifact are absent — notably
-// linux-*-deb: the release ships .deb packages but no signed deb updater
-// artifact, and serving the AppImage archive instead would make the plugin's
-// install_deb reject every update.
+// ".sig". Targets without a published updater artifact are absent.
+//
+// The linux-*-deb entries point at the signed .deb package itself (Tauri names
+// debs by Debian architecture). The release workflow signs each .deb with the
+// updater key, bound to the release version. A deb target is only answered for
+// clients that opt in (see api/client_update.go debOptIn); a client that does
+// not opt in gets 204 before this map is consulted, because it cannot install
+// a .deb and serving it would turn an honest banner into a failing install.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
 	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
 	"linux-x86_64-appimage":  "_amd64.AppImage.tar.gz",
 	"linux-aarch64-appimage": "_aarch64.AppImage.tar.gz",
+	"linux-x86_64-deb":       "_amd64.deb",
+	"linux-aarch64-deb":      "_arm64.deb",
 }
 
 // FindClientAssets scans the cached release assets for the client updater
