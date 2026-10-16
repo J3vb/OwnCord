@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /** Captured emoji picker callbacks so tests can simulate selection. */
-let lastEmojiPickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null =
-  null;
+let lastEmojiPickerOptions: {
+  onSelect: (emoji: string, select?: { keepOpen: boolean }) => void;
+  onClose: () => void;
+} | null = null;
 
 vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: (opts: { onSelect: (emoji: string) => void; onClose: () => void }) => {
+  createEmojiPicker: (opts: NonNullable<typeof lastEmojiPickerOptions>) => {
     lastEmojiPickerOptions = opts;
     const element = document.createElement("div");
     element.classList.add("emoji-picker");
@@ -2001,6 +2003,34 @@ describe("MessageInput", () => {
     // Emoji should be inserted at cursor position
     expect(textarea.value).toBe("Hello 🎉 world");
 
+    comp.destroy?.();
+  });
+
+  it("a plain pick closes the emoji picker", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+
+    lastEmojiPickerOptions!.onSelect("🎉");
+
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    comp.destroy?.();
+  });
+
+  it("a Shift-pick inserts at the caret and keeps the picker open for the next one", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "ab";
+    textarea.selectionStart = textarea.selectionEnd = 1;
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+
+    lastEmojiPickerOptions!.onSelect("🎉", { keepOpen: true });
+    lastEmojiPickerOptions!.onSelect("🔥", { keepOpen: true });
+
+    expect(textarea.value).toBe("a🎉🔥b");
+    expect(textarea.selectionStart).toBe("a🎉🔥".length);
+    expect(container.querySelector(".emoji-picker")).not.toBeNull();
     comp.destroy?.();
   });
 

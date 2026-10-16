@@ -97,6 +97,46 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
+  it("a plain click passes the emoji alone; a Shift-click adds keepOpen", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const cell = picker.element.querySelector(".ep-emoji") as HTMLElement;
+    const emoji = cell.dataset.emoji;
+
+    cell.click();
+    expect(onSelect).toHaveBeenLastCalledWith(emoji);
+    expect(onSelect.mock.lastCall).toHaveLength(1);
+
+    // Recents may re-render the grid, so look the cell up again.
+    const again = picker.element.querySelector(".ep-emoji") as HTMLElement;
+    again.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+    expect(onSelect).toHaveBeenLastCalledWith(again.dataset.emoji, { keepOpen: true });
+    picker.destroy();
+  });
+
+  it("Shift+Enter in the search input picks the first match with keepOpen", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "smile";
+    input.dispatchEvent(new Event("input"));
+    const firstMatch = picker.element.querySelector(".ep-emoji") as HTMLElement;
+
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(firstMatch.getAttribute("title"), {
+      keepOpen: true,
+    });
+    picker.destroy();
+  });
+
   it("clicking an emoji saves to recent in localStorage", () => {
     const { picker } = makePicker();
 

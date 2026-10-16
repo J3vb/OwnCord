@@ -230,3 +230,17 @@
   margin-top: 12px;
   line-height: 1.5;
 }
+
+/* Rendered message content inside a pin card: block children (paragraphs,
+   code, quotes) keep the card's 3-line clamp, and media cannot outgrow it. */
+.pinned-msg__content .msg-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pinned-msg__content pre,
+.pinned-msg__content img,
+.pinned-msg__content video {
+  max-width: 100%;
+  max-height: 4.2em;
+  overflow: hidden;
+}

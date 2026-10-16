@@ -12,6 +12,9 @@ const {
   mockInviteManagerDestroy,
   mockPinnedMessagesMount,
   mockPinnedMessagesDestroy,
+  mockPinnedSetPins,
+  mockPinnedRemovePin,
+  mockPinnedSetOnUnpin,
   mockShowToast,
   mockQuickSwitcherMount,
   mockQuickSwitcherDestroy,
@@ -25,6 +28,9 @@ const {
   mockInviteManagerDestroy: vi.fn(),
   mockPinnedMessagesMount: vi.fn(),
   mockPinnedMessagesDestroy: vi.fn(),
+  mockPinnedSetPins: vi.fn(),
+  mockPinnedRemovePin: vi.fn(),
+  mockPinnedSetOnUnpin: vi.fn(),
   mockShowToast: vi.fn(),
   mockQuickSwitcherMount: vi.fn(),
   mockQuickSwitcherDestroy: vi.fn(),
@@ -61,6 +67,9 @@ vi.mock("@components/PinnedMessages", () => ({
   createPinnedMessages: vi.fn(() => ({
     mount: mockPinnedMessagesMount,
     destroy: mockPinnedMessagesDestroy,
+    setPins: mockPinnedSetPins,
+    removePin: mockPinnedRemovePin,
+    setOnUnpin: mockPinnedSetOnUnpin,
   })),
 }));
 
@@ -71,23 +80,30 @@ vi.mock("@components/SearchOverlay", () => ({
   })),
 }));
 
-// B9-7: channel 99 is labelled NSFW and not acknowledged.
-vi.mock("@stores/channels.store", () => ({
-  setActiveChannel: mockSetActiveChannel,
-  channelsStore: {
-    getState: () => ({
-      channels: new Map([
+// B9-7: channel 99 is labelled NSFW and not acknowledged. Real stores, so the
+// controller's live subscriptions run.
+vi.mock("@stores/channels.store", async () => {
+  const { createStore } = await import("@lib/store");
+  return {
+    setActiveChannel: mockSetActiveChannel,
+    channelsStore: createStore({
+      channels: new Map<number, Record<string, unknown>>([
         [99, { nsfw: true }],
         [3, { id: 3, name: "voice-lobby", type: "voice" }],
         [4, { id: 4, name: "general", type: "text" }],
+        [42, { id: 42, name: "pins", type: "text", canPin: true }],
       ]),
     }),
-  },
-}));
+  };
+});
 
-vi.mock("@stores/messages.store", () => ({
-  setMessagePinned: mockSetMessagePinned,
-}));
+vi.mock("@stores/messages.store", async () => {
+  const { createStore } = await import("@lib/store");
+  return {
+    messagesStore: createStore({ pinRevision: new Map<number, number>() }),
+    setMessagePinned: mockSetMessagePinned,
+  };
+});
 
 vi.mock("@lib/toast", () => ({
   initToast: vi.fn(),
@@ -103,18 +119,31 @@ import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
 import { createPinnedMessages } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
+import { channelsStore } from "@stores/channels.store";
+import { messagesStore } from "@stores/messages.store";
+import { membersStore } from "@stores/members.store";
+import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import {
   mapInviteResponse,
   mapToPinnedMessage,
   createQuickSwitcherManager,
   createInviteManagerController,
-  createPinnedPanelController,
+  createPinnedPanelController as createPinnedPanelControllerRaw,
   createSearchOverlayController,
 } from "@pages/main-page/OverlayManagers";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// An open panel watches the shared stores, so every controller a test opens is
+// closed afterwards or it would keep reacting to the next test's store writes.
+const openPinnedControllers: Array<{ cleanup(): void }> = [];
+const createPinnedPanelController: typeof createPinnedPanelControllerRaw = (o) => {
+  const controller = createPinnedPanelControllerRaw(o);
+  openPinnedControllers.push(controller);
+  return controller;
+};
 
 function makeInviteResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -295,6 +324,7 @@ describe("createPinnedPanelController", () => {
   });
 
   afterEach(() => {
+    for (const c of openPinnedControllers.splice(0)) c.cleanup();
     root.remove();
   });
 
@@ -397,7 +427,7 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
   });
 
-  it("onUnpin closes panel on success", async () => {
+  it("onUnpin removes the card in place on success and keeps the panel open", async () => {
     const api = makeMockApi();
 
     const controller = createPinnedPanelController({
@@ -418,17 +448,198 @@ describe("createPinnedPanelController", () => {
 
     // Wait for the async success handling to complete
     await vi.waitFor(() => {
-      expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
+      expect(mockPinnedRemovePin).toHaveBeenCalledWith(1);
     });
 
-    // The store's `pinned` flag is the row's only local authority (there is
-    // no server pin/unpin broadcast) — without this the row still says
-    // "Unpin" after a panel unpin, and re-clicking it calls unpinMessage on
-    // an already-unpinned message.
+    // The store's `pinned` flag is the row's only local authority until the
+    // chat_pinned broadcast — without this the row still says "Unpin" after a
+    // panel unpin, and re-clicking it calls unpinMessage on an unpinned message.
     expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 1, false);
+
+    // The panel stays open (jump-to-message is what closes it).
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
 
     // No error toast should be shown
     expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
+  describe("live updates while open", () => {
+    const pin = (id: number, content: string) => ({
+      id,
+      user: { id: 1, username: "Alice" },
+      content,
+      created_at: "2024-01-01",
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      messagesStore.setState(() => ({ pinRevision: new Map<number, number>() }) as never);
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              name: "pins",
+              type: "text",
+              canPin: true,
+            } as never),
+          }) as never,
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const bumpPins = (channelId: number): void => {
+      messagesStore.setState(
+        (prev) =>
+          ({
+            pinRevision: new Map(prev.pinRevision).set(
+              channelId,
+              (prev.pinRevision?.get(channelId) ?? 0) + 1,
+            ),
+          }) as never,
+      );
+      messagesStore.flush();
+    };
+
+    async function openPanel(api: ReturnType<typeof makeMockApi>, canPin = () => true) {
+      const controller = createPinnedPanelController({
+        api: api as never,
+        getRoot: () => root,
+        getCurrentChannelId: () => 42,
+        canPin,
+      });
+      await controller.toggle();
+      return controller;
+    }
+
+    it("refetches the channel's pins once, debounced, after pin changes", async () => {
+      const api = makeMockApi();
+      await openPanel(api);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      api.getPins.mockResolvedValue({ messages: [pin(7, "fresh")] });
+      bumpPins(42);
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+      expect(mockPinnedSetPins).toHaveBeenCalledOnce();
+      const shown = mockPinnedSetPins.mock.calls[0]![0] as Array<{ id: number }>;
+      expect(shown.map((p) => p.id)).toEqual([7]);
+    });
+
+    it("refetches once when the connection returns, with the panel's abort signal", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      expect(api.getPins.mock.calls[0]).toHaveLength(1);
+
+      setConnectionStatus("reconnecting");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+      const signal = api.getPins.mock.calls[1]![1] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      expect(mockPinnedSetPins).toHaveBeenCalledOnce();
+
+      controller.cleanup();
+      expect(signal.aborted).toBe(true);
+      setConnectionStatus("reconnecting");
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a pin change in another channel", async () => {
+      const api = makeMockApi();
+      await openPanel(api);
+      bumpPins(7);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+      expect(mockPinnedSetPins).not.toHaveBeenCalled();
+    });
+
+    it("drops a refetch response that lands after the panel closed", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      let resolveLate: (v: unknown) => void = () => {};
+      api.getPins.mockReturnValue(new Promise((r) => (resolveLate = r)));
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+
+      controller.cleanup();
+      resolveLate({ messages: [pin(8, "late")] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockPinnedSetPins).not.toHaveBeenCalled();
+    });
+
+    it("stops watching once closed: no timer, no refetch", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      bumpPins(42);
+      controller.cleanup();
+      await vi.advanceTimersByTimeAsync(500);
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+    });
+
+    it("withdraws Unpin when the channel's canPin turns off and offers it again when it returns", async () => {
+      const api = makeMockApi();
+      let allowed = true;
+      await openPanel(api, () => allowed);
+
+      allowed = false;
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              type: "text",
+              canPin: false,
+            } as never),
+          }) as never,
+      );
+      channelsStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(undefined);
+
+      allowed = true;
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              type: "text",
+              canPin: true,
+            } as never),
+          }) as never,
+      );
+      channelsStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(expect.any(Function));
+    });
+
+    it("re-evaluates the permission when the viewer's role revision changes", async () => {
+      const api = makeMockApi();
+      let allowed = false;
+      await openPanel(api, () => allowed);
+      expect(mockPinnedSetOnUnpin).not.toHaveBeenCalled();
+
+      allowed = true;
+      setMembers([]);
+      membersStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(expect.any(Function));
+    });
   });
 
   it("onJumpToMessage forwards the panel's own channel id (captured at open time), not just the message id", async () => {
