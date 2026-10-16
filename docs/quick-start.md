@@ -199,6 +199,8 @@ signing is separate work. See
 - **Linux with Wayland:** the app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` for
   you on Wayland. This avoids WebKitGTK rendering crashes. To override it, set
   the variable yourself (to any value) before you start the app.
+- **Linux install:** for the `.deb`, the AppImage, the tray, the keyring and
+  uninstalling, see [linux-install.md](linux-install.md).
 
 ## If friends outside your network cannot connect
 

@@ -57,6 +57,8 @@ export interface InlineAutocompleteConfig<T> {
    * so typing keeps working, which is why the rows have no tabindex.
    */
   readonly comboboxInput?: HTMLElement;
+  /** Accessible name of the listbox, when it should have one. */
+  readonly ariaLabel?: string;
 }
 
 export interface InlineAutocompleteComponent {
@@ -99,6 +101,7 @@ export function createInlineAutocomplete<T>(
     role: "listbox",
     "data-testid": cfg.rootTestId,
   });
+  if (cfg.ariaLabel !== undefined) root.setAttribute("aria-label", cfg.ariaLabel);
   const list = createElement("div", { class: "ma-list" });
   root.appendChild(list);
 
@@ -170,6 +173,8 @@ export function createInlineAutocomplete<T>(
 
   function handleKeydown(e: KeyboardEvent): boolean {
     if (suggestions.length === 0) return false;
+    // An IME's commit-Enter (or arrow/Esc while composing) belongs to the IME.
+    if (e.isComposing || e.keyCode === 229) return false;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();

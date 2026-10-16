@@ -26,7 +26,12 @@ import {
   type ChannelAutocompleteComponent,
 } from "@components/ChannelAutocomplete";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
+import {
+  createSlashAutocomplete,
+  type SlashAutocompleteComponent,
+} from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
+import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
 import { ATTACHMENT_TTL_MS } from "../features/messaging/attachmentTtl";
@@ -309,6 +314,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let channelPopup: ChannelAutocompleteComponent | null = null;
   /** Index of the "#" the open channel popup is completing; -1 when closed. */
   let channelStart = -1;
+  /** Open while the whole draft is "/" plus letters (built-in slash commands). */
+  let slashPopup: SlashAutocompleteComponent | null = null;
 
   /** Pending attachment IDs to send with the next message. `upload` is set
    *  exactly while the upload is in flight: Send then queues the message behind
@@ -475,6 +482,54 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.focus();
   }
 
+  function closeSlashPopup(): void {
+    if (slashPopup === null) return;
+    slashPopup.destroy();
+    slashPopup = null;
+  }
+
+  /** The letters after a "/" when the draft is nothing but "/word", else null. */
+  function activeSlashQuery(): string | null {
+    if (textarea === null) return null;
+    const match = /^\/([A-Za-z]*)$/.exec(textarea.value);
+    return match === null ? null : (match[1] ?? "");
+  }
+
+  /** Replace the "/word" draft with "/name ". */
+  function insertSlashCommand(name: string): void {
+    if (textarea === null || activeSlashQuery() === null) {
+      closeSlashPopup();
+      return;
+    }
+    const inserted = `/${name} `;
+    textarea.value = inserted;
+    textarea.selectionStart = inserted.length;
+    textarea.selectionEnd = inserted.length;
+    closeSlashPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  /** Open, refilter, or close the slash-command popup for the current draft. */
+  function syncSlashPopup(): void {
+    const query = disabledReason === null ? activeSlashQuery() : null;
+    if (query === null) {
+      closeSlashPopup();
+      return;
+    }
+    if (slashPopup === null) {
+      slashPopup = createSlashAutocomplete({
+        onSelect: insertSlashCommand,
+        onClose: closeSlashPopup,
+        comboboxInput: textarea ?? undefined,
+      });
+      root?.appendChild(slashPopup.element);
+    }
+    if (!slashPopup.setQuery(query)) {
+      closeSlashPopup();
+    }
+  }
+
   /** Open, refilter, or close the channel popup for whatever is under the caret. */
   function syncChannelPopup(): void {
     const active = disabledReason === null ? activeChannelToken() : null;
@@ -576,6 +631,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    * textarea would race for the arrow keys.
    */
   function syncAutocomplete(): void {
+    // A "/word" draft has no "@", "#" or ":" token, so the slash popup never
+    // competes with the others; it only needs to leave them closed.
+    syncSlashPopup();
+    if (slashPopup !== null) {
+      closeMentionPopup();
+      closeChannelPopup();
+      closeEmojiPopup();
+      return;
+    }
     syncMentionPopup();
     if (mentionPopup !== null) {
       closeChannelPopup();
@@ -791,7 +855,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
     if (textarea === null) return;
-    const content = replaceEmojiShortcodes(textarea.value.trim());
+    // Built-in slash commands rewrite the text here, so the attachment and
+    // send-while-uploading paths below carry the rewritten message too. A bare
+    // /spoiler or /me has nothing to send and leaves the draft as typed.
+    const slash = applySlashCommand(textarea.value);
+    if (slash !== null && "empty" in slash) {
+      showUploadError(messagingText("slash.needsText", { name: slash.name }));
+      return;
+    }
+    const content = replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text);
     const hasAttachments = pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
 
@@ -857,6 +929,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     clearPendingAttachments();
 
     textarea.value = "";
+    closeSlashPopup();
     autoResize();
     textarea.focus();
     clearUploadError();
@@ -1391,6 +1464,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       (e: KeyboardEvent) => {
         // Whichever popup is open owns navigation keys, so Enter completes the
         // token instead of sending a half-typed message.
+        if (slashPopup?.handleKeydown(e) === true) return;
         if (mentionPopup?.handleKeydown(e) === true) return;
         if (channelPopup?.handleKeydown(e) === true) return;
         if (emojiPopup?.handleKeydown(e) === true) return;
@@ -1496,6 +1570,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.addEventListener(
       "blur",
       () => {
+        closeSlashPopup();
         closeMentionPopup();
         closeChannelPopup();
         closeEmojiPopup();
@@ -1669,6 +1744,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     cleanupPickers = () => {
       closeEmojiPicker();
       closeGifPicker();
+      closeSlashPopup();
       closeMentionPopup();
       closeChannelPopup();
       closeEmojiPopup();

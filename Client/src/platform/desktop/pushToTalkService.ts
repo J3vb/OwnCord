@@ -15,6 +15,15 @@
  * ever puts a raw track on the sender, and a user's own mute is never PTT's
  * to lift (v006) — a press while muted opens a gate on a stopped capture.
  *
+ * On a Wayland session the host reports the push-to-talk key only once the
+ * desktop's global-shortcut service has bound it, so `ptt_polling_supported`
+ * can be false at start and true later. `startBinding` reads it once, so the
+ * service also watches `global-keys-changed` (one app-lifetime subscription,
+ * started with the first binding) and re-arms the binding when the trigger
+ * appears: the bind dialog finishing, or a restored binding after the portal
+ * restarted. Losing the binding arrives as the host's `ptt-error`, handled
+ * below like a dead poller.
+ *
  * Only `./pushToTalk.ts` imports this module, and lazily — see its header.
  */
 
@@ -24,6 +33,8 @@ import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/ptt";
 import { inputMode } from "@lib/inputMode";
 import type { PushToTalk } from "../contracts/pushToTalk";
+import type { GlobalKeysStatus } from "../contracts/globalShortcuts";
+import { globalShortcuts } from "./globalShortcuts";
 
 const log = createLogger("ptt");
 
@@ -40,6 +51,38 @@ let nativeStarted = false;
 let nativeStop: Promise<void> | null = null;
 let edge = 0;
 let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+let statusWatch: (() => void) | null = null;
+
+/** Re-arm a binding that started before the desktop had bound the PTT key. A
+ *  live binding is left alone, so a repeated change event starts nothing. */
+function onGlobalKeysChanged(status: GlobalKeysStatus): void {
+  if (status.backend !== "portal") return;
+  if (status.triggers.ptt === null) {
+    // The desktop dropped the key (the user cleared it in system settings):
+    // no release edge can arrive, so tear the binding down like a dead poller.
+    if (binding !== null && isPttPollingLive()) dropBinding(binding);
+    return;
+  }
+  const vk = loadPref<number>("pttVk", 0);
+  if (vk === 0 || inputMode() !== "ptt") return;
+  if (binding?.ready === true && isPttPollingLive()) return;
+  void startBinding(vk, true);
+}
+
+/** The binding can no longer produce an edge: invalidate it, mark PTT not
+ *  live and open a closed gate. Shared by `ptt-error` and a lost trigger. */
+function dropBinding(attempt: PttBinding): void {
+  ++generation;
+  binding = null;
+  nativeStarted = false;
+  releaseListeners(attempt);
+  setPttPollingLive(false);
+  ungateMic();
+}
+
+function watchGlobalKeys(): void {
+  statusWatch ??= globalShortcuts.onStatusChange(onGlobalKeysChanged);
+}
 
 /** ptt_set_key's rejection for a key outside the backend's bindable list. */
 function isUnsupportedKeyError(err: unknown): boolean {
@@ -93,6 +136,7 @@ async function initPtt(): Promise<void> {
 }
 
 async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
+  watchGlobalKeys();
   releaseListeners(binding);
   const initialState = voiceStore.getState();
   const attempt: PttBinding = {
@@ -143,12 +187,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     const errorUnlisten = await listen<string>("ptt-error", (event) => {
       if (!isCurrent(attempt)) return;
       log.warn("PTT polling thread stopped unexpectedly", { error: event.payload });
-      ++generation;
-      binding = null;
-      nativeStarted = false;
-      releaseListeners(attempt);
-      setPttPollingLive(false);
-      ungateMic();
+      dropBinding(attempt);
     });
     if (!retainListener(attempt, errorUnlisten)) return;
 
