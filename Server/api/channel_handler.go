@@ -329,7 +329,12 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 			page.Before = v
 		}
 
-		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, page)
+		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, service.SearchRequest{
+			Query:     q,
+			ChannelID: channelID,
+			TZ:        r.URL.Query().Get("tz"),
+			Page:      page,
+		})
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
 				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")

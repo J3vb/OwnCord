@@ -27,18 +27,20 @@ func ftsMatchQuery(q string) string {
 const minPrefixRunes = 3
 
 // searchPageSQL is the tail of a search query for page: the cursor filter,
-// the order and the limit, with their arguments.
-func searchPageSQL(page SearchPage) (string, []any) {
+// the order and the limit, with their arguments. idCol is the message-id
+// column of the query's driving table (f.rowid with a MATCH, m.id without).
+// ranked reports whether the query has an FTS driver, so rank ordering exists.
+func searchPageSQL(page SearchPage, idCol string, ranked bool) (string, []any) {
 	var (
 		sb   strings.Builder
 		args []any
 	)
 	if page.Before > 0 {
-		sb.WriteString(" AND f.rowid < ?")
+		sb.WriteString(" AND " + idCol + " < ?")
 		args = append(args, page.Before)
 	}
-	if page.Recent {
-		sb.WriteString(" ORDER BY f.rowid DESC")
+	if page.Recent || !ranked {
+		sb.WriteString(" ORDER BY " + idCol + " DESC")
 	} else {
 		sb.WriteString(" ORDER BY rank")
 	}
