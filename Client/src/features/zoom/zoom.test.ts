@@ -158,11 +158,28 @@ describe("controller", () => {
     const { host, calls, release } = gatedHost();
     const zoom = createZoomController(host);
     const a = zoom.step(1);
-    const b = zoom.step(-1);
+    const b = zoom.set(150);
     release(false);
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    release(true);
     await Promise.all([a, b]);
-    expect(zoom.current()).toBe(100);
-    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls).toEqual([1.1, 1.5]);
+    expect(zoom.current()).toBe(150);
+    expect(stored()).toBe("150");
+  });
+
+  it("a no-op request does not swallow the next one", async () => {
+    const calls: number[] = [];
+    const zoom = createZoomController({
+      setZoom: vi.fn().mockImplementation(async (scale: number) => {
+        calls.push(scale);
+        return true;
+      }),
+    });
+    void zoom.reset();
+    await zoom.step(1);
+    expect(calls).toEqual([1.1]);
+    expect(stored()).toBe("110");
   });
 
   it("notifies subscribers until their signal aborts", async () => {

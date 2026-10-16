@@ -105,7 +105,17 @@ export function createZoomController(host: ZoomHost): ZoomController {
     }
   };
 
+  // Started only when a call is due, so it always awaits before `finally`
+  // clears `pumping` in the same tick as its last check.
   const pump = async (): Promise<void> => {
+    try {
+      await drain();
+    } finally {
+      pumping = null;
+    }
+  };
+
+  const drain = async (): Promise<void> => {
     while (applied !== wanted) {
       const target = wanted;
       // oxlint-disable-next-line no-await-in-loop -- native zooms must run one at a time, in order
@@ -126,9 +136,8 @@ export function createZoomController(host: ZoomHost): ZoomController {
 
   const run = (): Promise<void> => {
     if (pumping === null) {
-      pumping = pump().finally(() => {
-        pumping = null;
-      });
+      if (applied === wanted) return Promise.resolve();
+      pumping = pump();
     }
     return pumping;
   };
