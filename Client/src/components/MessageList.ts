@@ -1850,14 +1850,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         moreWasOpen = false;
         const button = moreButtonOf(e.target);
         if (button === null || skip) return;
-        withMessageMenu((m) =>
+        const testId = button.dataset["testid"] ?? "";
+        withMessageMenu((m) => {
+          // The first open waits for the menu module; a patch or scroll in that
+          // time replaces the button, so anchor on the live one, or open nothing.
+          const live = button.isConnected
+            ? button
+            : (contentContainer?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null);
+          if (live === null) return;
           m.openMessageMenuFromButton({
             opts: options,
-            button,
+            button: live,
             signal: disposable.signal,
             markUnread: markUnreadFrom,
-          }),
-        );
+          });
+        });
       },
       { signal: disposable.signal },
     );

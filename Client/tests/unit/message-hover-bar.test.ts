@@ -279,6 +279,18 @@ describe("hover bar More button (mounted list)", () => {
     expect(document.activeElement).toBe(fresh);
   });
 
+  it("a row rebuilt before the menu module loads: the menu anchors on the live More", async () => {
+    const old = more();
+    old.click();
+    // Rebuilt in the same task, before the lazy menu module resolves.
+    seed([makeMessage({ content: "after", editedAt: "2024-01-15T12:05:00Z" })]);
+    messagesStore.flush();
+    expect(old.isConnected).toBe(false);
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    expect(more()).not.toBe(old);
+    expect(more().getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("a second click on More closes its menu instead of reopening it", async () => {
     more().click();
     await vi.waitFor(() => expect(menu()).not.toBeNull());
