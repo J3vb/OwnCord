@@ -4,10 +4,11 @@
 # (the Rust test `helper_script_suite` runs it). The helper is sourced, and the
 # commands it calls (dpkg-query, dpkg-deb, dpkg, id, install, setpriv, apt-get)
 # are replaced by functions, so nothing needs root and nothing is installed.
+# shellcheck disable=SC2317,SC2329 # the stubs are called by the sourced helper
 set -u
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=owncord-deb-update
+# shellcheck source=owncord-deb-update disable=SC1091
 . "$here/owncord-deb-update"
 
 failures=0
