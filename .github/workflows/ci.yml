@@ -1315,7 +1315,7 @@ jobs:
         timeout-minutes: 8
         run: bash ../scripts/ci/playwright-install.sh
 
-      # Fast feedback: this job runs the 137-test smoke set
+      # Fast feedback: this job runs the smoke set
       # (Client/playwright.config.smoke.ts) against the Vite dev server.
       # `client-e2e-parity` runs the complete suite against the built
       # bundle on every browser change, including when Change selection fails
