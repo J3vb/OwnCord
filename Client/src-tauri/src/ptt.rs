@@ -407,19 +407,10 @@ fn ptt_transition(vk: i32, key_down: bool, was_pressed: bool) -> Option<bool> {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Whether this platform can actually observe global key state, i.e. whether
-/// the polling loop can ever emit a `ptt-state` event.
-///
-/// `ptt_start` spawns its thread unconditionally, so a live thread is NOT
-/// evidence that PTT works: on macOS `is_key_down` is a compile-time stub that
-/// always returns false, and on a Wayland session the app's window is a
-/// Wayland one, whose key presses an XWayland display never sees (with no
-/// XWayland at all `DeviceState::checked_new()` returns None). The frontend
-/// gates its join-time PTT mute and the Keybinds tab's binding on this,
-/// because muting at join where no event can ever arrive would close the
-/// microphone for the whole session with no way to reopen it.
-#[tauri::command]
-pub fn ptt_polling_supported() -> bool {
+/// Whether key-state polling can observe keys at all: always on Windows, on
+/// Linux when an X11 or XWayland display is reachable (`DeviceState::checked_new`
+/// is `None` otherwise), never elsewhere (macOS `is_key_down` is a stub).
+pub(crate) fn polling_available() -> bool {
     #[cfg(windows)]
     {
         true
@@ -428,19 +419,40 @@ pub fn ptt_polling_supported() -> bool {
     #[cfg(target_os = "linux")]
     {
         use device_query::DeviceState;
-        // Mirrors the availability check inside `is_key_down`: no reachable
-        // X11/XWayland display means key state is never observable.
-        let wayland = crate::shortcuts::is_wayland_session(
-            std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-            std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        );
-        crate::shortcuts::global_keys_observable(wayland, DeviceState::checked_new().is_some())
+        DeviceState::checked_new().is_some()
     }
 
     #[cfg(not(any(windows, target_os = "linux")))]
     {
         false
     }
+}
+
+/// The PTT virtual key currently set; 0 when unset.
+#[cfg(target_os = "linux")]
+pub(crate) fn ptt_vk() -> i32 {
+    PTT_VKEY.load(Ordering::SeqCst)
+}
+
+/// Whether a `ptt-state` event can ever arrive, i.e. whether a press can lift
+/// the join-time PTT gate.
+///
+/// `ptt_start` arms unconditionally, so a live thread is NOT evidence that PTT
+/// works: on macOS `is_key_down` is a compile-time stub that always returns
+/// false. On a Wayland session the app's window is a Wayland one, whose key
+/// presses an XWayland display never sees, so nothing polls there; presses
+/// arrive from the xdg-desktop-portal GlobalShortcuts interface instead, and
+/// only once the user has bound the shortcut and the portal reported a trigger
+/// (`GlobalKeysStatus::ptt_supported`). The frontend gates its join-time PTT
+/// mute and the Keybinds tab's binding on this, because muting at join where no
+/// event can ever arrive would close the microphone for the whole session with
+/// no way to reopen it. Async: on Wayland the first call waits for the portal's
+/// probe.
+#[tauri::command]
+pub async fn ptt_polling_supported<R: Runtime>(app: AppHandle<R>) -> bool {
+    tokio::task::spawn_blocking(move || crate::shortcuts::ptt_supported_now(&app))
+        .await
+        .unwrap_or(false)
 }
 
 /// Start the PTT polling loop. Emits `ptt-state` (bool) events.
@@ -451,6 +463,15 @@ pub fn ptt_polling_supported() -> bool {
 /// tearing down and a concurrent restart cannot clobber that signal.
 #[tauri::command]
 pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
+    // A Wayland session never polls: arming lets the portal's Activated and
+    // Deactivated edges become `ptt-state`.
+    #[cfg(target_os = "linux")]
+    {
+        if crate::shortcuts::wayland_now() {
+            crate::portal_shortcuts::arm(&app, crate::portal_shortcuts::Flag::Ptt);
+            return;
+        }
+    }
     let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
@@ -517,6 +538,8 @@ pub fn ptt_stop() {
 /// process tears down, preventing the `AppHandle` from being used against
 /// a half-torn-down runtime.
 pub fn ptt_stop_internal() {
+    #[cfg(target_os = "linux")]
+    crate::portal_shortcuts::disarm(crate::portal_shortcuts::Flag::Ptt);
     // Take this generation's (flag, handle) out under the lock, then signal and
     // join OUTSIDE the lock — the thread locks PTT_THREAD on exit, so joining
     // while holding it would deadlock. Taking first (slot -> None) also lets a

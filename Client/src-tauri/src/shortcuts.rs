@@ -11,18 +11,24 @@
 //! Emits `voice-shortcut` ("mute"/"deafen") once per press edge.
 //!
 //! Platform coverage: Windows (`GetAsyncKeyState`) and X11 Linux
-//! (`device_query`). Any Wayland session reports unsupported, XWayland
-//! included: XQueryKeymap there only sees keys while an X11 window has focus,
-//! so a native Wayland app in front hides the combination. The global path
-//! there needs the xdg-desktop-portal GlobalShortcuts API, which is not wired
-//! yet (see the Settings disclosure). The tray's Mute and
-//! Deafen items cover every platform regardless.
+//! (`device_query`) poll. A Wayland session never polls, XWayland included:
+//! XQueryKeymap there only sees keys while an X11 window has focus, so a
+//! native Wayland app in front hides the combination. It binds through the
+//! xdg-desktop-portal GlobalShortcuts interface instead (`portal_shortcuts.rs`)
+//! and reports supported only once the portal has reported a trigger; where
+//! the interface is missing it reports unsupported. `global_keys_status`
+//! names the backend. The tray's Mute and Deafen items cover every platform
+//! regardless.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime};
 
+#[cfg(target_os = "linux")]
+use crate::portal_shortcuts as portal;
 use crate::ptt::{combo_state, Modifiers};
 
 /// Windows Virtual-Key codes for the shipped combinations, used until the
@@ -59,10 +65,8 @@ fn combo_matches(mods: Modifiers, key_down: bool) -> bool {
 
 /// Whether the session is Wayland, from `WAYLAND_DISPLAY` and
 /// `XDG_SESSION_TYPE`.
-pub(crate) fn is_wayland_session(
-    wayland_display: Option<&str>,
-    session_type: Option<&str>,
-) -> bool {
+#[cfg(target_os = "linux")]
+fn is_wayland_session(wayland_display: Option<&str>, session_type: Option<&str>) -> bool {
     wayland_display.is_some_and(|d| !d.is_empty())
         || session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland"))
 }
@@ -73,15 +77,204 @@ pub(crate) fn global_keys_observable(wayland: bool, polling_supported: bool) -> 
     !wayland && polling_supported
 }
 
-/// Whether this platform can observe global key state while another app is in
-/// front. False on macOS and on any Wayland session.
-#[tauri::command]
-pub fn voice_shortcuts_supported() -> bool {
-    let wayland = is_wayland_session(
+/// Whether this process runs in a Wayland session.
+#[cfg(target_os = "linux")]
+pub(crate) fn wayland_now() -> bool {
+    is_wayland_session(
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-    );
-    global_keys_observable(wayland, crate::ptt::ptt_polling_supported())
+    )
+}
+
+/// How this session delivers global keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    /// Key-state polling (Windows, X11). Observes keys without consuming them.
+    Polling,
+    /// The xdg-desktop-portal GlobalShortcuts interface (Wayland).
+    Portal,
+    /// Nothing can deliver a global key.
+    None,
+}
+
+/// The portal's own description of each bound trigger; `None` is unbound.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Triggers {
+    pub ptt: Option<String>,
+    pub mute: Option<String>,
+    pub deafen: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalKeysStatus {
+    pub backend: Backend,
+    /// The portal interface version; 0 when there is no portal.
+    pub portal_version: u32,
+    pub triggers: Triggers,
+    /// Whether the portal can open its own shortcut settings (version 2+).
+    pub can_configure: bool,
+}
+
+impl GlobalKeysStatus {
+    pub(crate) fn new(backend: Backend, portal_version: u32, triggers: Triggers) -> Self {
+        Self {
+            backend,
+            portal_version,
+            triggers,
+            can_configure: backend == Backend::Portal && portal_version >= 2,
+        }
+    }
+
+    pub(crate) fn without_triggers(backend: Backend) -> Self {
+        Self::new(backend, 0, Triggers::default())
+    }
+
+    /// Whether a push-to-talk press can arrive. On the portal path that needs
+    /// a bound trigger and a desktop known to send the release.
+    pub(crate) fn ptt_supported(&self, xdg_current_desktop: Option<&str>) -> bool {
+        match self.backend {
+            Backend::Polling => true,
+            Backend::Portal => {
+                self.triggers.ptt.is_some()
+                    && portal_ptt_allowed(xdg_current_desktop, PORTAL_PTT_DENY)
+            }
+            Backend::None => false,
+        }
+    }
+
+    /// Whether the global mute and deafen keys can fire. The portal path needs
+    /// both bound: this flag makes the in-app handler stand down, so a lone
+    /// binding would kill the other key.
+    pub(crate) fn keys_supported(&self) -> bool {
+        match self.backend {
+            Backend::Polling => true,
+            Backend::Portal => self.triggers.mute.is_some() && self.triggers.deafen.is_some(),
+            Backend::None => false,
+        }
+    }
+}
+
+/// Desktops whose portal backend is known not to send `Deactivated`: a
+/// push-to-talk press there would never release. Empty until one is found.
+pub(crate) const PORTAL_PTT_DENY: &[&str] = &[];
+
+/// Whether `XDG_CURRENT_DESKTOP` (a colon-separated list) is free of every
+/// name in `deny`.
+pub(crate) fn portal_ptt_allowed(xdg_current_desktop: Option<&str>, deny: &[&str]) -> bool {
+    let Some(desktops) = xdg_current_desktop else {
+        return true;
+    };
+    !desktops
+        .split(':')
+        .any(|d| deny.iter().any(|name| d.eq_ignore_ascii_case(name)))
+}
+
+/// Which backend serves this session. Wayland takes the portal when its
+/// interface version read; every other session polls where keys are
+/// observable and has none where they are not.
+pub(crate) fn backend(wayland: bool, polling_ok: bool, portal_version: Option<u32>) -> Backend {
+    if wayland {
+        return match portal_version {
+            Some(_) => Backend::Portal,
+            None => Backend::None,
+        };
+    }
+    if polling_ok {
+        Backend::Polling
+    } else {
+        Backend::None
+    }
+}
+
+/// The backend and bound triggers now. Blocking: on Wayland the first call
+/// starts the portal thread and waits (at most a few seconds) for its probe.
+pub(crate) fn status_now<R: Runtime>(app: &AppHandle<R>) -> GlobalKeysStatus {
+    #[cfg(target_os = "linux")]
+    {
+        if wayland_now() {
+            return portal::status(app);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+    GlobalKeysStatus::without_triggers(backend(false, crate::ptt::polling_available(), None))
+}
+
+fn current_desktop() -> Option<String> {
+    std::env::var("XDG_CURRENT_DESKTOP").ok()
+}
+
+/// Whether a push-to-talk press can arrive; see `GlobalKeysStatus::ptt_supported`.
+pub(crate) fn ptt_supported_now<R: Runtime>(app: &AppHandle<R>) -> bool {
+    status_now(app).ptt_supported(current_desktop().as_deref())
+}
+
+/// Which backend serves global keys and which triggers are bound.
+#[tauri::command]
+pub async fn global_keys_status<R: Runtime>(app: AppHandle<R>) -> GlobalKeysStatus {
+    tokio::task::spawn_blocking(move || status_now(&app))
+        .await
+        .unwrap_or_else(|_| GlobalKeysStatus::without_triggers(Backend::None))
+}
+
+/// Ask the portal to bind push to talk, mute and deafen. The VKs only pick the
+/// suggested triggers; the desktop's own dialog has the last word. Waits for
+/// that dialog (up to five minutes). Errors are codes: `unsupported`,
+/// `bind_in_progress`, `bind_cancelled`, `bind_timeout`, `bind_failed`,
+/// `portal_lost`.
+#[tauri::command]
+pub async fn global_keys_portal_bind<R: Runtime>(
+    app: AppHandle<R>,
+    ptt_vk: i32,
+    mute_vk: i32,
+    deafen_vk: i32,
+) -> Result<GlobalKeysStatus, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let prefs = portal::BindPrefs {
+            ptt_vk,
+            mute_vk,
+            deafen_vk,
+        };
+        let reply = tokio::task::spawn_blocking(move || portal::bind(&app, prefs))
+            .await
+            .map_err(|_| "bind_failed".to_string())??;
+        reply.await.map_err(|_| "portal_lost".to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, ptt_vk, mute_vk, deafen_vk);
+        Err("unsupported".to_string())
+    }
+}
+
+/// Open the portal's own shortcut settings (interface version 2 and later).
+#[tauri::command]
+pub async fn global_keys_portal_configure<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let reply = tokio::task::spawn_blocking(move || portal::configure(&app))
+            .await
+            .map_err(|_| "configure_failed".to_string())??;
+        reply.await.map_err(|_| "portal_lost".to_string())?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Err("unsupported".to_string())
+    }
+}
+
+/// Whether the global mute and deafen keys can fire while another app is in
+/// front: polling where keys are observable, the portal once it has reported
+/// both triggers. False on macOS and where the portal is missing or unbound.
+#[tauri::command]
+pub async fn voice_shortcuts_supported<R: Runtime>(app: AppHandle<R>) -> bool {
+    tokio::task::spawn_blocking(move || status_now(&app).keys_supported())
+        .await
+        .unwrap_or(false)
 }
 
 /// Valid VK range, 1-254 (0 is not a key here: a global
@@ -109,11 +302,19 @@ pub fn voice_shortcuts_set_keys(mute_vk: i32, deafen_vk: i32) -> Result<(), Stri
 }
 
 /// Start the global voice-shortcut polling loop. Emits `voice-shortcut` with
-/// "mute" or "deafen" on each press edge. A no-op where
-/// `voice_shortcuts_supported` is false; the tray items still work there.
+/// "mute" or "deafen" on each press edge. On a Wayland session it arms the
+/// portal path instead and never polls. A no-op where polling cannot observe
+/// keys; the tray items still work there.
 #[tauri::command]
 pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
-    if !voice_shortcuts_supported() {
+    #[cfg(target_os = "linux")]
+    {
+        if wayland_now() {
+            portal::arm(&app, portal::Flag::Keys);
+            return;
+        }
+    }
+    if !global_keys_observable(false, crate::ptt::polling_available()) {
         return;
     }
     let mut guard = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
@@ -172,6 +373,8 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
 /// Tauri lifecycle handler on exit so the AppHandle the thread holds is
 /// released before the runtime tears down.
 pub fn voice_shortcuts_stop_internal() {
+    #[cfg(target_os = "linux")]
+    portal::disarm(portal::Flag::Keys);
     // Take this generation out under the lock, then signal and join OUTSIDE —
     // the thread locks SHORTCUT_THREAD on exit, so joining while holding it
     // would deadlock.
@@ -226,6 +429,7 @@ mod tests {
         assert!(validate_shortcut_keys(0x4D, 300).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn any_wayland_session_is_detected() {
         assert!(is_wayland_session(Some("wayland-0"), None));
@@ -245,6 +449,48 @@ mod tests {
             "Wayland without XWayland"
         );
         assert!(!global_keys_observable(false, false), "macOS");
+    }
+
+    #[test]
+    fn backend_follows_the_session_table() {
+        assert_eq!(backend(false, true, None), Backend::Polling, "Windows");
+        assert_eq!(
+            backend(false, true, Some(2)),
+            Backend::Polling,
+            "X11 with a portal"
+        );
+        assert_eq!(backend(false, false, None), Backend::None, "macOS");
+        assert_eq!(
+            backend(true, true, Some(1)),
+            Backend::Portal,
+            "Wayland, portal"
+        );
+        assert_eq!(
+            backend(true, true, None),
+            Backend::None,
+            "Wayland, no portal"
+        );
+    }
+
+    #[test]
+    fn status_serialises_for_the_webview() {
+        let status = GlobalKeysStatus::new(
+            Backend::Portal,
+            2,
+            Triggers {
+                ptt: Some("F8".into()),
+                ..Triggers::default()
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(&status).unwrap(),
+            serde_json::json!({
+                "backend": "portal",
+                "portalVersion": 2,
+                "triggers": { "ptt": "F8", "mute": null, "deafen": null },
+                "canConfigure": true,
+            })
+        );
     }
 
     #[test]
