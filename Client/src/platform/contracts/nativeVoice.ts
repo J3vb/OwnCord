@@ -204,6 +204,9 @@ export interface NativeVoiceScreenSource {
 export interface NativeVoiceScreenSources {
   portal: boolean;
   sources: NativeVoiceScreenSource[];
+  /** Other applications' sound can be shared with the screen: a PulseAudio
+   *  protocol server (PulseAudio or pipewire-pulse) answered. */
+  audio: boolean;
 }
 
 /** Capture pacing and size cap; 0 for both sizes is the source size. */
@@ -456,6 +459,15 @@ export interface NativeVoice {
   /** Unpublish the share of capture `capture` but keep the capture running,
    *  so a codec republish can publish it again; a stale id is a no-op. */
   unpublishScreen(session: number, capture: number): Promise<void>;
+  /** Publish the sound of the other applications as capture `capture`'s
+   *  `ScreenShareAudio` track (E2EE as every track); resolves with the
+   *  publication's sid. The audio lives as long as the capture and survives
+   *  a codec republish and a Change source; rejects when `capture` is not
+   *  running. A second call replaces the first. */
+  publishScreenAudio(session: number, capture: number): Promise<string>;
+  /** Unpublish screen audio `sid` and stop capturing the sound; a stale sid
+   *  is a no-op. */
+  unpublishScreenAudio(session: number, sid: string): Promise<void>;
   /** Unpublish and stop capture `capture`, releasing the capturer and any
    *  portal session; a stale id is a no-op. */
   stopScreen(session: number, capture: number): Promise<void>;

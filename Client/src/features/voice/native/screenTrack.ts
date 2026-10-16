@@ -5,8 +5,9 @@
 // its `mediaStreamTrack` is the local preview (the frame socket's `/screen`
 // route, drawn by a `NativeVideoRenderer`), `stop()` stops the host capture,
 // and `end()` raises the `ended` event the shared screen-share code listens
-// for when the OS stops a capture. Video only: the desktop capturer has no
-// audio, so a Linux share publishes no screen-share audio track.
+// for when the OS stops a capture. The share's audio is a separate track
+// (`screenAudioTrack.ts`) that the host captures from the other applications'
+// sound streams and publishes beside this video.
 //
 // Lifecycle (B7-11): the shared screen-share state owns the track and stops
 // it on disable/leave; `NativeRoom` also stops it when it disconnects.

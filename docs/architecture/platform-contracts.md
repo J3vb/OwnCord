@@ -38,7 +38,7 @@ three Linux-only mic-test commands (`native_voice_start_mic_test`,
 (2026-10-16) added `native_voice_change_camera`, and WP LP-7c (2026-10-16)
 added `native_voice_video_codecs` and `native_voice_unpublish_screen`, and WP
 LP-8b (2026-10-16) added `native_voice_publish_screen_audio` and
-`native_voice_unpublish_screen_audio`, which the webview calls from LP-8c on. The
+`native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on. The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -89,18 +89,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
-| Distinct `invoke` command names called from `Client/src/`  | 81    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 86    |
+| Distinct `invoke` command names called from `Client/src/`  | 83    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 89    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 86 distinct registrations
+The handler count covers the 89 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-two `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 85 on Linux
-and 43 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 88 on Linux
+and 46 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -133,6 +133,9 @@ get_cert_fingerprint
 get_identity_pin
 get_settings
 get_window_prefs
+global_keys_portal_bind
+global_keys_portal_configure
+global_keys_status
 load_credential
 load_identity_key
 load_pending_messages

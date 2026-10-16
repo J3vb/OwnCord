@@ -30,10 +30,11 @@ export const shards = {
     "src/features/voice/remoteTracks.ts",
     "src/features/voice/peerDecode.ts",
     "src/features/voice/native/nativeCameraTrack.ts",
+    "src/features/voice/native/screenAudioTrack.ts",
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/miniPlayer.ts",
-  ], // ~1091 mutants (estimated)
+  ], // ~1091 mutants (estimated) + screenAudioTrack.ts (new)
   "livekit-3": [
     "src/lib/livekitUrlResolver.ts",
     "src/lib/screenShare.ts",
@@ -124,13 +125,15 @@ export const shards = {
     "src/lib/channel-mutes.ts",
     "src/lib/gifProvider.ts",
     "src/lib/icons.ts",
-    "src/lib/markdown.ts",
     "src/features/updates/UpdateCheckRow.ts",
+  ], // 1248 measured with lib-rest-7 on run 38902717516, timed out at 89%
+  "lib-rest-7": [
+    "src/lib/markdown.ts",
     "src/features/updates/availableUpdate.ts",
     "src/features/whats-new/appVersion.ts",
     "src/features/whats-new/seenVersion.ts",
     "src/lib/userStatus.ts",
-  ], // ~1171 mutants (estimated)
+  ],
   "lib-rest-2": [
     "src/lib/autoIdle.ts",
     "src/lib/channel-navigation.ts",
@@ -178,13 +181,15 @@ export const shards = {
     "src/features/messaging/shortcodes.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
+  ], // 1249 measured with lib-rest-8 on run 38902717516, timed out at 96%
+  "lib-rest-8": [
     "src/lib/mentions.ts",
     "src/lib/presence.ts",
     "src/lib/read-state.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",
     "src/lib/trustedDomains.ts",
-  ], // ~1176 mutants (estimated)
+  ],
   "lib-rest-6": [
     "src/lib/a11y.ts",
     "src/lib/admin-panel.ts",

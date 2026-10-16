@@ -11,8 +11,10 @@
  * and the consent, so `portal: true` shows only the Quality step and
  * resolves `"portal"` for the host to hand to the portal.
  *
- * Linux native capture is video-only, so the Audio option says so instead of
- * offering a switch that would do nothing.
+ * Linux native capture shares other applications' sound when the host can
+ * capture it (`audioAvailable`): the Audio option is then a Share audio switch,
+ * on by default as on Windows. Without a PulseAudio-protocol sound server it
+ * is a note instead of a switch that would do nothing.
  *
  * On the web path (Windows) the OS picker owns the source and the audio
  * switch, so `osPicker: true` shows only the Quality step and resolves
@@ -39,6 +41,8 @@ export interface ScreenSharePick {
   source: string;
   quality: StreamQuality;
   fps: number;
+  /** Present only when the Share audio switch was offered: whether it was on. */
+  audio?: boolean;
 }
 
 export interface ScreenSharePickerOptions {
@@ -52,6 +56,9 @@ export interface ScreenSharePickerOptions {
   /** True for Change source on a live share: its quality and audio stay as
    *  they are, so only the source is picked. */
   readonly sourceOnly?: boolean;
+  /** True on Linux when the host can capture other applications' sound
+   *  (`NativeVoiceScreenSources.audio`): the Audio option is a switch. */
+  readonly audioAvailable?: boolean;
   readonly defaultQuality: StreamQuality;
   readonly defaultFps: number;
 }
@@ -63,11 +70,48 @@ interface QualityOption {
 
 const FPS_OPTIONS: readonly number[] = [60, 120];
 
-/** Linux native capture is video-only, so the Audio option is a note. */
-function buildAudioOption(): HTMLElement {
+/** Without a sound server to capture from, the Audio option is a note. */
+function buildAudioNote(): HTMLElement {
   const wrap = createElement("div", { class: "ssp-opt" });
   wrap.appendChild(createElement("div", { class: "ssp-opt-label" }, t("picker.audio")));
   wrap.appendChild(createElement("div", { class: "ssp-opt-text" }, t("picker.audioUnavailable")));
+  return wrap;
+}
+
+/** The Share audio switch (on by default, as the Windows picker's); `onChange`
+ *  hears every flip. */
+function buildAudioSwitch(onChange: (on: boolean) => void): HTMLElement {
+  const wrap = createElement("div", { class: "ssp-opt" });
+  const row = createElement("div", { class: "ssp-opt-row" });
+  row.appendChild(
+    createElement("div", { class: "ssp-opt-label", id: "ssp-audio-label" }, t("picker.shareAudio")),
+  );
+  const toggle = createElement("div", {
+    class: "toggle on",
+    role: "switch",
+    tabindex: "0",
+    "aria-checked": "true",
+    "aria-labelledby": "ssp-audio-label",
+    "aria-describedby": "ssp-audio-hint",
+    "data-testid": "ssp-share-audio",
+  });
+  const flip = (): void => {
+    const on = !toggle.classList.contains("on");
+    toggle.classList.toggle("on", on);
+    toggle.setAttribute("aria-checked", String(on));
+    onChange(on);
+  };
+  toggle.addEventListener("click", flip);
+  toggle.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    flip();
+  });
+  row.appendChild(toggle);
+  wrap.appendChild(row);
+  wrap.appendChild(
+    createElement("div", { class: "ssp-hint", id: "ssp-audio-hint" }, t("picker.shareAudioHint")),
+  );
   return wrap;
 }
 
@@ -94,6 +138,7 @@ export function showScreenSharePicker(
     let selectedSource: string | null = null;
     let selectedQuality: StreamQuality = opts.defaultQuality;
     let selectedFps: number = opts.defaultFps;
+    let selectedAudio = true;
     /** Set once the footer is built; the source list is built first, so a
      *  source pre-selection before then is a safe no-op. */
     let goLive: HTMLButtonElement | null = null;
@@ -287,7 +332,14 @@ export function showScreenSharePicker(
     // ---- Options: audio note + quality -------------------------------------
     if (opts.sourceOnly !== true) {
       const options = createElement("div", { class: "ssp-options" });
-      if (opts.osPicker !== true) options.appendChild(buildAudioOption());
+      if (opts.osPicker !== true)
+        options.appendChild(
+          opts.audioAvailable === true
+            ? buildAudioSwitch((on) => {
+                selectedAudio = on;
+              })
+            : buildAudioNote(),
+        );
       options.appendChild(buildQualityOption());
       body.appendChild(options);
     }
@@ -388,6 +440,10 @@ export function showScreenSharePicker(
         source: selectedSource,
         quality: selectedQuality,
         fps: selectedFps,
+        // Only when the switch was offered (a Change source offers none).
+        ...(opts.audioAvailable === true && opts.sourceOnly !== true && opts.osPicker !== true
+          ? { audio: selectedAudio }
+          : {}),
       };
       close();
     });

@@ -129,7 +129,8 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
     mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT
+    pinned_at  TEXT,
+    kind       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

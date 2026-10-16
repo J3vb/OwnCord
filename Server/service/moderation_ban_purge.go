@@ -221,3 +221,15 @@ func (s *MessageService) canModerateDelete(ctx context.Context, actorID, chID in
 	}
 	return true
 }
+
+// ValidateActionReason applies the moderation reason rules (length and
+// control characters) that BanUser enforces, so a caller can reject a bad
+// reason before it spends a rate-limit token.
+func ValidateActionReason(reason string) error {
+	return validateActionReason(reason)
+}
+
+// SetBanPurgeRowCapForTest lowers the number of messages one ban purge may
+// delete before it reports itself incomplete. It is for tests only; n <= 0
+// restores the default.
+func (s *ModerationService) SetBanPurgeRowCapForTest(n int) { s.banPurgeRowCap = n }
