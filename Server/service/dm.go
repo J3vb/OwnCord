@@ -335,7 +335,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 
 	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
-	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +435,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 
 	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
-	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
 	}
