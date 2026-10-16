@@ -5,9 +5,7 @@ vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }))
 
 const {
   BASELINE_DECODE,
-  DEV_H265_OPTION_KEY,
   DEV_VP8_ONLY_KEY,
-  devShowsH265,
   localVideoDecode,
   pickCommonCodec,
   resetLocalVideoDecodeForTest,
@@ -31,23 +29,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-});
-
-describe("devShowsH265", () => {
-  it("is on with the flag in a development build", () => {
-    localStorage.setItem(DEV_H265_OPTION_KEY, "1");
-    expect(devShowsH265()).toBe(true);
-  });
-
-  it("stays off in a release build even with the flag set", () => {
-    vi.stubEnv("DEV", false);
-    try {
-      localStorage.setItem(DEV_H265_OPTION_KEY, "1");
-      expect(devShowsH265()).toBe(false);
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
 });
 
 describe("localVideoDecode", () => {

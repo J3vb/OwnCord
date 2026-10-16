@@ -2,7 +2,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const supportsH265 = vi.hoisted(() => vi.fn(() => true));
-const DEV_FLAG = "owncord:dev:videoCodecH265";
 const NVIDIA = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
 const INTEL = "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)";
 
@@ -69,7 +68,6 @@ beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
   supportsH265.mockReturnValue(true);
-  localStorage.setItem(DEV_FLAG, "1");
   stubGpu(NVIDIA);
   installFakeAudio({ worklets: true });
   vi.stubGlobal("navigator", {
@@ -87,14 +85,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("VoiceAudioTab H.265 entry (WP M-6a)", () => {
-  it("is shown with the dev flag where H.265 can be published", () => {
+describe("VoiceAudioTab H.265 entry (WP M-6)", () => {
+  it("is shown where H.265 can be published", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "h265", "auto"]);
-  });
-
-  it("is hidden without the dev flag", () => {
-    localStorage.removeItem(DEV_FLAG);
-    expect(codecOptions()).toEqual(["vp8", "h264", "auto"]);
   });
 
   it("is hidden on Intel graphics", () => {

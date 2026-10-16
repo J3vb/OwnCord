@@ -21,7 +21,6 @@ const {
   resolveVideoCodec,
   vp9Offered,
 } = await import("./videoCodec");
-const { DEV_H265_OPTION_KEY } = await import("./decodeCaps");
 const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
 const { channelPeerDecode } = await import("./peerDecode");
 const { authStore } = await import("../../stores/auth.store");
@@ -228,18 +227,14 @@ describe("vp9Offered", () => {
   });
 });
 
-describe("h265Offered (WP M-6a)", () => {
-  beforeEach(() => {
-    localStorage.setItem(DEV_H265_OPTION_KEY, "1");
-  });
-
-  it("is true with the dev flag, support, a non-Intel GPU and not Linux", () => {
-    expect(h265Offered()).toBe(true);
-  });
-
-  it("is false without the dev flag", () => {
-    localStorage.removeItem(DEV_H265_OPTION_KEY);
-    expect(h265Offered()).toBe(false);
+describe("h265Offered (WP M-6)", () => {
+  it("is true with support, a non-Intel GPU and not Linux, in a release build too", () => {
+    vi.stubEnv("DEV", false);
+    try {
+      expect(h265Offered()).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("is false when H.265 cannot be published", () => {
@@ -270,7 +265,6 @@ describe("h265Offered (WP M-6a)", () => {
 describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
   beforeEach(() => {
     savePref("h265");
-    localStorage.setItem(DEV_H265_OPTION_KEY, "1");
     encodingInfo.mockResolvedValue(HARDWARE);
   });
 
@@ -318,8 +312,8 @@ describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 
-  it("publishes VP8 without the dev flag, without probing", async () => {
-    localStorage.removeItem(DEV_H265_OPTION_KEY);
+  it("publishes VP8 when H.265 is not offered, without probing", async () => {
+    supportsH265.mockReturnValue(false);
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
     expect(encodingInfo).not.toHaveBeenCalled();
   });

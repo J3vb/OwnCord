@@ -4,8 +4,8 @@
  * Voice E2EE is always on, and livekit-client then publishes no backup codec,
  * so every viewer must decode the one chosen here or see a black tile. VP8 and
  * H.264 are the two every shipped client decodes; VP9 and H.265 are options
- * picked only when every peer reports decoding them (H.265 is also behind a
- * dev flag and a hardware-encoder probe, WP M-6a). VP8 is the default; H.264
+ * picked only when every peer reports decoding them (H.265 also needs a
+ * hardware encoder and a non-Intel GPU, WP M-6). VP8 is the default; H.264
  * lets Windows encode on the graphics card. The Linux native engine always
  * publishes VP8: its release build has no hardware encoder, and software
  * H.264 there is slower than VP8.
@@ -13,7 +13,7 @@
 
 import { supportsH265, supportsVP9 } from "livekit-client";
 import { loadPref } from "../../lib/preferences";
-import { devShowsH265, pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
+import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";
 
 export type VideoCodecPref = "vp8" | "h264" | "vp9" | "h265" | "auto";
@@ -62,12 +62,11 @@ function isKnownNonIntel(renderer: string | null): renderer is string {
   return renderer !== null && !/intel/i.test(renderer);
 }
 
-/** Whether the settings list H.265: not the Linux native engine, the dev flag
- *  is set, the webview can publish it and the GPU is not Intel's (WP M-6a).
- *  Hidden from users until hardware results are in (WP M-6b). Whether the
- *  encoder is a hardware one is probed per publish, not here. */
+/** Whether the settings list H.265: not the Linux native engine, the webview
+ *  can publish it and the GPU is not Intel's (WP M-6). Whether the encoder is a
+ *  hardware one is probed per publish, not here. */
 export function h265Offered(): boolean {
-  return !isLinuxDesktop() && devShowsH265() && canPublishH265() && isKnownNonIntel(gpuRenderer());
+  return !isLinuxDesktop() && canPublishH265() && isKnownNonIntel(gpuRenderer());
 }
 
 /** Auto's rule: H.264 only where the browser says it encodes it in hardware
