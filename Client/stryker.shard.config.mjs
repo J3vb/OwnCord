@@ -30,10 +30,11 @@ export const shards = {
     "src/features/voice/remoteTracks.ts",
     "src/features/voice/peerDecode.ts",
     "src/features/voice/native/nativeCameraTrack.ts",
+    "src/features/voice/native/screenAudioTrack.ts",
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/miniPlayer.ts",
-  ], // ~1091 mutants (estimated)
+  ], // ~1091 mutants (estimated) + screenAudioTrack.ts (new)
   "livekit-3": [
     "src/lib/livekitUrlResolver.ts",
     "src/lib/screenShare.ts",
