@@ -29,3 +29,29 @@ SELECT message_id, user_id
 FROM message_call_participants
 WHERE message_id IN (sqlc.slice('ids'))
 ORDER BY message_id, user_id;
+
+-- name: ListOpenMessageCalls :many
+-- Every live call with its author, for the call log worker's start-up
+-- recovery, its periodic pass and its stop.
+SELECT c.message_id, c.channel_id, c.started_at, c.last_seen_at, m.user_id
+FROM message_calls c
+JOIN messages m ON m.id = c.message_id
+WHERE c.ended_at IS NULL
+ORDER BY c.message_id;
+
+-- name: GetOpenMessageCallByChannel :one
+SELECT c.message_id, c.channel_id, c.started_at, c.last_seen_at, m.user_id
+FROM message_calls c
+JOIN messages m ON m.id = c.message_id
+WHERE c.channel_id = ? AND c.ended_at IS NULL;
+
+-- name: TouchMessageCall :exec
+-- last_seen_at only moves forward, and only while the call is live.
+UPDATE message_calls SET last_seen_at = ?1
+WHERE message_id = ?2 AND ended_at IS NULL AND last_seen_at < ?1;
+
+-- name: InsertExistingMessageCallParticipant :exec
+-- Records a participant only while the user still exists, so a vanished user
+-- is skipped instead of failing the whole write.
+INSERT OR IGNORE INTO message_call_participants (message_id, user_id)
+SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2);

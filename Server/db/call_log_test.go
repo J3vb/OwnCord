@@ -442,3 +442,103 @@ func TestSetMessagePinned_CallRowNotFound(t *testing.T) {
 		t.Errorf("pinned = %d, want 0", got)
 	}
 }
+
+func TestOpenCallReads_LiveVersusNone(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	if oc, err := f.database.GetOpenCall(ctx, f.dm); err != nil || oc != nil {
+		t.Fatalf("GetOpenCall with no call = %v, %v; want nil, nil", oc, err)
+	}
+	if list, err := f.database.ListOpenCalls(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("ListOpenCalls with no call = %v, %v", list, err)
+	}
+	row := f.startCall(t, f.alice)
+	oc, err := f.database.GetOpenCall(ctx, f.dm)
+	if err != nil || oc == nil {
+		t.Fatalf("GetOpenCall = %v, %v", oc, err)
+	}
+	if oc.MessageID != row.Message.ID || oc.AuthorID != f.alice || oc.ChannelID != f.dm ||
+		oc.StartedAt != callStart || oc.LastSeenAt != callSeen {
+		t.Errorf("open call = %+v", oc)
+	}
+	list, err := f.database.ListOpenCalls(ctx)
+	if err != nil || len(list) != 1 || list[0] != *oc {
+		t.Fatalf("ListOpenCalls = %v, %v", list, err)
+	}
+	if _, err := f.database.EndCall(ctx, row.Message.ID, callEnd, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if oc, _ := f.database.GetOpenCall(ctx, f.dm); oc != nil {
+		t.Errorf("an ended call is still listed as open: %+v", oc)
+	}
+	if list, _ := f.database.ListOpenCalls(ctx); len(list) != 0 {
+		t.Errorf("ListOpenCalls after the end = %v", list)
+	}
+}
+
+func TestAddCallParticipants_IdempotentAndSkipsMissingUsers(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	row := f.startCall(t, f.alice)
+	if err := f.database.AddCallParticipants(ctx, row.Message.ID, nil); err != nil {
+		t.Fatalf("empty add: %v", err)
+	}
+	for range 2 {
+		if err := f.database.AddCallParticipants(ctx, row.Message.ID, []int64{f.alice, f.bob, 9999}); err != nil {
+			t.Fatalf("AddCallParticipants: %v", err)
+		}
+	}
+	ci, err := f.database.GetCallInfo(ctx, row.Message.ID)
+	if err != nil || ci == nil {
+		t.Fatalf("GetCallInfo: %v", err)
+	}
+	if !slices.Equal(ci.Participants, []int64{f.alice, f.bob}) {
+		t.Errorf("participants = %v, want alice and bob once each and no vanished user", ci.Participants)
+	}
+}
+
+func TestTouchCall_OnlyMovesForwardAndOnlyWhileLive(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	row := f.startCall(t, f.alice)
+	seen := func() string {
+		oc, err := f.database.GetOpenCall(ctx, f.dm)
+		if err != nil || oc == nil {
+			t.Fatalf("GetOpenCall: %v", err)
+		}
+		return oc.LastSeenAt
+	}
+	if err := f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 10:02:00"); err != nil {
+		t.Fatal(err)
+	}
+	if got := seen(); got != "2026-10-16 10:02:00" {
+		t.Fatalf("last_seen_at = %q, want the later time", got)
+	}
+	if err := f.database.TouchCall(ctx, row.Message.ID, callSeen); err != nil {
+		t.Fatal(err)
+	}
+	if got := seen(); got != "2026-10-16 10:02:00" {
+		t.Errorf("last_seen_at moved backwards to %q", got)
+	}
+	if _, err := f.database.EndCall(ctx, row.Message.ID, callEnd, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 11:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, f.database, `SELECT COUNT(*) FROM message_calls WHERE message_id = ? AND last_seen_at = '2026-10-16 10:02:00'`, row.Message.ID); n != 1 {
+		t.Error("TouchCall changed an ended call")
+	}
+}
+
+func TestGetCallInfo_NilForNonCallMessage(t *testing.T) {
+	f := newCallFixture(t)
+	ctx := context.Background()
+	id, err := f.database.CreateMessage(ctx, f.dm, f.alice, "plain", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci, err := f.database.GetCallInfo(ctx, id); err != nil || ci != nil {
+		t.Errorf("GetCallInfo(plain message) = %v, %v; want nil, nil", ci, err)
+	}
+}

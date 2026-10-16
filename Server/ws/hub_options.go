@@ -266,6 +266,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// WP 3D-5c: the read_state frame MoveReadPointer sends under the same
 		// lock the mention frames use.
 		svc.Messages.SetReadStateNotifier(h)
+		svc.CallLog.SetSink(h) // WP 3B-9: before the worker starts
 	}
 
 	registerChatHandlers(reg, chatDeps)
