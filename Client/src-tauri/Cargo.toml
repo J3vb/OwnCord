@@ -185,6 +185,14 @@ libc = "0.2"
 # Already in the tree as keyring's sync-secret-service transport, same
 # libdbus, no new build.
 dbus = "0.9"
+# System-wide input idle on Wayland compositors without a Mutter or
+# ScreenSaver idle source (KDE Plasma, wlroots): the ext-idle-notify-v1
+# protocol (idle.rs). Pure-Rust wire backend, so no libwayland link; Smithay
+# crates, exact-pinned like the other Linux deps.
+wayland-client = "=0.31.15"
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+# Desktop id of an integrated AppImage's launcher entry (unread_badge.rs).
+md-5 = "=0.10.6"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
 # WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
 # so on Linux the LiveKit SDK runs in this Rust backend instead of the webview

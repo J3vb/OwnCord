@@ -75,6 +75,11 @@ and only when it changes something a contributor or fork holder must do
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
 
+**Desktop UI (Linux)**
+
+- Linux: unread mentions now also show on the tray icon, as a red dot with the count as its title, so stock GNOME (with its tray extension) shows them as well as KDE's launcher count. The launcher count is now also sent to the desktop entry name AppImage integration tools usually create.
+- Linux: Away detection now works on KDE Plasma on Wayland and on wlroots desktops (Sway, Hyprland), where it used to fall back to activity inside the OwnCord window.
+
 **Profiles**
 
 - The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.

@@ -4,13 +4,14 @@
 //! when the taskbar button is recreated); this draws it:
 //!
 //! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above;
-//! - Linux: the launcher count, as a Unity `LauncherEntry` D-Bus signal sent
-//!   straight to the session bus, which KDE Plasma and Ubuntu's dock read;
-//!   stock GNOME shows none;
+//! - Linux: two paths at once. The launcher count, as a Unity `LauncherEntry`
+//!   D-Bus signal sent straight to the session bus, which KDE Plasma and
+//!   Ubuntu's dock read; and the tray icon swapped for a red-dot variant with
+//!   the count as the tray title, which is all stock GNOME (with its
+//!   AppIndicator extension) can show;
 //! - macOS: the dock count;
-//! - Windows and macOS: the tray tooltip, text from `text.rs`. Linux tray
-//!   icons (libappindicator) have no tooltip, so there the launcher count is
-//!   the only indicator.
+//! - The tray tooltip, text from `text.rs`; libappindicator has none, so on
+//!   Linux the dot and title carry the count.
 //!
 //! It never touches the tray's menu or its status items.
 
@@ -31,12 +32,88 @@ fn badge_label(count: u32) -> Option<String> {
     }
 }
 
+/// What the Linux badge shows for `count`: the launcher count and the tray's
+/// red dot and title. Both paths always apply, as no one desktop is known to
+/// read only one; the plan is a function so that stays checkable.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+struct LinuxBadgePlan {
+    launcher_count: u32,
+    tray_dot: bool,
+    tray_title: Option<String>,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_badge_plan(count: u32) -> LinuxBadgePlan {
+    LinuxBadgePlan {
+        launcher_count: count,
+        tray_dot: count > 0,
+        tray_title: badge_label(count),
+    }
+}
+
+/// The `.desktop` ids the launcher count is sent to. The installed packages
+/// ship `<product name>.desktop`. An AppImage is not installed: once an
+/// integrator (AppImageLauncher, appimaged) adds its launcher entry, it is
+/// named `appimagekit_<md5 of the AppImage's file URI>-<product name>`, with
+/// the URI taken as `file://` plus the `$APPIMAGE` path (from memory of the
+/// AppImage desktop-integration naming; unverified on a real integrator).
+/// `appimage` is that variable's value; only an absolute path counts.
+#[cfg(target_os = "linux")]
+fn launcher_desktop_ids(product_name: &str, appimage: Option<&str>) -> Vec<String> {
+    use md5::{Digest, Md5};
+
+    let mut ids = vec![product_name.to_string()];
+    if let Some(path) = appimage.filter(|p| p.starts_with('/')) {
+        let digest = Md5::digest(format!("file://{path}").as_bytes());
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        ids.push(format!("appimagekit_{hex}-{product_name}"));
+    }
+    ids
+}
+
+/// Tray dot radius as a share of the icon's shorter edge.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const DOT_RADIUS: f32 = 0.24;
+
+/// `rgba` (`width` x `height`) with a red dot in the top-right corner, edges
+/// blended over what was there. Drawn here for the same reason as the
+/// overlay: no second image to ship or decode.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn with_red_dot(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut px = rgba.to_vec();
+    if px.len() != (width * height * 4) as usize {
+        return px;
+    }
+    let r = width.min(height) as f32 * DOT_RADIUS;
+    let (cx, cy) = (width as f32 - r, r);
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let cover = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+            if cover == 0.0 {
+                continue;
+            }
+            let i = ((y * width + x) * 4) as usize;
+            let under = f32::from(px[i + 3]) / 255.0;
+            let out = cover + under * (1.0 - cover);
+            for (k, red) in OVERLAY_RED.into_iter().enumerate() {
+                let c = f32::from(red) * cover + f32::from(px[i + k]) * under * (1.0 - cover);
+                px[i + k] = (c / out) as u8;
+            }
+            px[i + 3] = (out * 255.0) as u8;
+        }
+    }
+    px
+}
+
 /// Overlay icon edge, px. Windows scales it to the small-icon size.
 #[cfg_attr(not(windows), allow(dead_code))]
 const OVERLAY_SIZE: u32 = 32;
 
 /// `--danger-fill` (`src/styles/tokens.css`), the app's mention badge red.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 const OVERLAY_RED: [u8; 3] = [0xd0, 0x30, 0x2f];
 
 /// A 3x5 pixel glyph, one row per entry, bit 2 the leftmost column.
@@ -121,10 +198,10 @@ fn launcher_entry_update(desktop_name: &str, count: u32) -> dbus::Message {
         .append2(format!("application://{desktop_name}.desktop"), props)
 }
 
-/// Send the launcher count over the session bus. The connection is kept for
+/// Send the launcher count over the session bus, once per desktop id. The connection is kept for
 /// the app's lifetime: the docks drop an entry once its sender leaves the bus.
 #[cfg(target_os = "linux")]
-fn send_launcher_count(desktop_name: &str, count: u32) {
+fn send_launcher_count(desktop_names: &[String], count: u32) {
     use dbus::blocking::Connection;
     use std::sync::Mutex;
 
@@ -140,14 +217,16 @@ fn send_launcher_count(desktop_name: &str, count: u32) {
         }
     }
     let Some(conn) = session.as_ref() else { return };
-    if conn
-        .channel()
-        .send(launcher_entry_update(desktop_name, count))
-        .is_err()
-    {
-        log::debug!("[badge] cannot send the launcher count");
-        *session = None;
-        return;
+    for desktop_name in desktop_names {
+        if conn
+            .channel()
+            .send(launcher_entry_update(desktop_name, count))
+            .is_err()
+        {
+            log::debug!("[badge] cannot send the launcher count");
+            *session = None;
+            return;
+        }
     }
     conn.channel().flush();
 }
@@ -169,11 +248,50 @@ pub fn set_unread_badge<R: Runtime>(app: tauri::AppHandle<R>, count: u32) {
         }
     }
     #[cfg(target_os = "linux")]
-    send_launcher_count(&app.package_info().name, count);
+    let plan = linux_badge_plan(count);
+    #[cfg(target_os = "linux")]
+    send_launcher_count(
+        &launcher_desktop_ids(
+            &app.package_info().name,
+            std::env::var("APPIMAGE").ok().as_deref(),
+        ),
+        plan.launcher_count,
+    );
     if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
+        #[cfg(target_os = "linux")]
+        set_linux_tray(&app, &tray, &plan);
         if let Err(e) = tray.set_tooltip(Some(text::tray_tooltip(count))) {
             log::warn!("[badge] cannot set the tray tooltip: {e}");
         }
+    }
+}
+
+/// Swap the tray icon for the red-dot variant (or back) and set its title.
+#[cfg(target_os = "linux")]
+fn set_linux_tray<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    tray: &tauri::tray::TrayIcon<R>,
+    plan: &LinuxBadgePlan,
+) {
+    static DOT_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let changed =
+        DOT_SHOWN.swap(plan.tray_dot, std::sync::atomic::Ordering::Relaxed) != plan.tray_dot;
+    if let Some(base) = app.default_window_icon().filter(|_| changed) {
+        let icon = if plan.tray_dot {
+            tauri::image::Image::new_owned(
+                with_red_dot(base.rgba(), base.width(), base.height()),
+                base.width(),
+                base.height(),
+            )
+        } else {
+            base.clone()
+        };
+        if let Err(e) = tray.set_icon(Some(icon)) {
+            log::warn!("[badge] cannot set the tray icon: {e}");
+        }
+    }
+    if let Err(e) = tray.set_title(plan.tray_title.as_deref()) {
+        log::warn!("[badge] cannot set the tray title: {e}");
     }
 }
 
@@ -220,5 +338,66 @@ mod tests {
         assert_eq!(at(16, 2), [0xd0, 0x30, 0x2f, 255], "the disc is badge red");
         // "9+" at scale 3 starts at x=5, y=8: the 9's top-left pixel is set.
         assert_eq!(at(5, 8), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn linux_plan_uses_both_paths_and_clears_both_at_zero() {
+        assert_eq!(
+            linux_badge_plan(0),
+            LinuxBadgePlan {
+                launcher_count: 0,
+                tray_dot: false,
+                tray_title: None
+            }
+        );
+        assert_eq!(
+            linux_badge_plan(12),
+            LinuxBadgePlan {
+                launcher_count: 12,
+                tray_dot: true,
+                tray_title: Some("9+".to_string())
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_ids_add_the_appimage_integration_id_only_for_an_absolute_path() {
+        assert_eq!(launcher_desktop_ids("OwnCord", None), ["OwnCord"]);
+        assert_eq!(launcher_desktop_ids("OwnCord", Some("")), ["OwnCord"]);
+        assert_eq!(
+            launcher_desktop_ids("OwnCord", Some("Apps/OwnCord.AppImage")),
+            ["OwnCord"]
+        );
+        // printf %s 'file:///home/u/Apps/OwnCord.AppImage' | md5sum
+        assert_eq!(
+            launcher_desktop_ids("OwnCord", Some("/home/u/Apps/OwnCord.AppImage")),
+            [
+                "OwnCord",
+                "appimagekit_ccf4709ec530cf6c5277db1389fb46f9-OwnCord"
+            ]
+        );
+    }
+
+    #[test]
+    fn red_dot_marks_only_the_top_right_corner() {
+        let (w, h) = (32u32, 32u32);
+        let base = vec![10u8; (w * h * 4) as usize];
+        let out = with_red_dot(&base, w, h);
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [out[i], out[i + 1], out[i + 2], out[i + 3]]
+        };
+        assert_eq!(
+            at(27, 4),
+            [0xd0, 0x30, 0x2f, 255],
+            "dot centre is badge red"
+        );
+        assert_eq!(at(2, 28), [10, 10, 10, 10], "far corner is untouched");
+    }
+
+    #[test]
+    fn red_dot_leaves_a_malformed_buffer_alone() {
+        assert_eq!(with_red_dot(&[1, 2, 3], 32, 32), vec![1, 2, 3]);
     }
 }
