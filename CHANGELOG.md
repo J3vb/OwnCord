@@ -61,6 +61,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
 - On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.
 - Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
+- Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
 
 **Profiles**
 

@@ -6,11 +6,16 @@ vi.mock("./native/platform", () => ({
 }));
 
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
-vi.mock("livekit-client", () => ({ supportsVP9: () => supportsVP9() }));
+const supportsH265 = vi.hoisted(() => vi.fn(() => true));
+vi.mock("livekit-client", () => ({
+  supportsVP9: () => supportsVP9(),
+  supportsH265: () => supportsH265(),
+}));
 
 const {
   getVideoCodecPref,
   gpuRenderer,
+  h265Offered,
   pickAutoCodec,
   resolveCodecChoice,
   resolveVideoCodec,
@@ -60,6 +65,8 @@ beforeEach(() => {
   isLinuxDesktop.mockReturnValue(false);
   supportsVP9.mockReset();
   supportsVP9.mockReturnValue(true);
+  supportsH265.mockReset();
+  supportsH265.mockReturnValue(true);
   encodingInfo.mockReset();
   vi.stubGlobal("navigator", { mediaCapabilities: { encodingInfo } });
   stubGpu(NVIDIA);
@@ -217,6 +224,120 @@ describe("vp9Offered", () => {
   it("is false on Linux", () => {
     isLinuxDesktop.mockReturnValue(true);
     expect(vp9Offered()).toBe(false);
+  });
+});
+
+describe("h265Offered (WP M-6)", () => {
+  it("is true with support, a non-Intel GPU and not Linux, in a release build too", () => {
+    vi.stubEnv("DEV", false);
+    try {
+      expect(h265Offered()).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("is false when H.265 cannot be published", () => {
+    supportsH265.mockReturnValue(false);
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false when supportsH265 throws, as without RTCRtpSender", () => {
+    supportsH265.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false on Intel graphics and when the GPU cannot be named", () => {
+    stubGpu(INTEL);
+    expect(h265Offered()).toBe(false);
+    stubGpu(null);
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false on Linux", () => {
+    isLinuxDesktop.mockReturnValue(true);
+    expect(h265Offered()).toBe(false);
+  });
+});
+
+describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
+  beforeEach(() => {
+    savePref("h265");
+    encodingInfo.mockResolvedValue(HARDWARE);
+  });
+
+  it("reads a saved H.265", () => {
+    expect(getVideoCodecPref()).toBe("h265");
+  });
+
+  it("publishes H.265 when offered and the encoder is power efficient, probing H.265", async () => {
+    await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("h265");
+    expect(encodingInfo).toHaveBeenCalledWith({
+      type: "webrtc",
+      video: {
+        contentType: "video/H265",
+        width: 1920,
+        height: 1080,
+        bitrate: 8_000_000,
+        framerate: 60,
+      },
+    });
+  });
+
+  it("publishes H.265 when every peer decodes it, else VP8", async () => {
+    await expect(
+      resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h265"], ["h265"]]),
+    ).resolves.toBe("h265");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h264"]])).resolves.toBe(
+      "vp8",
+    );
+    await expect(resolveCodecChoice(track(), 30, 1_700_000, () => [undefined])).resolves.toEqual({
+      preferred: "h265",
+      codec: "vp8",
+    });
+  });
+
+  it.each([
+    ["only in software", { supported: true, smooth: true, powerEfficient: false }],
+    ["not supported", { supported: false, smooth: false, powerEfficient: false }],
+  ])("publishes VP8 when the encoder is %s", async (_name, probe) => {
+    encodingInfo.mockResolvedValue(probe);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when the probe fails", async () => {
+    encodingInfo.mockRejectedValue(new TypeError("bad configuration"));
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when H.265 is not offered, without probing", async () => {
+    supportsH265.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("publishes VP8 on Intel graphics", async () => {
+    stubGpu(INTEL);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 on Linux", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when supportsH265 throws", async () => {
+    supportsH265.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("never lets Auto pick H.265", async () => {
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
   });
 });
 
