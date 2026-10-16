@@ -1153,7 +1153,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Optimistic: the row flips now and snaps back if the server refuses,
         // so the control answers the click instead of waiting on the round trip.
         setMessagePinned(chId, msgId, !currentlyPinned);
-        const revisionAfterFlip = messagesStore.getState().pinRevision?.get(chId);
+        const revisionAfterFlip = messagesStore.getState().messagePinRevision?.get(msgId);
         const action = currentlyPinned
           ? api.unpinMessage(chId, msgId)
           : api.pinMessage(chId, msgId);
@@ -1165,9 +1165,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             );
           })
           .catch((err) => {
-            // A moved revision means a chat_pinned (or another local change)
-            // already holds the truth for this channel; do not overwrite it.
-            if (messagesStore.getState().pinRevision?.get(chId) === revisionAfterFlip) {
+            // A moved revision means a chat_pinned for this message already
+            // holds the truth; do not overwrite it.
+            if (messagesStore.getState().messagePinRevision?.get(msgId) === revisionAfterFlip) {
               setMessagePinned(chId, msgId, currentlyPinned);
             }
             log.error("Pin/unpin failed", { error: String(err) });

@@ -83,6 +83,11 @@ function renderPinnedItem(msg: PinnedMessage, canUnpin: boolean): HTMLDivElement
       ...(msg.mentionsEveryone !== undefined ? { mentionsEveryone: msg.mentionsEveryone } : {}),
     }),
   );
+  // The panel opens no profiles, so mention chips are plain text here.
+  for (const chip of content.querySelectorAll<HTMLElement>(".mention")) {
+    chip.removeAttribute("role");
+    chip.removeAttribute("tabindex");
+  }
   appendChildren(body, head, content);
   appendChildren(row, avatar, body);
 

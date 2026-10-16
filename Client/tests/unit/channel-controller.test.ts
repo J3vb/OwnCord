@@ -188,8 +188,8 @@ vi.mock("@lib/read-state", () => ({
 }));
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
-/** The messages store's pin revision for channel 42, which a chat_pinned moves. */
-const { mockPinRevision } = vi.hoisted(() => ({ mockPinRevision: { value: 0 } }));
+/** The messages store's per-message pin revisions, which a chat_pinned moves. */
+const { mockPinRevisions } = vi.hoisted(() => ({ mockPinRevisions: new Map<number, number>() }));
 
 const {
   mockReattachToPresent,
@@ -207,7 +207,7 @@ const {
 
 vi.mock("@stores/messages.store", () => ({
   messagesStore: {
-    getState: () => ({ pinRevision: new Map([[42, mockPinRevision.value]]) }),
+    getState: () => ({ messagePinRevision: mockPinRevisions }),
   },
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
@@ -2001,18 +2001,41 @@ describe("createChannelController", () => {
         .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      mockPinRevision.value = 0;
+      mockPinRevisions.clear();
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
       // The server's broadcast lands while the request is pending.
-      mockPinRevision.value = 1;
+      mockPinRevisions.set(5, 1);
       reject(new Error("late"));
 
       await vi.waitFor(() => {
         expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
       });
       expect(mockSetMessagePinned.mock.calls).toEqual([[42, 5, true]]);
-      mockPinRevision.value = 0;
+      mockPinRevisions.clear();
+    });
+
+    it("onPinClick: a pin of another message in the channel still lets the rejection revert", async () => {
+      const opts = makeOpts();
+      let reject: (e: Error) => void = () => {};
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockPinRevisions.clear();
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      mockPinRevisions.set(6, 1);
+      reject(new Error("refused"));
+
+      await vi.waitFor(() => {
+        expect(mockSetMessagePinned.mock.calls).toEqual([
+          [42, 5, true],
+          [42, 5, false],
+        ]);
+      });
+      mockPinRevisions.clear();
     });
 
     it("onPinClick: a second click while the first is pending is ignored, then allowed again", async () => {

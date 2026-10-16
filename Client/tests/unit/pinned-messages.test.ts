@@ -10,6 +10,7 @@ vi.mock("@components/message-list/attachments", () => ({
 }));
 
 import { createPinnedMessages } from "@components/PinnedMessages";
+import { setMembers } from "@stores/members.store";
 import type { PinnedMessage, PinnedMessagesOptions } from "@components/PinnedMessages";
 
 const samplePins: PinnedMessage[] = [
@@ -271,6 +272,20 @@ describe("PinnedMessages", () => {
     expect(content.querySelector("strong")?.textContent).toBe("bold");
     expect(content.querySelector("code")?.textContent).toBe("code");
     expect(content.textContent).not.toContain("**");
+    panel.destroy?.();
+  });
+
+  it("renders mentions as plain text, not as controls the panel cannot open", () => {
+    setMembers([{ id: 11, username: "Bob", avatar: null, role: "member", status: "online" }]);
+    const { panel } = makePanel({
+      pinnedMessages: [{ ...samplePins[0]!, content: "hi @Bob" }],
+    });
+    const chips = container.querySelectorAll(".pinned-msg__content .mention");
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      expect(chip.getAttribute("role")).toBeNull();
+      expect(chip.getAttribute("tabindex")).toBeNull();
+    }
     panel.destroy?.();
   });
 

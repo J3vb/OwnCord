@@ -102,6 +102,8 @@ export interface MessagesState {
    * message). Optional like the fields above so inline fixtures need not set it.
    */
   readonly pinRevision?: ReadonlyMap<number, number>;
+  /** messageId -> count of pin/unpin changes seen for that message. */
+  readonly messagePinRevision?: ReadonlyMap<number, number>;
   /**
    * Channels whose loaded window is an around-window detached from the live
    * tail: newer messages exist on the server below what is rendered. While a
@@ -193,6 +195,7 @@ export const INITIAL_STATE: MessagesState = {
   historyLoadState: new Map(),
   olderLoadFailed: new Set(),
   pinRevision: new Map(),
+  messagePinRevision: new Map(),
   detachedChannels: new Set(),
   loadWatermark: new Map(),
 };

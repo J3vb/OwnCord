@@ -102,6 +102,14 @@ describe("reduceSetMessagePinned", () => {
     expect(other.pinRevision?.get(9)).toBe(1);
     expect(other.pinRevision?.get(1)).toBe(1);
   });
+
+  it("bumps the message's own pin revision, apart from other messages", () => {
+    const first = reduceSetMessagePinned(prev, 1, 2, true);
+    const second = reduceSetMessagePinned(first, 1, 3, true);
+    expect(second.messagePinRevision?.get(2)).toBe(1);
+    expect(second.messagePinRevision?.get(3)).toBe(1);
+    expect(reduceSetMessagePinned(second, 9, 2, false).messagePinRevision?.get(2)).toBe(2);
+  });
 });
 
 const snippet = (id: number, userId = 9) => ({
