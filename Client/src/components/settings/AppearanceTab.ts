@@ -10,6 +10,7 @@ import {
   SYSTEM_THEME,
   applyThemeChoice,
   getActiveThemeName,
+  onSystemThemePainted,
   resolveSystemTheme,
   restoreTheme,
   type ThemeName,
@@ -324,6 +325,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
+
+  // An OS light/dark flip under "Sync with computer" changes the default
+  // accent; with no stored accent the controls must follow it.
+  onSystemThemePainted(() => {
+    if (hasStoredAccent) return;
+    syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
+  }, signal);
 
   // Apply stored preferences on render
   if (currentTheme === null) {

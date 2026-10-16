@@ -545,4 +545,32 @@ describe("AppearanceTab - system theme", () => {
     container.appendChild(buildAppearanceTab(ac.signal));
     expect(container.querySelector(".theme-opt.active")?.classList.contains("system")).toBe(true);
   });
+
+  it("refreshes the default accent when the OS flips light/dark under system", () => {
+    mockGetActiveThemeName.mockReturnValue("system");
+    let dark = true;
+    let onChange: (() => void) | null = null;
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      get matches() {
+        return dark;
+      },
+      media,
+      addEventListener: (_t: string, cb: () => void) => {
+        onChange = cb;
+      },
+      removeEventListener: vi.fn(),
+    }));
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const hex = container.querySelector<HTMLInputElement>(".accent-hex-row input")!;
+    expect(hex.value).toBe("5865f2");
+    expect(container.querySelectorAll(".accent-swatch.active")).toHaveLength(1);
+
+    dark = false;
+    onChange!();
+
+    expect(hex.value).toBe("4f5bd5");
+    expect(hex.placeholder).toBe("4f5bd5");
+    // Light's default accent is not a preset, so no swatch stays selected.
+    expect(container.querySelectorAll(".accent-swatch.active")).toHaveLength(0);
+  });
 });

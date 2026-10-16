@@ -8,7 +8,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createMenuItem as buildMenuItem, enableMenuKeyboard } from "@lib/context-menu";
 import { appendPurgeSection } from "./purge-prompt";
 import { shellText } from "../i18n/shell";
-import { copyWithToast, isDeveloperMode } from "@lib/developerTools";
+import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 
 // ---------------------------------------------------------------------------
 // Types

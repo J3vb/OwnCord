@@ -4,7 +4,7 @@
  * (message-menu.ts). Pure over the stores, so the two cannot drift.
  */
 
-import { copyWithToast, isDeveloperMode } from "@lib/developerTools";
+import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";

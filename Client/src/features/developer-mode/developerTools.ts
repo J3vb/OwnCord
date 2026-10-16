@@ -3,9 +3,9 @@
  * channel): whether the preference is on, and a copy that reports its outcome.
  */
 
-import { loadPref } from "@lib/preferences";
-import { showToast } from "@lib/toast";
-import { messagingText } from "../i18n/messaging";
+import { loadPref } from "../../lib/preferences";
+import { showToast } from "../../lib/toast";
+import { messagingText } from "../../i18n/messaging";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);

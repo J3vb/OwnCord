@@ -7,7 +7,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { copyWithToast } from "@lib/developerTools";
+import { copyWithToast } from "../../features/developer-mode/developerTools";
 import { connectionLockReason, copyMessageLink, messageActionGates } from "./message-actions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";

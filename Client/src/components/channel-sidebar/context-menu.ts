@@ -24,7 +24,7 @@ import {
   clampMenuToViewport,
 } from "@lib/context-menu";
 import { appendPurgeSection } from "@components/purge-prompt";
-import { copyWithToast, isDeveloperMode } from "@lib/developerTools";
+import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 

@@ -112,6 +112,19 @@ function isKnownThemeName(name: string): boolean {
   return name === SYSTEM_THEME || BUILT_IN_THEMES.has(name);
 }
 
+const systemPaintListeners = new Set<() => void>();
+
+/**
+ * Run `cb` after an OS light/dark flip has repainted the "system" theme (and
+ * restored any stored accent). A control that shows the default accent uses it
+ * to refresh. Unsubscribes when `signal` aborts.
+ */
+export function onSystemThemePainted(cb: () => void, signal: AbortSignal): void {
+  if (signal.aborted) return;
+  systemPaintListeners.add(cb);
+  signal.addEventListener("abort", () => systemPaintListeners.delete(cb), { once: true });
+}
+
 /** Owns the live prefers-color-scheme listener while "system" is the choice. */
 let systemOwner: Disposable | null = null;
 
@@ -155,6 +168,7 @@ export function applyThemeChoice(choice: string): void {
       paint();
       // paintTheme clears the body's inline tokens, which carry the accent.
       restoreAccent();
+      for (const cb of systemPaintListeners) cb();
     },
     { signal: owner.signal },
   );

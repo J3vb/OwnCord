@@ -1788,6 +1788,37 @@ describe("MessageList", () => {
       }
     });
 
+    it("relabels the compact and gutter clock times, keeping them short", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
+        const now = new Date().toISOString();
+        setMessages(1, [
+          makeMessage({ id: 1, timestamp: now }),
+          makeMessage({ id: 2, timestamp: now }),
+        ]);
+        msgList.mount(container);
+
+        const compact = container.querySelector<HTMLElement>(".msg-compact-time")!;
+        const hover = container.querySelector<HTMLElement>(".msg-hover-time")!;
+        expect(compact.textContent).toContain("6:34 PM");
+        expect(hover.textContent).toContain("6:34 PM");
+
+        localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("24h"));
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+        );
+
+        for (const el of [compact, hover]) {
+          expect(el.textContent).toContain("18:34");
+          expect(el.textContent).not.toMatch(/AM|PM|Today|Yesterday/i);
+          expect(el.title).toContain("18:34");
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("rewrites a relative <t:…:R> timestamp as time passes", () => {
       vi.useFakeTimers();
       try {

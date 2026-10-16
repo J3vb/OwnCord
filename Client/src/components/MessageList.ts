@@ -56,6 +56,7 @@ import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
   formatBadgeCount,
+  formatClockTime,
   formatMessageTimestamp,
   getUserRole,
   resolveAuthor,
@@ -2200,11 +2201,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const item = virtualItems[renderedStart + i];
       if (item?.kind !== "message") continue;
       const text = formatMessageTimestamp(item.message.timestamp);
-      for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
+      for (const el of children[i]!.querySelectorAll(".msg-time, .sm-time")) {
         el.textContent = text;
       }
+      // The gutter and compact times are the short clock form, with no day word.
+      const clock = formatClockTime(item.message.timestamp);
+      for (const el of children[i]!.querySelectorAll(".msg-hover-time, .msg-compact-time")) {
+        el.textContent = clock;
+      }
       const title = fullDateTimeTitle(item.message.timestamp);
-      for (const el of children[i]!.querySelectorAll<HTMLElement>(".msg-time, .msg-hover-time")) {
+      for (const el of children[i]!.querySelectorAll<HTMLElement>(
+        ".msg-time, .msg-hover-time, .msg-compact-time",
+      )) {
         el.title = title;
       }
       const edited = children[i]!.querySelector<HTMLElement>(".msg-edited");
