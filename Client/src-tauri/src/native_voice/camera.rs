@@ -228,7 +228,8 @@ pub struct CaptureOptions {
 struct Shared {
     /// The published camera's source; `None` while not published.
     source: Mutex<Option<NativeVideoSource>>,
-    preview: Arc<Preview>,
+    /// Swapped by `take_over` so the preview socket outlives a capture.
+    preview: Mutex<Arc<Preview>>,
 }
 
 /// A running native camera capture.
@@ -265,7 +266,7 @@ impl CameraCapture {
         let (ready, started) = oneshot::channel();
         let shared = Arc::new(Shared {
             source: Mutex::new(None),
-            preview: Arc::new(watch::channel(None).0),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
         });
         let counted = Counted::new();
         let thread_shared = shared.clone();
@@ -287,11 +288,33 @@ impl CameraCapture {
     }
 
     pub fn preview(&self) -> Arc<Preview> {
-        self.shared.preview.clone()
+        self.shared
+            .preview
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
         *self.shared.source.lock().unwrap_or_else(|p| p.into_inner()) = source;
+    }
+
+    /// Carry `from`'s published source and preview over to this capture, so
+    /// the publication and the preview socket keep going on this capture's
+    /// frames once `from` is dropped (a camera change).
+    pub fn take_over(&self, from: &CameraCapture) {
+        *self
+            .shared
+            .preview
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = from.preview();
+        let source = from
+            .shared
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        self.set_source(source);
     }
 }
 
@@ -646,8 +669,13 @@ fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
     if let Some(source) = source {
         source.capture_frame(&frame);
     }
-    if shared.preview.receiver_count() > 0 {
-        shared.preview.send_replace(Some(Arc::new(frame.buffer)));
+    let preview = shared
+        .preview
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    if preview.receiver_count() > 0 {
+        preview.send_replace(Some(Arc::new(frame.buffer)));
     }
 }
 
@@ -668,7 +696,7 @@ mod tests {
     ) -> Option<Result<(u32, u32), String>> {
         let shared = Shared {
             source: Mutex::new(None),
-            preview: Arc::new(watch::channel(None).0),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
         };
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let stopper = std::thread::spawn(move || {
@@ -820,6 +848,98 @@ mod tests {
         assert_eq!(active_captures(), base);
         // The preview ends with the capture.
         assert!(rt.block_on(preview.changed()).is_err());
+    }
+
+    fn synthetic(width: u32, height: u32) -> (CameraCapture, Started) {
+        CameraCapture::start(
+            Target::Synthetic { width, height },
+            CaptureOptions {
+                fps: 30.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            || {},
+        )
+        .unwrap()
+    }
+
+    /// A camera change: the new capture carries the source and the preview
+    /// socket, so a receiver taken from the old capture keeps getting frames,
+    /// at the new size, once the old capture is gone.
+    #[test]
+    fn take_over_moves_preview_and_source_to_the_new_capture() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _guard = rt.enter();
+        let (old, old_started) = synthetic(640, 360);
+        let source = NativeVideoSource::new(
+            livekit::webrtc::video_source::VideoResolution {
+                width: 640,
+                height: 360,
+            },
+            false,
+        );
+        old.set_source(Some(source));
+        assert_eq!(rt.block_on(old_started).unwrap(), Ok((640, 360)));
+        let mut preview = old.preview().subscribe();
+        rt.block_on(preview.changed()).unwrap();
+        let (new, new_started) = synthetic(320, 240);
+        assert_eq!(rt.block_on(new_started).unwrap(), Ok((320, 240)));
+        new.take_over(&old);
+        assert!(old
+            .shared
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none());
+        assert!(new
+            .shared
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some());
+        drop(old);
+        // Frames the old capture sent before the swap may still be queued;
+        // wait for one at the new size.
+        let got = rt.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    preview.changed().await.ok()?;
+                    let frame = preview.borrow().clone()?;
+                    if (frame.width(), frame.height()) == (320, 240) {
+                        return Some(());
+                    }
+                }
+            })
+            .await
+        });
+        assert_eq!(got, Ok(Some(())), "preview carries on at the new size");
+        drop(new);
+    }
+
+    /// A pending change dropped before it takes over leaves the live
+    /// capture's preview running, untouched.
+    #[test]
+    fn a_dropped_pending_capture_leaves_the_live_preview_running() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let _guard = rt.enter();
+        let (live, live_started) = synthetic(640, 360);
+        assert_eq!(rt.block_on(live_started).unwrap(), Ok((640, 360)));
+        let mut preview = live.preview().subscribe();
+        let (pending, pending_started) = synthetic(320, 240);
+        assert_eq!(rt.block_on(pending_started).unwrap(), Ok((320, 240)));
+        drop(pending);
+        rt.block_on(preview.changed()).unwrap();
+        let frame = preview.borrow().clone().unwrap();
+        assert_eq!((frame.width(), frame.height()), (640, 360));
+        rt.block_on(preview.changed()).unwrap();
+        drop(live);
     }
 
     /// The real GStreamer frame path, with no camera: `videotestsrc` through

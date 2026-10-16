@@ -51,6 +51,7 @@ import { nativeCounters } from "./counters";
 const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
+import { CameraSwitchUnavailable } from "../cameraSwitch";
 import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
 import { noteChangedSource, pickChangeSource, pickScreenSource } from "./screenPicker";
 
@@ -563,7 +564,8 @@ export class NativeRoom {
   }
   /** Same contract as livekit-client's: `deviceId` is one of the ids the
    *  device list reported (`listAudioDevices`), "" or "default" is the host
-   *  default. Camera switching has no native counterpart yet. */
+   *  default. The camera is switched through
+   *  `NativeCameraTrack.setDeviceId`, so this returns false for `videoinput`. */
   async switchActiveDevice(kind: string, deviceId: string): Promise<boolean> {
     if (kind !== "audioinput" && kind !== "audiooutput") return false;
     // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
@@ -642,12 +644,13 @@ export class NativeRoom {
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
     const savedDevice = loadPref<string>("videoInputDevice", "");
+    const captureRequest = {
+      fps: options.videoEncoding?.maxFramerate ?? 30,
+      maxWidth: options.resolution?.width ?? 0,
+      maxHeight: options.resolution?.height ?? 0,
+    };
     const started = await desktop.nativeVoice
-      .startCamera(session, savedDevice, {
-        fps: options.videoEncoding?.maxFramerate ?? 30,
-        maxWidth: options.resolution?.width ?? 0,
-        maxHeight: options.resolution?.height ?? 0,
-      })
+      .startCamera(session, savedDevice, captureRequest)
       .catch((err: unknown) => {
         throw startError(err);
       });
@@ -656,13 +659,58 @@ export class NativeRoom {
       // i18n-exempt: internal native-room state guard, never rendered
       throw new Error("native room disconnected during camera start");
     }
-    const track = new NativeCameraTrack(started, `${this.frames}/camera`, (t) =>
-      this.stopCamera(session, t),
+    const track = new NativeCameraTrack(
+      started,
+      `${this.frames}/camera`,
+      (t) => this.stopCamera(session, t),
+      savedDevice,
+      captureRequest,
+      (t, deviceId) => this.changeCameraDevice(session, t, deviceId),
     );
     this.camera?.stop();
     this.camera = track;
     if (this.endedCamera === track.capture) track.end();
     return [track];
+  }
+
+  /** Move the live camera `track` onto `deviceId`: the host starts the new
+   *  capture beside the old one and swaps the publication's source once it
+   *  has a frame (same sid, same preview socket). A host refusal leaves the
+   *  old capture running and rejects `CameraSwitchUnavailable`, the cue for
+   *  the restart path; a stop or leave meanwhile is a plain error, which the
+   *  caller drops because the camera it was switching is gone. */
+  private async changeCameraDevice(
+    session: number,
+    track: NativeCameraTrack,
+    deviceId: string,
+  ): Promise<boolean> {
+    const live = (): boolean => this.sessionId === session && this.camera === track;
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new Error("camera is no longer live");
+    if (deviceId === track.device) return true;
+    const started = await desktop.nativeVoice
+      .changeCamera(session, deviceId, track.captureRequest)
+      .catch((err: unknown) => {
+        // A stop or leave meanwhile is not an unavailable switch: no restart.
+        // i18n-exempt: internal native-room state guard, never rendered
+        if (!live()) throw new Error("camera ended during the device change");
+        throw new CameraSwitchUnavailable(err);
+      });
+    if (!live()) {
+      // Stopped while the host swapped it in: a stop that reached the host
+      // after the swap named the old capture, so stop the new one too (a
+      // no-op when the stop came first).
+      if (this.sessionId === session)
+        desktop.nativeVoice
+          .stopCamera(session, started.capture)
+          .catch((err) => log.warn("native stopCamera failed", { capture: started.capture, err }));
+      // i18n-exempt: internal native-room state guard, never rendered
+      throw new Error("camera ended during the device change");
+    }
+    track.retarget(started);
+    track.device = deviceId;
+    if (this.endedCamera === started.capture) track.end();
+    return true;
   }
 
   /** Publish the already-started native camera capture: E2EE like the

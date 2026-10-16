@@ -673,6 +673,10 @@ pub struct NativeSession {
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
     camera_capture: Option<CameraShare>,
+    /// A capture started to replace the published camera's device; it takes
+    /// over the publication once its first frame arrives
+    /// (`finish_camera_change`), until then the live camera is untouched.
+    camera_change: Option<CameraShare>,
     screen: Option<ScreenShare>,
     /// A capture started to replace the published share's source; it takes
     /// over the publication once its first frame arrives
@@ -779,6 +783,7 @@ impl NativeSession {
             camera,
             camera_capture: None,
             screen: None,
+            camera_change: None,
             screen_change: None,
             screen_publication,
             next_capture: 0,
@@ -1054,6 +1059,69 @@ impl NativeSession {
         Ok(sid.to_string())
     }
 
+    /// Start capturing `target` to replace the published camera's device,
+    /// leaving the live capture and its publication running. Returns the new
+    /// capture's id and its first-frame receiver, as `start_camera`; the
+    /// caller awaits it without holding the session, then calls
+    /// `finish_camera_change` (or `stop_camera` to give up).
+    pub fn start_camera_change(
+        &mut self,
+        target: CameraTarget,
+        options: CameraCaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        if !self.camera_published() {
+            return Err("no published camera to change".into());
+        }
+        self.camera_change.take();
+        self.next_camera += 1;
+        let id = self.next_camera;
+        let on_event = self.on_event.clone();
+        let (capture, started) = CameraCapture::start(target, options, move || {
+            on_event(Event::CameraCaptureEnded { capture: id })
+        })?;
+        self.camera_change = Some(CameraShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Move the published camera onto capture `capture` (started by
+    /// `start_camera_change`): same publication and sid, same preview socket,
+    /// and the old capture is released. Fails, changing nothing, when a stop,
+    /// a new camera or another change came first.
+    pub fn finish_camera_change(&mut self, capture: u64) -> Result<(), String> {
+        let next = self
+            .camera_change
+            .take_if(|c| c.id == capture)
+            .ok_or("the camera change was superseded")?;
+        if !self.camera_published() {
+            return Err("the camera stopped during the change".into());
+        }
+        let Some(live) = self.camera_capture.as_mut() else {
+            return Err("the camera stopped during the change".into());
+        };
+        // The source keeps the size it was published at: the encoder follows
+        // each frame's own size (as on the web path's replaceTrack).
+        next.capture.take_over(&live.capture);
+        if let Some(publication) = self.camera.lock().unwrap().as_mut() {
+            publication.capture = Some(next.id);
+        }
+        // Dropping the old capture joins its thread and frees its device; the
+        // preview lives on in `next`.
+        drop(std::mem::replace(live, next));
+        Ok(())
+    }
+
+    /// Whether the running capture is the one published as the camera.
+    fn camera_published(&self) -> bool {
+        let live = self.camera_capture.as_ref().map(|c| c.id);
+        live.is_some()
+            && self
+                .camera
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| p.capture == live)
+    }
+
     /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
     /// remote tiles close the same way). A stale sid, one a later publish
     /// already replaced, is a no-op: it must not remove the newer camera. The
@@ -1087,8 +1155,12 @@ impl NativeSession {
     }
 
     /// Stop capture `capture` if it is still the running one (a stale id is a
-    /// no-op): unpublish it and release the pipeline and the device.
+    /// no-op): unpublish it and release the pipeline and the device. A
+    /// pending change's capture is only dropped.
     pub async fn stop_camera(&mut self, capture: u64) {
+        if self.camera_change.as_ref().is_some_and(|c| c.id == capture) {
+            self.camera_change.take();
+        }
         if self
             .camera_capture
             .as_ref()
@@ -1101,6 +1173,7 @@ impl NativeSession {
     /// Unpublish whatever camera is published and stop its capture: the
     /// preview socket ends with it.
     async fn release_camera(&mut self) {
+        self.camera_change.take();
         self.release_camera_publication().await;
         self.frames.set_camera(None);
         // Dropping joins the capture thread and tears down the pipeline.
