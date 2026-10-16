@@ -115,6 +115,8 @@ type Client struct {
 	focusSeq uint64
 	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
 	pendingFocusChID int64
+	// pendingFocusRead is the read flag of the deferred focus (false = the frame said read:false); guarded by mu.
+	pendingFocusRead bool
 	// pendingFocusReqID is the req_id of the deferred frame, echoed on an error; guarded by mu.
 	pendingFocusReqID string
 	// pendingFocusSeq is the focusSeq the pending intent was assigned; guarded by mu.

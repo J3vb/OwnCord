@@ -219,6 +219,9 @@ type MessageService struct {
 	// notify and the visibility check inside it; job resolution stays outside.
 	// See mentionWorker.emitMu and reverseMentionCounts.
 	mentionEmitMu syncutil.Mutex
+	// readStateNotifier delivers the read_state frame MoveReadPointer sends
+	// under mentionEmitMu. nil leaves it off (see SetReadStateNotifier).
+	readStateNotifier ReadStateNotifier
 	// liveStatus returns userID's live status, "" when they hold no live
 	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
 	// constructed, so @here reads the same status the member list overlays

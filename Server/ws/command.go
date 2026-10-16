@@ -89,27 +89,6 @@ type PresenceUpdateCmd struct {
 func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
 func (c PresenceUpdateCmd) UserID() int64 { return c.userID }
 
-// ChannelFocusCmd represents a channel_focus message.
-type ChannelFocusCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c ChannelFocusCmd) Type() string  { return MsgTypeChannelFocus }
-func (c ChannelFocusCmd) UserID() int64 { return c.userID }
-
-// MarkReadCmd represents a mark_read message: advance the caller's read state
-// for a channel without making it their focused channel. channel_focus already
-// marks read, but it also rebinds the connection's focused channel, so it is
-// the wrong tool for "mark that other channel read from its context menu".
-type MarkReadCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c MarkReadCmd) Type() string  { return MsgTypeMarkRead }
-func (c MarkReadCmd) UserID() int64 { return c.userID }
-
 // ReactionAddCmd represents a reaction_add message.
 type ReactionAddCmd struct {
 	userID    int64
@@ -448,21 +427,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		return parsePresenceUpdate(userID, raw)
 	},
 
-	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeChannelFocus, raw)
-		if err != nil {
-			return nil, err
-		}
-		return ChannelFocusCmd{userID: userID, ChannelID: chID}, nil
-	},
-
-	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeMarkRead, raw)
-		if err != nil {
-			return nil, err
-		}
-		return MarkReadCmd{userID: userID, ChannelID: chID}, nil
-	},
+	MsgTypeChannelFocus: parseChannelFocus,
+	MsgTypeMarkRead:     parseMarkRead,
+	MsgTypeMarkUnread:   parseMarkUnread,
 
 	MsgTypeCallRing: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		chID, err := parseCallChannelID(MsgTypeCallRing, raw)

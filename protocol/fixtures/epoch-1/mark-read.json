@@ -12,6 +12,18 @@
         }
       },
       {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 1,
+            "last_read_message_id": "<id:number>",
+            "mention_count": 0,
+            "unread_count": 0
+          },
+          "type": "read_state"
+        }
+      },
+      {
         "dir": "c2s",
         "frame": {
           "payload": {},
