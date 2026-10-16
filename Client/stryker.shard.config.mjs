@@ -213,13 +213,13 @@ export const shards = {
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
     "src/stores/members.store.ts",
-    "src/stores/voice.store.ts",
     "src/features/messaging/readingAnchor.ts",
     "src/features/messaging/emojiCatalog.ts",
     "src/features/messaging/attachmentTtl.ts",
     "src/features/messaging/sendQueue-loader.ts",
     "src/features/messaging/sendQueue.ts",
-  ], // ~1,250 mutants (estimated)
+  ], // timed out at 90 min on run 38957398478 while it still held voice.store.ts
+  "stores-4": ["src/stores/voice.store.ts"],
   "stores-2": [
     "src/stores/blocks.store.ts",
     "src/stores/channels.store.ts",
