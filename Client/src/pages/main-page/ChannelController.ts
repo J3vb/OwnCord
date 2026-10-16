@@ -54,6 +54,9 @@ import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
+import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { buildGroupAvatarStack } from "@components/DmSidebar";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
@@ -138,6 +141,41 @@ export interface ChannelController {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+
+const DM_STATUS_LABELS = {
+  online: "status.online",
+  idle: "status.idle",
+  dnd: "status.dnd",
+  invisible: "status.invisible",
+  offline: "status.offline",
+} as const;
+
+/** The DM partner's presence as the profile panel words it ("Do Not Disturb"),
+ *  not the capitalised wire value. An unknown value reads as offline. */
+function dmStatusLabel(status: string): string {
+  const key = Object.hasOwn(DM_STATUS_LABELS, status)
+    ? DM_STATUS_LABELS[status as keyof typeof DM_STATUS_LABELS]
+    : DM_STATUS_LABELS.offline;
+  return shellText(key);
+}
+
+/** The header's mark for a DM: the partner's avatar, or a group's face stack. */
+function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
+  if (dm.isGroup) {
+    return buildGroupAvatarStack(dm.channelId, dm.participants, label, pickAvatarColor(label));
+  }
+  const member = membersStore.getState().members.get(dm.recipient.id);
+  const wrapper = createAvatarElement(
+    {
+      username: dm.recipient.username,
+      displayName: label,
+      avatar: member?.avatar ?? dm.recipient.avatar,
+    },
+    { className: "ch-avatar-circle", background: pickAvatarColor(label) },
+  );
+  wrapper.setAttribute("aria-hidden", "true");
+  return wrapper;
+}
 
 function currentMessageUser(): MessageUser | null {
   const u = authStore.getState().user;
@@ -1068,14 +1106,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           const member = membersStore.getState().members.get(dmChannel.recipient.id);
           const status =
             member?.status ?? dmChannel.recipient.status ?? shellText("status.offline");
-          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+          subtitle = dmStatusLabel(status);
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
-        updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
-        // A group DM has no profile panel to open, so the pointer cursor would
-        // promise a click that does nothing (F24).
-        chatHeaderRefs.nameGroupEl.style.cursor =
-          dmChannel !== undefined && dmChannel.isGroup ? "default" : "pointer";
+        updateChatHeaderForDm(chatHeaderRefs, {
+          username: headerName,
+          status: subtitle,
+          avatar: dmChannel !== undefined ? buildDmHeaderAvatar(dmChannel, headerName) : null,
+          isGroup: dmChannel?.isGroup === true,
+        });
+        // Both are clickable: a 1:1 name opens the profile panel and a group
+        // name renames the group.
+        chatHeaderRefs.nameGroupEl.style.cursor = "pointer";
       };
       refreshDmHeader();
       // Keep the subtitle live across presence and roster changes — otherwise

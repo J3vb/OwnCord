@@ -116,6 +116,33 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
 }
 
 /**
+ * The two overlapping faces of a group DM. Shared by the DM row and the chat
+ * header so a group looks the same in both.
+ */
+export function buildGroupAvatarStack(
+  channelId: number,
+  participants: readonly DmParticipant[],
+  fallbackLabel: string,
+  background: string,
+): HTMLDivElement {
+  const stack = createElement("div", {
+    class: "dm-avatar dm-avatar-stack",
+    "data-testid": `dm-avatar-stack-${channelId}`,
+  });
+  const shown = participants.slice(0, 2);
+  // An empty group (every other member has left) still needs a mark, so fall
+  // back to the row's own label rather than rendering an empty circle.
+  const faces = shown.length > 0 ? shown : [{ id: 0, username: fallbackLabel, avatar: null }];
+  faces.forEach((p, i) => {
+    const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
+    face.style.background = background;
+    paintAvatar(face, p.avatar, p.username);
+    stack.appendChild(face);
+  });
+  return stack;
+}
+
+/**
  * The avatar block for a row: one circle for a 1:1 DM with a presence dot, or
  * two overlapping circles for a group.
  *
@@ -127,21 +154,12 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   const avatarBg = convo.avatarColor ?? "#5865F2";
 
   if (convo.isGroup === true) {
-    const stack = createElement("div", {
-      class: "dm-avatar dm-avatar-stack",
-      "data-testid": `dm-avatar-stack-${convo.channelId}`,
-    });
-    const shown = (convo.participants ?? []).slice(0, 2);
-    // An empty group (every other member has left) still needs a mark, so fall
-    // back to the row's own label rather than rendering an empty circle.
-    const faces = shown.length > 0 ? shown : [{ id: 0, username: convo.username, avatar: null }];
-    faces.forEach((p, i) => {
-      const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
-      face.style.background = avatarBg;
-      paintAvatar(face, p.avatar, p.username);
-      stack.appendChild(face);
-    });
-    return stack;
+    return buildGroupAvatarStack(
+      convo.channelId,
+      convo.participants ?? [],
+      convo.username,
+      avatarBg,
+    );
   }
 
   const avatar = createElement("div", { class: "dm-avatar" });

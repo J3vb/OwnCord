@@ -126,6 +126,8 @@ export interface SidebarAreaResult {
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
+  /** Rename a group DM through the sidebar's prompt (the header's name click). */
+  readonly renameGroup: (channelId: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,5 +1104,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
+    renameGroup,
   };
 }

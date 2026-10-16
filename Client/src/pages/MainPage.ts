@@ -474,7 +474,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    * channel, so the ring is only truthful once the caller is actually there —
    * ringing first would offer an empty room to whoever accepts.
    */
-  function startCall(): void {
+  function startCall(withVideo = false): void {
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
     // onVoiceJoin silently refuses to join when the socket is down
@@ -484,6 +484,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       showToast(shellText("channel.notConnected"), "error");
       return;
     }
+    // The existing voiceStore subscriber turns the camera on once connected.
+    cameraOnJoin = withVideo ? active.id : null;
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
     ringAfterJoin(active.id);
   }
@@ -826,6 +828,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onStartCall: () => {
         startCall();
+      },
+      onStartVideoCall: () => {
+        startCall(true);
+      },
+      onRenameGroup: () => {
+        const active = getActiveChannel();
+        if (active !== null && active.type === "dm") sidebar.renameGroup(active.id);
       },
     });
     dmProfileSlot = chatAreaResult.dmProfileSlot;

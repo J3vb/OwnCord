@@ -2420,6 +2420,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2429,10 +2431,10 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "alice", "dm");
 
       // Should use member status ("idle") over DM recipient status ("online")
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Idle",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ username: "alice", status: "Idle", isGroup: false }),
+      );
     });
 
     it("uses DM recipient status when member not found in members store", () => {
@@ -2460,6 +2462,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2468,10 +2472,65 @@ describe("createChannelController", () => {
 
       ctrl.mountChannel(42, "bob", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "bob",
-        status: "Dnd",
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ username: "bob", status: "Do Not Disturb" }),
+      );
+    });
+
+    it("hands the header the partner's avatar for a 1:1 and the face stack for a group", () => {
+      const user = (id: number, username: string) => ({
+        id,
+        username,
+        avatar: "",
+        status: "online",
       });
+      const dm = (
+        isGroup: boolean,
+        participants: [ReturnType<typeof user>, ...ReturnType<typeof user>[]],
+      ) => ({
+        channelId: 42,
+        recipient: participants[0],
+        participants,
+        name: isGroup ? "Crew" : "",
+        isGroup,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+      });
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
+        sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
+      };
+
+      mockDmStoreGetState.mockReturnValue({ channels: [dm(false, [user(5, "alice")])] });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "alice", "dm");
+      const one = mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as {
+        avatar: HTMLElement;
+        isGroup: boolean;
+      };
+      expect(one.isGroup).toBe(false);
+      expect(one.avatar.querySelector(".avatar-initial")?.textContent).toBe("A");
+
+      mockDmStoreGetState.mockReturnValue({
+        channels: [dm(true, [user(5, "alice"), user(6, "bob"), user(7, "cy")])],
+      });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "Crew", "dm");
+      const group = mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as {
+        avatar: HTMLElement;
+        isGroup: boolean;
+      };
+      expect(group.isGroup).toBe(true);
+      expect(group.avatar.classList.contains("dm-avatar-stack")).toBe(true);
+      expect(group.avatar.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
     });
 
     it("falls back to 'Offline' when DM channel not found in dmStore", () => {
@@ -2482,6 +2541,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2490,10 +2551,13 @@ describe("createChannelController", () => {
 
       ctrl.mountChannel(42, "unknown", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "unknown",
-        status: "Offline",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "unknown",
+          status: "Offline",
+        }),
+      );
     });
 
     it("keeps the DM header subtitle live when the partner's presence changes", () => {
@@ -2519,6 +2583,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2526,10 +2592,13 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "alice", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Offline",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "alice",
+          status: "Offline",
+        }),
+      );
 
       // The partner comes online — no re-mount, just a members store update.
       mockMembersStoreGetState.mockReturnValue({
@@ -2537,10 +2606,13 @@ describe("createChannelController", () => {
       });
       for (const cb of membersStoreSubscribers) cb();
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Online",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "alice",
+          status: "Online",
+        }),
+      );
     });
 
     it("keeps a group DM header live when the roster changes", () => {
@@ -2562,6 +2634,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2600,6 +2674,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2639,6 +2715,8 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
