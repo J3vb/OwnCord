@@ -12,10 +12,12 @@ import type {
   NativeVoiceCameraSupport,
   NativeVoiceConnected,
   NativeVoiceDevices,
+  NativeMicTestEnvelope,
   NativeVoiceEnvelope,
   NativeVoiceResources,
   NativeVoiceScreenSources,
   NativeVoiceScreenStarted,
+  NativeVoiceStats,
 } from "../contracts/nativeVoice";
 
 import { createLogger } from "@lib/logger";
@@ -23,6 +25,27 @@ import { createLogger } from "@lib/logger";
 const log = createLogger("nativeVoiceService");
 
 export const NATIVE_VOICE_EVENT = "native-voice";
+export const NATIVE_MIC_TEST_EVENT = "native-voice-mic-test";
+
+/** Same late-resolve shape as trayStatus.ts: the host resolves the unlisten
+ *  asynchronously, and an unsubscribe that lands first must still release it. */
+function listenLate<T>(name: string, handler: (payload: T) => void): () => void {
+  let active = true;
+  let unlisten: (() => void) | null = null;
+  void listen<T>(name, (e) => {
+    if (active) handler(e.payload);
+  })
+    .then((stop) => {
+      if (active) unlisten = stop;
+      else stop();
+    })
+    .catch((err: unknown) => log.warn(`${name} listen failed`, err));
+  return () => {
+    active = false;
+    unlisten?.();
+    unlisten = null;
+  };
+}
 
 export const nativeVoice: NativeVoice = {
   setRoomKey: (key) => invoke<void>("native_voice_set_key", { key }),
@@ -93,28 +116,40 @@ export const nativeVoice: NativeVoice = {
       throw err instanceof Error ? err : new Error(String(err));
     }
   },
+  async getStats(session) {
+    try {
+      return await invoke<NativeVoiceStats>("native_voice_get_stats", { session });
+    } catch (err) {
+      log.debug("native stats unavailable", err);
+      return null;
+    }
+  },
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
   listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>
     invoke<void>("native_voice_set_device", { session, kind, deviceId }),
-  onEvent(handler) {
-    // Same late-resolve shape as trayStatus.ts: the host resolves the
-    // unlisten asynchronously, and an unsubscribe that lands first must
-    // still release it.
-    let active = true;
-    let unlisten: (() => void) | null = null;
-    void listen<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, (e) => {
-      if (active) handler(e.payload);
-    })
-      .then((stop) => {
-        if (active) unlisten = stop;
-        else stop();
-      })
-      .catch((err: unknown) => log.warn("native-voice listen failed", err));
-    return () => {
-      active = false;
-      unlisten?.();
-      unlisten = null;
-    };
+  async startMicTest(options) {
+    try {
+      return await invoke<number>("native_voice_start_mic_test", { options });
+    } catch (err) {
+      // The host rejects with its reason as a string; callers match it.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   },
+  async updateMicTest(test, update) {
+    try {
+      await invoke<void>("native_voice_update_mic_test", { test, update });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+  async stopMicTest(test) {
+    try {
+      await invoke<void>("native_voice_stop_mic_test", { test });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+  onMicTestEvent: (handler) => listenLate<NativeMicTestEnvelope>(NATIVE_MIC_TEST_EVENT, handler),
+  onEvent: (handler) => listenLate<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, handler),
 };

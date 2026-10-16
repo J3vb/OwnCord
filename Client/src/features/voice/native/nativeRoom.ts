@@ -36,6 +36,8 @@ import type {
   NativeVoiceAudioOptions,
   NativeVoiceEnvelope,
   NativeVoiceEvent,
+  NativeVoiceStats,
+  NativeVoiceStatsEntry,
   NativeVoiceTrack,
   NativeVideoQuality,
 } from "../../../platform/contracts/nativeVoice";
@@ -62,11 +64,54 @@ type Listener = (...args: unknown[]) => void;
  *  canvas track stands in for the browser's decoded track. */
 export class NativeRemoteVideoTrack {
   readonly kind = "video";
+  private disposed = false;
+  private last: { bytes: number; atMs: number } | null = null;
+  /** bits/s from the last two distinct samples' byte deltas; undefined until
+   *  two exist (what the tile chip reads on the web path). */
+  currentBitrate: number | undefined = undefined;
   constructor(
     readonly sid: string,
     readonly source: string,
     private readonly renderer: NativeVideoRenderer,
+    private readonly stats: () => Promise<NativeVoiceStats | null> = () => Promise.resolve(null),
   ) {}
+  /** The tile chip's receiver sample (`remoteTracks.getRemoteVideoStats`),
+   *  from the host's shared stats tick. Undefined when the host has no sample
+   *  for this track, so the chip falls back to the element's size. */
+  async getReceiverStats(): Promise<
+    | {
+        frameWidth: number;
+        frameHeight: number;
+        framesDecoded: number;
+        timestamp: number;
+        mimeType?: string;
+        packetsLost: number;
+        packetsReceived: number;
+      }
+    | undefined
+  > {
+    const reply = await this.stats();
+    const s = this.disposed ? undefined : reply?.remoteVideo[this.sid];
+    if (reply == null || s === undefined) return undefined;
+    if (this.last !== null && reply.atMs > this.last.atMs) {
+      this.currentBitrate =
+        s.bytesReceived >= this.last.bytes
+          ? ((s.bytesReceived - this.last.bytes) * 8 * 1000) / (reply.atMs - this.last.atMs)
+          : undefined;
+    }
+    if (this.last === null || reply.atMs > this.last.atMs) {
+      this.last = { bytes: s.bytesReceived, atMs: reply.atMs };
+    }
+    return {
+      frameWidth: s.frameWidth,
+      frameHeight: s.frameHeight,
+      framesDecoded: s.framesDecoded,
+      timestamp: reply.atMs,
+      mimeType: s.mimeType,
+      packetsLost: s.packetsLost,
+      packetsReceived: s.packetsReceived,
+    };
+  }
   get mediaStreamTrack(): MediaStreamTrack {
     return this.renderer.mediaStreamTrack;
   }
@@ -75,6 +120,7 @@ export class NativeRemoteVideoTrack {
     return [];
   }
   dispose(): void {
+    this.disposed = true;
     this.renderer.dispose();
   }
 }
@@ -199,6 +245,40 @@ interface NativeLocalPublication {
   readonly track: PublishableTrack | NativeCameraTrack | NativeScreenTrack;
 }
 
+/** How long callers share one host stats reply: the poller, a watched tile
+ *  and your own share all poll every 2 s, so their ticks collapse into one
+ *  IPC; the poller alone always gets a fresh one. */
+const STATS_SHARE_MS = 1500;
+
+/** Stands in for livekit-client's `PCTransport` where connectionStats and
+ *  livekitDiagnostics read it (WP LP-5). */
+class NativeStatsTransport {
+  constructor(
+    private readonly room: NativeRoom,
+    private readonly side: "publisher" | "subscriber",
+  ) {}
+  /** undefined (not an empty report) when there is nothing: the poller must
+   *  see "no transports" and keep reading unavailable, never a 4-bar
+   *  "excellent" with rtt 0. */
+  async getStats(): Promise<ReadonlyMap<string, NativeVoiceStatsEntry> | undefined> {
+    const entries = (await this.room.readStats())?.[this.side];
+    return entries === undefined || entries.length === 0
+      ? undefined
+      : new Map(entries.map((e) => [e.id, e]));
+  }
+  /** The backend does not report ICE state to the webview; livekitDiagnostics
+   *  logs these. */
+  getICEConnectionState(): string {
+    return "unknown";
+  }
+  getConnectionState(): string {
+    return "unknown";
+  }
+  getSignallingState(): string {
+    return "unknown";
+  }
+}
+
 export class NativeRoom {
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   readonly name = "";
@@ -206,9 +286,39 @@ export class NativeRoom {
   /** Voice plays in the session's own mixer, so per-user gains above 1 are
    *  fine here (audioElements checks for this marker). */
   readonly nativePlayout = true;
-  /** connectionStats/connectionDiagnostics read `engine.pcManager`; native
-   *  has no browser peer connection, so they see "no transports". */
-  readonly engine = { pcManager: undefined, client: { ws: undefined } };
+  /** connectionStats/livekitDiagnostics read `engine.pcManager`; native has
+   *  no browser peer connection, so these stand-ins serve the host's filtered
+   *  W3C-shaped stats (`native_voice_get_stats`) and nothing while the room
+   *  is not connected. */
+  readonly engine = {
+    pcManager: {
+      publisher: new NativeStatsTransport(this, "publisher"),
+      subscriber: new NativeStatsTransport(this, "subscriber"),
+    },
+    client: { ws: undefined },
+  };
+  private statsTick: {
+    session: number;
+    at: number;
+    reply: Promise<NativeVoiceStats | null>;
+  } | null = null;
+  /** @internal The adapter's own readers only: the stats transports, the
+   *  remote video tracks and the screen track. One host call per tick. */
+  readStats(): Promise<NativeVoiceStats | null> {
+    const session = this.sessionId;
+    if (session === null || this.state !== "connected") return Promise.resolve(null);
+    const now = performance.now();
+    const tick = this.statsTick;
+    if (tick !== null && tick.session === session && now - tick.at < STATS_SHARE_MS) {
+      return tick.reply;
+    }
+    const reply = desktop.nativeVoice
+      .getStats(session)
+      .catch(() => null)
+      .then((r) => (this.sessionId === session ? r : null));
+    this.statsTick = { session, at: now, reply };
+    return reply;
+  }
   /** connectionDiagnostics asks this instead of `engine.client.ws`: the
    *  backend's signaling is up exactly while the room reads "connected"
    *  (it reports "reconnecting" and "disconnected" as they happen). */
@@ -514,6 +624,7 @@ export class NativeRoom {
     this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
+    this.statsTick = null;
     if (this.counted) nativeCounters.openRooms--;
     this.counted = false;
     this.state = "disconnected";
@@ -650,6 +761,7 @@ export class NativeRoom {
       { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
       pick.capture,
       (t) => this.changeScreenSource(session, t),
+      () => this.readStats(),
     );
     this.screen?.stop();
     this.screen = track;
@@ -768,7 +880,9 @@ export class NativeRoom {
     this.unsubscribeVideo(identity, pub);
     const renderer = new NativeVideoRenderer(`${this.frames}/remote/${pub.trackSid}`);
     pub.resetVideoView();
-    pub.track = new NativeRemoteVideoTrack(pub.trackSid, pub.source, renderer);
+    pub.track = new NativeRemoteVideoTrack(pub.trackSid, pub.source, renderer, () =>
+      this.readStats(),
+    );
     this.emit(RoomEvent.TrackSubscribed, pub.track, pub, this.participant(identity));
   }
 
@@ -1006,6 +1120,7 @@ export class NativeRoom {
         break;
       case "reconnecting":
         this.state = "reconnecting";
+        this.statsTick = null;
         this.emit(RoomEvent.Reconnecting);
         break;
       case "reconnected":
@@ -1014,6 +1129,7 @@ export class NativeRoom {
         break;
       case "disconnected":
         this.state = "disconnected";
+        this.statsTick = null;
         this.clearDecryptTimers();
         this.emit(
           RoomEvent.Disconnected,

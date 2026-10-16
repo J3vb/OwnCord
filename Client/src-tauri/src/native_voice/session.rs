@@ -18,6 +18,7 @@ use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
@@ -27,7 +28,7 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture, GateSink, LevelSink};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
@@ -357,14 +358,14 @@ pub struct AudioOptions {
 /// callback can still hold an older generation after a second rebuild, so
 /// drop only the entries every follower has let go of, here on the caller's
 /// thread.
-fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+pub(super) fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
     retired.retain(|r| Arc::strong_count(r) > 1);
     retired.extend(old);
 }
 
 /// What a request to change the audio processing asks of a session.
 #[derive(Debug, PartialEq, Eq)]
-enum ProcessingChange {
+pub(super) enum ProcessingChange {
     /// Audio is not enabled yet: only remember the options.
     Remember,
     /// The options are what the running processing already has.
@@ -378,7 +379,7 @@ enum ProcessingChange {
     Rebuild,
 }
 
-fn processing_change(
+pub(super) fn processing_change(
     enabled: bool,
     current: Option<AudioOptions>,
     next: AudioOptions,
@@ -681,7 +682,9 @@ const CAPTURE_REPORT_QUEUE: usize = 64;
 /// an emit (it serializes and takes the webviews' lock): the sinks only
 /// queue, dropping a report when the queue is full, and the task emits, in
 /// order. It ends when the sinks are dropped with the capture.
-fn capture_report_sinks(on_event: EventSink) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
+pub(super) fn capture_report_sinks(
+    on_event: EventSink,
+) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
     let (reports, mut queue) = tokio::sync::mpsc::channel(CAPTURE_REPORT_QUEUE);
     let emitter = tokio::spawn(async move {
         while let Some(event) = queue.recv().await {
@@ -708,6 +711,10 @@ fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
         ..Default::default()
     }
 }
+
+/// The local (by source key) and remote (by publication sid) video tracks
+/// whose stats the webview reads.
+pub type StatsTracks = (Vec<(&'static str, LocalTrack)>, Vec<(String, RemoteTrack)>);
 
 impl NativeSession {
     /// Connect with the room key already installed: the TS key exchange
@@ -908,7 +915,7 @@ impl NativeSession {
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(source.clone())?;
+            self.capture.start(Sink::Track(source.clone()))?;
             self.mic_source = Some(source.clone());
             let published = self
                 .publish_audio(RtcAudioSource::Native(source), bitrate)
@@ -925,7 +932,7 @@ impl NativeSession {
         if enabled {
             // The interop example publishes its own source and captures nothing.
             if let Some(source) = &self.mic_source {
-                self.capture.start(source.clone())?;
+                self.capture.start(Sink::Track(source.clone()))?;
             }
             track.unmute();
         } else {
@@ -1256,6 +1263,47 @@ impl NativeSession {
         self.frames.set_screen(None);
         // Dropping joins the capture thread.
         self.screen.take();
+    }
+
+    /// The publisher and subscriber transports' raw stats.
+    pub async fn transport_stats(&self) -> Result<(Vec<RtcStats>, Vec<RtcStats>), String> {
+        let s = self
+            .room
+            .get_stats()
+            .await
+            .map_err(|e| format!("native voice stats: {e}"))?;
+        Ok((s.publisher_stats, s.subscriber_stats))
+    }
+
+    /// Handles (Arc clones) of the video tracks whose stats the webview
+    /// reads. Local tracks are keyed by source, not sid, so the lookup is
+    /// immune to the issued/live sid split after a full reconnect; remote
+    /// ones by publication sid (what `remote_pub_info` sends). Unsubscribed
+    /// publications have no track and are skipped.
+    pub fn stats_tracks(&self) -> StatsTracks {
+        let local = self
+            .room
+            .local_participant()
+            .track_publications()
+            .values()
+            .filter_map(|p| {
+                let key = match p.source() {
+                    TrackSource::Camera => "camera",
+                    TrackSource::Screenshare => "screen_share",
+                    _ => return None,
+                };
+                p.track().map(|t| (key, t))
+            })
+            .collect();
+        let remote = self
+            .room
+            .remote_participants()
+            .values()
+            .flat_map(|participant| participant.track_publications().into_values())
+            .filter(|p| p.kind() == TrackKind::Video)
+            .filter_map(|p| p.track().map(|t| (p.sid().to_string(), t)))
+            .collect();
+        (local, remote)
     }
 
     pub fn remote_publication(

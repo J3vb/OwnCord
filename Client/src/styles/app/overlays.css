@@ -45,6 +45,31 @@
   background: transparent;
   color: var(--text-muted);
 }
+/* A row of emoji buttons (the message menu's quick reactions). */
+.context-menu-group {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+.context-menu-item--content {
+  flex: 1;
+  justify-content: center;
+  width: auto;
+  font-size: var(--font-size-lg, 18px);
+  line-height: 1;
+}
+.context-menu-item--content img {
+  width: 20px;
+  height: 20px;
+}
+.context-menu-item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-menu-item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
 .context-menu-sep {
   height: 1px;
   background: var(--border);
