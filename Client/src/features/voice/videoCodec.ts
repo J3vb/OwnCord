@@ -93,9 +93,9 @@ export function gpuRenderer(): string | null {
     const gl = document
       .createElement("canvas")
       .getContext("webgl", { powerPreference: "low-power" });
-    const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    if (!gl || !info) return null;
-    const renderer: unknown = gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+    if (!gl) return null;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const renderer: unknown = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
     gl.getExtension("WEBGL_lose_context")?.loseContext();
     return typeof renderer === "string" ? renderer : null;
   } catch {
@@ -160,7 +160,8 @@ async function resolvePreferredCodec(
   // the settings no longer offer publishes VP8, as the select shows.
   if (pref === "vp9") return canPublishVp9() ? pref : "vp8";
   if (pref === "vp8" && fps < HARDWARE_CODEC_FPS) return pref;
-  return pickAutoCodec(await probeEncoder(track, fps, bitrate, "video/H264"), gpuRenderer());
+  const probe = await probeEncoder(track, fps, bitrate, "video/H264");
+  return pickAutoCodec(probe, probe === null ? null : gpuRenderer());
 }
 
 /** MediaCapabilities' answer for encoding `contentType` at the track's size,
