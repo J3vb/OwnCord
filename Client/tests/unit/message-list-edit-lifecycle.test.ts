@@ -228,6 +228,34 @@ describe("MessageList — inline editor lifecycle (WP 3A-8 review)", () => {
     expect(document.activeElement).toBe(textarea);
   });
 
+  it("an editor that held focus gets it back after a jump away and back (full rebuild)", async () => {
+    setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
+    mount();
+    await settle();
+    await scrollTo(3300);
+    const visibleIds = [
+      ...container.querySelectorAll<HTMLElement>(".virtual-content > .message"),
+    ].map((el) => Number(el.dataset.testid!.replace("message-", "")));
+    const id = visibleIds[visibleIds.length - 2]!;
+    expect(list!.startEdit(id)).toBe(true);
+    await vi.waitFor(() => expect(editor(id)).not.toBeNull());
+    const textarea = editor(id)!;
+    textarea.focus();
+
+    await scrollTo(0);
+    expect(row(id)).toBeNull();
+    // Jump back in big steps, so the window is rebuilt rather than slid.
+    let top = 0;
+    while (row(id) === null && top < 6000) {
+      top += 1500;
+      await scrollTo(top);
+    }
+
+    expect(row(id)).not.toBeNull();
+    expect(editor(id)).toBe(textarea);
+    expect(document.activeElement).toBe(textarea);
+  });
+
   it("does not steal focus back from another field when the row returns", async () => {
     setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
     mount();

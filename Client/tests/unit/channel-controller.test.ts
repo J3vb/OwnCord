@@ -4099,6 +4099,29 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
+    it("a quick refusal reopens the editor with focus when focus is on the idle composer", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      const composer = document.createElement("textarea");
+      composer.className = "msg-textarea";
+      document.body.appendChild(composer);
+      composer.focus();
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
+      composer.remove();
+      ctrl.destroyChannel();
+    });
+
     it("drops an unechoed edit and delete silently after the expiry, so a later drop shows no error", async () => {
       vi.useFakeTimers();
       try {

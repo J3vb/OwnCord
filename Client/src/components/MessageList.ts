@@ -1293,6 +1293,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // clearChildren; capture its identity so it can be restored on its
       // replacement row (Q1: focus stays put through a virtualized rebuild).
       const focusedRow = captureRowFocus();
+      if (editHoldsFocus()) editRefocus = true;
       releaseTrackedMedia();
       beginRowRender();
       clearChildren(contentContainer);
@@ -1306,6 +1307,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       measureRendered();
       updateSpacers();
       restoreRowFocus(focusedRow);
+      refocusEditor();
     } else {
       // Target range already fully rendered: no-op. The ResizeObserver
       // handles measurement and spacer updates when element sizes change.

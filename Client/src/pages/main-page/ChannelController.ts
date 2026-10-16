@@ -388,17 +388,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     return entry;
   }
 
-  /** Put a failed edit's text back in its row's inline editor, but only while
-   *  its own channel is the mounted one and no other edit is open — the row it
-   *  belongs to may be gone by now (startEdit refuses a message that is not
-   *  loaded, not yours or not sent), and a list for another channel would
-   *  target the wrong message id. At most one edit lands, the newest; the error
-   *  toast (when asked for) says the text is back only if it is. */
   /** A failure can land long after the save: if the user has moved on to the
    *  composer or another text field, the restored editor must not take focus. */
   function userIsBusyElsewhere(): boolean {
     if (messageInput !== null && !messageInput.isIdle()) return true;
     const active = document.activeElement;
+    // The idle composer is where a just-saved edit hands focus back.
+    if (active instanceof HTMLElement && active.classList.contains("msg-textarea")) return false;
     return (
       active instanceof HTMLElement &&
       (active instanceof HTMLInputElement ||
@@ -407,6 +403,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
   }
 
+  /** Put a failed edit's text back in its row's inline editor, but only while
+   *  its own channel is the mounted one and no other edit is open — the row it
+   *  belongs to may be gone by now (startEdit refuses a message that is not
+   *  loaded, not yours or not sent), and a list for another channel would
+   *  target the wrong message id. At most one edit lands, the newest; the error
+   *  toast (when asked for) says the text is back only if it is. */
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
