@@ -79,6 +79,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Linux: unread mentions now also show on the tray icon, as a red dot with the count as its title, so stock GNOME (with its tray extension) shows them as well as KDE's launcher count. The launcher count is now also sent to the desktop entry name AppImage integration tools usually create.
 - Linux: Away detection now works on KDE Plasma on Wayland and on wlroots desktops (Sway, Hyprland), where it used to fall back to activity inside the OwnCord window.
+- Servers can now offer updates to Linux clients installed from the `.deb`: a client that asks with `?deb_install=pkexec` on `GET /api/v1/client-update/linux-x86_64-deb` (or `linux-aarch64-deb`) gets the signed `.deb` of the latest release, and a 200 with the latest version when it is already current. Releases now publish a `.deb.sig` beside each `.deb`. Clients released so far do not ask, and still get 204, now even when GitHub cannot be reached (it used to be 502). The desktop app's `.deb` installer follows in a later change.
 
 **Profiles**
 
