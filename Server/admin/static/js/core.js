@@ -133,7 +133,7 @@ const ACTION_LABEL={
   recovery_assist_issued:'issued account recovery for {t}',recovery_assist_used:'recovered their account with help from an owner',
   account_deleted:'deleted an account',account_erasure_replayed:'replayed an account erasure',
   session_revoke:'signed out a session',session_revoke_all:'signed out all their sessions',force_logout:'signed out {t}',
-  user_ban:'banned {t}',user_unban:'unbanned {t}',user_kick:'kicked {t}',user_timeout:'timed out {t}',user_untimeout:'ended the timeout of {t}',user_warn:'warned {t}',
+  user_ban:'banned {t}',user_ban_purge:'deleted recent messages of {t}',user_unban:'unbanned {t}',user_kick:'kicked {t}',user_timeout:'timed out {t}',user_untimeout:'ended the timeout of {t}',user_warn:'warned {t}',
   user_warning_acknowledged:'withdrew the warning of {t}',mod_action:'took a moderation action on {t}',
   voice_mod_mute:'changed the server mute of {t}',voice_mod_deafen:'changed the server deafen of {t}',voice_mod_move:'moved {t}',voice_mod_kick:'disconnected {t}',
   message_delete:'deleted a message',message_purge:'purged messages in {t}',message_pin:'pinned a message',
