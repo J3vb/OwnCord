@@ -29,6 +29,12 @@ export interface Channel {
    */
   readonly mentionCount: number;
   readonly lastMessageId: number | null;
+  /**
+   * The current user's read pointer: the last message they have read here
+   * (0 = nothing). Undefined when the server never said (an older server), in
+   * which case the NEW line stays count-based.
+   */
+  readonly lastReadMessageId?: number | undefined;
   /** Whether the current user may post here (drives the composer affordance). */
   readonly canSend: boolean;
   /**
@@ -97,6 +103,19 @@ export const channelsStore = createStore<ChannelsState>(INITIAL_STATE);
  */
 const unreadOnOpen = new Map<number, number>();
 
+/**
+ * The read pointer each channel had when it was last opened — the same
+ * snapshot as `unreadOnOpen`, for the same reason: the visit moves the live
+ * pointer, and the NEW line has to stay where the reader had got to. Absent
+ * (or undefined) means the server sent no pointer.
+ */
+const pointerOnOpen = new Map<number, number | undefined>();
+
+/** The read pointer this channel had when it was last opened (undefined = none sent). */
+export function getPointerOnOpen(channelId: number): number | undefined {
+  return pointerOnOpen.get(channelId);
+}
+
 /** Unread count this channel had when it was last opened (0 = nothing new). */
 export function getUnreadOnOpen(channelId: number): number {
   return unreadOnOpen.get(channelId) ?? 0;
@@ -107,6 +126,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
   // A fresh ready payload restates unread from the server; any snapshot from
   // the previous connection describes a read position that no longer applies.
   unreadOnOpen.clear();
+  pointerOnOpen.clear();
   const map = new Map<number, Channel>();
   for (const ch of channels) {
     map.set(ch.id, {
@@ -119,6 +139,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       unreadCount: ch.unread_count ?? 0,
       mentionCount: ch.mention_count ?? 0,
       lastMessageId: ch.last_message_id ?? null,
+      lastReadMessageId: ch.last_read_message_id,
       // The current server always sends can_send; older servers omit it, in
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
@@ -163,6 +184,7 @@ export function setRoles(roles: readonly ReadyRole[]): void {
  */
 export function resetChannelsStore(): void {
   unreadOnOpen.clear();
+  pointerOnOpen.clear();
   channelsStore.setState(() => INITIAL_STATE);
 }
 
@@ -191,6 +213,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       unreadCount: existing?.unreadCount ?? 0,
       mentionCount: existing?.mentionCount ?? 0,
       lastMessageId: existing?.lastMessageId ?? null,
+      lastReadMessageId: existing?.lastReadMessageId,
       // Every channel_create carries this viewer's own can_send, so a live
       // role/override edit updates the composer without waiting for a
       // reconnect. Older servers omit it — keep the existing verdict there,
@@ -310,6 +333,7 @@ export function setActiveChannel(id: number | null, options?: { clearUnread?: bo
   // pure function of previous state.
   if (id !== null) {
     unreadOnOpen.set(id, channelsStore.getState().channels.get(id)?.unreadCount ?? 0);
+    pointerOnOpen.set(id, channelsStore.getState().channels.get(id)?.lastReadMessageId);
   }
   const clear = options?.clearUnread ?? true;
   channelsStore.setState((prev) => {
@@ -547,5 +571,28 @@ export function clearUnread(channelId: number): void {
     const next = new Map(prev.channels);
     next.set(channelId, updated);
     return { ...prev, channels: next };
+  });
+}
+
+/**
+ * Set a channel's read pointer, and optionally its counts, outright (the
+ * optimistic move of a mark, or the server's `read_state`). A no-op for a
+ * channel this client does not know.
+ */
+export function setReadPointer(
+  channelId: number,
+  pointer: number | undefined,
+  counts?: { readonly unread: number; readonly mention: number },
+): void {
+  channelsStore.setState((prev) => {
+    const existing = prev.channels.get(channelId);
+    if (existing === undefined) return prev;
+    const map = new Map(prev.channels);
+    map.set(channelId, {
+      ...existing,
+      lastReadMessageId: pointer,
+      ...(counts && { unreadCount: counts.unread, mentionCount: counts.mention }),
+    });
+    return { ...prev, channels: map };
   });
 }

@@ -458,6 +458,13 @@ export interface NativeVoice {
    *  synchronous unsubscribe that is safe to call before the host
    *  subscription has finished registering. */
   onMicTestEvent(handler: (envelope: NativeMicTestEnvelope) => void): () => void;
+  /** Start the host's app-level device watch (idempotent, kept for the app's
+   *  life) and subscribe to its changes: `handler` runs with the new lists each
+   *  time the capture or playout devices change, in or out of a call. A
+   *  restarting sound server is not reported as a change. Returns a
+   *  synchronous unsubscribe that is safe to call before the host subscription
+   *  has finished registering, as `onEvent`'s is. */
+  watchDevices(handler: (devices: NativeVoiceDevices) => void): () => void;
   /** Room events for every session. Returns a synchronous unsubscribe that
    *  is safe to call before the host subscription has finished registering. */
   onEvent(handler: (envelope: NativeVoiceEnvelope) => void): () => void;

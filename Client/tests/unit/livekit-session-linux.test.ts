@@ -129,6 +129,8 @@ vi.mock("../../src/platform/desktop", () => ({
       stopLiveKitProxy: vi.fn(),
     },
     nativeVoice: {
+      // DeviceManager subscribes to the host's device watch on every join.
+      watchDevices: () => () => {},
       setRoomKey: (key: string) => {
         host.commands.push(["setRoomKey", [key]]);
         return Promise.resolve();

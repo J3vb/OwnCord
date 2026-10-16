@@ -26,6 +26,7 @@ const log = createLogger("nativeVoiceService");
 
 export const NATIVE_VOICE_EVENT = "native-voice";
 export const NATIVE_MIC_TEST_EVENT = "native-voice-mic-test";
+export const NATIVE_DEVICES_EVENT = "native-voice-devices";
 
 /** Same late-resolve shape as trayStatus.ts: the host resolves the unlisten
  *  asynchronously, and an unsubscribe that lands first must still release it. */
@@ -151,5 +152,19 @@ export const nativeVoice: NativeVoice = {
     }
   },
   onMicTestEvent: (handler) => listenLate<NativeMicTestEnvelope>(NATIVE_MIC_TEST_EVENT, handler),
+  watchDevices(handler) {
+    // Listen first so a change that lands right after the host starts is not
+    // missed; a rejected start leaves the listener (and the webview trigger)
+    // in place.
+    const stop = listenLate<NativeVoiceDevices>(NATIVE_DEVICES_EVENT, handler);
+    void (async () => {
+      try {
+        await invoke<void>("native_voice_watch_devices");
+      } catch (err) {
+        log.warn("native device watch did not start", err);
+      }
+    })();
+    return stop;
+  },
   onEvent: (handler) => listenLate<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, handler),
 };

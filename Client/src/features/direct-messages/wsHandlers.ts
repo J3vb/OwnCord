@@ -41,6 +41,7 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
     lastMessageId: p.last_message_id,
+    lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
@@ -80,8 +81,17 @@ export function applyReadyDms(payload: Payload<"ready">): void {
         continue;
       }
       const mentionCount = dm.mention_count ?? 0;
-      if (ch.unreadCount !== dm.unread_count || ch.mentionCount !== mentionCount) {
-        nextChannels.set(id, { ...ch, unreadCount: dm.unread_count, mentionCount });
+      if (
+        ch.unreadCount !== dm.unread_count ||
+        ch.mentionCount !== mentionCount ||
+        ch.lastReadMessageId !== dm.last_read_message_id
+      ) {
+        nextChannels.set(id, {
+          ...ch,
+          unreadCount: dm.unread_count,
+          mentionCount,
+          lastReadMessageId: dm.last_read_message_id,
+        });
         changed = true;
       }
     }

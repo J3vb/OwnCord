@@ -274,6 +274,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_device,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_watch_devices,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_list_cameras,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_camera_support,

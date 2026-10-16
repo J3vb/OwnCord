@@ -1776,6 +1776,11 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const updateMicTest = vi.fn();
   const stopMicTest = vi.fn();
   const onMicTestEvent = vi.fn();
+  const onNativeDevicesChanged = vi.fn();
+  /** What the host's playout list calls its device; a test renames it to
+   *  stand for a plug or unplug. */
+  let speakersLabel = "Speakers";
+  const unsubscribeNative = vi.fn();
   const unsubscribeTest = vi.fn();
   /** The mic test's event handler, as the host would call it. */
   let testHandler: ((envelope: NativeMicTestEnvelope) => void) | null = null;
@@ -1786,6 +1791,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     stopMicTest.mockReset().mockResolvedValue(undefined);
     unsubscribeTest.mockReset();
     testHandler = null;
+    speakersLabel = "Speakers";
+    unsubscribeNative.mockReset();
+    onNativeDevicesChanged.mockReset().mockReturnValue(unsubscribeNative);
     onMicTestEvent.mockReset().mockImplementation((handler: typeof testHandler) => {
       testHandler = handler;
       return unsubscribeTest;
@@ -1804,9 +1812,10 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       nativeAudioDevices: async (kind: string) =>
         kind === "audioinput"
           ? [{ deviceId: "guid-mic", label: "USB Mic", kind }]
-          : [{ deviceId: "guid-spk", label: "Speakers", kind }],
+          : [{ deviceId: "guid-spk", label: speakersLabel, kind }],
       nativeCameraDevices: (...args: unknown[]) => nativeCameraDevices(...args),
       nativeCameraSupport: (...args: unknown[]) => nativeCameraSupport(...args),
+      onNativeDevicesChanged: (handler: () => void) => onNativeDevicesChanged(handler) as unknown,
     }));
     vi.doMock("../../src/platform/desktop", () => ({
       desktop: {
@@ -2013,6 +2022,23 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(desc.textContent).toBe(NORMAL_DESC);
     expect(tab.element.textContent).not.toContain("not available on Linux yet");
     expect(startMicTest).not.toHaveBeenCalled();
+  });
+
+  it("on Linux a native device change refills the lists outside a call, and stops after the tab is torn down", async () => {
+    const tab = await mount();
+    const outputLabels = () =>
+      [...tab.element.querySelectorAll("option")].map((o) => o.textContent ?? "");
+    expect(onNativeDevicesChanged).toHaveBeenCalledTimes(1);
+    expect(outputLabels().some((l) => l.includes("Headset"))).toBe(false);
+    const changed = onNativeDevicesChanged.mock.calls[0]![0] as () => void;
+
+    speakersLabel = "Headset";
+    changed();
+    await vi.waitFor(() => expect(outputLabels().some((l) => l.includes("Headset"))).toBe(true));
+    expect(unsubscribeNative).not.toHaveBeenCalled();
+
+    tab.ac.abort();
+    expect(unsubscribeNative).toHaveBeenCalledTimes(1);
   });
 
   it("starts the native loopback with the saved devices, processing, gains and gate", async () => {

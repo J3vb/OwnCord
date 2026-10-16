@@ -14,6 +14,7 @@ import {
   joinVoiceChannel,
   restateSelfVoiceState,
 } from "../../stores/voice.store";
+import { focusPayload } from "../../lib/last-channel";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
@@ -52,7 +53,7 @@ export function handleAuthOk(
   // server) covers that gap on every connect, resume included.
   const activeChannelId = channelsStore.select((s) => s.activeChannelId);
   if (activeChannelId !== null) {
-    ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
+    ws.send({ type: "channel_focus", payload: focusPayload(activeChannelId) });
   }
 
   // A resumed socket gets no ready, so a mute/deafen toggled while it was down
