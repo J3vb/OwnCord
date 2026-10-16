@@ -66,6 +66,11 @@ export interface LightboxHandle {
   /** Resets zoom and pan and ends a drag in progress. */
   resetView(): void;
   closeMenu(): void;
+  /** True while the image menu is open; it owns the arrow keys. */
+  isImageMenuOpen(): boolean;
+  /** Passed in so the lazy gallery module imports only types from here. */
+  fetchImageAsObjectUrl(url: string): Promise<string | null>;
+  thumbnailUrl(fileUrl: string, mime: string): string;
   close(): void;
 }
 
@@ -912,11 +917,16 @@ export function recoverEvictedImage(
   img: HTMLImageElement,
   source: ExternalImageSource | (() => ExternalImageSource),
   onExpired?: () => void,
+  /** Identity of what `img` should show now; a reload that finishes after it
+   *  changed (a lightbox gallery step) is dropped. */
+  stillCurrent?: () => unknown,
 ): void {
   const recover = (event: Event): void => {
     if (!img.src.startsWith("blob:") || isLiveImageUrl(img.src)) return;
     event.stopImmediatePropagation();
+    const started = stillCurrent?.();
     void reloadImage(typeof source === "function" ? source() : source).then((result) => {
+      if (stillCurrent !== undefined && stillCurrent() !== started) return;
       if (result.ok) {
         img.src = result.value;
         return;
@@ -1473,7 +1483,14 @@ export function openImageLightbox(
     const url = sourceOf(c);
     return url !== null && isExternalUrl(url) ? url : null;
   };
-  if (external !== undefined) recoverEvictedImage(img, () => current.external ?? { url: "" });
+  if (external !== undefined) {
+    recoverEvictedImage(
+      img,
+      () => current.external ?? { url: "" },
+      undefined,
+      () => current,
+    );
+  }
   // `src` can be the server's thumbnail (P4-08): show it at once, then the
   // full file. A server image shown in full is a memory-cache hit here.
   if (external !== undefined && "url" in external && isServerUrl(external.url)) {
@@ -1754,6 +1771,11 @@ export function openImageLightbox(
         resetZoom();
       },
       closeMenu: () => imageMenuModule?.closeImageMenu(),
+      // The menu's own class (image-menu.ts MENU_CLASS): asked of the DOM so it
+      // holds even before the lazy menu module has loaded.
+      isImageMenuOpen: () => document.querySelector(".image-context-menu") !== null,
+      fetchImageAsObjectUrl,
+      thumbnailUrl,
       close,
     };
     import("./lightbox-gallery").then(

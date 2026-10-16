@@ -13,7 +13,6 @@ import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { mediaControlsText } from "../../i18n/mediaControls";
-import { fetchImageAsObjectUrl, thumbnailUrl } from "./attachments";
 import type { LightboxGallery, LightboxHandle } from "./attachments";
 
 const log = createLogger("lightbox-gallery");
@@ -22,7 +21,7 @@ const log = createLogger("lightbox-gallery");
  *  to an open viewer. Everything is released with the viewer's `signal`. */
 export function attachLightboxGallery(gallery: LightboxGallery, handle: LightboxHandle): void {
   const { items, isGone, watch, row } = gallery;
-  const { overlay, img, controls, signal } = handle;
+  const { overlay, img, controls, signal, fetchImageAsObjectUrl, thumbnailUrl } = handle;
   const total = items.length;
   if (signal.aborted || total < 2) return;
 
@@ -79,6 +78,12 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
 
     // The preview first, then the full file, as the first image loads.
     let loaded = false;
+    // Both fetches failed: drop the previous picture rather than leave it
+    // under the new image's counter, alt and label.
+    const failed = (): void => {
+      img.removeAttribute("src");
+      showToast(mediaControlsText("lightbox.openFailed"), "error");
+    };
     void fetchImageAsObjectUrl(thumbnailUrl(item.url, item.mime))
       .then((preview) => {
         if (mine === step && preview !== null) {
@@ -90,14 +95,14 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
       .then((full) => {
         if (mine !== step) return;
         if (full === null) {
-          if (!loaded) showToast(mediaControlsText("lightbox.openFailed"), "error");
+          if (!loaded) failed();
           return;
         }
         if (img.src !== full) img.src = full;
       })
       .catch((err: unknown) => {
         log.warn("Lightbox image failed to load", { error: String(err) });
-        if (mine === step) showToast(mediaControlsText("lightbox.openFailed"), "error");
+        if (mine === step && !loaded) failed();
       });
 
     // The next image in the direction of travel, so the next step is instant.
@@ -126,7 +131,7 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // An open image menu owns the keys.
-      if (document.querySelector(".image-context-menu") !== null) return;
+      if (handle.isImageMenuOpen()) return;
       e.preventDefault();
       const direction = e.key === "ArrowRight" ? 1 : -1;
       show(index + direction, direction);

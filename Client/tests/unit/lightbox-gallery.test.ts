@@ -232,6 +232,149 @@ describe("lightbox gallery", () => {
     expect(saveMock).toHaveBeenCalledWith({ defaultPath: "c.png" });
   });
 
+  it.each([
+    ["answers 404", () => Promise.resolve({ ok: false, status: 404, headers: { get: () => null } })],
+    ["rejects", () => Promise.reject(new Error("offline"))],
+  ])("a step whose image fetch %s drops the previous picture", async (_name, fail) => {
+    fetchMock.mockImplementation((url: string) =>
+      new URL(url).pathname.endsWith("/b") ? fail() : Promise.resolve(okImage),
+    );
+    open(0);
+    await ready();
+    await vi.waitFor(() => expect(lightboxImg().src).toMatch(/^blob:image-/));
+
+    key("ArrowRight");
+    await flush();
+    await flush();
+
+    expect(counter()).toBe("2 of 3");
+    expect(lightboxImg().alt).toBe("b.png");
+    expect(lightboxImg().hasAttribute("src")).toBe(false);
+  });
+
+  it("a slow first-image fetch finishing after a step does not overwrite the picture", async () => {
+    let releaseA: (v: unknown) => void = () => undefined;
+    fetchMock.mockImplementation((url: string) =>
+      new URL(url).pathname.endsWith("/a")
+        ? new Promise((r) => (releaseA = r))
+        : Promise.resolve(okImage),
+    );
+    open(0);
+    await ready();
+
+    key("ArrowRight");
+    await vi.waitFor(() => expect(lightboxImg().src).toMatch(/^blob:image-/));
+    await flush();
+    const shown = lightboxImg().src;
+
+    releaseA(okImage);
+    await flush();
+    await flush();
+
+    expect(lightboxImg().src).toBe(shown);
+  });
+
+  describe("with the clipboard and a decoder stubbed", () => {
+    const drawImage = vi.fn();
+    beforeEach(() => {
+      drawImage.mockReset();
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+        drawImage,
+      } as unknown as CanvasRenderingContext2D);
+      vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) =>
+        cb(new Blob(["png"], { type: "image/png" })),
+      );
+      Object.defineProperty(HTMLImageElement.prototype, "decode", {
+        configurable: true,
+        value: () => Promise.resolve(),
+      });
+      vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(8);
+      vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(6);
+      vi.stubGlobal(
+        "ClipboardItem",
+        class {
+          constructor(readonly items: Record<string, Promise<Blob>>) {}
+        },
+      );
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { write: vi.fn().mockResolvedValue(undefined) },
+      });
+    });
+    afterEach(() => {
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it("image menu Copy after a step fetches the current image", async () => {
+      open(0);
+      await ready();
+      key("ArrowRight");
+      await flush();
+      await flush();
+      // Drop the cache so Copy has to fetch, and the path shows which image.
+      clearAttachmentCaches();
+      fetchMock.mockClear();
+
+      lightboxImg().dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+      );
+      await vi.waitFor(() =>
+        expect(document.querySelector("[data-testid='image-menu-copy']")).not.toBeNull(),
+      );
+      document.querySelector<HTMLElement>("[data-testid='image-menu-copy']")!.click();
+      await vi.waitFor(() => expect(drawImage).toHaveBeenCalled());
+
+      expect(fetchedPaths()).toEqual(["/api/v1/files/b"]);
+    });
+  });
+
+  it("eviction recovery after a step reloads the current image", async () => {
+    open(0);
+    await ready();
+    key("ArrowRight");
+    await flush();
+    await flush();
+    clearAttachmentCaches();
+    fetchMock.mockClear();
+
+    lightboxImg().dispatchEvent(new Event("error"));
+    await flush();
+    await flush();
+
+    expect(fetchedPaths()).toEqual(["/api/v1/files/b"]);
+  });
+
+  it("an eviction reload that finishes after a further step is dropped", async () => {
+    open(0);
+    await ready();
+    key("ArrowRight");
+    await flush();
+    await flush();
+    clearAttachmentCaches();
+    let releaseB: (v: unknown) => void = () => undefined;
+    fetchMock.mockReset();
+    fetchMock.mockImplementation((url: string) =>
+      new URL(url).pathname.endsWith("/b")
+        ? new Promise((r) => (releaseB = r))
+        : Promise.resolve(okImage),
+    );
+
+    lightboxImg().dispatchEvent(new Event("error"));
+    key("ArrowRight");
+    await vi.waitFor(() => expect(lightboxImg().src).toMatch(/^blob:image-/));
+    await flush();
+    const shown = lightboxImg().src;
+    expect(counter()).toBe("3 of 3");
+
+    releaseB(okImage);
+    await flush();
+    await flush();
+
+    expect(lightboxImg().src).toBe(shown);
+  });
+
   it("a step closes an open image menu", async () => {
     open(0);
     await ready();
