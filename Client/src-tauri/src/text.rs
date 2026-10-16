@@ -43,6 +43,16 @@ pub fn tray_tooltip(count: u32) -> String {
 #[cfg_attr(windows, allow(dead_code))]
 pub const NOTIFICATION_OPEN: &str = "Open";
 
+// --- Global shortcuts (Wayland portal) -------------------------------------
+
+/// What the desktop's shortcut dialog and settings list for each shortcut.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_PTT: &str = "Push to Talk";
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_MUTE: &str = "Toggle Mute";
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_DEAFEN: &str = "Toggle Deafen";
+
 // --- Close to tray notice --------------------------------------------------
 
 /// Shown once, the first time the X button hides the window to the tray.
@@ -168,6 +178,8 @@ mod tests {
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
             ("http_pool.rs", include_str!("http_pool.rs")),
+            ("shortcuts.rs", include_str!("shortcuts.rs")),
+            ("portal_shortcuts.rs", include_str!("portal_shortcuts.rs")),
         ];
         let quoted = [
             TRAY_SHOW_HIDE,
@@ -181,6 +193,9 @@ mod tests {
             TRAY_DEAFEN,
             TRAY_QUIT,
             TRAY_TOOLTIP,
+            SHORTCUT_PTT,
+            SHORTCUT_MUTE,
+            SHORTCUT_DEAFEN,
             STARTUP_DIALOG_TITLE,
             CERT_UNVERIFIED,
         ]
