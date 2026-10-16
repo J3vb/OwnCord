@@ -36,6 +36,7 @@ vi.mock("@stores/voice.store", () => ({
 }));
 vi.mock("../../src/features/voice/native/devices", () => ({
   nativeAudioDevices: async () => null,
+  onNativeDevicesChanged: () => null,
 }));
 
 import { DeviceManager } from "../../src/lib/deviceManager";

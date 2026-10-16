@@ -22,6 +22,7 @@
 //! logged.
 pub mod camera;
 pub mod capture;
+mod hotplug;
 pub mod mic_test;
 pub mod playout;
 pub mod screen;
@@ -171,6 +172,11 @@ fn mic_test_blocked(has_session: bool) -> bool {
 #[derive(Default)]
 pub struct NativeVoiceState {
     inner: Mutex<Inner>,
+    /// The app-level device watcher (LP-6a), filled once by
+    /// `native_voice_watch_devices` and kept for the app's life. A std mutex
+    /// held only to test or fill the slot, separate from `inner`, the tokio
+    /// mutex held across awaits: the two are never taken together.
+    devices_watch: std::sync::Mutex<Option<hotplug::DevicesWatch>>,
 }
 
 impl NativeVoiceState {
@@ -393,6 +399,29 @@ pub async fn native_voice_list_devices() -> Result<session::Devices, String> {
     tokio::task::spawn_blocking(session::list_devices)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Start the app-level device watcher if it is not running, then return at
+/// once: the watcher thread does the first listing. Every change of the
+/// capture or playout lists afterwards is emitted as `native-voice-devices`
+/// (a trigger; the webview re-lists). Idempotent, never stopped by the webview.
+#[tauri::command]
+pub async fn native_voice_watch_devices<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, NativeVoiceState>,
+) -> Result<(), String> {
+    hotplug::ensure_watch(&state.devices_watch, || {
+        hotplug::DevicesWatch::start(
+            hotplug::POLL_EVERY,
+            hotplug::host_lister(),
+            move |devices| {
+                if let Err(e) = app.emit(hotplug::DEVICES_EVENT, devices) {
+                    log::warn!("[native_voice] device change event failed: {e}");
+                }
+            },
+        )
+    });
+    Ok(())
 }
 
 /// Select the capture (`kind == "audioinput"`) or playout (`"audiooutput"`)

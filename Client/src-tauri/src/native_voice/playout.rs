@@ -52,7 +52,7 @@ const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
 /// stream is reopened.
 pub(super) const FOLLOW_EVERY: Duration = Duration::from_secs(2);
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(super) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -300,7 +300,7 @@ pub(super) fn host_devices(
     listed
 }
 
-fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
+pub(super) fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
     host_devices(
         host.default_output_device(),
         host.output_devices().into_iter().flatten(),

@@ -15,6 +15,7 @@ import type {
   NativeVoiceScreenStarted,
   NativeVoiceStats,
 } from "../../../src/platform/contracts/nativeVoice";
+import { expectConsole } from "../../helpers/console";
 import { NATIVE_MIC_TEST_IN_CALL } from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
@@ -53,6 +54,10 @@ export interface NativeControl {
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
   emits(envelope: NativeVoiceEnvelope): Promise<void>;
+  /** The host delivers a device change. Resolves once it has been delivered. */
+  emitsDevices(devices: NativeVoiceDevices): Promise<void>;
+  /** The host refuses the next device watch start. */
+  refusesDeviceWatch(): void;
   /** The host delivers a mic test event. Resolves once it has been delivered. */
   emitsMicTest(envelope: NativeMicTestEnvelope): Promise<void>;
 }
@@ -370,6 +375,48 @@ export function describeNativeVoiceSuite(
         expect(fresh).toHaveBeenCalledTimes(1);
       },
     );
+
+    check("watchDevices starts the host watch and delivers each device change", async () => {
+      const handler = vi.fn();
+      ctx.subject.watchDevices(handler);
+      const devices: NativeVoiceDevices = {
+        inputs: [{ id: "guid-mic", name: "Headset mic" }],
+        outputs: [{ id: "guid-spk", name: "Headset" }],
+      };
+      await ctx.native.emitsDevices(devices);
+      expect(handler.mock.calls).toEqual([[devices]]);
+      expect(ctx.native.commands()).toEqual([["native_voice_watch_devices", undefined]]);
+    });
+
+    check("an unsubscribe from watchDevices stops delivery, even before it settled", async () => {
+      const handler = vi.fn();
+      const stop = ctx.subject.watchDevices(handler);
+      await ctx.native.emitsDevices({ inputs: [], outputs: [] });
+      stop();
+      await ctx.native.emitsDevices({ inputs: [], outputs: [] });
+      expect(handler).toHaveBeenCalledTimes(1);
+      const early = vi.fn();
+      ctx.subject.watchDevices(early)();
+      await ctx.native.emitsDevices({ inputs: [], outputs: [] });
+      expect(early).not.toHaveBeenCalled();
+      const fresh = vi.fn();
+      ctx.subject.watchDevices(fresh);
+      await ctx.native.emitsDevices({ inputs: [], outputs: [] });
+      expect(fresh).toHaveBeenCalledTimes(1);
+      expect(early).not.toHaveBeenCalled();
+    });
+
+    check("a refused device watch start does not throw and keeps the subscription", async () => {
+      ctx.native.refusesDeviceWatch();
+      const handler = vi.fn();
+      expect(() => ctx.subject.watchDevices(handler)).not.toThrow();
+      await ctx.native.emitsDevices({ inputs: [], outputs: [] });
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(ctx.native.commands()).toEqual([["native_voice_watch_devices", undefined]]);
+      // The rejection is logged, not thrown. A subject that never rejects
+      // logs nothing, and the host binding does.
+      expectConsole("warn", "native device watch did not start");
+    });
 
     check("delivers each room event to the handler as the host sent it", async () => {
       const handler = vi.fn();

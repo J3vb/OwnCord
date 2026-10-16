@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   micTestRefusal: null as string | null,
   stats: null as unknown,
   statsFails: false,
+  watchFails: false,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -42,6 +43,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       return state.statsFails
         ? Promise.reject("native voice stats timed out")
         : Promise.resolve(state.stats);
+    }
+    if (cmd === "native_voice_watch_devices") {
+      return state.watchFails ? Promise.reject("no sound server") : Promise.resolve();
     }
     if (cmd === "native_voice_start_mic_test") {
       const refusal = state.micTestRefusal;
@@ -71,6 +75,7 @@ describeNativeVoiceSuite(async () => {
   state.handlers.clear();
   state.stats = null;
   state.statsFails = false;
+  state.watchFails = false;
   const mod = await import("../../../src/platform/desktop/nativeVoice");
   const desktopBinding: NativeVoice = mod.nativeVoice;
   return {
@@ -109,6 +114,9 @@ describeNativeVoiceSuite(async () => {
       failsStats() {
         state.statsFails = true;
       },
+      refusesDeviceWatch() {
+        state.watchFails = true;
+      },
       commands: () => state.commands,
       async emits(envelope) {
         // Let the facade's service load and a registering subscription
@@ -117,6 +125,12 @@ describeNativeVoiceSuite(async () => {
         for (let i = 0; i < 4; i++) await Promise.resolve();
         for (const handler of state.handlers.get("native-voice") ?? [])
           handler({ payload: envelope });
+      },
+      async emitsDevices(devices) {
+        await import("../../../src/platform/desktop/nativeVoiceService");
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+        for (const handler of state.handlers.get("native-voice-devices") ?? [])
+          handler({ payload: devices });
       },
       async emitsMicTest(envelope) {
         await import("../../../src/platform/desktop/nativeVoiceService");

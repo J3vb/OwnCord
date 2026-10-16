@@ -33,6 +33,7 @@ import {
   nativeAudioDevices,
   nativeCameraDevices,
   nativeCameraSupport,
+  onNativeDevicesChanged,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { getVideoCodecPref, vp9Offered } from "../../features/voice/videoCodec";
@@ -108,6 +109,7 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let invalidateCameraPreviewRequest: (() => void) | null = null;
   let stopNativePreview: (() => void) | null = null;
   let stopNativeMicTest: (() => void) | null = null;
+  let stopNativeDevices: (() => void) | null = null;
 
   function stopMic(): void {
     stopMeter?.();
@@ -129,6 +131,10 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
     // is stopped here, never in stopMic.
     stopNativeMicTest?.();
     stopNativeMicTest = null;
+    // The host's device watch subscription belongs to the build, released on
+    // a rebuild and on the overlay's close like the mic test.
+    stopNativeDevices?.();
+    stopNativeDevices = null;
   }
 
   function build(buildSignal: AbortSignal = signal): HTMLDivElement {
@@ -156,6 +162,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       (stop) => {
         stopNativeMicTest = stop;
       },
+      (stop) => {
+        stopNativeDevices = stop;
+      },
     );
   }
 
@@ -174,6 +183,7 @@ type CameraRegistrar = (stream: MediaStream | null) => void;
 type CameraInvalidationRegistrar = (invalidate: () => void) => void;
 type NativePreviewRegistrar = (stop: () => void) => void;
 type NativeMicTestRegistrar = (stop: () => void) => void;
+type NativeDevicesRegistrar = NativeMicTestRegistrar;
 
 function buildVoiceAudioTabInner(
   signal: AbortSignal,
@@ -183,6 +193,7 @@ function buildVoiceAudioTabInner(
   registerCameraInvalidation: CameraInvalidationRegistrar,
   registerNativePreview: NativePreviewRegistrar,
   registerMicTest: NativeMicTestRegistrar,
+  registerNativeDevices: NativeDevicesRegistrar,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
@@ -1069,20 +1080,23 @@ function buildVoiceAudioTabInner(
 
   void populateDevices();
 
+  const onDeviceChange = (): void => {
+    void populateDevices();
+    // The session moves the capture after its own debounce; re-read then.
+    setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
+  };
   // MediaDevices is an EventTarget everywhere this ships, but a webview that
   // exposes enumerateDevices without the event target shouldn't take the tab
   // down with it — it just loses live refresh.
   if (typeof navigator.mediaDevices?.addEventListener === "function") {
-    navigator.mediaDevices.addEventListener(
-      "devicechange",
-      () => {
-        void populateDevices();
-        // The session moves the capture after its own debounce; re-read then.
-        setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
-      },
-      { signal },
-    );
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange, { signal });
   }
+  // On Linux the host's hot-plug watch is the trigger (null elsewhere); it
+  // also starts the watch, so the lists stay live outside a call.
+  // Released through cleanupMic (a rebuild or the overlay closing), not an
+  // "abort" listener: build() runs again on every rebuild (OC-0125).
+  const stopNative = onNativeDevicesChanged(onDeviceChange);
+  if (stopNative !== null) registerNativeDevices(stopNative);
 
   inputSelect.addEventListener(
     "change",

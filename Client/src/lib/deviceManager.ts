@@ -11,7 +11,7 @@ import { voiceStore } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { micCaptureOptions, type AudioPipeline } from "@lib/audioPipeline";
-import { nativeAudioDevices } from "../features/voice/native/devices";
+import { nativeAudioDevices, onNativeDevicesChanged } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("deviceManager");
@@ -43,6 +43,8 @@ export class DeviceManager {
   private onErrorCallback: ((message: string) => void) | null = null;
   private onToast: ((message: string) => void) | null = null;
   private deviceChangeHandler: (() => void) | null = null;
+  /** Releases the Linux host's device hot-plug subscription (null elsewhere). */
+  private nativeDeviceWatch: (() => void) | null = null;
   private deviceChangeTimer: ReturnType<typeof setTimeout> | null = null;
   /** The saved device id each kind fell back to the default from after it
    *  was unplugged. Kept across rooms so a reconnect still restores it. */
@@ -129,6 +131,9 @@ export class DeviceManager {
       }, DEVICE_CHANGE_DEBOUNCE_MS);
     };
     navigator.mediaDevices?.addEventListener("devicechange", this.deviceChangeHandler);
+    // On Linux the webview's event may never fire; the host's watch feeds the
+    // same debounced handler.
+    this.nativeDeviceWatch = onNativeDevicesChanged(this.deviceChangeHandler);
     log.debug("Device change listener started");
   }
 
@@ -136,6 +141,10 @@ export class DeviceManager {
     if (this.deviceChangeHandler !== null) {
       navigator.mediaDevices?.removeEventListener("devicechange", this.deviceChangeHandler);
       this.deviceChangeHandler = null;
+    }
+    if (this.nativeDeviceWatch !== null) {
+      this.nativeDeviceWatch();
+      this.nativeDeviceWatch = null;
     }
     if (this.deviceChangeTimer !== null) {
       clearTimeout(this.deviceChangeTimer);

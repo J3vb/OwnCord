@@ -5,11 +5,17 @@ vi.mock("./platform", () => ({ isLinuxDesktop: () => linux.value }));
 const listDevices = vi.hoisted(() => vi.fn());
 const listCameras = vi.hoisted(() => vi.fn());
 const cameraSupport = vi.hoisted(() => vi.fn());
+const watchDevices = vi.hoisted(() => vi.fn());
 vi.mock("../../../platform/desktop", () => ({
-  desktop: { nativeVoice: { listDevices, listCameras, cameraSupport } },
+  desktop: { nativeVoice: { listDevices, listCameras, cameraSupport, watchDevices } },
 }));
 
-import { nativeAudioDevices, nativeCameraDevices, nativeCameraSupport } from "./devices";
+import {
+  nativeAudioDevices,
+  nativeCameraDevices,
+  nativeCameraSupport,
+  onNativeDevicesChanged,
+} from "./devices";
 
 beforeEach(() => {
   listDevices.mockReset();
@@ -21,6 +27,7 @@ beforeEach(() => {
   listCameras.mockResolvedValue([{ id: "/dev/video0", name: "HD Webcam" }]);
   cameraSupport.mockReset();
   cameraSupport.mockResolvedValue({ available: true, missing: [] });
+  watchDevices.mockReset();
 });
 
 describe("nativeAudioDevices", () => {
@@ -70,5 +77,25 @@ describe("nativeCameraSupport", () => {
     linux.value = false;
     await expect(nativeCameraSupport()).resolves.toBeNull();
     expect(cameraSupport).not.toHaveBeenCalled();
+  });
+});
+
+describe("onNativeDevicesChanged", () => {
+  it("on Linux subscribes to the host watch and calls the handler without the payload", () => {
+    linux.value = true;
+    const unsubscribe = vi.fn();
+    watchDevices.mockReturnValue(unsubscribe);
+    const handler = vi.fn();
+    const stop = onNativeDevicesChanged(handler);
+    expect(stop).toBe(unsubscribe);
+    const deliver = watchDevices.mock.calls[0]![0] as (devices: unknown) => void;
+    deliver({ inputs: [], outputs: [] });
+    expect(handler.mock.calls).toEqual([[]]);
+  });
+
+  it("returns null off Linux and starts no watch", () => {
+    linux.value = false;
+    expect(onNativeDevicesChanged(vi.fn())).toBeNull();
+    expect(watchDevices).not.toHaveBeenCalled();
   });
 });
