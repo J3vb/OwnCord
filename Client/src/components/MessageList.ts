@@ -42,8 +42,8 @@ import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
 import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
 import { withMessageMenu } from "./message-list/message-menu-loader";
-import { preloadInlineEdit, withInlineEdit } from "./message-list/inline-edit-loader";
-import type { InlineEditSession } from "./message-list/inline-edit";
+import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
+import type { InlineEditSession } from "../features/messaging/inlineEdit";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
@@ -436,6 +436,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Virtual scroll state
   let virtualItems: readonly VirtualItem[] = [];
   let allMessages: readonly Message[] = [];
+  /** Every loaded message, tombstones included: a reply resolves its parent
+   *  here, so a parent deleted live reads as deleted, not as unknown. Only
+   *  `allMessages` (the rows drawn) leaves tombstones out. */
+  let replyParents: readonly Message[] = [];
   const heightCache = new Map<string, number>(); // itemKey -> measured px
   let tree: FenwickTree | null = null;
   let topSpacer: HTMLDivElement | null = null;
@@ -605,7 +609,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const el = renderMessage(
       item.message,
       item.isGrouped,
-      allMessages,
+      replyParents,
       options,
       owner.signal,
       editor,
@@ -1323,7 +1327,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function rebuildItems(): void {
-    allMessages = visibleMessages(getChannelMessages(options.channelId));
+    replyParents = getChannelMessages(options.channelId);
+    allMessages = visibleMessages(replyParents);
     virtualItems = buildVirtualItems(allMessages, resolveNewDividerIndex(allMessages));
 
     seedTree();
@@ -1366,7 +1371,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function patchRows(): boolean {
     if (root === null || contentContainer === null || tree === null) return false;
     if (renderAllRunning || renderedStart < 0 || allMessages.length === 0) return false;
-    const next = visibleMessages(getChannelMessages(options.channelId));
+    const nextParents = getChannelMessages(options.channelId);
+    const next = visibleMessages(nextParents);
     if (next.length === 0) return false;
     const prevItems = virtualItems;
     const nextItems = buildVirtualItems(next, resolveNewDividerIndex(next));
@@ -1425,10 +1431,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
 
     // A reply re-renders its quote when its parent left, arrived, or changed
-    // what the quote draws (renderReplyRef reads the parent from allMessages);
+    // what the quote draws (renderReplyRef reads the parent from replyParents);
     // a reaction or pin on the parent leaves the reply alone.
-    const prevById = new Map(allMessages.map((m) => [m.id, m]));
-    const nextById = new Map(next.map((m) => [m.id, m]));
+    const prevById = new Map(replyParents.map((m) => [m.id, m]));
+    const nextById = new Map(nextParents.map((m) => [m.id, m]));
     const quoteChanged = (id: number | null): boolean => {
       if (id === null) return false;
       const a = prevById.get(id);
@@ -1446,6 +1452,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const focusedKey = focusedAt === -1 ? undefined : prevKeys[prevStart + focusedAt];
     const shownByKey = new Map(shown.map((el, i) => [prevKeys[renderedStart + i]!, el]));
     allMessages = next;
+    replyParents = nextParents;
     virtualItems = nextItems;
 
     const rows: HTMLElement[] = [];
@@ -2417,8 +2424,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function repaintReplyRefAuthors(row: HTMLElement): void {
     for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
-      const parent = allMessages.find((m) => m.id === replyTo);
-      if (parent === undefined) continue;
+      const parent = replyParents.find((m) => m.id === replyTo);
+      if (parent === undefined || parent.deleted) continue;
       const roleColor = roleColorVar(getUserRole(parent.user.id));
       const author = resolveAuthor(parent.user);
       const key = authorAvatarKey(author, roleColor);

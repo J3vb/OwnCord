@@ -477,10 +477,16 @@ describe("inline message editor (WP 3A-8)", () => {
       expect(error.hidden).toBe(false);
       expect(error.getAttribute("role")).toBe("alert");
       expect(error.textContent).toContain("4000");
-      // Typing again clears it.
+      // The field is tied to the message while it shows.
+      expect(error.id).not.toBe("");
+      expect(textarea.getAttribute("aria-invalid")).toBe("true");
+      expect(textarea.getAttribute("aria-describedby")).toBe(error.id);
+      // Typing again clears it, and the field's error state with it.
       textarea.value = "a".repeat(10);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
       expect(error.hidden).toBe(true);
+      expect(textarea.hasAttribute("aria-invalid")).toBe(false);
+      expect(textarea.hasAttribute("aria-describedby")).toBe(false);
     });
 
     it("counts astral characters as one code point each", async () => {
@@ -596,5 +602,19 @@ describe("inline message editor (WP 3A-8)", () => {
     expect(editor(2)).toBeNull();
     expect(list!.isEditing()).toBe(false);
     expect(options.onEditEnd).not.toHaveBeenCalled();
+  });
+
+  it("a reply without referencedMessage reads 'deleted', not unknown, once its loaded parent is deleted live", () => {
+    mount([mine(1), mine(2, { replyTo: 1, referencedMessage: undefined })]);
+    expect(row(2)!.querySelector(".msg-reply-ref[role='button']")).not.toBeNull();
+
+    patch(1, { deleted: true });
+
+    expect(row(1)).toBeNull();
+    const ref = row(2)!.querySelector<HTMLElement>(".msg-reply-ref")!;
+    expect(ref.classList.contains("msg-reply-ref--deleted")).toBe(true);
+    expect(ref.textContent).toBe("Original message was deleted");
+    expect(ref.getAttribute("role")).toBeNull();
+    expect(ref.getAttribute("tabindex")).toBeNull();
   });
 });
