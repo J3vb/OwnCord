@@ -25,6 +25,12 @@ type VisibilityReader interface {
 	ListChannels(ctx context.Context) ([]db.Channel, error)
 	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	// GetDefaultRole and GetChannelPermissions back the channel-level private
+	// flag on single-channel frames (channel_create / channel_update): the
+	// default role (nil, nil when none is flagged) and that role's override
+	// row on one channel (0, 0, nil when it has none).
+	GetDefaultRole(ctx context.Context) (*db.Role, error)
+	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
@@ -52,6 +58,10 @@ type VisibilityReader interface {
 type ReadySnapshotReader interface {
 	VisibilityReader
 	ListRoles(ctx context.Context) ([]*db.Role, error)
+	// GetAllChannelPermissionsForRole is the one bulk read behind the ready
+	// payload's channel-level private flag: the default role's override on
+	// every channel, keyed by channel id (the role layer only).
+	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 	// MemberGeneration and NextMemberBanLapse decide when the shared
 	// ListMembers result (serve_ready_members_cache.go) must be read again.

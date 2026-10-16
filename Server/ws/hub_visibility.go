@@ -257,6 +257,8 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// Called via the admin HubBroadcaster interface, which carries no context;
 	// the targeted re-sync must complete regardless of the triggering request.
 	ctx := context.Background()
+	// Channel-level, so read once for every recipient of this fan-out.
+	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 
 	// Visibility is CanViewChannel — the single predicate shared with
 	// buildReady / REST ListVisibleChannels — resolved per user from their
@@ -311,7 +313,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			// Addressed per client so it can carry this recipient's own
 			// affordance verdicts — the whole point of this fan-out is that
 			// a permission change just made those verdicts diverge.
-			live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)))
+			live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)))
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
