@@ -92,7 +92,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "config schema and load",
 	},
 	"db/erasure.go": {
-		Ceiling: 900,
+		Ceiling: 750,
 		Class:   classGrandfathered,
 		Note:    "erasure and the erasure checkpoint",
 	},
