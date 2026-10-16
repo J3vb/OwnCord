@@ -51,6 +51,7 @@ export const ServerMessageType = {
   MEMBER_TIMEOUTS: "member_timeouts", // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
   APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   MENTION_COUNT: "mention_count", // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+  READ_STATE: "read_state", // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
   CHANNEL_ACTIVITY: "channel_activity", // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
   ERROR: "error",
   PONG: "pong",
@@ -82,6 +83,7 @@ export const ClientMessageType = {
   TYPING_START: "typing_start",
   CHANNEL_FOCUS: "channel_focus",
   MARK_READ: "mark_read",
+  MARK_UNREAD: "mark_unread",
   PRESENCE_UPDATE: "presence_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",

@@ -286,32 +286,28 @@ func (s *ChannelService) dropConnectStamp(userID int64) {
 	}
 }
 
-// HandleChannelFocus processes a channel focus event and updates read state.
-// Returns the channel for callers to set client state.
+// AdmitChannelFocus is channel_focus with read:false: it runs the same
+// admission as HandleChannelFocus and returns the channel without writing any
+// read state, so a client can focus and subscribe without marking anything read.
+func (s *ChannelService) AdmitChannelFocus(ctx context.Context, userID, channelID int64) (*db.Channel, error) {
+	if channelID <= 0 {
+		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
+	}
+	return admitReadState(ctx, s.st, s.perms, userID, channelID)
+}
+
+// HandleChannelFocus processes a channel focus event and updates read state to
+// the channel's latest message. Returns the channel for callers to set client
+// state.
 func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channelID int64) (*db.Channel, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
 
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := admitReadState(ctx, s.st, s.perms, userID, channelID)
+	if err != nil {
+		return nil, err
 	}
-
-	// Session admission is permissions.CanAdmitSession — visibility, the same
-	// predicate behind ListVisibleChannels, the ready payload and reconnect
-	// replay — so a socket that still holds an id it can no longer see (or
-	// an archived channel, OC-0070) cannot resubscribe to the live topic or
-	// advance its read state. channel_focus and mark_read share this one
-	// service call, so the gate closes both at once.
-	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, false)
-	if subErr != nil {
-		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-	}
-	if err := permissions.CanAdmitSession(sub); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
-	}
-
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
 	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
 	// correct then — any future message id is larger, so unread counts hold.
@@ -348,5 +344,26 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)
+	return ch, nil
+}
+
+// admitReadState is the gate every read-state operation shares (channel_focus,
+// mark_read, mark_unread): the channel must exist, and the caller must pass
+// permissions.CanAdmitSession, which is visibility, the same predicate behind
+// ListVisibleChannels, the ready payload and reconnect replay. A socket that
+// still holds an id it can no longer see (or an archived channel, OC-0070)
+// cannot resubscribe to the live topic or move its read state.
+func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
+	ch, err := st.GetChannel(ctx, channelID)
+	if err != nil || ch == nil {
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)
+	if subErr != nil {
+		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
+	}
+	if err := permissions.CanAdmitSession(sub); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
+	}
 	return ch, nil
 }

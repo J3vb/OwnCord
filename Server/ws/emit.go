@@ -136,7 +136,7 @@ func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event
 			// Not a ChannelEvent: it takes no seq and no topic, only a note for
 			// the coalescer, which flushes it off this goroutine.
 			if n := e.ActivityNote(); n.readBy != 0 {
-				h.activity.markRead(n.readBy, n.channelID, time.Now())
+				h.activity.markRead(n.readBy, n.channelID, n.readUpTo, n.readSet, time.Now())
 			} else {
 				h.activity.note(n)
 			}

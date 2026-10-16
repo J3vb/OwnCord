@@ -54,6 +54,10 @@ type Store interface {
 	// CreateMessageWithMentions / CreateMessageDelivery.
 	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	// MoveReadPointer moves a reader's pointer and recomputes mention_count
+	// from the receipts in one writer transaction (WP 3D-5c). The caller holds
+	// mentionEmitMu across it and the frame it sends.
+	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
 	// ── Mentions ──

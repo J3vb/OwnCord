@@ -470,6 +470,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 				"message_deduplication":        true,
 				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
 				"message_retry_floor_ms":       retryFloorMS,
+				"read_pointer":                 true,
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,

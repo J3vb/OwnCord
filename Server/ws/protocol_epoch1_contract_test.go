@@ -664,6 +664,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"typing", journeyTyping},
 		{"channel-activity", journeyChannelActivity},
 		{"mark-read", journeyMarkRead},
+		{"mark-unread", journeyMarkUnread},
 		{"dm-send", journeyDMSend},
 		{"dm-request", journeyDMRequest},
 		{"dm-request-ignored", journeyDMRequestIgnored},
@@ -930,8 +931,8 @@ func journeyChannelActivity(t *testing.T, r *epochRig) {
 	b.barrier()
 }
 
-// journeyMarkRead records the one client→server frame that answers with
-// nothing at all. The ping/pong pair proves the silence.
+// journeyMarkRead records mark_read, which answers with one read_state frame
+// to the caller (WP 3D-5c) and nothing else.
 func journeyMarkRead(t *testing.T, r *epochRig) {
 	aliceID, _, aliceTok, _ := r.seedBaseline(t)
 	if _, err := r.db.CreateMessage(context.Background(), textChannelID, aliceID, "unread", nil); err != nil {
@@ -946,6 +947,31 @@ func journeyMarkRead(t *testing.T, r *epochRig) {
 		"type":    "mark_read",
 		"payload": map[string]any{"channel_id": textChannelID},
 	})
+	a.expect("read_state")
+	a.barrier()
+}
+
+// journeyMarkUnread records mark_unread: the pointer moves to the message
+// before the one named and the caller gets a read_state frame.
+func journeyMarkUnread(t *testing.T, r *epochRig) {
+	aliceID, _, aliceTok, _ := r.seedBaseline(t)
+	if _, err := r.db.CreateMessage(context.Background(), textChannelID, aliceID, "first", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	second, err := r.db.CreateMessage(context.Background(), textChannelID, aliceID, "second", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	a := r.dial(t, "a")
+	a.authenticate(aliceTok)
+
+	a.record = true
+	a.send(map[string]any{
+		"type":    "mark_unread",
+		"payload": map[string]any{"channel_id": textChannelID, "message_id": second},
+	})
+	a.expect("read_state")
 	a.barrier()
 }
 
