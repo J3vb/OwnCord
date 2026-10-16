@@ -200,6 +200,20 @@ type Message struct {
 	Timestamp        string  `json:"timestamp"`
 	MentionsEveryone int64   `json:"mentionsEveryone"`
 	PinnedAt         *string `json:"pinnedAt"`
+	Kind             int64   `json:"kind"`
+}
+
+type MessageCall struct {
+	MessageID  int64   `json:"messageId"`
+	ChannelID  int64   `json:"channelId"`
+	StartedAt  string  `json:"startedAt"`
+	EndedAt    *string `json:"endedAt"`
+	LastSeenAt string  `json:"lastSeenAt"`
+}
+
+type MessageCallParticipant struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
 }
 
 type MessageDeliveryReceipt struct {

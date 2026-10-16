@@ -40,7 +40,11 @@ itself, so it adds no data class here. **Amended 2026-10-15 (mention ledger):**
 raised each mention badge, which no other user or service reads and which is
 removed with the recipient (erasure) or the message (cascade). It is no
 community service, so it adds nothing here; its lifecycle row is class 11a in
-`data-lifecycle.md`. Other
+`data-lifecycle.md`. **Amended 2026-10-16 (call log):** `064_call_log.sql` adds
+`messages.kind`, `message_calls` and `message_call_participants`, the server-written
+record of a call in a DM. It is no community service and nothing a user can write
+(call rows are read-only), so it adds nothing here; its lifecycle row is class 11b
+in `data-lifecycle.md`. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

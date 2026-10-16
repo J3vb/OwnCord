@@ -1137,6 +1137,16 @@ username, or an `@everyone` from a user without the bit, carries no mention
 semantics and stays plain text. The same two fields appear on pinned-message
 responses and on the WebSocket `chat_message`/`chat_edited` payloads.
 
+A DM can also hold a call log row: a message the server writes for a call in
+the DM's voice channel. It carries two more fields, both omitted for an ordinary
+message: `"kind": "call"` and `"call": {"started_at", "ended_at", "participants"}`.
+`started_at` and `ended_at` use the message `timestamp` format (`ended_at` is
+`null` while the call is live), and `participants` is the list of user IDs who
+were in the call at any point. `content` is fallback text for clients that do not
+know the field. A call row is read-only: editing, deleting, pinning, reacting to
+or replying to it is refused, and search does not return it. A client treats an
+unknown `kind` as an ordinary message and shows `content`.
+
 #### Pagination
 
 Use cursor-based pagination by passing the `id` of the last message as the `before` parameter:
@@ -3726,6 +3736,8 @@ same request again to continue. A retry must resend `ban_reason` and
 fields match, the ban is not written a second time (no new ledger row, no
 refreshed reason or expiry) and only the deletion continues. For a temporary
 ban, the same `ban_duration_hours` retried within an hour counts as unchanged.
+Each request measures the window back from its own arrival time, so a message
+that crosses the window's edge between two requests stays.
 
 #### Response 200 OK -- the updated user (same shape as the list entry).
 

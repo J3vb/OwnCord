@@ -360,6 +360,8 @@ var erasureStatements = []struct {
 	// The messages_ad trigger (migration 001) drops each row from the FTS
 	// index; message_mentions and reactions on these rows cascade.
 	{"messages", `DELETE FROM messages WHERE user_id = ?`},
+	// Call log participation (migration 064). Call rows the subject authored cascade with messages.
+	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
