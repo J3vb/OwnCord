@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
+- Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
