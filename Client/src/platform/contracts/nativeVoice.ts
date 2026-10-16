@@ -450,6 +450,17 @@ export interface NativeVoice {
     source: string,
     capture: NativeVoiceScreenCapture,
   ): Promise<NativeVoiceScreenStarted>;
+  /** Use camera `source` instead under the live, published camera: a new
+   *  capture starts beside it and takes the publication over (same sid, same
+   *  preview socket) once its first frame arrives, then the old capture
+   *  stops. Resolves with the new capture, which `stopCamera` then names;
+   *  rejects, leaving the live camera untouched, when the device cannot be
+   *  opened beside it or no camera is published. */
+  changeCamera(
+    session: number,
+    source: string,
+    capture: NativeVoiceCameraCapture,
+  ): Promise<NativeVoiceCameraStarted>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;

@@ -22,6 +22,7 @@ export const shards = {
     "src/features/voice/joinBackoffText.ts",
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/cameraMenu.ts",
+    "src/features/voice/cameraSwitch.ts",
     "src/features/voice/dragMove.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/screenshareChange.ts",

@@ -643,6 +643,47 @@ pub async fn native_voice_start_camera(
     })
 }
 
+/// Use camera `source` instead under the live camera's publication (its sid
+/// and preview socket stay): a new capture starts beside the live one, and
+/// only once its first frame arrives does it take the publication over and the
+/// old capture stop. Until then, and on any failure (a busy device, a stop or
+/// leave meanwhile), the live camera is untouched. Resolves with the new
+/// capture's id, which the webview then names to stop it.
+#[tauri::command]
+pub async fn native_voice_change_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    source: String,
+    capture: camera::CaptureOptions,
+) -> Result<CameraStarted, String> {
+    let target = camera::Target::parse(&source)?;
+    let (id, started) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .start_camera_change(target, capture)?;
+    let started = started
+        .await
+        .map_err(|_| "camera capture stopped before it started".to_string())
+        .and_then(|r| r);
+    let mut inner = state.inner.lock().await;
+    let s = inner.current(session)?;
+    let finished = started.and_then(|size| s.finish_camera_change(id).map(|()| size));
+    let (width, height) = match finished {
+        Ok(size) => size,
+        Err(e) => {
+            s.stop_camera(id).await;
+            return Err(e);
+        }
+    };
+    Ok(CameraStarted {
+        capture: id,
+        width,
+        height,
+    })
+}
+
 /// Publish (or replace) running camera capture `capture`; its frames then go
 /// to remote peers through the camera's `NativeVideoSource`. Returns the
 /// publication sid `native_voice_unpublish_camera` takes.

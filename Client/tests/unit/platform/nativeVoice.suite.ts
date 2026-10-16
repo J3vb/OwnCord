@@ -40,6 +40,8 @@ export interface NativeControl {
     started: NativeVoiceScreenStarted,
     sid: string,
   ): void;
+  /** The host refuses the next camera change with this reason. */
+  refusesCameraChange(reason: string): void;
   /** The host refuses the next screen source change with this reason. */
   refusesScreenChange(reason: string): void;
   /** The host answers the next mic test start with this test id. */
@@ -226,6 +228,21 @@ export function describeNativeVoiceSuite(
         ["native_voice_start_screen", { session: 7, source: "screen:1", capture }],
         ["native_voice_publish_screen", { session: 7, capture: 2, options: publish }],
         ["native_voice_stop_screen", { session: 7, capture: 2 }],
+      ]);
+    });
+
+    check("changes the live camera's device and reports a refusal as an Error", async () => {
+      const capture = { fps: 30, maxWidth: 1280, maxHeight: 720 };
+      const started = { capture: 3, width: 960, height: 720 };
+      ctx.native.hasCameras([], started, { width: 0, height: 0, frames: "" });
+      await expect(ctx.subject.changeCamera(7, "/dev/video2", capture)).resolves.toEqual(started);
+      ctx.native.refusesCameraChange("camera busy");
+      const refused = ctx.subject.changeCamera(7, "/dev/video4", capture);
+      await expect(refused).rejects.toBeInstanceOf(Error);
+      await expect(refused).rejects.toThrow("camera busy");
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_change_camera", { session: 7, source: "/dev/video2", capture }],
+        ["native_voice_change_camera", { session: 7, source: "/dev/video4", capture }],
       ]);
     });
 

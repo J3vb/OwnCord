@@ -45,6 +45,8 @@ export const nativeVoice: NativeVoice = {
   publishScreen: async (session, capture, options) =>
     (await service()).publishScreen(session, capture, options),
   stopScreen: async (session, capture) => (await service()).stopScreen(session, capture),
+  changeCamera: async (session, source, capture) =>
+    (await service()).changeCamera(session, source, capture),
   changeScreen: async (session, source, capture) =>
     (await service()).changeScreen(session, source, capture),
   getStats: async (session) => (await service()).getStats(session),

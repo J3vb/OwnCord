@@ -19,6 +19,7 @@ import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
+import { CameraSwitchUnavailable } from "./cameraSwitch";
 import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
@@ -361,26 +362,41 @@ export class MediaControl {
     // An enable that read the choice just before this pick starts on the old
     // device; picking again moves it.
     if (track === null) return;
+    // The restart path: stop, start on the saved device, republish.
+    const restartCameraOn = async (): Promise<boolean> => {
+      const generation = state.generation ?? 0;
+      await this.enableCamera();
+      // A failed restart already said so, but the server still has the
+      // camera on: tell it the camera is off.
+      if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
+        await this.disableCamera();
+        return false;
+      }
+      return true;
+    };
     try {
       if ("setDeviceId" in track) {
         const before = track.mediaStreamTrack;
-        if (!(await track.setDeviceId(deviceId))) {
-          log.warn("Camera restarted on another device than the one picked");
+        try {
+          if (!(await track.setDeviceId(deviceId))) {
+            log.warn("Camera restarted on another device than the one picked");
+          }
+        } catch (err) {
+          if (!(err instanceof CameraSwitchUnavailable)) throw err;
+          // The in-place switch could not run and the old camera still
+          // publishes: restart on the new device instead.
+          log.info("In-place camera switch unavailable, restarting", err);
+          if (!(await restartCameraOn())) return;
+          log.info("Camera device switched");
+          return;
         }
         // The restart swaps the capture: unplug detection moves with it.
         const now = track.mediaStreamTrack;
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
-      } else {
-        const generation = state.generation ?? 0;
-        await this.enableCamera();
-        // A failed restart already said so, but the server still has the
-        // camera on: tell it the camera is off.
-        if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
-          await this.disableCamera();
-          return;
-        }
+      } else if (!(await restartCameraOn())) {
+        return;
       }
       log.info("Camera device switched");
     } catch (err) {
