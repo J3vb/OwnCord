@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
+- Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
@@ -62,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings now lists its tabs in Discord's order (Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds, then Advanced, Diagnostics & logs and About), and shows the app version in small text under Log Out.
 - Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
+- Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
 
 **Voice**
 

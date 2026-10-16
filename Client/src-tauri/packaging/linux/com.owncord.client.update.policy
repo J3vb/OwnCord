@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Polkit action for the in-app update of the .deb install. The client runs
+  `pkexec /usr/lib/owncord-client/owncord-deb-update <file> <sha256>`; polkit
+  asks for the administrator password once per update and never caches the
+  authorization. The message below is read by polkit from this file, so it
+  is the one piece of user-visible text that lives outside src-tauri/src/text.rs.
+-->
+<policyconfig>
+  <vendor>OwnCord</vendor>
+
+  <action id="com.owncord.client.update">
+    <description>Install an OwnCord update</description>
+    <message>Authentication is required to install the OwnCord update</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/owncord-client/owncord-deb-update</annotate>
+  </action>
+</policyconfig>

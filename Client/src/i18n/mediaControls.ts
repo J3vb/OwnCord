@@ -5,4 +5,10 @@ import { defineCatalog } from "./format";
  *  rendered, so it stays out of the startup chunk. */
 export const mediaControlsText = defineCatalog("mediaControls", {
   "lightbox.close": "Close image",
+  "lightbox.download": "Download image",
+  "lightbox.openOriginal": "Open original",
+  "lightbox.prev": "Previous image",
+  "lightbox.next": "Next image",
+  "lightbox.position": "{index} of {total}",
+  "lightbox.openFailed": "Couldn't open the image",
 });

@@ -15,6 +15,7 @@ import type {
   AppUpdater,
   DownloadProgress,
   UpdateCheckResult,
+  UpdateFailureReason,
   UpdateInstallState,
 } from "../contracts/updater";
 
@@ -50,6 +51,15 @@ function notifyInstallListener(
     log.error("Update observer failed", { error: String(err) });
   }
 }
+
+/** The backend's stable error prefixes for a .deb install that did not run
+ *  (`src-tauri/src/text.rs`): the password prompt dismissed, or no permission. */
+const FAILURE_REASONS = new Map<string, UpdateFailureReason>([
+  // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
+  ["update cancelled", "cancelled"],
+  // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
+  ["update not authorized", "not-authorized"],
+]);
 
 /** Check if a newer client version is available on the connected server. */
 async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
@@ -88,10 +98,17 @@ function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
           progress: { received: event.payload.received, total: event.payload.total ?? null },
         });
       });
+      let unlistenInstalling: (() => void) | null = null;
       try {
+        // A .deb install asks for the system password after the download; the
+        // backend says so just before it does.
+        unlistenInstalling = await listen("update-installing", () => {
+          publishInstallState({ status: "installing" });
+        });
         await invoke("download_and_install_update", { serverUrl });
         installed = true;
       } finally {
+        unlistenInstalling?.();
         unlisten();
       }
       log.info("Update installed, relaunching...");
@@ -102,7 +119,11 @@ function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
       // A failed download may be retried. Once native installation succeeds,
       // keep the guard: reinstalling cannot repair a failed app restart.
       if (!installed) installation = null;
-      publishInstallState({ status: "failed", restartRequired: installed });
+      publishInstallState({
+        status: "failed",
+        restartRequired: installed,
+        reason: installed ? undefined : FAILURE_REASONS.get(String(err)),
+      });
       throw err;
     }
   });

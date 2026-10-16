@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { channelsStore, type Channel } from "../../stores/channels.store";
 import { dmStore, type DmChannel } from "../../stores/dm.store";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "../../lib/channel-mutes";
+import { savePref } from "../../lib/preferences";
 import { setGlobalNotificationLevel } from "../../lib/notificationLevel";
 import { startUnreadBadge, unreadBadgeCount } from "./unreadBadge";
 
@@ -121,6 +122,34 @@ describe("unread badge", () => {
     stop();
     window.dispatchEvent(new Event("focus"));
     expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3, 3, 0]);
+  });
+
+  it("with the Unread message badge pref off it pushes 0 and stays 0 as the count changes, and turning it on pushes the current count", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setDms([dm(30, 4)]);
+    savePref("unreadBadge", false);
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0]);
+
+    setDms([dm(30, 9)]);
+    setChannelList([channel(1, { mentionCount: 2 })]);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0]);
+
+    savePref("unreadBadge", true);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 11]);
+
+    savePref("unreadBadge", false);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 11, 0]);
+    stop();
+  });
+
+  it("a wrong-typed stored Unread message badge value behaves as on", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setDms([dm(31, 5)]);
+    localStorage.setItem("owncord:settings:unreadBadge", JSON.stringify("off"));
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([5]);
+    stop();
   });
 
   it("a mention in a muted channel counts; plain unread in a muted channel does not", () => {

@@ -21,7 +21,16 @@ import { dmStore } from "../../stores/dm.store";
 import { isChannelMuted } from "../../lib/channel-mutes";
 import { effectiveNotificationLevel } from "../../lib/notificationLevel";
 import { Disposable } from "../../lib/disposable";
+import { loadPref } from "../../lib/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
+
+/**
+ * Settings > Notifications > "Unread message badge"; on unless switched off.
+ * A stored value of the wrong type reads as the default (on).
+ */
+export function unreadBadgeEnabled(): boolean {
+  return loadPref<boolean>("unreadBadge", true);
+}
 
 /** The badge count for the connected server, from the stores as they are now. */
 export function unreadBadgeCount(): number {
@@ -54,7 +63,8 @@ export function startUnreadBadge(badge: Pick<Notifier, "setUnreadBadge">): () =>
     // A browser host or an older native host has no badge; nothing to do.
     badge.setUnreadBadge(count).catch(() => {});
   };
-  const sync = (): void => push(unreadBadgeCount());
+  // Off pushes 0 and keeps it there; turning it on pushes the live count.
+  const sync = (): void => push(unreadBadgeEnabled() ? unreadBadgeCount() : 0);
   // Windows keeps the overlay on the taskbar button, which a hide from the
   // tray or an Explorer restart recreates bare; re-apply it when shown.
   const resync = (): void => {

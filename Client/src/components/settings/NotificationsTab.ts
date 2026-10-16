@@ -286,6 +286,12 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
       desc: t("notifications.suppress.desc"),
       fallback: false,
     },
+    {
+      key: "unreadBadge",
+      label: t("notifications.unreadBadge.label"),
+      desc: t("notifications.unreadBadge.desc"),
+      fallback: true,
+    },
   ];
 
   const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];

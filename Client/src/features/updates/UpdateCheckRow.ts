@@ -45,6 +45,7 @@ function currentInstallState(): UpdateInstallState {
  *  download that can be retried is not one of these. */
 export function installInProgressText(state: UpdateInstallState): string | null {
   if (state.status === "downloading") return connectText("update.downloading");
+  if (state.status === "installing") return connectText("update.installing");
   if (state.status === "restarting") return connectText("update.installedRestarting");
   if (state.status === "failed" && state.restartRequired) {
     return connectText("update.installedRestart");
@@ -95,7 +96,11 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
         showOutcome(status, "error", t("updates.failed"));
         return;
       case "manual-upgrade":
-        showOutcome(status, "warning", connectText("update.unavailable"));
+        showOutcome(
+          status,
+          "warning",
+          connectText(outcome.unconfirmed === true ? "update.unconfirmed" : "update.unavailable"),
+        );
         return;
       case "available": {
         const underway = installInProgressText(currentInstallState());

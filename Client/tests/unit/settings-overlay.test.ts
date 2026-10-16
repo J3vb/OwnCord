@@ -373,10 +373,10 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
     getTab(container, 5).click();
 
-    // Desktop, flash, @everyone, message sounds, the call sound (D2) and the
+    // Desktop, flash, @everyone, the unread badge, message sounds, the call sound (D2) and the
     // voice UI sounds (DP-40), plus the seven per-sound switches (WP M-8).
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(13);
+    expect(toggles.length).toBe(14);
 
     overlay.destroy?.();
   });

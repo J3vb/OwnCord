@@ -18,6 +18,9 @@ export interface UpdateCheckResult {
   readonly version: string | null;
   readonly body: string | null;
   readonly manual_upgrade: boolean;
+  /** With `manual_upgrade`: a .deb install that can update itself got no offer
+   *  from the server, which is not proof it cannot be updated. */
+  readonly unconfirmed?: boolean;
   /** The check itself could not complete (network, feed error): `available: false`
    *  then says nothing about whether a newer version exists. */
   readonly failed?: boolean;
@@ -29,12 +32,22 @@ export interface DownloadProgress {
   readonly total: number | null;
 }
 
+/** Re-declared, structurally identical to `UpdateFailureReason` (`lib/updater.ts`). */
+export type UpdateFailureReason = "cancelled" | "not-authorized";
+
 /** Re-declared, structurally identical to `UpdateInstallState` (`lib/updater.ts`). */
 export type UpdateInstallState =
   | { readonly status: "idle" }
   | { readonly status: "downloading"; readonly progress: DownloadProgress | null }
+  | { readonly status: "installing" }
   | { readonly status: "restarting" }
-  | { readonly status: "failed"; readonly restartRequired: boolean };
+  | {
+      readonly status: "failed";
+      readonly restartRequired: boolean;
+      /** Why a .deb install did not run, when the system password prompt was
+       *  dismissed or could not authorize. Absent for every other failure. */
+      readonly reason?: UpdateFailureReason;
+    };
 
 export interface AppUpdater {
   checkForUpdate(serverUrl: string): Promise<UpdateCheckResult>;
