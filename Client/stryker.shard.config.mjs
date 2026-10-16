@@ -25,6 +25,7 @@ export const shards = {
     "src/features/voice/dragMove.ts",
     "src/features/voice/mediaControl.ts",
     "src/features/voice/screenshareChange.ts",
+    "src/features/voice/codecSwitch.ts",
     "src/features/voice/shareGate.ts",
     "src/features/voice/remoteTracks.ts",
     "src/features/voice/shareSenderStats.ts",
