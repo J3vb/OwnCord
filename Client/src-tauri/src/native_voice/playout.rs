@@ -116,7 +116,7 @@ impl Mixer {
         lock(&self.0).gains[volume as usize].insert(identity.to_string(), gain.max(0.0));
     }
 
-    fn add(&self, sid: &str, identity: &str, volume: Option<Volume>, channels: usize) {
+    pub(super) fn add(&self, sid: &str, identity: &str, volume: Option<Volume>, channels: usize) {
         lock(&self.0).queues.insert(
             sid.to_string(),
             Queue {
@@ -136,7 +136,7 @@ impl Mixer {
         self.add(LOOPBACK, LOOPBACK, Some(Volume::Microphone), 1);
     }
 
-    fn remove(&self, sid: &str) {
+    pub(super) fn remove(&self, sid: &str) {
         lock(&self.0).queues.remove(sid);
     }
 
