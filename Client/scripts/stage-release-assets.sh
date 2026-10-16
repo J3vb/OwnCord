@@ -51,7 +51,11 @@ case "$os" in
       fi
       cp "$f" "$out/$base"
     done
-    for f in "$bundle"/deb/*.deb; do
+    # The .deb is signed by release.yml ("Sign the .deb updater artifact");
+    # the nightly build is unsigned, so *.deb.sig is copied only when present.
+    # Server/updater/assets.go matches the package on _amd64.deb / _arm64.deb
+    # (Tauri's own Debian-architecture names) and its signature on .sig.
+    for f in "$bundle"/deb/*.deb "$bundle"/deb/*.deb.sig; do
       cp "$f" "$out/"
     done
     ;;
