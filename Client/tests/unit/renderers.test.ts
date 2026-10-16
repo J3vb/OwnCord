@@ -1630,6 +1630,22 @@ describe("renderers", () => {
     });
   });
 
+  describe("compact header time", () => {
+    it("renders the short clock time before the author, titled with the full date", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+
+      const compact = container.querySelector<HTMLElement>(".msg-header .msg-compact-time");
+      expect(compact).not.toBeNull();
+      expect(compact!.textContent).toBe(formatClockTime(msg.timestamp));
+      expect(compact!.title).toBe(container.querySelector<HTMLElement>(".msg-time")!.title);
+      expect(compact!.nextElementSibling?.classList.contains("msg-author")).toBe(true);
+
+      ac.abort();
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // formatMessageTimestamp
   // ---------------------------------------------------------------------------

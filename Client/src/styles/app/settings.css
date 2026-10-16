@@ -923,6 +923,19 @@ details.disclose[open] > summary .icon {
   background: #1a1a2e;
   color: #f4f5fa;
 }
+/* Sync with computer: both previews on one tile, the label outlined so it
+   reads on either half. */
+.theme-opt.system {
+  width: auto;
+  min-width: 80px;
+  padding: 0 10px;
+  text-align: center;
+  background: linear-gradient(135deg, #313338 50%, #f2f3f5 50%);
+  color: #fff;
+  text-shadow:
+    0 0 2px #000,
+    0 0 4px #000;
+}
 /* Accent color picker */
 .accent-swatches {
   display: flex;

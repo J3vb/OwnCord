@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberContextMenu, createChannelContextMenu } from "@components/AdminActions";
+import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions, ChannelContextMenuOptions } from "@components/AdminActions";
 
 describe("AdminActions", () => {
@@ -372,6 +373,53 @@ describe("AdminActions", () => {
         expect(topLevelLabels(result.element)).toEqual(["Block"]);
         result.destroy();
       });
+    });
+  });
+
+  describe("MemberContextMenu - Developer Mode Copy User ID", () => {
+    let writeText: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    });
+    afterEach(() => setDeveloperMode(false));
+
+    function open(showAdminActions: boolean) {
+      const result = createMemberContextMenu({
+        userId: 77,
+        username: "u",
+        currentRole: "member",
+        availableRoles: ["member"],
+        showAdminActions,
+        isBlocked: false,
+        onToggleBlock: vi.fn(async () => {}),
+        onKick: vi.fn(async () => {}),
+        onBan: vi.fn(async () => {}),
+        onChangeRole: vi.fn(async () => {}),
+      });
+      container.appendChild(result.element);
+      return result;
+    }
+    const labels = (el: HTMLElement): (string | null)[] =>
+      Array.from(el.querySelectorAll(".context-menu__item")).map((i) => i.textContent);
+
+    it.each([true, false])("copies the user id when on (admin=%s)", (admin) => {
+      setDeveloperMode(true);
+      const { element, destroy } = open(admin);
+      const item = Array.from(element.querySelectorAll<HTMLElement>(".context-menu__item")).find(
+        (i) => i.textContent === "Copy User ID",
+      );
+      expect(item).toBeDefined();
+      item!.click();
+      expect(writeText).toHaveBeenCalledWith("77");
+      destroy();
+    });
+
+    it("leaves it out when off", () => {
+      setDeveloperMode(false);
+      const { element, destroy } = open(true);
+      expect(labels(element)).not.toContain("Copy User ID");
+      destroy();
     });
   });
 

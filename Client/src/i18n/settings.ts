@@ -54,6 +54,7 @@ export const settingsText = defineCatalog("settings", {
   "appearance.theme": "Theme",
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
+  "appearance.theme.system": "Sync with computer",
   "appearance.compactMode": "Compact Mode",
   "appearance.timeFormat": "Time Format",
   "appearance.timeFormat.desc": "Choose 12-hour or 24-hour clocks for timestamps",
@@ -197,7 +198,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.key.ctrlI": "Ctrl + I",
 
   "advanced.developerMode.label": "Developer Mode",
-  "advanced.developerMode.desc": "Show message IDs, user IDs, and channel IDs on context menus",
+  "advanced.developerMode.desc":
+    "Add Copy Message ID, Copy User ID and Copy Channel ID to right-click menus",
   "advanced.debug": "Debug",
   "advanced.devtools.label": "Open DevTools",
   "advanced.devtools.desc": "Open the browser developer tools for debugging",

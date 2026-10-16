@@ -3,6 +3,7 @@ import { attachChannelContextMenu } from "@components/channel-sidebar/context-me
 import type { ChannelReorderData } from "@components/ChannelSidebar";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
+import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { Channel } from "@stores/channels.store";
 
 function channel(id: number, position: number): Channel {
@@ -99,5 +100,83 @@ describe("channel context menu - Move Up / Move Down", () => {
       { channelId: 1, newPosition: 1, previousPosition: 0 },
       { channelId: 2, newPosition: 0, previousPosition: 0 },
     ]);
+  });
+});
+
+describe("channel context menu - Developer Mode Copy Channel ID", () => {
+  let writeText: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  });
+  afterEach(() => setDeveloperMode(false));
+
+  function open(target: Channel): void {
+    const el = document.createElement("div");
+    container.appendChild(el);
+    attachChannelContextMenu(el, target, ac.signal, ac.signal);
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+  }
+  const item = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[data-testid="ctx-copy-channel-id"]');
+
+  it("offers the item when Developer Mode is on and copies the id", () => {
+    setDeveloperMode(true);
+    open(channel(42, 0));
+    expect(item()?.textContent).toBe("Copy Channel ID");
+    item()!.click();
+    expect(writeText).toHaveBeenCalledWith("42");
+  });
+
+  it("leaves it out when Developer Mode is off", () => {
+    setDeveloperMode(false);
+    open(channel(42, 0));
+    expect(item()).toBeNull();
+  });
+
+  it("opens a menu on a voice channel for a non-manager only in Developer Mode", () => {
+    authStore.setState((s) => ({
+      ...s,
+      user: { id: 1, username: "t", avatar: null, role: "member" },
+    }));
+    const voice = { ...channel(7, 0), type: "voice" as const };
+    open(voice);
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+    setDeveloperMode(true);
+    open(voice);
+    expect(item()).not.toBeNull();
+  });
+
+  it("leaves Shift+F10 and the Menu key alone on a row with no menu", () => {
+    authStore.setState((s) => ({
+      ...s,
+      user: { id: 1, username: "t", avatar: null, role: "member" },
+    }));
+    setDeveloperMode(false);
+    const el = document.createElement("div");
+    container.appendChild(el);
+    attachChannelContextMenu(
+      el,
+      { ...channel(7, 0), type: "voice" as const },
+      ac.signal,
+      ac.signal,
+    );
+    const keys = [
+      new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true }),
+    ];
+    for (const key of keys) el.dispatchEvent(key);
+    expect(keys.map((k) => k.defaultPrevented)).toEqual([false, false]);
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+
+    setDeveloperMode(true);
+    const again = new KeyboardEvent("keydown", {
+      key: "ContextMenu",
+      bubbles: true,
+      cancelable: true,
+    });
+    el.dispatchEvent(again);
+    expect(again.defaultPrevented).toBe(true);
+    expect(item()).not.toBeNull();
   });
 });

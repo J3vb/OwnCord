@@ -7,7 +7,7 @@
  */
 
 import { loadPref } from "@lib/preferences";
-import { applyTheme, getActiveThemeName, restoreAccent, type ThemeName } from "@lib/themes";
+import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/themes";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */
@@ -60,7 +60,7 @@ export function applyFontSize(): void {
  * Call at app startup so the UI doesn't flash default styles.
  */
 export function applyStoredAppearance(): void {
-  applyTheme(getActiveThemeName() as ThemeName);
+  applyThemeChoice(getActiveThemeName());
   restoreAccent();
   applyFontSize();
   document.documentElement.classList.toggle(

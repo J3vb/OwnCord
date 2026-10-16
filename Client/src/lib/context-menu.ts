@@ -83,11 +83,14 @@ export function openMenuOnKeyboard(
   el: HTMLElement,
   openAt: (x: number, y: number) => void,
   signal: AbortSignal,
+  /** Return false when the row has no menu right now: the key is then left alone. */
+  canOpen: () => boolean = () => true,
 ): void {
   el.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
       if (!(e.shiftKey && e.key === "F10") && e.key !== "ContextMenu") return;
+      if (!canOpen()) return;
       e.preventDefault();
       // A row nested in another menu-owning row (a voice participant inside a
       // voice channel row) must not also open its parent's menu.

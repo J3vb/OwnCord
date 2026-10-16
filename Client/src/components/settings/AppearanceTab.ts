@@ -7,8 +7,11 @@ import { loadPref, savePref, createToggle } from "./helpers";
 import {
   THEMES,
   applyAccent,
-  applyTheme,
+  SYSTEM_THEME,
+  applyThemeChoice,
   getActiveThemeName,
+  onSystemThemePainted,
+  resolveSystemTheme,
   restoreTheme,
   type ThemeName,
 } from "@lib/themes";
@@ -30,20 +33,31 @@ function getDefaultAccent(themeName: string): string {
   return themeName === "light" ? "#4f5bd5" : FALLBACK_ACCENT;
 }
 
+/** "system" is a choice, not a palette: the accent default follows what it shows. */
+function paletteOf(choice: string): string {
+  return choice === SYSTEM_THEME ? resolveSystemTheme() : choice;
+}
+
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
-  const currentTheme = activeThemeName in THEMES ? (activeThemeName as ThemeName) : null;
+  const currentTheme =
+    activeThemeName in THEMES || activeThemeName === SYSTEM_THEME ? activeThemeName : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
   let hasStoredAccent = localStorage.getItem("owncord:settings:accentColor") !== null;
-  const defaultAccent = getDefaultAccent(activeThemeName);
+  const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
 
   // Theme selector
   const themeHeader = createElement("h3", {}, t("appearance.theme"));
   const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
-  for (const name of Object.keys(THEMES) as ThemeName[]) {
+  const choices: string[] = [...(Object.keys(THEMES) as ThemeName[]), SYSTEM_THEME];
+  for (const name of choices) {
     const isActive = name === currentTheme;
+    const label =
+      name === SYSTEM_THEME
+        ? t("appearance.theme.system")
+        : name.charAt(0).toUpperCase() + name.slice(1);
     const btn = createElement(
       "button",
       {
@@ -51,13 +65,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
         role: "radio",
         tabindex: isActive ? "0" : "-1",
         "aria-checked": isActive ? "true" : "false",
-        "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
+        "aria-label": label,
       },
-      name.charAt(0).toUpperCase() + name.slice(1),
+      label,
     );
 
     const activateTheme = (): void => {
-      applyTheme(name);
+      applyThemeChoice(name);
       for (const child of themeRow.children) {
         child.classList.remove("active");
         child.setAttribute("aria-checked", "false");
@@ -69,9 +83,9 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
         // which includes the accent override applyAccent puts there. Without
         // re-applying it, a theme that sets --accent on its body class
         // (neon-glow) silently reverts the user's accent until restart.
-        applyAccent(loadPref<string>("accentColor", getDefaultAccent(name)));
+        applyAccent(loadPref<string>("accentColor", getDefaultAccent(paletteOf(name))));
       } else {
-        syncDisplayedAccent(getDefaultAccent(name));
+        syncDisplayedAccent(getDefaultAccent(paletteOf(name)));
       }
     };
 
@@ -312,11 +326,18 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
 
+  // An OS light/dark flip under "Sync with computer" changes the default
+  // accent; with no stored accent the controls must follow it.
+  onSystemThemePainted(() => {
+    if (hasStoredAccent) return;
+    syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
+  }, signal);
+
   // Apply stored preferences on render
   if (currentTheme === null) {
     restoreTheme();
   } else {
-    applyTheme(currentTheme);
+    applyThemeChoice(currentTheme);
   }
   applyFontSize();
   document.documentElement.classList.toggle("compact-mode", currentCompact);

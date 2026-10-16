@@ -4,25 +4,15 @@
  * (message-menu.ts). Pure over the stores, so the two cannot drift.
  */
 
-import { loadPref } from "@lib/preferences";
+import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
 import { formatMessageLink } from "@lib/deep-link";
-import { showToast } from "@lib/toast";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { getChannelMessages, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
-import { messagingText } from "../../i18n/messaging";
 import { shellText } from "../../i18n/shell";
 import { channelCanReact, reactionLockReason } from "./reactions";
-
-/** Cached value of the developerMode preference. Invalidated on pref change. */
-let developerModeEnabled = loadPref<boolean>("developerMode", false);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "developerMode") {
-    developerModeEnabled = loadPref<boolean>("developerMode", false);
-  }
-}) as EventListener);
 
 /** Controls a keyboard user can land on inside a rendered row. */
 export const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
@@ -87,19 +77,8 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
     report: gate(on && opts.onReportClick !== undefined && !own),
-    copyId: gate(on && developerModeEnabled),
+    copyId: gate(on && isDeveloperMode()),
   };
-}
-
-type MessagingKey = Parameters<typeof messagingText>[0];
-
-/** Copy `text`, then say whether it worked: a copy with no feedback is
- *  indistinguishable from a clipboard that refused. */
-export function copyWithToast(text: string, done: MessagingKey, failed: MessagingKey): void {
-  void navigator.clipboard.writeText(text).then(
-    () => showToast(messagingText(done), "success"),
-    () => showToast(messagingText(failed), "error"),
-  );
 }
 
 /** Copy the message's permalink, with the usual toasts. */

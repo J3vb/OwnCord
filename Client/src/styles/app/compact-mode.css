@@ -28,6 +28,13 @@
 .compact-mode .message .msg-header {
   display: flex;
 }
+.compact-mode .message .msg-compact-time {
+  display: inline;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .compact-mode .message.grouped .msg-header {
   display: none;
 }

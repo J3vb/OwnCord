@@ -221,6 +221,10 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* Compact mode only: the short clock time ahead of the author. */
+.message .msg-compact-time {
+  display: none;
+}
 .message .msg-edited {
   font-size: var(--font-size-xxs);
   color: var(--text-muted);
