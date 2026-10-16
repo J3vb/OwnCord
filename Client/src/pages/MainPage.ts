@@ -1477,6 +1477,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           : getRemoteVideoStats(tileId, "camera"),
       getLocalShareStats: () => getLocalScreenshareStats(),
       onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
+      isStreamLive: (userId, screenshare) => {
+        const { currentChannelId, voiceUsers } = voiceStore.getState();
+        if (currentChannelId === null) return false;
+        const user = voiceUsers.get(currentChannelId)?.get(userId);
+        return (screenshare ? user?.screenshare : user?.camera) === true;
+      },
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)

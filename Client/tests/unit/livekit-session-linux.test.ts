@@ -88,6 +88,7 @@ vi.mock("@stores/voice.store", () => ({
     get: vi.fn(),
     set: vi.fn(),
     subscribe: vi.fn(),
+    subscribeSelector: vi.fn(() => () => {}),
   },
   setLocalMuted: vi.fn(),
   setLocalDeafened: vi.fn(),

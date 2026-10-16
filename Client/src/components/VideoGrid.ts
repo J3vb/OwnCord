@@ -110,6 +110,11 @@ export interface VideoGridCallbacks {
   readonly onCallPopout?: (out: boolean, restore: boolean) => void;
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
+  /** Whether this user's voice state still says their screen share (or
+   *  camera) is on. A codec switch unpublishes and publishes the same track
+   *  (WP M-5b), so a watched stream whose owner still has it on gets a moment
+   *  to come back, keeping its watch, before its tile ends. */
+  readonly isStreamLive?: (userId: number, screenshare: boolean) => boolean;
   /** Back to the full stream view of `tileId`, from its mini-player. */
   readonly onReturnToStream?: (tileId: number) => void;
   /** Focus a control on the main page, for focus that was in a mini-player
@@ -354,10 +359,19 @@ interface CellEntry {
   lost?: boolean;
   /** The stream ended: the tile shows who ended it until this timer drops it. */
   ending?: ReturnType<typeof setTimeout>;
+  /** The stream is gone but its owner still shares: the tile waits, without a
+   *  cover, for the republish to arrive. */
+  holding?: ReturnType<typeof setTimeout>;
 }
 
 /** How long a watched stream's tile says it ended before it goes. */
 const ENDED_COVER_MS = 3000;
+
+/** How long a watched share whose owner still shares waits for its republish
+ *  before the tile says it ended, and how often it looks at the owner's state
+ *  meanwhile (a real stop shows its cover as soon as the owner's state says so). */
+const REPUBLISH_HOLD_MS = 2500;
+const REPUBLISH_HOLD_POLL_MS = 250;
 
 /** A remote stream playing in its tile (watched, not in a pop-out window). */
 function isPlayingHere(e: CellEntry | undefined): boolean {
@@ -1712,6 +1726,12 @@ export function createVideoGrid(): VideoGridComponent {
 
     // The same person shared again while their tile said it ended (a new
     // source, a quick re-share): a new tile, still watched and in focus.
+    const held = cells.get(userId);
+    if (held?.holding !== undefined && stream !== null) {
+      // The republished share is back: it plays in the tile it left.
+      clearTimeout(held.holding);
+      held.holding = undefined;
+    }
     const reshared = cells.get(userId)?.ending !== undefined;
     const refocus = reshared && focusedTileId === userId;
     if (reshared) dropTile(userId, true);
@@ -1725,7 +1745,19 @@ export function createVideoGrid(): VideoGridComponent {
       setTrackMuted(existing, false);
       if (!existing.el.classList.contains("video-cell--stopped")) {
         existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
-        setStopped(userId, true, false);
+        // A codec switch unsubscribes before it unpublishes: a stream whose
+        // owner still has it on waits for its republish, pop-out and mini open.
+        const owner = existing.config;
+        if (
+          owner !== undefined &&
+          !owner.isSelf &&
+          existing.holding === undefined &&
+          callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
+        ) {
+          holdForRepublish(userId, existing, owner.audioUserId, owner.isScreenshare);
+        } else {
+          setStopped(userId, true, false);
+        }
       }
       applyNames(existing, username, config?.name ?? username);
       return;
@@ -2036,6 +2068,48 @@ export function createVideoGrid(): VideoGridComponent {
   function removeStream(userId: number): void {
     pendingWatch.delete(userId);
     const entry = cells.get(userId);
+    if (entry === undefined || entry.ending !== undefined || entry.holding !== undefined) return;
+    const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
+    const owner = entry.config;
+    if (
+      watched &&
+      owner !== undefined &&
+      !owner.isSelf &&
+      callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
+    ) {
+      holdForRepublish(userId, entry, owner.audioUserId, owner.isScreenshare);
+      return;
+    }
+    endStream(userId);
+  }
+
+  /** The stream went but its owner's voice state still says it is on: a
+   *  codec switch republishes it. Show no cover and keep the watch until the
+   *  owner's state says otherwise or the grace runs out. */
+  function holdForRepublish(
+    userId: number,
+    entry: CellEntry,
+    owner: number,
+    screenshare: boolean,
+  ): void {
+    let waited = 0;
+    const look = (): void => {
+      entry.holding = undefined;
+      if (cells.get(userId) !== entry) return;
+      waited += REPUBLISH_HOLD_POLL_MS;
+      if (waited < REPUBLISH_HOLD_MS && callbacks.isStreamLive?.(owner, screenshare) === true) {
+        entry.holding = setTimeout(look, REPUBLISH_HOLD_POLL_MS);
+        return;
+      }
+      endStream(userId);
+    };
+    entry.holding = setTimeout(look, REPUBLISH_HOLD_POLL_MS);
+  }
+
+  /** The cover and drop for a watched screen share that ended (or a plain
+   *  drop for any other tile). */
+  function endStream(userId: number): void {
+    const entry = cells.get(userId);
     if (entry === undefined || entry.ending !== undefined) return;
     const watched = (isPlayingHere(entry) && entry.mini === undefined) || entry.lost === true;
     if (entry.config?.isScreenshare !== true || !watched) {
@@ -2069,6 +2143,7 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(userId);
     if (entry === undefined) return;
     clearTimeout(entry.ending);
+    clearTimeout(entry.holding);
 
     // Capture the focused tile control before detaching, so a user tabbing
     // through the overlay keeps a focus target when this tile leaves (Q1).
@@ -2265,6 +2340,7 @@ export function createVideoGrid(): VideoGridComponent {
       // An ended tile still holds its stream's watch for a re-share.
       if (entry.ending !== undefined) forgetWatch(tileId);
       clearTimeout(entry.ending);
+      clearTimeout(entry.holding);
       entry.popout?.close();
       entry.mini?.close();
       if (entry.trackCleanup) {
