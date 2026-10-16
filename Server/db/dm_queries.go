@@ -42,6 +42,12 @@ type DMChannelInfo struct {
 	// GetUserDMChannels query so every path that builds a DM summary (GET
 	// /dms and the ready payload) reports the same badge.
 	MentionCount int `json:"mention_count"`
+	// LastReadMessageID is the viewer's read pointer (read_states
+	// .last_message_id), 0 when they have never read the DM. Only
+	// GetUserDMChannels fills it; a frame built without that query (the
+	// dm_channel_open event, NewDMChannelInfo) leaves it nil so the field is
+	// omitted instead of claiming 0.
+	LastReadMessageID *int64 `json:"last_read_message_id,omitempty"`
 }
 
 // DMUser is the public-facing shape for a DM participant.
@@ -369,16 +375,18 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 		if recipients == nil {
 			recipients = []DMUser{}
 		}
+		lastRead := rows[i].LastReadMessageID
 		info := DMChannelInfo{
-			ChannelID:     rows[i].ChannelID,
-			Recipients:    recipients,
-			Name:          rows[i].Name,
-			IsGroup:       rows[i].IsGroup != 0,
-			LastMessageID: rows[i].LastMessageID,
-			LastMessage:   rows[i].LastMessage,
-			LastMessageAt: rows[i].LastMessageAt,
-			UnreadCount:   int(rows[i].UnreadCount),
-			MentionCount:  int(rows[i].MentionCount),
+			ChannelID:         rows[i].ChannelID,
+			Recipients:        recipients,
+			Name:              rows[i].Name,
+			IsGroup:           rows[i].IsGroup != 0,
+			LastMessageID:     rows[i].LastMessageID,
+			LastMessage:       rows[i].LastMessage,
+			LastMessageAt:     rows[i].LastMessageAt,
+			UnreadCount:       int(rows[i].UnreadCount),
+			MentionCount:      int(rows[i].MentionCount),
+			LastReadMessageID: &lastRead,
 		}
 		if len(recipients) > 0 {
 			info.Recipient = recipients[0]

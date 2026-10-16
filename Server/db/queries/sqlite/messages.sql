@@ -76,7 +76,9 @@ SELECT c.id,
                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
          LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
-                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
 WHERE c.type IN ('text', 'announcement')
    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp

@@ -1700,20 +1700,22 @@ List all open DM channels for the authenticated user, ordered by most recent act
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
       "unread_count": 3,
-      "mention_count": 1
+      "mention_count": 1,
+      "last_read_message_id": 5039
     }
   ]
 }
 ```
 
-| Field           | Description                                                                                                            |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`     | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients`    | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`          | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`      | True for a group DM. Stored, not derived from the live participant count.                                              |
-| `unread_count`  | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
-| `mention_count` | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
+| Field                  | Description                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`            | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients`           | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`                 | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                              |
+| `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
+| `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
+| `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 

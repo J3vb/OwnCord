@@ -803,12 +803,14 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
 		          LIMIT 100)) AS unread,
 		        COALESCE((SELECT rs.mention_count FROM read_states rs
-		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
+		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+		        COALESCE((SELECT rs.last_message_id FROM read_states rs
+		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 		 FROM channels c
 		 WHERE c.type IN ('text', 'announcement')
 		    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
 		                                   WHERE dp.channel_id = c.id AND dp.user_id = ?))`,
-		userID, userID, userID,
+		userID, userID, userID, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)
@@ -819,7 +821,7 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 	for rows.Next() {
 		var chID int64
 		var cu ChannelUnread
-		if scanErr := rows.Scan(&chID, &cu.LastMessageID, &cu.UnreadCount, &cu.MentionCount); scanErr != nil {
+		if scanErr := rows.Scan(&chID, &cu.LastMessageID, &cu.UnreadCount, &cu.MentionCount, &cu.LastReadMessageID); scanErr != nil {
 			return nil, fmt.Errorf("GetChannelUnreadCounts scan: %w", scanErr)
 		}
 		result[chID] = cu
