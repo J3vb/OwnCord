@@ -26,6 +26,7 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
     slowMode: 0,
     topic: "",
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
     ...overrides,

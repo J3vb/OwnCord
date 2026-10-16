@@ -3189,6 +3189,140 @@ describe("ChannelSidebar channel feature flags", () => {
     });
   });
 
+  describe("private channel lock", () => {
+    const lock = (id: number): Element | null =>
+      container.querySelector(`[data-testid='channel-private-${id}']`);
+
+    it("shows on text, announcement and voice rows, with a title and aria-label", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: true },
+        { id: 2, name: "news", type: "announcement", category: "Text", position: 1, private: true },
+        { id: 3, name: "war-room", type: "voice", category: "Voice", position: 0, private: true },
+      ]);
+      sidebar.mount(container);
+
+      for (const id of [1, 2, 3]) {
+        const badge = lock(id);
+        expect(badge).not.toBeNull();
+        expect(badge?.getAttribute("title")).toBe("Private channel");
+        expect(badge?.getAttribute("aria-label")).toBe("Private channel");
+        expect(badge?.querySelector("svg")).not.toBeNull();
+      }
+    });
+
+    it("is not inside the aria-hidden glyph, so it stays announced", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: true },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)?.closest("[aria-hidden='true']")).toBeNull();
+    });
+
+    it("is absent on a non-private row and on a row from an older server", () => {
+      setChannels([
+        { id: 1, name: "a", type: "text", category: "Text", position: 0, private: false },
+        { id: 2, name: "b", type: "text", category: "Text", position: 1 },
+        { id: 3, name: "c", type: "voice", category: "Voice", position: 0 },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)).toBeNull();
+      expect(lock(2)).toBeNull();
+      expect(lock(3)).toBeNull();
+    });
+
+    it("coexists with the nsfw marker and the voice capacity badge", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "staff",
+          type: "text",
+          category: "Text",
+          position: 0,
+          private: true,
+          nsfw: true,
+        },
+        {
+          id: 5,
+          name: "war-room",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          private: true,
+          nsfw: true,
+          voice_max_users: 5,
+        },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-nsfw-1']")).not.toBeNull();
+      expect(lock(5)).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-nsfw-5']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-capacity-5']")).not.toBeNull();
+    });
+
+    it("redraws the row live when a channel_create flips the flag, both ways", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: false },
+      ]);
+      sidebar.mount(container);
+      expect(lock(1)).toBeNull();
+
+      addChannel({
+        id: 1,
+        name: "staff",
+        type: "text",
+        category: "Text",
+        position: 0,
+        private: true,
+      });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      // An older-server frame without the key keeps the lock.
+      addChannel({ id: 1, name: "staff", type: "text", category: "Text", position: 0 });
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      addChannel({
+        id: 1,
+        name: "staff",
+        type: "text",
+        category: "Text",
+        position: 0,
+        private: false,
+      });
+
+      channelsStore.flush();
+      expect(lock(1)).toBeNull();
+    });
+
+    it("redraws the row live when a channel_update flips the flag", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: false },
+      ]);
+      sidebar.mount(container);
+
+      updateChannel({ id: 1, private: true });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      updateChannel({ id: 1, name: "staff-room" });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      updateChannel({ id: 1, private: false });
+
+      channelsStore.flush();
+      expect(lock(1)).toBeNull();
+    });
+  });
+
   describe("voice capacity readout", () => {
     it("shows connected/limit when the channel has a user limit", () => {
       setChannels([

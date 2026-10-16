@@ -61,6 +61,11 @@ export interface Channel {
    */
   readonly nsfw: boolean;
   /**
+   * Hidden from @everyone by a permission override, visible to this viewer.
+   * Marks the sidebar row with a lock. Older servers never send it: false.
+   */
+  readonly isPrivate: boolean;
+  /**
    * The current account's own acknowledgement of the label, as the server
    * last confirmed it (ready, a 204 from the acknowledgement route, or
    * nsfw_ack). Absent or false means content stays gated; it is only ever
@@ -151,6 +156,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // Older servers omit these; "absent" reads as unflagged / unlimited,
       // which is also what an unconfigured channel sends.
       nsfw: ch.nsfw ?? false,
+      isPrivate: ch.private ?? false,
       nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
@@ -227,6 +233,8 @@ export function addChannel(channel: ChannelCreatePayload): void {
       canReact: channel.can_react ?? existing?.canReact,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
+      // A re-sent channel_create from an older server omits it: keep what we know.
+      isPrivate: channel.private ?? existing?.isPrivate ?? false,
       // channel_create never carries the per-viewer acknowledgement; keep the
       // known one while the label stays on.
       nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
@@ -265,6 +273,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.nsfw !== undefined
         ? { nsfw: update.nsfw, nsfwAcknowledged: update.nsfw && existing.nsfwAcknowledged === true }
         : {}),
+      ...(update.private !== undefined ? { isPrivate: update.private } : {}),
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
     };

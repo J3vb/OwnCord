@@ -68,6 +68,7 @@ function channel(id: number, name: string, type: "text" | "dm"): Channel {
     topic: "",
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };
