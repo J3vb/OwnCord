@@ -57,6 +57,8 @@ export interface QueueDeps {
   readonly putBack: (files: readonly SentAttachment[]) => void;
   /** Every file has a fresh id: post the message with these, in chip order. */
   readonly dispatch: (files: readonly SentAttachment[]) => void;
+  /** The channel's last send and its slow-mode window in seconds, once one was charged. */
+  readonly slowWindow: () => { readonly sentAt: number; readonly window: number } | undefined;
   /** An upload failed or was cancelled; the row becomes a failed one. */
   readonly fail: (code: QueueFailure) => void;
 }
@@ -158,6 +160,9 @@ export async function runQueuedSend(entry: QueuedSend, deps: QueueDeps): Promise
   try {
     for (const item of entry.items) watch(entry, item);
     await Promise.all(entry.items.map((item) => settle(entry, item)));
+    // A text sent meanwhile may have opened the channel's slow-mode window.
+    await holdForSlowMode(entry, deps);
+    if (entry.cancelled) throw new Error(CANCELLED);
     // An upload can outlast the age margin of an id that settled long before.
     const old = entry.items.filter((item) => !isFresh(item, Date.now()));
     for (const item of old) {
@@ -171,9 +176,30 @@ export async function runQueuedSend(entry: QueuedSend, deps: QueueDeps): Promise
     deps.dispatch(entry.items.map(asFile));
   } catch {
     destroyRunning(entry);
+    // Cancel was pressed from the keyboard: its button is about to be replaced.
+    const cancel = document.querySelector(`[data-testid="msg-upload-cancel-${entry.cid}"]`);
+    const hadFocus = cancel !== null && cancel === document.activeElement;
     entry.failed = true;
     deps.fail(entry.cancelled ? "UPLOAD_CANCELLED" : "UPLOAD_FAILED");
+    if (hadFocus) focusRetry(entry.cid, true);
   }
+}
+
+/** Poll until the slow-mode window is over; Cancel, Delete and teardown set `cancelled`. */
+function holdForSlowMode(entry: QueuedSend, deps: QueueDeps): Promise<void> {
+  const sent = deps.slowWindow();
+  const ms = sent === undefined ? 0 : sent.sentAt + sent.window * 1000 - Date.now();
+  if (ms <= 0 || entry.cancelled) return Promise.resolve();
+  return new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 250))).then(() =>
+    holdForSlowMode(entry, deps),
+  );
+}
+
+/** Focus the failed row's Retry; the row may render a frame after the store changes. */
+function focusRetry(cid: string, again: boolean): void {
+  const retry = document.querySelector<HTMLElement>(`[data-testid="msg-retry-${cid}"]`);
+  if (retry !== null) retry.focus();
+  else if (again) requestAnimationFrame(() => focusRetry(cid, false));
 }
 
 /** Stop a queued send's uploads; the run in progress then fails it UPLOAD_CANCELLED. */
@@ -211,6 +237,7 @@ export function renderUploadStrip(entry: QueuedSend, signal: AbortSignal): HTMLE
   const running = entry.failed !== true;
   const strip = createElement("div", {
     class: "msg-upload-strip",
+    id: `msg-upload-strip-${entry.cid}`,
     ...(running
       ? {
           role: "group",
@@ -248,6 +275,8 @@ export function renderUploadStrip(entry: QueuedSend, signal: AbortSignal): HTMLE
       class: "msg-upload-cancel",
       type: "button",
       "data-testid": `msg-upload-cancel-${entry.cid}`,
+      // Several rows can show "Cancel upload": the row's text tells them apart.
+      "aria-describedby": `msg-body-${entry.cid} msg-upload-strip-${entry.cid}`,
     },
     sendQueueText("strip.cancel"),
   );

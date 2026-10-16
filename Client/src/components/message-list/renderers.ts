@@ -428,7 +428,14 @@ export function renderMessage(
     // unconfirmed-optimistic sentinel shared by every pending row, so it is not
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
-    el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
+    const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
+    if (msg.status === "uploading" && msg.correlationId !== null) {
+      // A queued row's Cancel describes itself by this text (3A-9).
+      const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
+      wrap.style.display = "contents";
+      wrap.appendChild(body);
+      el.appendChild(wrap);
+    } else el.appendChild(body);
     if (msg.editedAt !== null) {
       el.appendChild(
         createElement(

@@ -75,6 +75,7 @@ import {
   resetMessagesStore,
 } from "@stores/messages.store";
 import { setAuth } from "@stores/auth.store";
+import { channelsStore, setActiveChannel, setChannels, setRoles } from "@stores/channels.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { failPendingOnDisconnect } from "../../src/features/messaging/wsHandlers";
@@ -616,6 +617,105 @@ describe("send while uploading (controller)", () => {
       "skipped",
       null,
     );
+    ctrl.destroy();
+  });
+  it("Retry then Delete before the chunk loads posts nothing", async () => {
+    h.chunkFails.value = true;
+    const { ctrl, chatSends } = setup();
+    ctrl.mountChannel(42, "general", "text");
+    const a = held("a.pdf");
+    onSend("deleted", [a.item]);
+    await flush();
+    const failedCid = rowByContent("deleted")!.correlationId;
+
+    h.chunkFails.value = false;
+    h.listOpts.value.onRetry(failedCid);
+    // Still waiting for the chunk: the user presses Delete on the row on screen.
+    h.listOpts.value.onDeleteDraft(failedCid);
+    a.resolve("srv-a");
+    await flush();
+
+    expect(rowByContent("deleted")).toBeUndefined();
+    expect(chatSends()).toEqual([]);
+    ctrl.destroy();
+  });
+
+  it("two quick Retry clicks run the send once", async () => {
+    h.chunkFails.value = true;
+    const { ctrl, chatSends } = setup();
+    ctrl.mountChannel(42, "general", "text");
+    const a = held("a.pdf");
+    onSend("twice", [a.item]);
+    await flush();
+    const failedCid = rowByContent("twice")!.correlationId;
+
+    h.chunkFails.value = false;
+    h.listOpts.value.onRetry(failedCid);
+    h.listOpts.value.onRetry(failedCid);
+    a.resolve("srv-a");
+    await flush();
+
+    expect(chatSends()).toHaveLength(1);
+    expect(rows().filter((m) => m.content === "twice")).toHaveLength(1);
+    ctrl.destroy();
+  });
+
+  it("holds a queued send until a slow-mode window opened by a later text is over", async () => {
+    setChannels([
+      {
+        id: 42,
+        name: "general",
+        type: "text",
+        category: null,
+        position: 0,
+        can_send: true,
+        slow_mode: 5,
+      },
+    ] as never);
+    setActiveChannel(42);
+    setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+    channelsStore.flush();
+    const { ctrl, chatSends, fire, opts } = setup();
+
+    ctrl.mountChannel(42, "general", "text");
+    const a = held("a.pdf");
+    onSend("files", [a.item]);
+    await flush();
+
+    // A quick text goes out and is accepted: the server's window starts.
+    onSend("quick");
+    await flush();
+    const sendIndex = opts.ws.send.mock.calls.findIndex(
+      (c) => (c[0] as { type: string }).type === "chat_send",
+    );
+    const quickCid = opts.ws.send.mock.results[sendIndex]!.value as string;
+    fire("chat_send_ok", { message_id: 5, timestamp: "" }, quickCid);
+    vi.useFakeTimers();
+    a.resolve("srv-a");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(chatSends().map((m) => m.content)).toEqual(["quick"]);
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(chatSends().map((m) => m.content)).toEqual(["quick", "files"]);
+    ctrl.destroy();
+  });
+
+  it("does not put files back for a send whose account changed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let user = 1;
+    const { ctrl, chatSends } = setup({ userId: () => user });
+    ctrl.mountChannel(42, "general", "text");
+    const slow = held("slow.pdf");
+    onSend("aged", [settledItem("srv-old", "old.pdf"), slow.item]);
+    await vi.waitFor(() => expect(rowByContent("aged")).toBeDefined());
+
+    vi.setSystemTime(Date.now() + ATTACHMENT_TTL_MS + 1000);
+    user = 2;
+    slow.resolve("srv-slow");
+    await flush();
+
+    expect(h.restoreUnsent).not.toHaveBeenCalled();
+    expect(chatSends()).toEqual([]);
     ctrl.destroy();
   });
 });

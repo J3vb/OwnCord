@@ -97,6 +97,7 @@ function makeDeps() {
         }),
     ),
     putBack: vi.fn<(files: readonly SentAttachment[]) => void>(),
+    slowWindow: vi.fn<QueueDeps["slowWindow"]>(() => undefined),
     dispatch: vi.fn<(files: readonly SentAttachment[]) => void>(),
     fail: vi.fn<(code: "UPLOAD_FAILED" | "UPLOAD_CANCELLED") => void>(),
   } satisfies QueueDeps & Record<string, unknown>;
@@ -450,5 +451,108 @@ describe("renderUploadStrip", () => {
     expect(strip.querySelector("progress")).toBeNull();
     expect(strip.querySelector("button")).toBeNull();
     expect(strip.hasAttribute("aria-label")).toBe(false);
+  });
+});
+
+const describedBy = (strip: HTMLElement) =>
+  strip.querySelector(".msg-upload-cancel")!.getAttribute("aria-describedby");
+
+describe("review follow-ups", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.replaceChildren();
+  });
+
+  it("moves focus to the new Retry button when Cancel had it", async () => {
+    const a = held("a.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([running(a)]);
+    const strip = renderUploadStrip(entry, new AbortController().signal);
+    document.body.appendChild(strip);
+    // The host replaces the strip with the failed row's Retry when the send fails.
+    deps.fail.mockImplementation(() => {
+      const retry = document.createElement("button");
+      retry.dataset.testid = "msg-retry-cid-1";
+      strip.replaceWith(retry);
+    });
+    const done = runQueuedSend(entry, deps);
+    const cancel = strip.querySelector<HTMLButtonElement>(".msg-upload-cancel")!;
+    cancel.focus();
+
+    cancel.click();
+    await done;
+
+    expect(document.activeElement).toBe(document.querySelector('[data-testid="msg-retry-cid-1"]'));
+  });
+
+  it("leaves focus alone when Cancel did not have it", async () => {
+    const a = held("a.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([running(a)]);
+    const strip = renderUploadStrip(entry, new AbortController().signal);
+    document.body.appendChild(strip);
+    const other = document.createElement("input");
+    document.body.appendChild(other);
+    deps.fail.mockImplementation(() => {
+      const retry = document.createElement("button");
+      retry.dataset.testid = "msg-retry-cid-1";
+      document.body.appendChild(retry);
+    });
+    const done = runQueuedSend(entry, deps);
+    other.focus();
+
+    cancelQueuedSend(entry);
+    await done;
+
+    expect(document.activeElement).toBe(other);
+  });
+
+  it("describes each Cancel by its row's text and its own chips", () => {
+    const one = renderUploadStrip(
+      entryOf([running(held("a.pdf"))], { cid: "x1" }),
+      new AbortController().signal,
+    );
+    const two = renderUploadStrip(
+      entryOf([running(held("b.pdf"))], { cid: "x2" }),
+      new AbortController().signal,
+    );
+    expect(describedBy(one)).toBe("msg-body-x1 msg-upload-strip-x1");
+    expect(describedBy(two)).toBe("msg-body-x2 msg-upload-strip-x2");
+    expect(one.id).toBe("msg-upload-strip-x1");
+  });
+
+  it("waits out the slow-mode window before dispatching", async () => {
+    vi.useFakeTimers();
+    const { deps } = makeDeps();
+    const now = Date.now();
+    deps.slowWindow.mockReturnValue({ sentAt: now, window: 5 });
+    const done = runQueuedSend(
+      entryOf([{ filename: "a.pdf", id: "srv-a", uploadedAt: now }]),
+      deps,
+    );
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(deps.dispatch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1100);
+    await done;
+
+    expect(deps.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("Cancel ends the slow-mode wait with UPLOAD_CANCELLED", async () => {
+    vi.useFakeTimers();
+    const { deps } = makeDeps();
+    const now = Date.now();
+    deps.slowWindow.mockReturnValue({ sentAt: now, window: 60 });
+    const entry = entryOf([{ filename: "a.pdf", id: "srv-a", uploadedAt: now }]);
+    const done = runQueuedSend(entry, deps);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    cancelQueuedSend(entry);
+    await vi.advanceTimersByTimeAsync(300);
+    await done;
+
+    expect(deps.dispatch).not.toHaveBeenCalled();
+    expect(deps.fail).toHaveBeenCalledWith("UPLOAD_CANCELLED");
   });
 });

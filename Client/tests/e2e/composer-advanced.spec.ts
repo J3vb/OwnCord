@@ -548,8 +548,9 @@ test.describe("Composer — send while uploading", () => {
     );
     await expect.poll(() => bar.evaluate((el: HTMLProgressElement) => el.value)).toBeCloseTo(0.5);
 
-    // Nothing reaches the socket while the upload is held.
-    await page.waitForTimeout(300);
+    // Nothing reaches the socket while the upload is held: the row and its
+    // progress above prove the queued send is waiting, and a send would have
+    // gone out when Enter was pressed.
     expect(await chatSends(page)).toHaveLength(0);
 
     await releaseUploads(page);
@@ -591,9 +592,14 @@ test.describe("Composer — send while uploading", () => {
     await textarea(page).press("Enter");
     const row = page.locator(".message", { hasText: "cancel this one" });
 
-    await row.locator("[data-testid^='msg-upload-cancel-']").click();
+    // Keyboard Cancel: focus must land on the Retry that replaces it.
+    const cancelButton = row.locator("[data-testid^='msg-upload-cancel-']");
+    await expect(cancelButton).toHaveAttribute("aria-describedby", /msg-body-/);
+    await cancelButton.focus();
+    await page.keyboard.press("Enter");
 
     await expect(row).toHaveClass(/failed/);
+    await expect(row.locator("[data-testid^='msg-retry-']")).toBeFocused();
     await expect(row.locator(".msg-send-failed-text")).toHaveText("Upload cancelled");
     await expect(row.locator(".msg-upload-chip span")).toHaveText("report.pdf");
     await expect(row.locator("progress")).toHaveCount(0);

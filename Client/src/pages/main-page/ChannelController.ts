@@ -683,13 +683,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // this channel posts, fails and puts files back for this channel even after
     // the user has switched away.
     function queueDeps(entry: QueuedSend): QueueDeps {
+      const live = (): boolean => queuedSends.get(entry.cid) === entry && ownsAccountSession();
       return {
         upload: uploadFile,
-        putBack: (files) => putBackUnsent(entry.channelId, files, "skipped"),
+        putBack: (files) => {
+          if (live()) putBackUnsent(entry.channelId, files, "skipped");
+        },
+        // The server refuses a send inside the channel's slow-mode window, so wait it out.
+        slowWindow: () => slowModeSentAtByChannel.get(entry.channelId),
         fail: (code) => {
-          if (queuedSends.get(entry.cid) === entry && ownsAccountSession()) {
-            markSendFailed(entry.cid, code);
-          }
+          if (live()) markSendFailed(entry.cid, code);
         },
         dispatch: (files) => {
           if (queuedSends.get(entry.cid) !== entry) return;
@@ -706,9 +709,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       };
     }
 
-    /** Show `entry` as an "uploading" row (replacing `previous`, Retry's old row)
-     *  and run it. Waits for the lazy module, which the first upload preloaded. */
-    function startQueued(entry: QueuedSend, retry: boolean, previous?: string): void {
+    /** Show `entry` as an "uploading" row and run it; on Retry it replaces the
+     *  failed row under a new id. The entry stays under its old id until the
+     *  module has loaded, so a Delete in that window still finds it. Waits for
+     *  the lazy module, which the first upload preloaded. A failed entry whose
+     *  row vanishes without Delete stays in `queuedSends`, holding its Files,
+     *  until teardown. */
+    function startQueued(entry: QueuedSend, retry: boolean): void {
       // A failed load is already logged by the loader's preload.
       void loadSendQueue()
         .catch(() => null)
@@ -721,10 +728,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             queuedSends.delete(entry.cid);
             return;
           }
-          if (previous !== undefined) removeOptimistic(previous);
+          if (retry) {
+            // A second Retry click in the window finds it no longer failed.
+            if (entry.failed !== true) return;
+            queuedSends.delete(entry.cid);
+            removeOptimistic(entry.cid);
+            entry.cid = crypto.randomUUID();
+            queuedSends.set(entry.cid, entry);
+          }
           // The strip reads this when the row first renders: Cancel only while it runs.
           entry.failed = false;
           if (isWindowDetached(channelId) && !signal.aborted) jumpToPresentForSend();
+          // Set first, so a render during the add can draw the strip.
+          if (mod !== null) sendQueueMod = mod;
           addOptimisticMessage({
             correlationId: entry.cid,
             channelId,
@@ -740,7 +756,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             markSendFailed(entry.cid, "UPLOAD_FAILED");
             return;
           }
-          sendQueueMod = mod;
           void (retry ? mod.retryQueuedSend : mod.runQueuedSend)(entry, queueDeps(entry));
         });
     }
@@ -942,10 +957,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // 3A-9: a failed queued send uploads what it lacks and posts again, as
         // a new row under a new id.
         if (queued.channelId !== channelId) return;
-        queuedSends.delete(correlationId);
-        queued.cid = crypto.randomUUID();
-        queuedSends.set(queued.cid, queued);
-        startQueued(queued, true, correlationId);
+        startQueued(queued, true);
         return;
       }
       const recovered = recoveredPendingText(owner, correlationId);

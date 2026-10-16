@@ -412,6 +412,42 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("gives the uploading row's text an id its Cancel button describes itself by", async () => {
+      const { renderUploadStrip: realStrip } =
+        await import("../../src/features/messaging/sendQueue");
+      const entry = {
+        cid: "u1",
+        channelId: 1,
+        userId: 1,
+        content: "hello",
+        replyTo: null,
+        replyPing: false,
+        items: [{ filename: "a.pdf" }],
+      };
+      const msg = makeMessage({
+        status: "uploading",
+        correlationId: "u1",
+        id: 0,
+        content: "hello",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(
+        msg,
+        false,
+        [msg],
+        makeOpts({ renderUploadStrip: (_cid, signal) => realStrip(entry, signal) }),
+        ac.signal,
+      );
+      container.appendChild(el);
+
+      const cancel = el.querySelector(".msg-upload-cancel")!;
+      const target = el.querySelector(`#msg-body-u1`);
+      expect(cancel.getAttribute("aria-describedby")).toContain("msg-body-u1");
+      expect(target?.textContent).toContain("hello");
+
+      ac.abort();
+    });
+
     it("renders an uploading row without a strip when the host has none", () => {
       const msg = makeMessage({ status: "uploading", correlationId: "u1", id: 0 });
       const ac = new AbortController();
