@@ -115,6 +115,7 @@ function privateIndicator(channelId: number): HTMLSpanElement {
   const badge = createElement("span", {
     class: "ch-lock",
     "data-testid": `channel-private-${channelId}`,
+    role: "img",
     "aria-label": label,
   });
   badge.title = label;
