@@ -220,6 +220,8 @@ export const shards = {
     "src/features/messaging/echoReconcile.ts",
     "src/features/messaging/markdownMarkers.ts",
     "src/features/messaging/messageLimits.ts",
+    "src/features/messaging/inlineEdit.ts",
+    "src/features/messaging/inlineEditLoader.ts",
     "src/features/messaging/liveMessages.ts",
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionState.ts",
