@@ -160,6 +160,10 @@ export const messagingText = defineCatalog("messaging", {
   "toast.linkCopyFailed": "Couldn't copy the message link",
   "toast.idCopied": "Message ID copied",
   "toast.idCopyFailed": "Couldn't copy the message ID",
+  "toast.userIdCopied": "User ID copied",
+  "toast.userIdCopyFailed": "Couldn't copy the user ID",
+  "toast.channelIdCopied": "Channel ID copied",
+  "toast.channelIdCopyFailed": "Couldn't copy the channel ID",
 
   "spoiler.reveal": "Spoiler — click to reveal",
   "spoiler.revealed": "Spoiler — revealed",

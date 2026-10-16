@@ -8,6 +8,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createMenuItem as buildMenuItem, enableMenuKeyboard } from "@lib/context-menu";
 import { appendPurgeSection } from "./purge-prompt";
 import { shellText } from "../i18n/shell";
+import { copyWithToast, isDeveloperMode } from "./message-list/message-actions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -222,6 +223,19 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   const canManageRoles = options.canManageRoles ?? options.showAdminActions;
   const canKick = options.canKick ?? options.showAdminActions;
   const canBan = options.canBan ?? options.showAdminActions;
+
+  // Developer Mode: copy the member's ID, ahead of everything else.
+  if (isDeveloperMode()) {
+    menu.appendChild(
+      createMenuItem(
+        shellText("member.copyId"),
+        "context-menu__item",
+        () => copyWithToast(String(options.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
+        disposable.signal,
+      ),
+    );
+    menu.appendChild(createSeparator());
+  }
 
   if (!options.showAdminActions || (!canManageRoles && !canKick && !canBan)) {
     menu.appendChild(blockItem);

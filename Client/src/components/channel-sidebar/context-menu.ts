@@ -24,6 +24,7 @@ import {
   clampMenuToViewport,
 } from "@lib/context-menu";
 import { appendPurgeSection } from "@components/purge-prompt";
+import { copyWithToast, isDeveloperMode } from "@components/message-list/message-actions";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 
@@ -77,9 +78,7 @@ export function attachChannelContextMenu(
   const showMute = channel.type !== "voice";
   // Keyboard reordering only makes sense with the row's own group at hand.
   const showMove = canManage && channels !== undefined && onReorder !== undefined;
-  if (!showMarkRead && !showMute && !showEdit && !showDelete && !canPurge && !showMove) {
-    return;
-  }
+  const hasEntries = showMarkRead || showMute || showEdit || showDelete || canPurge || showMove;
 
   /** Build, mount and wire the menu at a viewport anchor. */
   function openMenu(anchorX: number, anchorY: number): void {
@@ -190,6 +189,12 @@ export function attachChannelContextMenu(
       );
     }
 
+    if (isDeveloperMode()) {
+      addItem(shellText("channel.copyId"), "context-menu-item", "ctx-copy-channel-id", () =>
+        copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
+      );
+    }
+
     if ((showMarkRead || showMute || showMove) && (showEdit || showDelete || canPurge)) {
       menu.appendChild(createElement("div", { class: "context-menu-sep" }));
     }
@@ -251,6 +256,8 @@ export function attachChannelContextMenu(
   el.addEventListener(
     "contextmenu",
     (e) => {
+      // Developer Mode adds Copy Channel ID, so even a bare row has a menu then.
+      if (!hasEntries && !isDeveloperMode()) return;
       e.preventDefault();
       e.stopPropagation();
       openMenu(e.clientX, e.clientY);
@@ -259,5 +266,11 @@ export function attachChannelContextMenu(
   );
 
   // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused row.
-  openMenuOnKeyboard(el, openMenu, signal);
+  openMenuOnKeyboard(
+    el,
+    (x, y) => {
+      if (hasEntries || isDeveloperMode()) openMenu(x, y);
+    },
+    signal,
+  );
 }

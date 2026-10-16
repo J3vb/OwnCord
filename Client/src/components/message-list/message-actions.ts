@@ -24,6 +24,11 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   }
 }) as EventListener);
 
+/** Whether Developer Mode is on: the copy-ID entries on the context menus. */
+export function isDeveloperMode(): boolean {
+  return developerModeEnabled;
+}
+
 /** Controls a keyboard user can land on inside a rendered row. */
 export const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
 
@@ -87,7 +92,7 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
     report: gate(on && opts.onReportClick !== undefined && !own),
-    copyId: gate(on && developerModeEnabled),
+    copyId: gate(on && isDeveloperMode()),
   };
 }
 

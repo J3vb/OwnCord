@@ -35,8 +35,11 @@
   line-height: 1.25;
   font-size: var(--font-size-sm);
 }
+/* The header line keeps its time, ahead of the name as in Discord's compact
+   mode; grouped lines get theirs from .msg-hover-time above. */
 .compact-mode .message .msg-time {
-  display: none;
+  display: inline;
+  order: -1;
 }
 /* Reactions and embeds */
 .compact-mode .msg-reactions {

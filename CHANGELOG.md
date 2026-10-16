@@ -54,6 +54,8 @@ and only when it changes something a contributor or fork holder must do
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
+- Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
+- With Developer Mode on, right-clicking a member adds **Copy User ID** and right-clicking a channel adds **Copy Channel ID**, next to the existing Copy Message ID.
 
 **Voice**
 
