@@ -50,6 +50,23 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
     base64_room_key.as_bytes().to_vec()
 }
 
+/// The `RoomOptions` every native session connects with: dynacast on, so a
+/// video layer nobody subscribes to is paused, and GCM e2ee.
+fn room_options(key_provider: KeyProvider) -> RoomOptions {
+    let mut options = RoomOptions::default();
+    options.dynacast = true;
+    // The report's proven configuration. `encryption` would also enable
+    // data-track encryption, which livekit-client's `e2ee` path lacks.
+    #[allow(deprecated)]
+    {
+        options.e2ee = Some(E2eeOptions {
+            encryption_type: EncryptionType::Gcm,
+            key_provider,
+        });
+    }
+    options
+}
+
 /// Mirror of `ExternalE2EEKeyProvider`'s fixed options: no ratcheting, no
 /// failure tolerance, the SDK-default salt and PBKDF2.
 fn key_provider_options() -> KeyProviderOptions {
@@ -727,16 +744,7 @@ impl NativeSession {
         on_event: EventSink,
     ) -> Result<Self, String> {
         let key_provider = KeyProvider::with_shared_key(key_provider_options(), key_material);
-        let mut options = RoomOptions::default();
-        // The report's proven configuration. `encryption` would also enable
-        // data-track encryption, which livekit-client's `e2ee` path lacks.
-        #[allow(deprecated)]
-        {
-            options.e2ee = Some(E2eeOptions {
-                encryption_type: EncryptionType::Gcm,
-                key_provider: key_provider.clone(),
-            });
-        }
+        let options = room_options(key_provider.clone());
         let frames = FrameServer::bind().await?;
         let (room, events) = Room::connect(url, token, options)
             .await
@@ -1605,6 +1613,17 @@ mod tests {
     use super::*;
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
     use livekit_protocol as proto;
+
+    #[test]
+    fn room_options_enable_dynacast_and_gcm_e2ee() {
+        let key_provider = KeyProvider::with_shared_key(key_provider_options(), vec![7; 32]);
+        let options = room_options(key_provider.clone());
+        assert!(options.dynacast);
+        #[allow(deprecated)]
+        let e2ee = options.e2ee;
+        let e2ee = e2ee.expect("e2ee is configured");
+        assert!(matches!(e2ee.encryption_type, EncryptionType::Gcm));
+    }
 
     #[test]
     fn retire_keeps_every_generation_a_follower_still_holds() {
