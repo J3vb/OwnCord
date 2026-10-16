@@ -985,6 +985,7 @@ ul.md-list-nested {
   max-width: none;
   margin-top: 0;
   border-radius: 0;
+  background: var(--bg-tertiary);
 }
 .msg-image-grid > .msg-image:nth-child(-n + 2) {
   grid-column: span 3;
@@ -1009,6 +1010,24 @@ ul.md-list-nested {
 }
 .msg-image-grid[data-count="3"] > .msg-image:first-child {
   grid-row: span 2;
+}
+.msg-image-grid[data-count="6"] > .msg-image,
+.msg-image-grid[data-count="9"] > .msg-image {
+  grid-column: span 2;
+}
+.msg-image-grid[data-count="7"] > .msg-image:first-child,
+.msg-image-grid[data-count="10"] > .msg-image:first-child {
+  grid-column: span 6;
+}
+.msg-image-grid[data-count="7"] > .msg-image:nth-child(2),
+.msg-image-grid[data-count="10"] > .msg-image:nth-child(2) {
+  grid-column: span 2;
+}
+.msg-image-grid .msg-media-fallback {
+  flex-wrap: wrap;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
 }
 .msg-image .placeholder-img {
   width: 100%;

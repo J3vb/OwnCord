@@ -149,7 +149,7 @@ describe("renderers lightbox sequence", () => {
     expect(document.querySelector(".image-lightbox")).toBeNull();
   });
 
-  it("groups 2+ images into one ordered grid and leaves files and videos outside", async () => {
+  it("groups 2+ images into one ordered grid and leaves files outside", async () => {
     const msg = makeMessage({
       attachments: [
         att("a", "a.png", "image/png"),
@@ -177,6 +177,17 @@ describe("renderers lightbox sequence", () => {
 
     imgs[1]!.click(); // tile 2 still opens the lightbox at index 1
     await vi.waitFor(() => expect(counter()).toBe("2 of 3"));
+  });
+
+  it("lays out a pending row's images as the grid before the id arrives", async () => {
+    const msg = makeMessage({
+      id: 0,
+      attachments: [att("a", "a.png", "image/png"), att("b", "b.png", "image/png")],
+    });
+    await renderRow(msg);
+    const grid = document.querySelector(".msg-image-grid");
+    expect(grid?.getAttribute("data-count")).toBe("2");
+    expect(grid?.querySelectorAll("img").length).toBe(2);
   });
 
   it("renders a single image without a grid wrapper", async () => {

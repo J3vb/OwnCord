@@ -311,7 +311,10 @@ function sendErrorReason(code: string | null): string {
  *  sequence, in attachment order (3A-10c); an unconfirmed row (id 0) has none,
  *  and a lone image opens as it always did. */
 function appendAttachments(el: HTMLElement, msg: Message): void {
-  const images = msg.id === 0 ? [] : msg.attachments.filter(isGalleryImage);
+  // A pending row already lays its images out as the grid, so confirming it
+  // does not resize the row; only the lightbox sequence waits for the id.
+  const tiles = msg.attachments.filter(isGalleryImage);
+  const images = msg.id === 0 ? [] : tiles;
   const items = images.map((att) => ({
     url: resolveServerUrl(att.url),
     filename: att.filename,
@@ -324,8 +327,8 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
       ?.find((m) => m.id === msg.id)?.deleted === true;
   // Two or more images share one mosaic wrapper, placed where the first image was.
   const grid =
-    images.length >= 2
-      ? createElement("div", { class: "msg-image-grid", "data-count": String(images.length) })
+    tiles.length >= 2
+      ? createElement("div", { class: "msg-image-grid", "data-count": String(tiles.length) })
       : null;
   for (const att of msg.attachments) {
     const index = images.indexOf(att);
@@ -344,7 +347,7 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
             row: () => document.querySelector(`[data-testid="message-${msg.id}"]`),
           };
     const node = renderAttachment(att, gallery);
-    if (grid !== null && index !== -1) {
+    if (grid !== null && tiles.includes(att)) {
       if (grid.parentNode === null) el.appendChild(grid);
       grid.appendChild(node);
     } else {
