@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at   TEXT,
     deleted     INTEGER NOT NULL DEFAULT 0,
     mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT
+    pinned_at  TEXT,
+    kind       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

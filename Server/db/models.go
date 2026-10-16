@@ -173,7 +173,18 @@ type Message struct {
 	// token and the author held MENTION_EVERYONE. Per-user mentions live in
 	// message_mentions.
 	MentionsEveryone bool
+	// Kind is MessageKindUser for an ordinary message and MessageKindCall for
+	// a call log row, which only the server writes.
+	Kind int64
 }
+
+// MessageKindUser and MessageKindCall are the stored values of messages.kind.
+// MessageKindNameCall is the wire name of kind 1 (protocol enum chat_message.kind).
+const (
+	MessageKindUser     int64 = 0
+	MessageKindCall     int64 = 1
+	MessageKindNameCall       = "call"
+)
 
 // MessageWithUser joins a Message with the author's public fields.
 type MessageWithUser struct {
@@ -240,6 +251,18 @@ type MessageAPIResponse struct {
 	// (never stored). Null when this is not a reply or the parent is gone or
 	// in another channel.
 	ReferencedMessage *ReferencedMessage `json:"referenced_message"`
+	// Kind and Call are set only on a call log row (kind "call") and omitted
+	// for an ordinary message. See CallInfo.
+	Kind string    `json:"kind,omitempty"`
+	Call *CallInfo `json:"call,omitempty"`
+}
+
+// CallInfo is the call block of a call log row. Times use the message
+// timestamp layout. EndedAt is nil while the call is live.
+type CallInfo struct {
+	StartedAt    string  `json:"started_at"`
+	EndedAt      *string `json:"ended_at"`
+	Participants []int64 `json:"participants"`
 }
 
 // ReferencedMessage is the snippet of a reply's parent. A deleted parent is
@@ -250,6 +273,9 @@ type ReferencedMessage struct {
 	Content        string      `json:"content"`
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
+	// IsCall marks a call log row. It is server-side only: a reply to one is
+	// refused, so it never reaches the wire.
+	IsCall bool `json:"-"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.

@@ -72,7 +72,7 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 	}
 	sb.WriteString(` JOIN channels c ON m.channel_id = c.id
 		 JOIN users u ON m.user_id = u.id
-		 WHERE m.deleted = 0`)
+		 WHERE m.deleted = 0 AND m.kind = 0`)
 	if ranked {
 		sb.WriteString(" AND messages_fts MATCH ?")
 		args = append(args, match)

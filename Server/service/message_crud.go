@@ -435,6 +435,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
 	}
+	// A call log row is written only by the server (WP 3B-9).
+	if msg.Kind == db.MessageKindCall {
+		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
 
 	// Channel type for DM-aware permissions. Fail closed: a lookup failure must
 	// not fall through with chanType="", which routes into the non-DM
@@ -599,6 +603,11 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	// different, still-live message. Mirrors EditMessage's msg.Deleted guard.
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+	}
+	// A call log row is read-only for everyone, moderators included. It goes
+	// only with its channel, its author's erasure or retention (WP 3B-9).
+	if msg.Kind == db.MessageKindCall {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
 	// Fail closed, mirroring EditMessage: a lookup failure must not fall
