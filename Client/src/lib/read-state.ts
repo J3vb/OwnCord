@@ -386,7 +386,28 @@ export function noteMessageSeen(channelId: number, messageId: number, live = fal
     if (!live || unreadHold.get(channelId) !== true) return;
     unreadHold.delete(channelId);
   }
+  raiseHighestSeen(channelId, messageId);
+}
+
+function raiseHighestSeen(channelId: number, messageId: number): void {
   if (messageId > (highestSeen.get(channelId) ?? 0)) highestSeen.set(channelId, messageId);
+}
+
+/**
+ * Record the newest message a reader scrolling through the list has on screen,
+ * short of the live tail. `noteMessageSeen` turns away for a list scrolled off
+ * the tail (that is what "away" means for unread counting), which would drop
+ * exactly this case: a reader who opens an unread channel and scrolls part way
+ * has seen those rows, and leaving must mark them. Here only a blurred window
+ * or a detached window counts as away, and a Mark Unread hold still blocks it.
+ * Like `noteMessageSeen` it only raises the value, and only records: the send
+ * happens on leaving.
+ */
+export function noteVisibleMessageSeen(channelId: number, messageId: number): void {
+  if (!readPointerEnabled() || messageId <= 0) return;
+  if (!document.hasFocus() || isWindowDetached(channelId)) return;
+  if (unreadHold.has(channelId)) return;
+  raiseHighestSeen(channelId, messageId);
 }
 
 /**
@@ -480,6 +501,21 @@ export function acceptReadState(channelId: number, pointer: number): boolean {
   return true;
 }
 
+const markUnreadFailListeners = new Set<(channelId: number) => void>();
+
+/**
+ * Be told when a Mark Unread for any channel failed and its pointer was put
+ * back (see `failMarkUnread`), so a mounted list can drop the NEW line the
+ * mark drew. Returns the unsubscribe. A `read_state` that answers the mark
+ * never notifies: the line stays.
+ */
+export function onMarkUnreadFailed(listener: (channelId: number) => void): () => void {
+  markUnreadFailListeners.add(listener);
+  return () => {
+    markUnreadFailListeners.delete(listener);
+  };
+}
+
 /** What to tell the user when a Mark Unread did not happen. */
 export type MarkUnreadNotice = "rateLimited" | "notFound" | "failed";
 
@@ -502,6 +538,7 @@ export function failMarkUnread(requestId: string | undefined, notice: MarkUnread
   pendingMarkUnread.delete(requestId);
   unreadHold.delete(pending.channelId);
   if (pending.previous !== undefined) writeReadPointer(pending.channelId, pending.previous);
+  for (const listener of markUnreadFailListeners) listener(pending.channelId);
   unreadNotice?.(notice);
   return true;
 }

@@ -73,6 +73,8 @@ import {
   isChannelCovered,
   noteLiveMessageSeen,
   noteMessageSeen,
+  noteVisibleMessageSeen,
+  onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
 import { readPointerEnabled } from "@lib/serverCapabilities";
@@ -734,6 +736,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
     if (!isAtBottom() || isChannelAway(options.channelId)) {
       bottomMarked = false;
+      noteVisibleRowsSeen();
       return;
     }
     // The cached bottom of a revisit predates what arrived while away; keep
@@ -753,6 +756,26 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     markChannelReadSeen(options.channelId);
   }
 
+  /**
+   * A reader scrolling short of the bottom has seen the rows on screen: record
+   * the newest confirmed one whose top is above the viewport's bottom, so
+   * leaving sends `mark_read` up to it (the badge was cleared on open, and the
+   * server must follow). Records only; nothing is sent here. Reads the height
+   * tree, not the DOM, so a scroll event costs one lookup.
+   */
+  function noteVisibleRowsSeen(): void {
+    if (root === null || !readPointerEnabled() || isChannelCovered()) return;
+    if (newDividerDeferred || virtualItems.length === 0) return;
+    // The last pixel in view: a row starting exactly at the bottom edge is not.
+    const bottom = root.scrollTop + Math.max(root.clientHeight - 1, 0);
+    for (let i = Math.min(offsetToIndex(bottom), virtualItems.length - 1); i >= 0; i--) {
+      const item = virtualItems[i]!;
+      if (item.kind !== "message" || item.message.id <= 0) continue;
+      noteVisibleMessageSeen(options.channelId, item.message.id);
+      return;
+    }
+  }
+
   /** The newest confirmed message loaded here (pending rows have no id yet); 0 for none. */
   function newestLoadedId(): number {
     for (let i = allMessages.length - 1; i >= 0; i--) {
@@ -767,13 +790,52 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * server keeps a read pointer.
    */
   function markUnreadFrom(messageId: number): void {
+    const before = {
+      linePointer,
+      newDividerAnchorId,
+      markedUnread,
+      unreadBarDismissed,
+      openedUnread,
+      unreadOnOpen,
+    };
     const pointer = markMessageUnread(options.channelId, messageId);
     if (pointer === null) return;
+    unmarked = before;
     linePointer = pointer;
     newDividerAnchorId = messageId;
     markedUnread = true;
     unreadBarDismissed = false;
     refreshUnreadFromChannel(messageId);
+    if (!patchRows()) renderAll();
+  }
+
+  /** What the list showed before the latest Mark Unread, to go back to if it fails. */
+  let unmarked: {
+    readonly linePointer: number | undefined;
+    readonly newDividerAnchorId: number | null;
+    readonly markedUnread: boolean;
+    readonly unreadBarDismissed: boolean;
+    readonly openedUnread: number;
+    readonly unreadOnOpen: number;
+  } | null = null;
+
+  /**
+   * The Mark Unread did not happen (refused, or never sent) and its pointer is
+   * back: the NEW line and the unread bar go back to what they were. A
+   * confirming `read_state` never comes here, so a mark that worked stays.
+   */
+  function revertMarkUnread(): void {
+    if (unmarked === null) return;
+    ({
+      linePointer,
+      newDividerAnchorId,
+      markedUnread,
+      unreadBarDismissed,
+      openedUnread,
+      unreadOnOpen,
+    } = unmarked);
+    unmarked = null;
+    updateUnreadBar();
     if (!patchRows()) renderAll();
   }
 
@@ -1847,6 +1909,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }),
     );
 
+    unsubscribers.push(
+      onMarkUnreadFailed((channelId) => {
+        if (channelId === options.channelId) revertMarkUnread();
+      }),
+    );
     unsubscribers.push(
       channelsStore.subscribeSelector(
         (s) => s.channels.get(options.channelId)?.unreadCount,

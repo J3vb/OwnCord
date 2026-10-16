@@ -27,6 +27,9 @@ import {
   setChannels,
 } from "@stores/channels.store";
 import {
+  acceptReadState,
+  failMarkUnread,
+  leaveChannel,
   resetReadPointerState,
   setLiveTailInView,
   setMarkReadSender,
@@ -355,6 +358,45 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       await vi.waitFor(() => expect(label()).toMatch(/^7 new messages since/));
     });
 
+    const barLabel = (): string =>
+      container.querySelector('[data-testid="unread-bar-label"]')?.textContent ?? "";
+
+    it("a refused Mark Unread takes the NEW line and the unread bar back", async () => {
+      messagesStore.flush();
+      mount();
+      expect(lineAbove()).toBeNull();
+      altClick(row(3).querySelector(".msg-text")!);
+      await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
+      expect(barLabel()).toMatch(/^3 new messages since/);
+      expect(failMarkUnread("req-1", "rateLimited")).toBe(true);
+      expect(channelsStore.getState().channels.get(CHANNEL_ID)?.lastReadMessageId).toBe(5);
+      expect(lineAbove()).toBeNull();
+      expect(barLabel()).toBe("");
+    });
+
+    it("a failed send takes the line back to where an earlier Mark Unread put it", async () => {
+      mount();
+      altClick(row(3).querySelector(".msg-text")!);
+      await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
+      writeReadPointer(CHANNEL_ID, 2, { unread: 3, mention: 0 });
+      altClick(row(4).querySelector(".msg-text")!);
+      await vi.waitFor(() => expect(lineAbove()).toBe("message-4"));
+      expect(failMarkUnread("req-2", "failed")).toBe(true);
+      expect(lineAbove()).toBe("message-3");
+    });
+
+    it("a confirmed Mark Unread keeps the line and the bar", async () => {
+      messagesStore.flush();
+      mount();
+      altClick(row(3).querySelector(".msg-text")!);
+      await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
+      writeReadPointer(CHANNEL_ID, 2, { unread: 3, mention: 0 });
+      // The server's answer settles the request, so a late failure restores nothing.
+      expect(acceptReadState(CHANNEL_ID, 2)).toBe(true);
+      expect(failMarkUnread("req-1", "failed")).toBe(false);
+      expect(lineAbove()).toBe("message-3");
+    });
+
     it("the message menu offers Mark Unread just above Copy Message Link", async () => {
       mount();
       row(3)
@@ -469,6 +511,39 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       openChannel(3, 2);
       mount();
       scrollUp();
+      expect(marks).toEqual([]);
+    });
+
+    it("a partial scroll, then leaving, marks read up to the newest visible message", () => {
+      const ids = Array.from({ length: 40 }, (_, i) => i + 1);
+      setMessages(ids.map(msg));
+      openChannel(30, 5);
+      mount();
+      scrollTo(600);
+      leaveChannel(CHANNEL_ID);
+      expect(marks).toHaveLength(1);
+      const [, sent] = marks[0]!;
+      // Seen, so past the pointer; but nowhere near the newest loaded (40).
+      expect(sent).toBeGreaterThan(5);
+      expect(sent).toBeLessThan(40);
+      // Scrolling further raises it, and never lowers it.
+      marks.length = 0;
+      scrollTo(900);
+      scrollTo(300);
+      leaveChannel(CHANNEL_ID);
+      expect(marks).toHaveLength(1);
+      expect(marks[0]![1]).toBeGreaterThan(sent!);
+      expect(marks[0]![1]).toBeLessThan(40);
+    });
+
+    it("a partial scroll in a blurred window records nothing", () => {
+      setMessages(Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
+      openChannel(30, 5);
+      mount();
+      hasFocus.mockReturnValue(false);
+      scrollTo(600);
+      hasFocus.mockReturnValue(true);
+      leaveChannel(CHANNEL_ID);
       expect(marks).toEqual([]);
     });
 

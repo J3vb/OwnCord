@@ -15,6 +15,8 @@ import {
   markChannelReadSeen,
   noteLiveMessageSeen,
   noteMessageSeen,
+  noteVisibleMessageSeen,
+  onMarkUnreadFailed,
   resetReadPointerState,
   failMarkUnread,
   setLiveTailInView,
@@ -374,6 +376,46 @@ describe("Mark Unread", () => {
   it("stays held when no arrival found the reader away", () => {
     markMessageUnread(1, 10);
     noteMessageSeen(1, 12, true);
+    leaveChannel(1);
+    expect(reads).toEqual([]);
+  });
+
+  it("tells a mounted list when a refusal put the pointer back, and not after it unsubscribed", () => {
+    const told: number[] = [];
+    const off = onMarkUnreadFailed((id) => told.push(id));
+    markMessageUnread(1, 10);
+    failMarkUnread("u-1", "failed");
+    expect(told).toEqual([1]);
+    off();
+    markMessageUnread(1, 10);
+    failMarkUnread("u-2", "failed");
+    expect(told).toEqual([1]);
+  });
+
+  it("a stranger frame tells nobody", () => {
+    const told: number[] = [];
+    const off = onMarkUnreadFailed((id) => told.push(id));
+    markMessageUnread(1, 10);
+    failMarkUnread("something-else", "failed");
+    off();
+    expect(told).toEqual([]);
+  });
+
+  it("records the visible message of a list scrolled off the tail, and only raises it", () => {
+    setLiveTailInView(1, false);
+    noteMessageSeen(1, 8);
+    noteVisibleMessageSeen(1, 12);
+    noteVisibleMessageSeen(1, 9);
+    leaveChannel(1);
+    expect(reads).toEqual([[1, 12]]);
+  });
+
+  it("a visible message is not recorded while blurred or held after Mark Unread", () => {
+    hasFocus.mockReturnValue(false);
+    noteVisibleMessageSeen(1, 12);
+    hasFocus.mockReturnValue(true);
+    markMessageUnread(1, 10);
+    noteVisibleMessageSeen(1, 12);
     leaveChannel(1);
     expect(reads).toEqual([]);
   });
