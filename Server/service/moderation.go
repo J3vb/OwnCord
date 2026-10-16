@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/telemetry"
@@ -37,6 +38,14 @@ type ModerationService struct {
 	// MUTE_MEMBERS rather than adding a second path to the same effect).
 	// Nil is a normal no-op — Timeout still lands for text and reactions.
 	voiceMuter TimeoutVoiceMuter
+	// limiter throttles the ban purge's authorization per actor
+	// (AuthorizeBanPurge); nil disables the throttle.
+	limiter *auth.RateLimiter
+	// banPurgeSem admits one ban purge at a time server-wide. See
+	// PurgeAfterBan for the lock order.
+	banPurgeSem chan struct{}
+	// banPurgeRowCap overrides banPurgeMaxRows when positive (tests only).
+	banPurgeRowCap int
 }
 
 // ModActionNotifier delivers a live mod_action frame to a connected target.
@@ -91,7 +100,7 @@ type TimeoutVoiceMuter interface {
 
 // NewModerationService creates a ModerationService.
 func NewModerationService(st Store, perms *PermissionService) *ModerationService {
-	return &ModerationService{st: st, perms: perms}
+	return &ModerationService{st: st, perms: perms, banPurgeSem: make(chan struct{}, 1)}
 }
 
 // SetNotifier installs the live mod_action notifier.
