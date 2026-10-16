@@ -8,7 +8,7 @@ vi.mock("../../src/features/voice/native/platform", () => ({
 }));
 const nativeH264 = vi.hoisted(() => ({ value: true }));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
-  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value }),
+  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value, vp9: false, decode: [] }),
 }));
 // The Linux case waits for the codec probe, so the tab outlives the build:
 // keep the native device lists and hot-plug watch off the real desktop host.

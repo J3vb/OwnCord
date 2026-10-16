@@ -135,9 +135,12 @@ export interface NativeVoiceConnected {
 /** A video codec the native engine publishes (WP LP-7c). */
 export type NativeVoiceVideoCodec = "vp8" | "h264";
 
-/** Which codecs beyond VP8 the native engine can encode. */
+/** What the native engine can encode beyond VP8 (`h264`, `vp9`) and decode
+ *  (`decode`: lowercase codec names from libwebrtc's receiver capabilities). */
 export interface NativeVoiceVideoCodecs {
   h264: boolean;
+  vp9: boolean;
+  decode: string[];
 }
 
 /** How the camera is published: the web path's `publishTrack` options. */
@@ -411,8 +414,9 @@ export interface NativeVoice {
    *  available is "no camera plugged in"; this false is "camera support is
    *  missing". */
   cameraSupport(): Promise<NativeVoiceCameraSupport>;
-  /** Whether the engine can encode H.264 (libwebrtc lists a `video/H264`
-   *  sender codec). A rejection resolves `{ h264: false }`, never throws. */
+  /** Which codecs the engine encodes (libwebrtc's sender capabilities) and
+   *  decodes (its receiver capabilities). A rejection resolves
+   *  `{ h264: false, vp9: false, decode: [] }`, never throws. */
   videoCodecs(): Promise<NativeVoiceVideoCodecs>;
   /** Start capturing native camera `source` (replacing any running capture)
    *  and resolve once its first frame arrives; a source that fails or yields

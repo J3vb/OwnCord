@@ -86,18 +86,23 @@ export class E2EEIdentity {
   async buildAnnouncePayload(
     ephemeralPubBase64: string,
   ): Promise<{ public_key: string; signature?: string; video_decode: readonly string[] }> {
-    const video_decode = localVideoDecode();
+    // Started before the key load so the load's staleness guards see the same
+    // ordering as before the decode list became async.
+    const decoding = localVideoDecode();
+    let signature: string | undefined;
     try {
       const idKeyPair = await this.ensureIdentityKeyPair();
       if (idKeyPair) {
         const myUserId = authStore.getState().user?.id ?? 0;
         const ephemeralRaw = rawFromBase64(ephemeralPubBase64);
-        const signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
-        return { public_key: ephemeralPubBase64, signature, video_decode };
+        signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
       }
     } catch (err) {
       log.error("E2EE: failed to sign announce — sending unsigned", err);
+      signature = undefined;
     }
+    const video_decode = await decoding;
+    if (signature !== undefined) return { public_key: ephemeralPubBase64, signature, video_decode };
     return { public_key: ephemeralPubBase64, video_decode };
   }
 }

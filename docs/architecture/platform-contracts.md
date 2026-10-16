@@ -38,7 +38,9 @@ three Linux-only mic-test commands (`native_voice_start_mic_test`,
 (2026-10-16) added `native_voice_change_camera`, and WP LP-7c (2026-10-16)
 added `native_voice_video_codecs` and `native_voice_unpublish_screen`, and WP
 LP-8b (2026-10-16) added `native_voice_publish_screen_audio` and
-`native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on. The
+`native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on,
+and WP M-11a (2026-10-16) widened the `native_voice_video_codecs` result to
+`{ h264, vp9, decode }` (no new command). The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.

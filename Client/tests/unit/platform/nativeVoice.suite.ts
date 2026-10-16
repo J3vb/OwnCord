@@ -41,7 +41,7 @@ export interface NativeControl {
     sid: string,
   ): void;
   /** The host answers the next video-codec probe with this H.264 answer. */
-  reportsVideoCodecs(h264: boolean): void;
+  reportsVideoCodecs(codecs: { h264: boolean; vp9: boolean; decode: string[] }): void;
   /** The host rejects the next video-codec probe. */
   failsVideoCodecs(): void;
   /** The host refuses the next camera change with this reason. */
@@ -189,16 +189,27 @@ export function describeNativeVoiceSuite(
       expect(ctx.native.commands()).toEqual([["native_voice_camera_support", undefined]]);
     });
 
-    check("reports whether the engine can encode H.264, and no when the probe fails", async () => {
-      ctx.native.reportsVideoCodecs(true);
-      await expect(ctx.subject.videoCodecs()).resolves.toEqual({ h264: true });
-      ctx.native.failsVideoCodecs();
-      await expect(ctx.subject.videoCodecs()).resolves.toEqual({ h264: false });
-      expect(ctx.native.commands()).toEqual([
-        ["native_voice_video_codecs", undefined],
-        ["native_voice_video_codecs", undefined],
-      ]);
-    });
+    check(
+      "reports whether the engine can encode H.264 and VP9 and decode, and nothing when the probe fails",
+      async () => {
+        ctx.native.reportsVideoCodecs({ h264: true, vp9: true, decode: ["vp8", "vp9"] });
+        await expect(ctx.subject.videoCodecs()).resolves.toEqual({
+          h264: true,
+          vp9: true,
+          decode: ["vp8", "vp9"],
+        });
+        ctx.native.failsVideoCodecs();
+        await expect(ctx.subject.videoCodecs()).resolves.toEqual({
+          h264: false,
+          vp9: false,
+          decode: [],
+        });
+        expect(ctx.native.commands()).toEqual([
+          ["native_voice_video_codecs", undefined],
+          ["native_voice_video_codecs", undefined],
+        ]);
+      },
+    );
 
     check("starts and stops the out-of-call camera preview", async () => {
       const capture = { fps: 30, maxWidth: 320, maxHeight: 180 };

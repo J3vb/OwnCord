@@ -30,9 +30,11 @@
 //! does for every camera quality but "source".
 //! `--codec h264` (with `--video`) publishes the camera as H.264 instead of
 //! the default VP8 (WP LP-7c).
-//! `--probe-codecs` prints `{"event":{"type":"codecs","h264":bool}}` and exits:
-//! whether this build's libwebrtc can encode H.264, so the browser half can
-//! skip its H.264 case with a reason instead of failing it.
+//! `--probe-codecs` prints `{"event":{"type":"codecs","h264":bool,"vp9":bool,
+//! "decode":[..]}}` and exits:
+//! whether this build's libwebrtc can encode H.264 or VP9 and which codecs it
+//! decodes, so the browser half can skip its H.264 and VP9 cases with a reason
+//! instead of failing them.
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
@@ -415,7 +417,14 @@ mod linux {
     pub async fn run() -> Result<(), String> {
         if std::env::args().any(|a| a == "--probe-codecs") {
             let codecs = owncord_client_lib::native_voice::probe_video_codecs();
-            emit(serde_json::json!({ "event": { "type": "codecs", "h264": codecs.h264 } }));
+            emit(serde_json::json!({
+                "event": {
+                    "type": "codecs",
+                    "h264": codecs.h264,
+                    "vp9": codecs.vp9,
+                    "decode": codecs.decode,
+                }
+            }));
             return Ok(());
         }
         let url = arg("--url").ok_or("--url required")?;

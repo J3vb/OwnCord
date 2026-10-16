@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   devices: { inputs: [], outputs: [] } as unknown,
   cameras: [] as unknown,
   support: { available: true, missing: [] } as unknown,
-  videoCodecs: { h264: false } as unknown,
+  videoCodecs: { h264: false, vp9: false, decode: [] } as unknown,
   videoCodecsFail: false,
   camera: { capture: 0, width: 0, height: 0 },
   preview: { width: 0, height: 0, frames: "" },
@@ -126,8 +126,8 @@ describeNativeVoiceSuite(async () => {
       sharesScreenAs(sources, started, sid) {
         state.screen = { sources, started, sid };
       },
-      reportsVideoCodecs(h264) {
-        state.videoCodecs = { h264 };
+      reportsVideoCodecs(codecs) {
+        state.videoCodecs = codecs;
       },
       failsVideoCodecs() {
         state.videoCodecsFail = true;
