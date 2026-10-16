@@ -462,6 +462,7 @@ func (m *mockHubWB) BroadcastChannelCreate(ch *db.Channel)                      
 func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                            {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                           {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                                  {}
+func (m *mockHubWB) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)     {}
 func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)              {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                          {}
 func (m *mockHubWB) RefreshAllChannelVisibility()                                     {}

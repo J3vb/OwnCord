@@ -90,6 +90,11 @@ type patchUserRequest struct {
 	// from now (login re-checks via IsEffectivelyBanned). Omitted or 0 =
 	// permanent. Only meaningful with banned=true.
 	BanDurationHours *int `json:"ban_duration_hours"`
+	// DeleteMessageSeconds also deletes the banned member's messages posted
+	// within this many seconds, in the channels the actor may moderate
+	// (0..604800). Only meaningful with banned=true; see
+	// handlers_users_ban_purge.go.
+	DeleteMessageSeconds *int `json:"delete_message_seconds"`
 }
 
 // maxBanDurationHours caps temporary bans at one year; anything longer is
@@ -178,7 +183,7 @@ func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service
 // result out to connected clients; a request without banned is a no-op. It
 // reports whether the handler may continue; on false it has already written
 // the error response.
-func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest, banExpires *time.Time) bool {
 	if req.Banned == nil {
 		return true
 	}
@@ -190,16 +195,6 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	banReason := ""
 	if req.BanReason != nil {
 		banReason = *req.BanReason
-	}
-	var banExpires *time.Time
-	if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
-		hours := *req.BanDurationHours
-		if hours < 0 || hours > maxBanDurationHours {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
-			return false
-		}
-		t := time.Now().Add(time.Duration(hours) * time.Hour)
-		banExpires = &t
 	}
 	var actionErr error
 	if *req.Banned {
@@ -281,6 +276,11 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 			return
 		}
 
+		purgeSeconds, ok := patchUserValidatePurge(w, req)
+		if !ok {
+			return
+		}
+
 		// Authorize the role change before applying anything else. Without
 		// this pre-flight, a PATCH combining banned + role_id would commit
 		// and broadcast the ban first and only then attempt the role change:
@@ -295,14 +295,33 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 			return
 		}
 
+		// Validate the ban's own fields before the purge check spends the
+		// actor's rate-limit token, so a corrected retry is not throttled.
+		banExpires, ok := patchUserValidateBan(w, req)
+		if !ok {
+			return
+		}
+
+		// The purge's checks (including its rate limit) also run before the
+		// ban is written, so a refusal leaves the target unbanned.
+		if purgeSeconds > 0 && !patchUserAuthorizePurge(w, r, mod, actor, id) {
+			return
+		}
+		retry := purgeSeconds > 0 && patchUserIsPurgeRetry(r, users, id, req)
+
 		// Ban/unban first: it routes through ModerationService, which enforces
 		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
 		// not — any admin-panel actor could previously ban the owner). The
 		// role change, if requested, was already authorized above, so a ban
 		// committing here cannot be followed by a refused role change leaving
 		// a half-applied PATCH behind.
-		if !patchUserApplyBan(w, r, hub, mod, actor, id, req) {
+		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req, banExpires) {
 			return
+		}
+
+		var purge *banPurgeOutcome
+		if purgeSeconds > 0 {
+			purge = patchUserPurge(r, hub, mod, actor, id, purgeSeconds)
 		}
 
 		if !patchUserApplyRole(w, r, hub, permInvalidator, mod, actor, id, req) {
@@ -312,6 +331,13 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 		updated, roleName, err := users.GetWithRoleName(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
+			return
+		}
+		if purge != nil {
+			writeJSON(w, http.StatusOK, patchUserPurgeResponse{
+				adminUserResponse: toAdminUserResponse(updated, roleName),
+				Purge:             purge,
+			})
 			return
 		}
 		writeJSON(w, http.StatusOK, toAdminUserResponse(updated, roleName))
