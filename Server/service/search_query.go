@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -30,10 +31,19 @@ type ParsedSearch struct {
 	// From and In are the raw usernames and channel names, in order of
 	// appearance, with any leading @ or # removed.
 	From, In []string
+	// Mentions are the raw usernames of mentions: values, in order, with any
+	// leading @ removed.
+	Mentions []string
+	// Has holds the distinct has: kinds (link, file, image, video, sound),
+	// normalised to lower case with the audio alias folded into sound.
+	Has []string
+	// Pinned is set by pinned:true or pinned:false.
+	Pinned *bool
 	// AfterTS and BeforeTS are the date bounds as stored UTC timestamps:
 	// timestamp >= AfterTS and timestamp < BeforeTS. Empty means unbounded.
 	AfterTS, BeforeTS string
-	// EmptyRange is set when the date filters intersect to nothing.
+	// EmptyRange is set when the filters can match nothing: the date filters
+	// intersect to nothing, or pinned:true and pinned:false are both given.
 	EmptyRange bool
 	// HasFilters reports whether any non-empty filter value was given.
 	HasFilters bool
@@ -42,7 +52,7 @@ type ParsedSearch struct {
 // searchKey names a filter key active in this version.
 func searchKey(k string) (string, bool) {
 	switch k {
-	case "from", "in", "before", "after", "during":
+	case "from", "in", "before", "after", "during", "has", "mentions", "pinned":
 		return k, true
 	}
 	return "", false
@@ -116,7 +126,7 @@ func lexSearchValue(rs []rune, i int) (string, int) {
 func cleanSearchValue(key, val string) string {
 	val = strings.TrimSpace(val)
 	switch key {
-	case "from":
+	case "from", "mentions":
 		val = strings.TrimLeft(val, "@")
 	case "in":
 		val = strings.TrimLeft(val, "#")
@@ -138,7 +148,7 @@ func ParseSearch(q, tz string) (ParsedSearch, error) {
 		words    []string
 		consumed bool
 		tokens   int
-		window   searchWindow
+		st       = searchState{loc: loc}
 	)
 	for _, tok := range lexSearch(q) {
 		if tok.key == "" {
@@ -154,20 +164,8 @@ func ParseSearch(q, tz string) (ParsedSearch, error) {
 			return ParsedSearch{}, fmt.Errorf("%w: too many filters (at most %d)", ErrBadRequest, maxSearchFilterTokens)
 		}
 		p.HasFilters = true
-		switch tok.key {
-		case "from":
-			p.From = append(p.From, tok.val)
-		case "in":
-			p.In = append(p.In, tok.val)
-		default:
-			dLo, dHi, perr := searchDayRange(tok.key, tok.val, loc)
-			if perr != nil {
-				return ParsedSearch{}, perr
-			}
-			window.intersect(dLo, dHi)
-		}
-		if len(p.From) > maxSearchFilterValues || len(p.In) > maxSearchFilterValues {
-			return ParsedSearch{}, fmt.Errorf("%w: %s: allows at most %d values", ErrBadRequest, tok.key+":", maxSearchFilterValues)
+		if err := st.add(&p, tok); err != nil {
+			return ParsedSearch{}, err
 		}
 	}
 
@@ -176,8 +174,86 @@ func ParseSearch(q, tz string) (ParsedSearch, error) {
 	} else {
 		p.Text = q
 	}
-	p.AfterTS, p.BeforeTS, p.EmptyRange = window.stored()
+	p.AfterTS, p.BeforeTS, p.EmptyRange = st.window.stored()
+	if st.contradiction {
+		p.EmptyRange = true
+	}
 	return p, nil
+}
+
+// searchState carries what ParseSearch accumulates across filter tokens
+// beyond the fields of ParsedSearch itself.
+type searchState struct {
+	loc           *time.Location
+	window        searchWindow
+	hasValues     int
+	contradiction bool
+}
+
+// add records one non-empty filter token into p and enforces the per-kind
+// value cap.
+func (st *searchState) add(p *ParsedSearch, tok searchToken) error {
+	switch tok.key {
+	case "from":
+		p.From = append(p.From, tok.val)
+	case "in":
+		p.In = append(p.In, tok.val)
+	case "mentions":
+		p.Mentions = append(p.Mentions, tok.val)
+	case "has":
+		st.hasValues++
+		kind, err := searchHasKind(tok.val)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(p.Has, kind) {
+			p.Has = append(p.Has, kind)
+		}
+	case "pinned":
+		want, err := searchPinned(tok.val)
+		if err != nil {
+			return err
+		}
+		if p.Pinned != nil && *p.Pinned != want {
+			st.contradiction = true
+		}
+		p.Pinned = &want
+	default:
+		lo, hi, err := searchDayRange(tok.key, tok.val, st.loc)
+		if err != nil {
+			return err
+		}
+		st.window.intersect(lo, hi)
+	}
+	if len(p.From) > maxSearchFilterValues || len(p.In) > maxSearchFilterValues ||
+		len(p.Mentions) > maxSearchFilterValues || st.hasValues > maxSearchFilterValues {
+		return fmt.Errorf("%w: %s: allows at most %d values", ErrBadRequest, tok.key+":", maxSearchFilterValues)
+	}
+	return nil
+}
+
+// searchHasKind validates a has: value and folds it to its canonical kind.
+// embed, sticker and poll are not supported and are refused like any other
+// unknown value, so a user typing them learns the filter did not apply.
+func searchHasKind(val string) (string, error) {
+	switch v := strings.ToLower(val); v {
+	case "link", "file", "image", "video", "sound":
+		return v, nil
+	case "audio":
+		return "sound", nil
+	}
+	return "", fmt.Errorf("%w: has: expects link, file, image, video or sound", ErrBadRequest)
+}
+
+// searchPinned validates a pinned: value.
+func searchPinned(val string) (bool, error) {
+	switch strings.ToLower(val) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: pinned: expects true or false", ErrBadRequest)
 }
 
 // searchWindow is the running intersection of the date filters; a zero bound

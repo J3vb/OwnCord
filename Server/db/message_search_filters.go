@@ -27,6 +27,14 @@ type SearchQuery struct {
 	// timestamp < BeforeTS. Both use the stored "YYYY-MM-DD HH:MM:SS" UTC
 	// format; empty means unbounded.
 	AfterTS, BeforeTS string
+	// MentionIDs keeps messages that mention every one of these users in
+	// their text. Reply-ping rows and @everyone do not count.
+	MentionIDs []int64
+	// Has keeps messages that satisfy every kind: link, file, image, video,
+	// sound. Attachment kinds only see attachments linked to the message.
+	Has []string
+	// Pinned, when set, keeps messages whose pinned flag equals it.
+	Pinned *bool
 }
 
 // HasSearchTerms reports whether text has anything left to search for once
@@ -91,6 +99,12 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 		sb.WriteString(" AND m.id < ? AND m.timestamp < ?")
 		args = append(args, hi, q.BeforeTS)
 	}
+	extra, extraArgs, err := searchExtraFilters(q)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
+	}
+	sb.WriteString(extra)
+	args = append(args, extraArgs...)
 	tail, tailArgs := searchPageSQL(page, idCol, ranked)
 	sb.WriteString(tail)
 	args = append(args, tailArgs...)

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -72,12 +73,27 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, in Se
 		}
 	}
 
+	var mentionIDs []int64
+	if len(parsed.Mentions) > 0 {
+		mentionIDs, err = s.resolveSearchMentions(ctx, parsed.Mentions)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(mentionIDs) == 0 {
+			// mentions: values are AND'd, so one unknown name matches nothing.
+			return nil, 0, nil
+		}
+	}
+
 	results, err = s.st.SearchMessagesFiltered(ctx, db.SearchQuery{
 		Text:       parsed.Text,
 		ChannelIDs: scope,
 		AuthorIDs:  authorIDs,
 		AfterTS:    parsed.AfterTS,
 		BeforeTS:   parsed.BeforeTS,
+		MentionIDs: mentionIDs,
+		Has:        parsed.Has,
+		Pinned:     parsed.Pinned,
 	}, page)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
@@ -153,6 +169,27 @@ func (s *MessageService) resolveSearchUsers(ctx context.Context, names []string)
 		}
 		seen[u.ID] = true
 		ids = append(ids, u.ID)
+	}
+	return ids, nil
+}
+
+// resolveSearchMentions maps mentions: usernames to distinct user ids. The
+// result is empty when any name is unknown: mentions: values are AND'd, so one
+// unknown user means nothing can match. Two spellings of one user collapse to
+// one id.
+func (s *MessageService) resolveSearchMentions(ctx context.Context, names []string) ([]int64, error) {
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		u, err := s.st.GetUserByUsername(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("%w: user lookup failed: %w", ErrInternal, err)
+		}
+		if u == nil {
+			return nil, nil
+		}
+		if !slices.Contains(ids, u.ID) {
+			ids = append(ids, u.ID)
+		}
 	}
 	return ids, nil
 }

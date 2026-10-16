@@ -1362,18 +1362,32 @@ text. Keys are case-insensitive and only count at the start of a token, so
 double-quoted to hold spaces (`from:"ann lee"`); an unterminated quote runs to
 the end of `q`.
 
-| Filter        | Value                              | Matches                                                                  |
-| ------------- | ---------------------------------- | ------------------------------------------------------------------------ |
-| `from:name`   | username, optional leading `@`     | Messages by that user (case-insensitive)                                 |
-| `in:name`     | channel name, optional leading `#` | Messages in every readable channel with that name (names are not unique) |
-| `before:date` | `YYYY-MM-DD`                       | Sent before 00:00 of that day in `tz`                                    |
-| `after:date`  | `YYYY-MM-DD`                       | Sent from 00:00 of the day after, in `tz`                                |
-| `during:date` | `YYYY-MM-DD`                       | Sent during that day in `tz`                                             |
+| Filter          | Value                                                     | Matches                                                                  |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                 |
+| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name (names are not unique) |
+| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                    |
+| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                |
+| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                             |
+| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                 |
+| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                |
+| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                    |
 
-- Repeated `from:` or `in:` values match any of them; different filters must all
-  match. Several date filters intersect, and an empty range returns no results.
+- Repeated `from:` or `in:` values match any of them; repeated `has:` or
+  `mentions:` values must all match; different filters must all match. Several date filters intersect, and an empty range returns no results.
 - An empty value (`from:`) is ignored. At most 25 filters per query and 10
-  values each of `from:` and `in:`.
+  values each of `from:`, `in:`, `has:` and `mentions:`.
+- `has:link` means the text contains `http://` or `https://` (approximate; there
+  is no embed index). `has:file` is any attachment; `image`, `video` and `sound`
+  match the attachment MIME type (`image/*`, `video/*`, `audio/*`). An upload
+  not yet sent, and any deleted message, never match. `embed`, `sticker` and
+  `poll` are not supported and are a `400`.
+- `mentions:` matches `@user` mentions in the text. A reply ping (the reply
+  notification to the replied-to author) and `@everyone` / `@here` do not count,
+  and an edit that removes the mention stops the match. A reply that pings a
+  user and also names them in the text still matches, judged from the current
+  text (approximate: `@bobby` also counts for `bob`).
+- `pinned:` takes `true` or `false`; `pinned:true pinned:false` returns nothing.
 - An unknown user or channel name returns an empty `200`. `in:` only matches
   channels the caller can read, so a private, unacknowledged NSFW or someone
   else's DM channel gives exactly the answer a nonexistent name gives, with or
@@ -1411,12 +1425,12 @@ when there are no more results. It is always `null` for `sort=relevance` when `q
 
 #### Error Responses
 
-| Status | Code                            | When                                                                                                                                                                                                     |
-| ------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent`; bad `tz`; a malformed `before:` / `after:` / `during:` date; too many filters (the message names the filter) |
-| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                                                                                                                                      |
-| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                                                                                                                                       |
-| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                                                                                                                                            |
+| Status | Code                            | When                                                                                                                                                                                                                                                                              |
+| ------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent`; bad `tz`; a malformed `before:` / `after:` / `during:` date; an unknown `has:` kind or a `pinned:` value other than `true` / `false`; too many filters (the message names the filter) |
+| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                                                                                                                                                                                                               |
+| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                                                                                                                                                                                                                |
+| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                                                                                                                                                                                                                     |
 
 ---
 
