@@ -1064,10 +1064,16 @@ ul.md-list-nested {
   cursor: zoom-in;
   user-select: none;
 }
-.image-lightbox-close {
+.image-lightbox-toolbar {
   position: absolute;
   top: 16px;
   right: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 1;
+}
+.image-lightbox-close,
+.image-lightbox-action {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-circle);
@@ -1079,9 +1085,9 @@ ul.md-list-nested {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
 }
-.image-lightbox-close:hover {
+.image-lightbox-close:hover,
+.image-lightbox-action:hover {
   background: var(--scrim-hover);
 }
 
