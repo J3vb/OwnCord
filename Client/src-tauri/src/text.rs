@@ -116,6 +116,26 @@ pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
     )
 }
 
+// --- Linux .deb update (LP-14b) -----------------------------------------
+//
+// The two `update …` strings are stable codes: the renderer matches their
+// prefix (`platform/desktop/updater.ts`) to choose its own catalog text, so do
+// not reword them. The polkit prompt's message is read by polkit from
+// `packaging/linux/com.owncord.client.update.policy`, not from here.
+
+/// pkexec reported the password prompt was dismissed (exit 126).
+#[cfg(target_os = "linux")]
+pub const UPDATE_CANCELLED: &str = "update cancelled";
+/// pkexec could not authorize the update, or no polkit agent is running (127).
+#[cfg(target_os = "linux")]
+pub const UPDATE_NOT_AUTHORIZED: &str = "update not authorized";
+/// The root helper refused the package (exit 10 to 13).
+#[cfg(target_os = "linux")]
+pub const UPDATE_PACKAGE_CHECK_FAILED: &str = "download/install failed: package check failed";
+/// apt-get, or anything else on the install path, failed.
+#[cfg(target_os = "linux")]
+pub const UPDATE_PACKAGE_MANAGER_FAILED: &str = "download/install failed: package manager failed";
+
 #[cfg(test)]
 mod tests {
     use super::*;

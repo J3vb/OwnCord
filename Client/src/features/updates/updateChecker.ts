@@ -31,7 +31,7 @@ export type UpdateCheckReason = "startup" | "interval" | "reconnect" | "manual";
 export type UpdateOutcome =
   | { readonly kind: "up-to-date" }
   | { readonly kind: "available"; readonly version: string; readonly body: string }
-  | { readonly kind: "manual-upgrade" }
+  | { readonly kind: "manual-upgrade"; readonly unconfirmed?: boolean }
   | { readonly kind: "failed" };
 
 export interface UpdateChecker {
@@ -99,8 +99,9 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     try {
       const result = await checkForUpdate(serverUrl);
       if (result.failed === true) outcome = { kind: "failed" };
-      else if (result.manual_upgrade) outcome = { kind: "manual-upgrade" };
-      else if (result.available && result.version !== null) {
+      else if (result.manual_upgrade) {
+        outcome = { kind: "manual-upgrade", unconfirmed: result.unconfirmed };
+      } else if (result.available && result.version !== null) {
         outcome = { kind: "available", version: result.version, body: result.body ?? "" };
       } else outcome = { kind: "up-to-date" };
     } catch (err) {

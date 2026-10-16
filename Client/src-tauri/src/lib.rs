@@ -7,6 +7,8 @@ mod constants;
 #[cfg(target_os = "linux")]
 mod crash_log;
 mod credentials;
+#[cfg(target_os = "linux")]
+mod deb_install;
 mod diagnostics;
 #[cfg(windows)]
 mod dpapi;

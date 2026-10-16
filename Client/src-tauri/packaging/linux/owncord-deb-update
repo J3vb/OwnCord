@@ -1,0 +1,125 @@
+#!/bin/sh
+# owncord-deb-update <deb-path> <sha256-hex>
+#
+# Root-owned helper that installs an OwnCord .deb the client has already
+# downloaded and verified. The client runs it through pkexec (polkit action
+# com.owncord.client.update), so everything below runs as root.
+#
+# What it guarantees: root installs exactly the bytes whose SHA-256 the client
+# computed from the verified download, and only a package with this package's
+# own name and the machine's architecture. The file is read once with the
+# invoking user's rights into a directory only root can write, hashed there,
+# and apt-get installs that copy, never the path the client named.
+#
+# Exit codes (pkexec itself owns 126 and 127, so this script never ends with
+# either):
+#   0   installed
+#   10  bad arguments or no PKEXEC_UID
+#   11  the source file could not be read as the invoking user
+#   12  the copy's SHA-256 is not the one given
+#   13  the package is not this package, or not built for this machine
+#   14  apt-get failed
+#   15  the work directory could not be prepared
+#
+# Environment: nothing is read except PKEXEC_UID, which pkexec sets. PATH is
+# replaced at the start of main.
+#
+# The last lines run main unless the file is being sourced by its shell test
+# (owncord-deb-update.test.sh), which stubs the commands as functions. Running
+# is the default, so an unexpected $0 can never make the helper do nothing.
+
+HELPER_PATH=/usr/lib/owncord-client/owncord-deb-update
+CACHE_ROOT=/var/cache/owncord-client
+# Largest package copied. A longer source is truncated, fails the hash (12).
+MAX_COPY_BYTES=536870912
+work=""
+
+cleanup() {
+  if [ -n "$work" ]; then
+    rm -rf -- "$work"
+    work=""
+  fi
+}
+
+# Validate the arguments, copy and check the package, install it. Returns the
+# exit code; main() normalises it and runs cleanup.
+update() {
+  [ "$#" -eq 2 ] || return 10
+  deb=$1
+  hash=$2
+  case "$deb" in
+    /*.deb) ;;
+    *) return 10 ;;
+  esac
+  case "$hash" in
+    *[!0-9a-f]*) return 10 ;;
+  esac
+  [ "${#hash}" -eq 64 ] || return 10
+  uid=${PKEXEC_UID:-}
+  case "$uid" in
+    '' | *[!0-9]*) return 10 ;;
+  esac
+
+  # The package name is never hard-coded: it is whichever package owns this
+  # helper, so a renamed package keeps working.
+  owner=$(dpkg-query -S "$HELPER_PATH" 2>/dev/null) || return 13
+  owner=${owner%%
+*}
+  own=${owner%%:*}
+  [ -n "$own" ] || return 13
+
+  # 0755, not 0700: apt's sandbox user must be able to read the copy. Only
+  # root can write or rename inside.
+  install -d -m 0755 -o root -g root "$CACHE_ROOT" || return 15
+  # Leftovers of a run that was killed outright (SIGKILL skips the trap).
+  find "$CACHE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'update.*' -mmin +1440 \
+    -exec rm -rf -- {} + 2>/dev/null || true
+  work=$(mktemp -d "$CACHE_ROOT/update.XXXXXXXX") || return 15
+  chmod 0755 "$work" || return 15
+  copy=$work/owncord.deb
+
+  gid=$(id -g "$uid") || return 11
+  # Read the source with the invoking user's own rights, so this helper never
+  # reads a file that user cannot, and only a regular one. The root shell
+  # opens the destination.
+  setpriv --reuid="$uid" --regid="$gid" --init-groups test -f "$deb" || return 11
+  setpriv --reuid="$uid" --regid="$gid" --init-groups head -c "$MAX_COPY_BYTES" -- "$deb" >"$copy" || return 11
+
+  got=$(sha256sum <"$copy") || return 12
+  got=${got%% *}
+  [ "$got" = "$hash" ] || return 12
+
+  pkg=$(dpkg-deb -f "$copy" Package) || return 13
+  arch=$(dpkg-deb -f "$copy" Architecture) || return 13
+  want=$(dpkg --print-architecture) || return 13
+  [ "$pkg" = "$own" ] || return 13
+  [ "$arch" = "$want" ] || return 13
+
+  # apt-get rather than dpkg -i: it resolves a newly added Depends and fails
+  # before unpacking when one cannot be met. --allow-downgrades because Debian
+  # version ordering and semver disagree on prereleases.
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    --allow-downgrades -o DPkg::Lock::Timeout=120 "$copy" || return 14
+  return 0
+}
+
+main() {
+  set -u
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+  umask 022
+  trap cleanup EXIT
+  trap 'exit 15' HUP INT TERM
+  update "$@"
+  rc=$?
+  cleanup
+  case "$rc" in
+    126 | 127) rc=15 ;;
+  esac
+  exit "$rc"
+}
+
+case "$0" in
+  *.test.sh) ;;
+  *) main "$@" ;;
+esac
