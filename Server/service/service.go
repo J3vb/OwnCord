@@ -46,9 +46,11 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
-	Tokens      *TokenService
-	Sessions    *SessionService
-	Setup       *SetupService
+	// ChannelPrivacy is the channel-level private flag (3D-6).
+	ChannelPrivacy *ChannelPrivacyService
+	Tokens         *TokenService
+	Sessions       *SessionService
+	Setup          *SetupService
 	// Erasure runs account erasure for the self-service route and the admin
 	// route alike (B4-9); the composition root installs the upload storage
 	// on it and the maintenance loop resumes its unfinished jobs.
@@ -134,6 +136,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Settings:        NewSettingsService(st),
 		Uploads:         uploads,
 		Voice:           NewVoiceService(st),
+		ChannelPrivacy:  NewChannelPrivacyService(st),
 		Tokens:          NewTokenService(st),
 		Sessions:        NewSessionService(st),
 		Setup:           NewSetupService(st, limiter),

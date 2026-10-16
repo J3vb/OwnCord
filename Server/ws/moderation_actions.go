@@ -116,7 +116,7 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		slog.Warn("hub: RefreshUserChannels could not list channels", "user_id", userID, "err", err)
 		return
 	}
-	defaultRole := h.defaultRoleForPrivacy(ctx)
+	privacy := h.privacySnapshot(ctx)
 	for i := range channels {
 		ch := &channels[i]
 		if ch.Type == "dm" {
@@ -136,7 +136,7 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		if live == nil {
 			return
 		}
-		live.sendMsg(buildChannelCreateFor(ch, h.channelIsPrivateFor(ctx, defaultRole, ch.ID, ch.Type), affordancesFor(sub)))
+		live.sendMsg(buildChannelCreateFor(ch, privacy.Private(ch.ID), affordancesFor(sub)))
 	}
 }
 

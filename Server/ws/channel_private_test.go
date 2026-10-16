@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -157,49 +158,50 @@ func TestPrivateFlag_FramesFollowOverrideChange(t *testing.T) {
 	}
 }
 
-// racingOverrideReader edits the world right after the ready build's one bulk
-// override read: it deletes the channel (and with it the override), so the
-// snapshot the flag was computed from is already stale by the time ready is
-// encoded.
-type racingOverrideReader struct {
-	ws.ReadySnapshotReader
+// racingPrivacy edits the world right after the ready build's one snapshot
+// read: it deletes the channel (and with it the override), so the snapshot the
+// flag was computed from is already stale by the time ready is encoded.
+type racingPrivacy struct {
+	ws.ChannelPrivacy
 	database  *db.DB
 	channelID int64
 	reads     int
 }
 
-func (r *racingOverrideReader) GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error) {
+func (r *racingPrivacy) Snapshot(ctx context.Context) (service.ChannelPrivacySnapshot, error) {
 	r.reads++
-	got, err := r.ReadySnapshotReader.GetAllChannelPermissionsForRole(ctx, roleID)
+	got, err := r.ChannelPrivacy.Snapshot(ctx)
 	if _, delErr := r.database.ExecContext(ctx, `DELETE FROM channels WHERE id = ?`, r.channelID); delErr != nil {
-		return nil, delErr
+		return service.ChannelPrivacySnapshot{}, delErr
 	}
 	return got, err
 }
 
 // Edge case 1: an override changed (here: its channel deleted) while ready is
-// building. The flag comes from the single bulk read, ready is built once, and
-// nothing panics on the vanished channel.
-func TestBuildReady_PrivateFlagUsesOneBulkSnapshot(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "private-race")
+// building. The flag comes from the single snapshot read, ready is built once,
+// and nothing panics on the vanished channel.
+func TestBuildReady_PrivateFlagUsesOneSnapshot(t *testing.T) {
+	database := openCoverageDB(t)
 	ctx := context.Background()
+	rp := &racingPrivacy{ChannelPrivacy: service.NewChannelPrivacyService(database), database: database}
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, ChannelPrivacy: rp})
+	user := seedCoverageOwner(t, database, "private-race")
 	goneID, _ := database.CreateChannel(ctx, "vanishing", "text", "", "", 0)
 	keepID, _ := database.CreateChannel(ctx, "stays", "text", "", "", 1)
 	denyDefaultRoleRead(t, database, goneID)
 	denyDefaultRoleRead(t, database, keepID)
+	rp.channelID = goneID
 
-	rd := &racingOverrideReader{ReadySnapshotReader: database, database: database, channelID: goneID}
 	owner, err := database.GetRoleByID(ctx, 1)
 	if err != nil || owner == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := hub.WriteReadyForTest(rd, user.ID, owner, &buf); err != nil {
+	if err := hub.WriteReadyForTest(database, user.ID, owner, &buf); err != nil {
 		t.Fatalf("WriteReadyForTest: %v", err)
 	}
-	if rd.reads != 1 {
-		t.Errorf("bulk override reads = %d, want exactly 1", rd.reads)
+	if rp.reads != 1 {
+		t.Errorf("snapshot reads = %d, want exactly 1", rp.reads)
 	}
 	byID := readyChannelsByID(t, buf.Bytes())
 	if ch, ok := byID[keepID]; !ok || ch["private"] != true {
@@ -243,16 +245,21 @@ func TestNotifyModAction_TimeoutRefreshCarriesPrivateFlag(t *testing.T) {
 	}
 }
 
-// failingBulkReader errors the ready bulk override read.
-type failingBulkReader struct{ ws.ReadySnapshotReader }
+// failingPrivacy errors every read.
+type failingPrivacy struct{}
 
-func (failingBulkReader) GetAllChannelPermissionsForRole(context.Context, int64) (map[int64]db.ChannelOverride, error) {
-	return nil, errors.New("bulk read failed")
+func (failingPrivacy) Snapshot(context.Context) (service.ChannelPrivacySnapshot, error) {
+	return service.ChannelPrivacySnapshot{}, errors.New("snapshot failed")
 }
 
-// A failed bulk read must not fail ready: everything is private=false.
-func TestBuildReady_BulkOverrideReadFailureIsNotPrivate(t *testing.T) {
-	hub, database := newCoverageHub(t)
+func (failingPrivacy) ChannelIsPrivate(context.Context, int64) (bool, error) {
+	return false, errors.New("read failed")
+}
+
+// A failed read must not fail ready or a frame: everything is private=false.
+func TestBuildReady_PrivacyReadFailureIsNotPrivate(t *testing.T) {
+	database := openCoverageDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, ChannelPrivacy: failingPrivacy{}})
 	user := seedCoverageOwner(t, database, "private-bulkfail")
 	id, _ := database.CreateChannel(context.Background(), "locked", "text", "", "", 0)
 	denyDefaultRoleRead(t, database, id)
@@ -261,8 +268,8 @@ func TestBuildReady_BulkOverrideReadFailureIsNotPrivate(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := hub.WriteReadyForTest(failingBulkReader{database}, user.ID, owner, &buf); err != nil {
-		t.Fatalf("ready failed on bulk read error: %v", err)
+	if err := hub.WriteReadyForTest(database, user.ID, owner, &buf); err != nil {
+		t.Fatalf("ready failed on privacy read error: %v", err)
 	}
 	byID := readyChannelsByID(t, buf.Bytes())
 	if len(byID) == 0 {

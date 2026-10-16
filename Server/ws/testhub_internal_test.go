@@ -41,6 +41,9 @@ func newTestHubWith(tb testing.TB, opts HubOptions) *Hub {
 	if opts.Presence == nil && opts.DB != nil {
 		opts.Presence = service.NewUserService(opts.DB)
 	}
+	if opts.ChannelPrivacy == nil && opts.DB != nil {
+		opts.ChannelPrivacy = service.NewChannelPrivacyService(opts.DB)
+	}
 	if opts.Auth == nil && opts.DB != nil {
 		opts.Auth = service.NewSessionService(opts.DB)
 	}
