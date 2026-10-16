@@ -89,6 +89,18 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
+/// The app-sound registry (WP LP-6b); off Linux the sounds stay in the webview.
+#[cfg(target_os = "linux")]
+fn app_sounds_state() -> native_voice::app_sound::AppSounds {
+    native_voice::app_sound::AppSounds::default()
+}
+#[cfg(not(target_os = "linux"))]
+struct NoAppSounds;
+#[cfg(not(target_os = "linux"))]
+fn app_sounds_state() -> NoAppSounds {
+    NoAppSounds
+}
+
 /// Whether a forwarded single-instance launch should restore the main window.
 ///
 /// Once an installer is launching the old process must not take handoffs: the
@@ -188,6 +200,7 @@ pub fn run() {
         .manage(http_proxy::HttpProxyState::new())
         .manage(external_content::ExternalContentState::new())
         .manage(native_voice_state())
+        .manage(app_sounds_state())
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
             #[cfg(desktop)]
@@ -275,6 +288,10 @@ pub fn run() {
             native_voice::native_voice_set_device,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_watch_devices,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_play_sound,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_sound,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_list_cameras,
             #[cfg(target_os = "linux")]

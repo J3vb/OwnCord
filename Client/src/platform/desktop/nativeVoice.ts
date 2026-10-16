@@ -83,6 +83,21 @@ export const nativeVoice: NativeVoice = {
       unlisten = null;
     };
   },
+  async playSound(notes, deviceId, gain) {
+    try {
+      return await (await service()).playSound(notes, deviceId, gain);
+    } catch {
+      // The chunk failed to load: the caller falls back, as for a host failure.
+      return null;
+    }
+  },
+  async stopSound(id) {
+    try {
+      await (await service()).stopSound(id);
+    } catch {
+      // Nothing to cut when the host bindings never loaded.
+    }
+  },
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.

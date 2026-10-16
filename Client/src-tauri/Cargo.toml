@@ -68,7 +68,7 @@ tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.32"
-tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros", "time"] }
 tokio-rustls = { version = "0.26", default-features = false }
 # TCP keepalive on the REST tunnel's pooled upstream sockets (http_pool.rs);
 # tokio exposes none. Already in the dependency tree through tokio.

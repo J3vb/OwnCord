@@ -439,6 +439,8 @@ describeNativeVoiceSuite(async () => {
     stopMicTest: async () => undefined,
     onMicTestEvent: () => () => undefined,
     watchDevices: () => () => undefined,
+    playSound: async () => undefined,
+    stopSound: async () => undefined,
     onEvent: () => () => undefined,
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
@@ -453,6 +455,8 @@ describeNativeVoiceSuite(async () => {
     reportsStats: () => undefined,
     failsStats: () => undefined,
     refusesDeviceWatch: () => undefined,
+    startsSoundAs: () => undefined,
+    failsSound: () => undefined,
     commands: () => [],
     emits: async () => undefined,
     emitsDevices: async () => undefined,
