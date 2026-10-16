@@ -72,6 +72,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
 - Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
+- Linux: paused video layers stay paused when you start or stop another camera or screen share.
 
 **Profiles**
 

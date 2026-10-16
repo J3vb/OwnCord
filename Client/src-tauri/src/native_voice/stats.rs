@@ -205,12 +205,14 @@ mod tests {
 
     /// libwebrtc parses each stats report with an `unwrap()` inside a cxx
     /// callback, so a report type or enum value its `RtcStats` does not know
-    /// aborts the app. The parse was checked against this exact pair; a bump
-    /// must re-check `RtcStats` against the new WebRTC stats before landing.
+    /// aborts the app. The parse was checked against this exact pair (0.3.52 /
+    /// 0.3.49 add only `PeerConnection::set_bitrate`; `RtcStats` is unchanged and
+    /// the prebuilt libwebrtc tag is still webrtc-89d790b); a bump must re-check
+    /// `RtcStats` against the new WebRTC stats before landing.
     #[test]
     fn the_stats_parser_is_the_reviewed_libwebrtc() {
         let lock = include_str!("../../Cargo.lock");
-        for (name, version) in [("libwebrtc", "0.3.50"), ("webrtc-sys", "0.3.47")] {
+        for (name, version) in [("libwebrtc", "0.3.52"), ("webrtc-sys", "0.3.49")] {
             let entry = format!("name = \"{name}\"\nversion = \"{version}\"\n");
             assert!(
                 lock.contains(&entry),
