@@ -1356,6 +1356,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1391,6 +1392,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1407,6 +1409,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1663,6 +1666,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1706,6 +1710,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1722,6 +1727,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1759,6 +1765,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1797,6 +1804,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1813,6 +1821,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1962,6 +1971,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2004,6 +2014,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2307,6 +2318,7 @@ describe("SidebarArea", () => {
               topic: "",
               slowMode: 0,
               nsfw: false,
+              isPrivate: false,
               voiceMaxUsers: 0,
               voiceMaxVideo: 0,
             });
@@ -2747,6 +2759,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -3719,6 +3732,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });

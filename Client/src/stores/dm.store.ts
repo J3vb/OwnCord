@@ -155,6 +155,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     // guild channels, and a DM row is synthesised here rather than coming from
     // the server's channel list.
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };

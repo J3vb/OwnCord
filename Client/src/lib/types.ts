@@ -220,6 +220,13 @@ export interface ReadyChannel {
    */
   readonly nsfw?: boolean;
   /**
+   * Whether the channel is private: @everyone cannot see it (a permission
+   * override hides it), worked out per channel, not per viewer. Sent on every
+   * guild channel, never on DMs; absent from older servers, which is read as
+   * "not private". Drives the sidebar's lock badge only.
+   */
+  readonly private?: boolean;
+  /**
    * Whether the CALLER has acknowledged this labelled channel (B5-7) — per
    * account, so every device inherits it. Always false for an unlabelled
    * channel. Absent reads as "not acknowledged": the gate fails closed.
@@ -571,6 +578,8 @@ export interface ChannelCreatePayload {
   readonly slow_mode?: number;
   /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
+  /** See ReadyChannel.private — absent means unchanged. */
+  readonly private?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
@@ -610,6 +619,8 @@ export interface ChannelUpdatePayload {
   readonly slow_mode?: number;
   /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
   readonly nsfw?: boolean;
+  /** See ReadyChannel.private — absent means unchanged. */
+  readonly private?: boolean;
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
