@@ -114,13 +114,13 @@ says exactly what the beta does and does not claim about who can read what.
   talk, mute and deafen use the desktop's GlobalShortcuts portal. That
   exists on GNOME 48 and newer and on KDE Plasma. GNOME 47 and older, and
   wlroots desktops such as Sway, have no portal for it, so there are no global
-  keys there; the tray menu's Mute and Deafen still work. On the portal,
+  keys there; the tray menu's Mute and Deafen still work where there is a tray. On the portal,
   push to talk takes function keys (F1 to F24) only, and the desktop owns the
   keys while they are bound: the focused app no longer receives them. On X11 the
   app reads the keys itself and is not affected. See
   [Wayland notes](linux-install.md#wayland-notes).
-- **On Linux, screen-share audio is probably heard in mono for now.** Viewers
-  most likely hear the shared sound in mono. This needs PulseAudio or
+- **On Linux, viewers hear screen-share audio in mono for now.** The app sends
+  it in stereo, but the stereo signal is not passed on yet. This needs PulseAudio or
   pipewire-pulse to be running.
 - **On Linux, some media needs extra distro packages.**
   - Video attachments and YouTube embeds that use H264/AAC play only with

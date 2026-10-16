@@ -192,7 +192,7 @@ fn open_log_folder_from_tray<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// Settings > Advanced "Open log folder": the same folder as the tray item, for
+/// Settings > Diagnostics & logs "Open log folder": the same folder as the tray item, for
 /// desktops with no tray (stock GNOME). The error text reaches the webview.
 #[tauri::command]
 pub fn open_log_folder<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {

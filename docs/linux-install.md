@@ -206,8 +206,8 @@ You also need PipeWire for the capture itself.
   the app offers it. It checks the signature, then replaces the AppImage file.
 - **.deb.** The app updates itself too. Click Update Now, and the desktop asks
   once for your administrator password. OwnCord then installs the new package
-  and restarts. This needs `pkexec` (installed on most desktops). Without it,
-  or if you prefer, install the new `.deb` by hand:
+  and restarts. This needs a polkit password agent, which every full desktop has. On a bare
+  window manager without one, or if you prefer, install the new `.deb` by hand:
 
   ```bash
   sudo apt install ./OwnCord_<new-version>_amd64.deb

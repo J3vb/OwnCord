@@ -39,7 +39,7 @@ Tester: ______________ Date: ______________
 | 10  | Pop-out window                    |      |      |       |
 | 11  | Notifications and sounds          |      |      |       |
 | 12  | Unread badge                      |      |      |       |
-| 13  | Auto-idle goes Away               |      |      |       |
+| 13  | Auto-idle goes Idle               |      |      |       |
 | 14  | Close to tray with a tray         |      |      |       |
 | 15  | Close with no tray                |      |      |       |
 | 16  | In-app update (AppImage)          |      |      |       |
@@ -217,14 +217,14 @@ You should see:
 On stock GNOME the tray needs the AppIndicator extension. Install it for this
 item.
 
-## 13. Auto-idle goes Away
+## 13. Auto-idle goes Idle
 
-Do: Settings, set the idle time to the shortest. Leave the keyboard and mouse
-alone for that long, with OwnCord in the background. Then move the mouse.
+Do: leave the keyboard and mouse alone for 10 minutes, with OwnCord in the
+background. Then move the mouse.
 
 You should see:
 
-- Your status changes to Away.
+- Your status changes to Idle.
 - It goes back to Online when you move the mouse or press a key.
 - This works when you used another app, not only OwnCord.
 
@@ -250,7 +250,7 @@ is on. Close the window.
 You should see:
 
 - OwnCord really quits. It does not hide.
-- Nothing is left running. Check with `pgrep -a owncord`.
+- Nothing is left running. Check with `pgrep -ai owncord`.
 - Start it again. It opens normally.
 
 ## 16. In-app update (AppImage)
