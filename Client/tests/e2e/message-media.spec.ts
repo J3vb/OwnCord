@@ -194,6 +194,22 @@ async function currentTransform(page: Page): Promise<{ scale: number; x: number;
   });
 }
 
+async function openedUrls(page: Page): Promise<unknown[]> {
+  return page.evaluate(() =>
+    (
+      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { url?: unknown } }> }
+    ).__invokeLog
+      .filter((e) => e.cmd === "plugin:opener|open_url")
+      .map((e) => e.args?.url),
+  );
+}
+
+async function invokedCommands(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.map((e) => e.cmd),
+  );
+}
+
 test.describe("Image lightbox", () => {
   test("a direct image URL is fetched through the broker and opens the lightbox on click", async ({
     page,
@@ -234,6 +250,37 @@ test.describe("Image lightbox", () => {
     await expect.poll(() => currentTransform(page)).toMatchObject({ scale: 1, x: 0, y: 0 });
 
     await page.locator(".image-lightbox-close").click();
+    await expect(page.locator(".image-lightbox")).toBeHidden();
+  });
+
+  test("the toolbar offers Download and Open original, and Tab reaches them", async ({ page }) => {
+    await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
+    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
+    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+    await inlineImg.click();
+    await expect(page.locator(".image-lightbox")).toBeVisible();
+
+    const download = page.getByRole("button", { name: "Download image" });
+    const openOriginal = page.getByRole("button", { name: "Open original" });
+    await expect(download).toBeVisible();
+    await expect(openOriginal).toBeVisible();
+    await expect(page.locator(".image-lightbox-close")).toBeFocused();
+
+    // Tab order is the visual order: Download, Open original, Close.
+    await page.keyboard.press("Tab");
+    await expect(download).toBeFocused();
+    await page.keyboard.press("Enter");
+    // The native save dialog is the first step of a save (the mock cancels it).
+    await expect.poll(() => invokedCommands(page)).toContain("plugin:dialog|save");
+
+    await page.keyboard.press("Tab");
+    await expect(openOriginal).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await openedUrls(page)).length).toBe(1);
+    expect(await openedUrls(page)).toEqual([IMAGE_URL]);
+
+    // Escape still dismisses it.
+    await page.keyboard.press("Escape");
     await expect(page.locator(".image-lightbox")).toBeHidden();
   });
 
