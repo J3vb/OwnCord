@@ -1,5 +1,5 @@
 /**
- * MessageInput component — textarea with send, reply bar, and edit mode.
+ * MessageInput component — textarea with send and reply bar.
  * Step 5.42 of the Tauri v2 migration.
  */
 
@@ -27,6 +27,10 @@ import {
 } from "@components/ChannelAutocomplete";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
+import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
+import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
+
+export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
@@ -57,9 +61,6 @@ export interface MessageInputOptions {
    *  once. Best effort: a rejection is ignored. */
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
-  readonly onEditMessage: (messageId: number, content: string) => void;
-  /** Enter on an edit whose text was cleared: offer to delete the message. */
-  readonly onEmptyEdit?: (messageId: number) => void;
   /** The draft's text or reply changed; read it back with peekDraft(). */
   readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -128,25 +129,24 @@ export interface DraftUpload {
 export type MessageInputComponent = MountableComponent & {
   setReplyTo(messageId: number, username: string, opts?: Pick<ReplyTarget, "ping" | "self">): void;
   clearReply(): void;
-  startEdit(messageId: number, content: string): void;
-  cancelEdit(): void;
+  /** Put the caret back in the composer (the inline editor closed). */
+  focus(): void;
   /** Capture the current unsent state so a channel switch can carry it. */
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */
   restoreDraft(draft: ComposerDraft): void;
-  /** The draft's text and reply (the one an edit displaced, mid-edit), with
-   *  none of getDraft()'s upload hand-off. */
+  /** The draft's text and reply, with none of getDraft()'s upload hand-off. */
   peekDraft(): { readonly content: string; readonly replyTo: ReplyTarget | null };
   /**
    * Put back files a send did not carry, as chips in their error state, and
-   * the send's reply target when the composer has no reply or edit of its own.
+   * the send's reply target when the composer has no reply of its own.
    */
   restoreUnsent(
     files: readonly SentAttachment[],
     reason: "skipped" | "unavailable",
     replyTo?: ComposerDraft["replyTo"],
   ): void;
-  /** True when the composer holds no text, reply, edit or attachment. */
+  /** True when the composer holds no text, reply or attachment. */
   isIdle(): boolean;
   /**
    * Disable the composer with a visible reason (permission / connection), or
@@ -176,94 +176,6 @@ export type MessageInputComponent = MountableComponent & {
    *  Ctrl+G). No-op while that button is disabled. */
   togglePicker(kind: "emoji" | "gif"): void;
 };
-
-/** Ctrl/Cmd shortcut → markdown marker it wraps the selection in. */
-const FORMAT_MARKERS: Readonly<Record<string, string>> = {
-  b: "**",
-  i: "*",
-  u: "__",
-};
-
-export interface WrapResult {
-  readonly value: string;
-  readonly selectionStart: number;
-  readonly selectionEnd: number;
-}
-
-/**
- * Wrap (or unwrap) `[start, end)` of `value` in `marker`, returning the new
- * value and where the selection should land. With an empty selection the
- * markers are inserted around the caret so typing continues inside them.
- *
- * Pure so the behaviour can be tested without a DOM selection.
- */
-export function wrapWithMarker(
-  value: string,
-  start: number,
-  end: number,
-  marker: string,
-): WrapResult {
-  const selected = value.slice(start, end);
-  const len = marker.length;
-
-  // Already wrapped — pressing the shortcut again takes the markers back off.
-  // The interior must not itself contain the marker: otherwise a selection
-  // that merely starts and ends with it (e.g. multiple already-wrapped spans,
-  // or a longer marker like "**" matching the outer edge of "*x*") would be
-  // mistaken for a single wrapped span and have its interior markers stripped.
-  if (
-    selected.length > 2 * len &&
-    selected.startsWith(marker) &&
-    selected.endsWith(marker) &&
-    !selected.slice(len, selected.length - len).includes(marker)
-  ) {
-    const inner = selected.slice(len, selected.length - len);
-    return {
-      value: value.slice(0, start) + inner + value.slice(end),
-      selectionStart: start,
-      selectionEnd: start + inner.length,
-    };
-  }
-  if (value.slice(start - len, start) === marker && value.slice(end, end + len) === marker) {
-    // The characters immediately outside the selection match this marker,
-    // but matching alone doesn't prove they *are* this marker rather than
-    // the edge of a longer run of the same repeated character — e.g. the
-    // single "*" bordering a double-clicked word inside "**bold**" matches
-    // the italic marker "*", but it's really one half of a "**" bold pair.
-    // Compare the full contiguous run of the marker's character against
-    // exactly one marker-width: a run that's a whole marker-width *longer*
-    // means the true neighbour is a bigger marker, so unwrapping here would
-    // tear it apart. Fall through to wrapping (adding this marker as an
-    // extra layer) instead.
-    const markerChar = marker[0];
-    const runLength = (index: number, step: -1 | 1): number => {
-      let i = index;
-      let count = 0;
-      while (value[i] === markerChar) {
-        count++;
-        i += step;
-      }
-      return count;
-    };
-    const leftRun = runLength(start - 1, -1);
-    const rightRun = runLength(end, 1);
-    const leftIsLongerMarker = leftRun - len === len;
-    const rightIsLongerMarker = rightRun - len === len;
-    if (!leftIsLongerMarker && !rightIsLongerMarker) {
-      return {
-        value: value.slice(0, start - len) + selected + value.slice(end + len),
-        selectionStart: start - len,
-        selectionEnd: start - len + selected.length,
-      };
-    }
-  }
-
-  return {
-    value: value.slice(0, start) + marker + selected + marker + value.slice(end),
-    selectionStart: start + len,
-    selectionEnd: start + len + selected.length,
-  };
-}
 
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -299,11 +211,6 @@ function refusedExtension(name: string): string | null {
 // the queue client-side so we never upload an attachment doomed to be
 // orphaned by a send that can never succeed.
 const MAX_ATTACHMENTS = 10;
-// Server/service/message.go's maxMessageLen refuses content past 4000 code
-// points (utf8.RuneCountInString). Mirror it here so an over-long send fails
-// visibly instead of producing an optimistic row whose retry fails identically.
-// Counted in code points, not UTF-16 units -- see the guard in handleSend.
-const MAX_MESSAGE_LEN = 4000;
 // The counter shows once this few characters are left, as Discord's does.
 const COUNTER_FROM_REMAINING = 200;
 /** Where a file dragged in from the OS is accepted. */
@@ -356,15 +263,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let root: HTMLDivElement | null = null;
   let state = {
     replyTo: null as ReplyTarget | null,
-    editing: null as { messageId: number } | null,
   };
-  /** The ordinary draft (text + reply) displaced by an edit, so cancelling or
-   *  saving the edit gives the user back what they were typing (P1-08). Staged
-   *  attachments are untouched by an edit and read live from the composer. */
-  let preEditDraft: {
-    text: string;
-    replyTo: ReplyTarget | null;
-  } | null = null;
   let lastTypingTime = 0;
   let lastSendTime = 0;
 
@@ -372,7 +271,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let replyBar: HTMLDivElement | null = null;
   let replyText: HTMLSpanElement | null = null;
   let replyPingBtn: HTMLButtonElement | null = null;
-  let editBar: HTMLDivElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
   /** Slow-mode-style gate: refuses the send without freezing the composer. */
   let sendGateReason: string | null = null;
@@ -705,12 +603,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function hideReplyBar(): void {
     replyBar?.classList.remove("visible");
   }
-  function showEditBar(): void {
-    editBar?.classList.add("visible");
-  }
-  function hideEditBar(): void {
-    editBar?.classList.remove("visible");
-  }
 
   function autoResize(): void {
     if (textarea === null) return;
@@ -737,8 +629,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function maybeEmitTyping(): void {
-    // Editing an old message is not typing a new one (Discord shows nothing).
-    if (state.editing !== null) return;
     const now = Date.now();
     if (now - lastTypingTime >= TYPING_THROTTLE_MS) {
       lastTypingTime = now;
@@ -893,13 +783,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (textarea === null) return;
     const content = replaceEmojiShortcodes(textarea.value.trim());
     const hasAttachments = pendingAttachments.length > 0;
-    // Edits are text-only, so a queued attachment must not unlock submitting
-    // an edit whose text was cleared -- that would tear down edit mode for a
-    // send the host refuses anyway.
-    if (content.length === 0 && state.editing !== null) {
-      options.onEmptyEdit?.(state.editing.messageId);
-      return;
-    }
     if (content.length === 0 && !hasAttachments) return;
 
     // The spread counts code points, which is what the server counts. A
@@ -919,35 +802,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     // The age timer can fire late (a sleeping machine, a throttled window), so
     // Send checks the age itself and never posts an id the sweep may have taken.
-    if (state.editing === null) {
-      const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
-      if (stale.length > 0) {
-        for (const a of stale) refreshStale(a);
-        showUploadError(
-          messagingText(
-            stale.some((a) => a.expired === true)
-              ? "error.attachmentExpired"
-              : "error.attachmentRefreshing",
-          ),
-        );
-        return;
-      }
+    const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
+    if (stale.length > 0) {
+      for (const a of stale) refreshStale(a);
+      showUploadError(
+        messagingText(
+          stale.some((a) => a.expired === true)
+            ? "error.attachmentExpired"
+            : "error.attachmentRefreshing",
+        ),
+      );
+      return;
     }
 
     // Debounce to prevent double-click duplicate sends
     const now = Date.now();
     if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
     lastSendTime = now;
-
-    if (state.editing !== null) {
-      options.onEditMessage(state.editing.messageId, content);
-      // P1-08: sending the edit returns the composer to the ordinary draft the
-      // edit displaced, instead of clearing everything.
-      restorePreEditDraft();
-      clearUploadError();
-      textarea.focus();
-      return;
-    }
 
     // Only include attachments that have finished uploading (have a real server ID)
     const files = pendingAttachments.flatMap((a): SentAttachment[] =>
@@ -976,7 +847,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  When the file could not be attached the paste stays plain text. */
   function pasteLongTextAsFile(e: ClipboardEvent): void {
     if (textarea === null || options.onUploadFile === undefined) return;
-    if (state.editing !== null || disabledReason !== null || uploadsDisabledByServer()) return;
+    if (disabledReason !== null || uploadsDisabledByServer()) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text === "") return;
     const { value, selectionStart, selectionEnd } = textarea;
@@ -1027,7 +898,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           target instanceof Element &&
           target.closest(DROP_SLOTS) !== null &&
           disabledReason === null &&
-          state.editing === null &&
           !uploadsDisabledByServer() &&
           !dialogOpen();
         if (!accepts) {
@@ -1157,14 +1027,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (disabledReason !== null) return;
     if (uploadsDisabledByServer()) {
       showUploadError(messagingText("attach.serverDisabled"));
-      return;
-    }
-
-    // Attachments queued during an edit are neither sent (the edit branch
-    // never reads pendingAttachments) nor cleared -- they'd silently ride
-    // along with the next ordinary message. Refuse at the single entry point.
-    if (state.editing !== null) {
-      showUploadError(messagingText("error.attachWhileEditing"));
       return;
     }
 
@@ -1361,11 +1223,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     username: string,
     opts: Pick<ReplyTarget, "ping" | "self"> = {},
   ): void {
-    // Leaving edit mode for reply mode discards the edit and gives back the
-    // ordinary draft the edit displaced. Without this the stale edit text
-    // survives into reply mode and Enter reposts it as a duplicate.
-    if (state.editing !== null) cancelEdit();
-    state = { replyTo: { messageId, username, ...opts }, editing: null };
+    state = { replyTo: { messageId, username, ...opts } };
     showReplyBar();
     textarea?.focus();
     options.onDraftChange?.();
@@ -1377,49 +1235,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     options.onDraftChange?.();
   }
 
-  function startEdit(messageId: number, content: string): void {
-    // P1-08: stash what the user was typing (text + reply) before the edit
-    // takes over the composer, so cancelling or saving gives it back. Staged
-    // attachments are left in place and read live, not part of the stash.
-    if (preEditDraft === null) {
-      preEditDraft = { text: textarea?.value ?? "", replyTo: state.replyTo };
-    }
-    if (state.replyTo !== null) hideReplyBar();
-    state = { replyTo: null, editing: { messageId } };
-    showEditBar();
-    if (textarea !== null) {
-      textarea.value = content;
-      autoResize();
-      textarea.focus();
-    }
-  }
-
-  /** Return the composer to the ordinary draft an edit displaced. Falls back to
-   *  an empty composer when an edit was opened without one. */
-  function restorePreEditDraft(): void {
-    const stashed = preEditDraft ?? { text: "", replyTo: null };
-    preEditDraft = null;
-    state = { replyTo: stashed.replyTo, editing: null };
-    hideEditBar();
-    if (textarea !== null) {
-      textarea.value = stashed.text;
-      autoResize();
-    }
-    if (stashed.replyTo !== null) showReplyBar();
-    else hideReplyBar();
-    options.onDraftChange?.();
-  }
-
-  function cancelEdit(): void {
-    restorePreEditDraft();
+  function focus(): void {
+    textarea?.focus();
   }
 
   function isIdle(): boolean {
     return (
-      (textarea?.value ?? "") === "" &&
-      state.replyTo === null &&
-      state.editing === null &&
-      pendingAttachments.length === 0
+      (textarea?.value ?? "") === "" && state.replyTo === null && pendingAttachments.length === 0
     );
   }
 
@@ -1457,19 +1279,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyClose.addEventListener("click", clearReply, { signal });
     replyInner.appendChild(replyClose);
     replyBar.appendChild(replyInner);
-
-    editBar = createElement("div", { class: "reply-bar" });
-    const editInner = createElement("div", { class: "reply-bar-inner" });
-    const editText = createElement("strong", {}, messagingText("edit.editing"));
-    editInner.appendChild(editText);
-    const editClose = createElement("button", {
-      class: "reply-close",
-      "aria-label": messagingText("edit.cancel"),
-    });
-    editClose.appendChild(createIcon("x", 14));
-    editClose.addEventListener("click", () => cancelEdit(), { signal });
-    editInner.appendChild(editClose);
-    editBar.appendChild(editInner);
 
     attachmentPreviewBar = createElement("div", { class: "attachment-preview-bar" });
 
@@ -1589,10 +1398,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         // An Escape that cancels something is used up: the app-wide Escape
         // (mark the channel read) leaves a prevented key alone.
         if (e.key === "Escape") {
-          if (state.editing !== null) {
-            e.preventDefault();
-            cancelEdit();
-          } else if (state.replyTo !== null) {
+          if (state.replyTo !== null) {
             e.preventDefault();
             clearReply();
           }
@@ -1856,7 +1662,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
     });
-    appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
+    appendChildren(root, replyBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
     applySlowModeNote();
     container.appendChild(root);
     // Apply any initial disabled reason before focusing.
@@ -1892,8 +1698,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyBar = null;
     replyText = null;
     replyPingBtn = null;
-    editBar = null;
-    preEditDraft = null;
     attachmentPreviewBar = null;
     uploadErrorEl = null;
     charCounter = null;
@@ -1913,16 +1717,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  their server id; an upload still in flight is handed to the draft, and
    *  destroy() then leaves it running for the composer that restores it.
    *  The caller owns those uploads: store the draft or destroy each owner.
-   *  Mid-edit this is the draft the edit displaced: the edit text itself is
-   *  never stashed, since restored outside edit mode it would send as a
-   *  duplicate new message. */
+   */
   function peekDraft(): { content: string; replyTo: ReplyTarget | null } {
-    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
-    return { content: stashed.text, replyTo: stashed.replyTo };
+    return { content: textarea?.value ?? "", replyTo: state.replyTo };
   }
 
   function getDraft(): ComposerDraft {
-    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     const uploads: DraftUpload[] = [];
     for (const a of pendingAttachments) {
       if (a.upload === undefined) continue;
@@ -1930,8 +1730,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       uploads.push(a.upload);
     }
     return {
-      content: stashed.text,
-      replyTo: stashed.replyTo,
+      content: textarea?.value ?? "",
+      replyTo: state.replyTo,
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
@@ -2037,7 +1837,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyTo?: ComposerDraft["replyTo"],
   ): void {
     if (attachmentPreviewBar === null) return;
-    if (replyTo != null && state.replyTo === null && state.editing === null) {
+    if (replyTo != null && state.replyTo === null) {
       const { messageId, username, ...opts } = replyTo;
       setReplyTo(messageId, username, opts);
     }
@@ -2056,8 +1856,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     destroy,
     setReplyTo,
     clearReply,
-    startEdit,
-    cancelEdit,
+    focus,
     isIdle,
     setDisabled,
     setSendGate,

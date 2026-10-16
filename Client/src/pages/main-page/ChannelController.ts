@@ -388,21 +388,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     return entry;
   }
 
-  /** Put a failed edit's text back in the composer, but only while its own
-   *  channel is the mounted one and the composer holds nothing of the user's
-   *  — the row it belongs to may be gone by now, and startEdit against
-   *  another channel's composer would target the wrong message id. At most
-   *  one edit lands, the newest; the error toast (when asked for) says the text is back
-   *  only if it is. Deferred a microtask because the synchronous disconnected
-   *  path runs inside MessageInput.handleSend, whose own restore of the
-   *  pre-edit draft (right after onEditMessage returns) would otherwise wipe
-   *  the restored edit text. */
+  /** Put a failed edit's text back in its row's inline editor, but only while
+   *  its own channel is the mounted one and no other edit is open — the row it
+   *  belongs to may be gone by now (startEdit refuses a message that is not
+   *  loaded, not yours or not sent), and a list for another channel would
+   *  target the wrong message id. At most one edit lands, the newest; the error
+   *  toast (when asked for) says the text is back only if it is. */
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
       let restored = false;
-      if (newest !== undefined && messageInput?.isIdle() === true) {
-        messageInput.startEdit(newest.messageId, newest.content);
+      if (
+        newest !== undefined &&
+        messageList !== null &&
+        !messageList.isEditing() &&
+        messageList.startEdit(newest.messageId, newest.content)
+      ) {
         restored = true;
       }
       if (toast) {
@@ -1131,12 +1132,37 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       },
       onEditClick: (msgId: number) => {
-        const msgs = getChannelMessages(channelId);
-        const msg = msgs.find((m) => m.id === msgId);
-        if (msg !== undefined) {
-          messageInput?.startEdit(msgId, msg.content);
-        }
+        messageList?.startEdit(msgId);
       },
+      onEditSave: (messageId: number, content: string): boolean => {
+        const msgs = getChannelMessages(channelId);
+        const original = msgs.find((m) => m.id === messageId);
+        if (original !== undefined && original.content === content) {
+          return true;
+        }
+        // CLI-08: same connection gate as delete. A dropped edit frame must
+        // not look saved — the row would keep its old text, and the user
+        // would never know to try again. The editor stays open with the text.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          showToast(messagingText("toast.editFailed"), "error");
+          return false;
+        }
+        const id = ws.send({
+          type: "chat_edit",
+          payload: { message_id: messageId, content },
+        });
+        track(pendingEdits, id, { channelId, messageId, content });
+        return true;
+      },
+      // Discord's flow: clearing an edit and pressing Save asks to delete the
+      // message. Cancel leaves the editor open; Delete closes it first.
+      onEmptyEdit: (messageId: number) => {
+        openDeleteConfirm(messageId, {
+          onConfirm: () => messageList?.cancelEdit(),
+          clicked: false,
+        });
+      },
+      onEditEnd: () => messageInput?.focus(),
       onDeleteClick: (msgId: number, shiftKey: boolean) => {
         // Shift-click skips the prompt, as Discord's delete confirm does
         // (P4-12). A plain click opens a confirm.
@@ -1271,38 +1297,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             payload: { channel_id: channelId },
           });
         }
-      },
-      onEditMessage: (messageId: number, content: string) => {
-        const trimmed = content.trim();
-        if (trimmed === "") {
-          showToast(messagingText("toast.emptyMessage"), "error");
-          return;
-        }
-        const msgs = getChannelMessages(channelId);
-        const original = msgs.find((m) => m.id === messageId);
-        if (original !== undefined && original.content === trimmed) {
-          return;
-        }
-        // CLI-08: same connection gate as delete. A dropped edit frame must
-        // not toast success — the row would keep its old text, and the user
-        // would never know to try again.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          failEdits([{ channelId, messageId, content: trimmed }], true);
-          return;
-        }
-        const id = ws.send({
-          type: "chat_edit",
-          payload: { message_id: messageId, content: trimmed },
-        });
-        track(pendingEdits, id, { channelId, messageId, content: trimmed });
-      },
-      // Discord's flow: clearing an edit and pressing Enter asks to delete the
-      // message. Cancel leaves the edit open; Delete closes it first.
-      onEmptyEdit: (messageId: number) => {
-        openDeleteConfirm(messageId, {
-          onConfirm: () => messageInput?.cancelEdit(),
-          clicked: false,
-        });
       },
       onDraftChange: scheduleDraftSave,
     });
@@ -1621,7 +1615,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
           if (m.user.id === myId && !m.deleted && m.status === "sent") {
-            messageInput?.startEdit(m.id, m.content);
+            messageList?.startEdit(m.id);
             break;
           }
         }

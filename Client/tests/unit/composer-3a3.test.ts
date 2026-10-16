@@ -18,7 +18,6 @@ function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInput
     channelName: "general",
     onSend: vi.fn(),
     onTyping: vi.fn(),
-    onEditMessage: vi.fn(),
     ...overrides,
   };
 }
@@ -210,39 +209,6 @@ describe("composer polish (3A-3)", () => {
     });
   });
 
-  describe("editing", () => {
-    it("offers to delete when an emptied edit is sent", () => {
-      const onEmptyEdit = vi.fn();
-      const opts = makeOptions({ onEmptyEdit });
-      const comp = createMessageInput(opts);
-      comp.mount(container);
-      comp.startEdit(42, "old text");
-      type("   ");
-      enter();
-      expect(onEmptyEdit).toHaveBeenCalledWith(42);
-      expect(opts.onEditMessage).not.toHaveBeenCalled();
-      // The edit stays open until the delete is confirmed.
-      const bars = [...container.querySelectorAll(".reply-bar.visible")];
-      expect(bars.some((el) => el.textContent?.includes("Editing message"))).toBe(true);
-      comp.destroy?.();
-    });
-
-    it("sends no typing signal while editing, and does again after", () => {
-      vi.useFakeTimers({ toFake: ["Date"] });
-      const opts = makeOptions();
-      const comp = createMessageInput(opts);
-      comp.mount(container);
-      comp.startEdit(42, "old");
-      type("old!");
-      expect(opts.onTyping).not.toHaveBeenCalled();
-
-      comp.cancelEdit();
-      type("new message");
-      expect(opts.onTyping).toHaveBeenCalledTimes(1);
-      comp.destroy?.();
-    });
-  });
-
   describe("draft hooks", () => {
     it("reports text and reply changes, and the send that clears them", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -276,16 +242,6 @@ describe("composer polish (3A-3)", () => {
       expect(textarea().value).toBe("**bold**");
       expect(onDraftChange).toHaveBeenCalled();
       expect(comp.peekDraft().content).toBe("**bold**");
-      comp.destroy?.();
-    });
-
-    it("peeks the draft an edit displaced, not the edit text", () => {
-      const comp = createMessageInput(makeOptions());
-      comp.mount(container);
-      type("my draft");
-      comp.startEdit(42, "old");
-      type("changed old");
-      expect(comp.peekDraft()).toEqual({ content: "my draft", replyTo: null });
       comp.destroy?.();
     });
   });

@@ -43,6 +43,8 @@ export function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageLi
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),
     onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
     onDeleteClick: vi.fn(),
     onReactionClick: vi.fn(),
     onPinClick: vi.fn(),

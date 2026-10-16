@@ -222,7 +222,12 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   const edited = row(bob, before);
   await edited.hover();
   await edited.locator("[data-testid^='msg-edit-']").click();
-  await submit(after);
+  // The edit happens in the row itself (WP 3A-8), not in the composer.
+  // The row no longer has its text, so find it by its editor.
+  const editInput = bob.locator(".message.editing .msg-inline-edit-input");
+  await editInput.fill(after);
+  await editInput.press("Enter");
+  await expect(row(bob, after)).toHaveCount(1);
   const doomed = row(bob, gone);
   await doomed.hover();
   // Through the menu: the bar's Delete is Shift-only and skips the confirm.

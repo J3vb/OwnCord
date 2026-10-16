@@ -47,7 +47,6 @@ export const messagingText = defineCatalog("messaging", {
   "composer.slowModeNote": "Slow mode is on: one message every {seconds}s",
   "error.tooLong": "Messages are limited to {max} characters",
   "error.uploadsPending": "Please wait for uploads to finish",
-  "error.attachWhileEditing": "Can't attach files while editing a message",
   "error.fileTooLarge": "File too large: {filename} exceeds {limit} MB limit",
   "error.fileTypeBlocked": "{filename} can't be uploaded: this server doesn't allow .{ext} files",
   "error.fileTypeNoExtension":
@@ -62,8 +61,6 @@ export const messagingText = defineCatalog("messaging", {
   "error.attachmentsNotSent": "Some files weren't sent — send again to attach them, or remove them",
   "error.attachmentsUnavailable":
     "Your files were no longer available, so nothing was sent — send again to attach them, or remove them",
-  "edit.editing": "Editing message",
-  "edit.cancel": "Cancel editing",
   "attach.label": "Attach file",
   "attach.unavailable": "File uploads not available",
   "attach.serverDisabled": "Uploads are disabled on this server",
@@ -133,6 +130,7 @@ export const messagingText = defineCatalog("messaging", {
   "divider.new": "NEW",
   "reply.jumpTitle": "Jump to the replied-to message",
   "reply.unknown": "Reply to unknown message",
+  "reply.originalDeleted": "Original message was deleted",
   "reply.attachment": "Attachment",
   "send.slowMode": "Slow mode — wait before sending again",
   "send.rateLimited": "You're sending too fast — try again in a moment",
@@ -184,7 +182,7 @@ export const messagingText = defineCatalog("messaging", {
   "delete.confirm": "Delete",
   "delete.shiftTip": "Tip: hold Shift when you click Delete to skip this.",
   "toast.editFailed": "Couldn't edit the message",
-  "toast.editFailedRestored": "Couldn't edit the message — your text is back in the composer",
+  "toast.editFailedRestored": "Couldn't edit the message — your text is back in the editor",
   "toast.deleteFailed": "Couldn't delete the message",
   "maskedLink.title": "Leaving OwnCord",
   "maskedLink.body":

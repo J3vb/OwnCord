@@ -113,6 +113,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -1038,22 +1040,30 @@ describe("MessageList", () => {
     });
 
     it("re-renders the next row when a delete ends its grouping, and nothing further", () => {
-      // Same author a minute apart: every row after the first is grouped.
-      setMessages(
-        1,
-        [1, 2, 3, 4].map((id) =>
-          makeMessage({ id, timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString() }),
-        ),
-      );
+      // Alice, then Bob a minute apart: Bob's second and third rows are grouped.
+      const bob = (id: number): Message =>
+        makeMessage({
+          id,
+          user: { id: 2, username: "Bob", avatar: null },
+          timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString(),
+        });
+      setMessages(1, [
+        makeMessage({ id: 1, timestamp: new Date(Date.UTC(2024, 0, 15, 12, 1)).toISOString() }),
+        bob(2),
+        bob(3),
+        bob(4),
+      ]);
       msgList.mount(container);
       const [row1, row3, row4] = [row(1), row(3), row(4)];
       expect(row3!.classList.contains("grouped")).toBe(true);
 
       replace(2, { deleted: true });
 
+      // The deleted row leaves the list (the store keeps its tombstone).
+      expect(row(2)).toBeNull();
       expect(row(1)).toBe(row1);
       expect(row(4)).toBe(row4);
-      // A deleted row never groups, so the row under it now shows its author.
+      // The row under it now follows Alice's message, so it shows its author.
       expect(row(3)).not.toBe(row3);
       expect(row(3)!.classList.contains("grouped")).toBe(false);
     });

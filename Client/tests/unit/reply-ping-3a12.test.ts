@@ -18,7 +18,6 @@ function makeOptions(): MessageInputOptions {
     channelName: "general",
     onSend: vi.fn(),
     onTyping: vi.fn(),
-    onEditMessage: vi.fn(),
   };
 }
 

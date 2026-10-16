@@ -39,16 +39,15 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await expect(row.locator(".msg-actions-bar")).toBeAttached();
   await row.hover();
   await row.locator("[data-testid^='msg-edit-']").click();
-  await input.fill(`${own}-edited`);
+  // The edit happens in the row itself (WP 3A-8), not in the composer.
+  // The row no longer has its text, so find it by its editor.
+  const editInput = page.locator(".message.editing .msg-inline-edit-input");
+  await editInput.fill(`${own}-edited`);
+  await editInput.press("Enter");
   const edited = page.locator(".message", {
     has: page.locator(".msg-text", { hasText: `${own}-edited` }),
   });
-  // The composer drops a submit within 200 ms of the last send (its
-  // double-send guard); Enter again until the edit lands.
-  await expect(async () => {
-    await input.press("Enter");
-    await expect(edited).toHaveCount(1, { timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+  await expect(edited).toHaveCount(1);
   const picker = page.locator(".reaction-picker-wrap .emoji-picker.open");
   // The hover bar pops in on hover, and the edit's re-render can move the row
   // under the pointer; on WebView2 a single click then waited 30 s for a
@@ -63,9 +62,9 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await edited.locator(".reaction-chip.me").click();
   await expect(edited.locator(".reaction-chip.me")).toHaveCount(0);
   // Drained each cycle, as in the fullstack soak, so rows are not growth by
-  // construction. The purge leaves each row as a "[message deleted]" tombstone
-  // until the channel is refetched; leaving #general and returning refetches it,
-  // as the fullstack soak's channel switch does.
+  // construction. The purge takes each row out of the list at once (the store
+  // keeps a tombstone until the channel is refetched); leaving #general and
+  // returning refetches it, as the fullstack soak's channel switch does.
   await purge();
   await expect(edited).toHaveCount(0);
   await page.locator(".channel-item:not(.voice)", { hasText: OTHER_CHANNEL }).click();

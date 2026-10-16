@@ -1,0 +1,186 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMessageList } from "@components/MessageList";
+import { messagesStore } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
+import "../../src/styles/app.css";
+
+// jsdom lays nothing out, so the editor growing inside a virtualized row, the
+// height tree re-measuring and the caret staying on screen can only be checked
+// in a real browser (WP 3A-8).
+const ME = 1;
+
+/** Even ids are the signed-in user's, so they can be edited. */
+function message(id: number): Message {
+  return {
+    id,
+    channelId: 1,
+    user: { id: (id % 2) + 1, username: id % 2 === 0 ? "Alice" : "Bob", avatar: null },
+    content: `Message ${id}`,
+    replyTo: null,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    editedAt: null,
+    deleted: false,
+    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString(),
+    status: "sent",
+    correlationId: null,
+    errorCode: null,
+  };
+}
+
+function setRows(rows: readonly Message[]): void {
+  messagesStore.setState((prev) => ({
+    ...prev,
+    messagesByChannel: new Map([[1, rows]]),
+    hasMore: new Map([[1, false]]),
+  }));
+}
+
+const frames = async (n = 4): Promise<void> => {
+  for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
+};
+
+describe("MessageList inline editor in a real browser", () => {
+  const style = document.createElement("style");
+  style.textContent = ".messages-region { height: 400px; display: flex; flex-direction: column; }";
+  const host = document.createElement("div");
+
+  afterEach(() => {
+    host.replaceChildren();
+    style.remove();
+    host.remove();
+  });
+
+  async function mountReadingFromTheMiddle(): Promise<{
+    list: ReturnType<typeof createMessageList>;
+    root: HTMLElement;
+  }> {
+    document.head.appendChild(style);
+    document.body.appendChild(host);
+    setRows(Array.from({ length: 150 }, (_, i) => message(i + 1)));
+    const list = createMessageList({
+      channelId: 1,
+      channelName: "general",
+      currentUserId: ME,
+      onScrollTop: vi.fn(),
+      onReplyClick: vi.fn(),
+      onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
+      onDeleteClick: vi.fn(),
+      onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
+    });
+    list.mount(host);
+    const root = host.querySelector<HTMLElement>(".messages-container")!;
+    await frames();
+    root.scrollTop = root.scrollHeight / 2;
+    root.dispatchEvent(new Event("scroll"));
+    // Let the rows' measured heights replace the estimates before anything is read.
+    await frames(10);
+    return { list, root };
+  }
+
+  /** An own, fully visible row in the lower part of the view, so growing it pushes it past the edge. */
+  function lowOwnRow(root: HTMLElement): { id: number; el: HTMLElement } {
+    const view = root.getBoundingClientRect();
+    const rows = [...host.querySelectorAll<HTMLElement>(".virtual-content > .message")];
+    const el = rows.findLast((r) => {
+      const id = Number(r.dataset.testid!.replace("message-", ""));
+      const box = r.getBoundingClientRect();
+      return (
+        id % 2 === 0 && box.top > view.top + view.height * 0.5 && box.bottom < view.bottom - 40
+      );
+    })!;
+    return { id: Number(el.dataset.testid!.replace("message-", "")), el };
+  }
+
+  it("typing ten lines grows the row, re-measures the tree and keeps the caret in view", async () => {
+    const { list, root } = await mountReadingFromTheMiddle();
+    const { id, el } = lowOwnRow(root);
+    const bottomSpacer = host.querySelector<HTMLElement>(".virtual-spacer-bottom")!;
+    const rowHeight = el.getBoundingClientRect().height;
+    const topSpacer = host.querySelector<HTMLElement>(".virtual-spacer-top")!;
+
+    expect(list.startEdit(id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(host.querySelector(`[data-testid="msg-edit-input-${id}"]`)).not.toBeNull(),
+    );
+    const textarea = host.querySelector<HTMLTextAreaElement>(
+      `[data-testid="msg-edit-input-${id}"]`,
+    )!;
+    expect(document.activeElement).toBe(textarea);
+    await frames();
+
+    // Ten lines, typed at the end, as the reader would.
+    textarea.value = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await frames(6);
+
+    const grown = host.querySelector<HTMLElement>(`[data-testid="message-${id}"]`)!;
+    expect(grown.getBoundingClientRect().height).toBeGreaterThan(rowHeight + 100);
+    // The caret (the editor's bottom) is still inside the viewport.
+    const view = root.getBoundingClientRect();
+    const box = textarea.getBoundingClientRect();
+    expect(box.bottom).toBeLessThanOrEqual(view.bottom + 1);
+    expect(box.top).toBeGreaterThanOrEqual(view.top - 1);
+    expect(document.activeElement).toBe(textarea);
+
+    // The height tree followed the growth: the spacers are real, the rows
+    // below sit directly under the grown one (no overlap, no gap), and the
+    // window the tree picked still reaches the end of the list.
+    expect(parseFloat(bottomSpacer.style.height)).toBeGreaterThanOrEqual(0);
+    expect(parseFloat(topSpacer.style.height)).toBeGreaterThanOrEqual(0);
+    const below = grown.nextElementSibling as HTMLElement;
+    const gap = below.getBoundingClientRect().top - grown.getBoundingClientRect().bottom;
+    expect(gap).toBeGreaterThanOrEqual(-1);
+    expect(gap).toBeLessThan(40);
+    root.scrollTop = root.scrollHeight;
+    await frames(6);
+    expect(host.querySelector('[data-testid="message-150"]')).not.toBeNull();
+
+    list.destroy?.();
+  });
+
+  it("the selection and focus survive a patchRows move of the edited row", async () => {
+    const { list, root } = await mountReadingFromTheMiddle();
+    const { id, el } = lowOwnRow(root);
+    expect(list.startEdit(id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(host.querySelector(`[data-testid="msg-edit-input-${id}"]`)).not.toBeNull(),
+    );
+    const textarea = host.querySelector<HTMLTextAreaElement>(
+      `[data-testid="msg-edit-input-${id}"]`,
+    )!;
+    textarea.value = "a half typed edit that is long enough";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    textarea.setSelectionRange(7, 17);
+    await frames();
+    const rowBefore = host.querySelector(`[data-testid="message-${id}"]`)!;
+    expect(rowBefore).toBe(el.isConnected ? el : rowBefore);
+
+    // A reaction lands: the row is drawn again around the same textarea.
+    const current = messagesStore.getState().messagesByChannel.get(1)!;
+    setRows(
+      current.map((m) =>
+        m.id === id ? { ...m, reactions: [{ emoji: "🔥", count: 2, me: false }] } : m,
+      ),
+    );
+    await messagesStore.flush();
+    await frames();
+
+    const rowAfter = host.querySelector<HTMLElement>(`[data-testid="message-${id}"]`)!;
+    expect(rowAfter).not.toBe(rowBefore);
+    expect(rowAfter.querySelector(".reaction-chip")).not.toBeNull();
+    expect(host.querySelector(`[data-testid="msg-edit-input-${id}"]`)).toBe(textarea);
+    expect(rowAfter.contains(textarea)).toBe(true);
+    expect(textarea.value).toBe("a half typed edit that is long enough");
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([7, 17]);
+    expect(document.activeElement).toBe(textarea);
+
+    list.destroy?.();
+  });
+});
