@@ -538,6 +538,7 @@ function seedActiveChannel(lastMessageId: number | null = null): void {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         },

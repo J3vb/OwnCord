@@ -14,6 +14,21 @@
   color: var(--text-muted);
 }
 
+/* Private-channel lock over the bottom-right of the type glyph. Absolute
+   against the row (position: relative) so it takes no flex space and cannot
+   shift the nsfw marker or the capacity badge; left is the row's 8px padding
+   plus the 20px glyph box, less the lock's own width. */
+.channel-item .ch-lock {
+  position: absolute;
+  left: 19px;
+  bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
 /* "3/5" on a voice channel that has a user limit. Pushed to the right edge
    like the unread badge; a readout only — the server owns capacity. */
 .channel-item .ch-capacity {

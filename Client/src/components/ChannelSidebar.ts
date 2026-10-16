@@ -105,6 +105,24 @@ function nsfwIndicator(channelId: number): HTMLSpanElement {
 }
 
 /**
+ * The lock over the bottom-right of a private channel's type glyph, as Discord
+ * marks one. A sibling of the glyph rather than a child: the glyph span is
+ * aria-hidden, and the lock must stay announced. Positioned by CSS against the
+ * row, so it sits alongside the nsfw marker and the capacity badge.
+ */
+function privateIndicator(channelId: number): HTMLSpanElement {
+  const label = shellText("channel.private");
+  const badge = createElement("span", {
+    class: "ch-lock",
+    "data-testid": `channel-private-${channelId}`,
+    "aria-label": label,
+  });
+  badge.title = label;
+  badge.appendChild(createIcon("lock", 9));
+  return badge;
+}
+
+/**
  * "3/5" for a voice channel that has a user limit, or null when it is
  * unlimited (0) — a count with no ceiling is already shown by the participant
  * rows underneath, and "3/0" would read as a bug.
@@ -158,6 +176,9 @@ function renderTextChannelItem(
   // not the reader has already accepted the gate this session.
   if (channel.nsfw) {
     item.appendChild(nsfwIndicator(channel.id));
+  }
+  if (channel.isPrivate) {
+    item.appendChild(privateIndicator(channel.id));
   }
 
   // A muted channel still counts its unreads — it has not stopped existing,
@@ -341,6 +362,9 @@ function renderVoiceChannelItem(
 
   if (channel.nsfw) {
     item.appendChild(nsfwIndicator(channel.id));
+  }
+  if (channel.isPrivate) {
+    item.appendChild(privateIndicator(channel.id));
   }
 
   const voiceUsers = getChannelVoiceUsers(channel.id);
@@ -705,6 +729,7 @@ function channelRowSignature(
     channel.name,
     channel.type,
     channel.nsfw ? "n" : "",
+    channel.isPrivate ? "p" : "",
     channel.voiceMaxUsers,
     activeChannelId === channel.id ? "a" : "",
     isChannelMuted(channel.id) ? "m" : "",

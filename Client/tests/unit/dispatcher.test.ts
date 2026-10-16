@@ -555,6 +555,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -600,6 +601,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -647,6 +649,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -958,6 +961,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1409,6 +1413,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -1435,6 +1440,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: true,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -2008,6 +2014,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2109,6 +2116,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2980,6 +2988,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3015,6 +3024,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3031,6 +3041,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3062,6 +3073,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3078,6 +3090,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3107,6 +3120,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3134,6 +3148,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3150,6 +3165,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -4817,6 +4833,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -5304,6 +5321,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -5347,6 +5365,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
