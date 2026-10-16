@@ -7,11 +7,11 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { copyWithToast } from "../../features/developer-mode/developerTools";
-import { connectionLockReason, copyMessageLink, messageActionGates } from "./message-actions";
+import { connectionLockReason, messageActionGates } from "./message-actions";
+import { withMessageMenu } from "./message-menu-loader";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
-import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
@@ -56,7 +56,7 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
-import { renderReactions, wireReactionControl } from "./reactions";
+import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
 
@@ -457,11 +457,39 @@ export function renderMessage(
     el.appendChild(bar);
   }
 
-  // The hover action bar (react/reply/pin/edit/delete) only applies to
-  // confirmed server messages — not deleted rows or unsent optimistic rows.
+  // The hover action bar only applies to confirmed server messages — not
+  // deleted rows or unsent optimistic rows. Normal bar: the quick reactions,
+  // React, Edit (own) or Reply (others'), then "...". Holding Shift also shows
+  // Pin, Delete and, on your own message, Reply (CSS on `.shift-held`; the
+  // buttons are always rendered when their gate allows, `display:none` keeps
+  // them out of the tab order otherwise). Copy Link, Report and Copy ID live
+  // in the "..." menu.
   if (!msg.deleted && msg.status === "sent") {
     const gates = messageActionGates(msg, opts);
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
+
+    // The lock is applied at render from the current timeout, then updated in
+    // place by refreshReactionLocks when the timeout changes (P4-02).
+    quickReactionEmoji(QUICK_REACTIONS).forEach((emoji, index) => {
+      // A new emoji on a message at the cap is left out, as in the menu.
+      if (atReactionLimit(msg.reactions, emoji)) return;
+      const { node, name } = emojiNode(emoji);
+      const label = messagingText("action.reactWith", { name });
+      const quickBtn = createElement("button", {
+        class: "msg-quick-react",
+        "data-testid": `msg-quick-react-${msg.id}-${index}`,
+        "aria-label": label,
+      });
+      quickBtn.appendChild(node);
+      quickBtn.title = label;
+      wireReactionControl(
+        quickBtn,
+        () => opts.onReactionClick(msg.id, emoji),
+        gates.react.reason,
+        signal,
+      );
+      actionsBar.appendChild(quickBtn);
+    });
 
     const reactBtn = createElement("button", {
       "data-testid": `msg-react-${msg.id}`,
@@ -469,8 +497,6 @@ export function renderMessage(
     });
     reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = messagingText("action.react");
-    // The lock is applied at render from the current timeout, then updated in
-    // place by refreshReactionLocks when the timeout changes (P4-02).
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
@@ -479,29 +505,8 @@ export function renderMessage(
     );
     actionsBar.appendChild(reactBtn);
 
-    const replyBtn = createElement("button", {
-      "data-testid": `msg-reply-${msg.id}`,
-      "aria-label": messagingText("action.reply"),
-    });
-    replyBtn.appendChild(createIcon("reply", 16));
-    replyBtn.title = messagingText("action.reply");
-    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
-    actionsBar.appendChild(replyBtn);
-
-    const pinBtn = createElement("button", {
-      "data-testid": `msg-pin-${msg.id}`,
-      "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
-    });
-    pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
-    pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
-    pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
-      signal,
-    });
-    if (gates.pin.shown) {
-      actionsBar.appendChild(pinBtn);
-    }
-
-    if (gates.edit.shown) {
+    const own = gates.edit.shown;
+    if (own) {
       const editBtn = createElement("button", {
         "data-testid": `msg-edit-${msg.id}`,
         "aria-label": messagingText("action.edit"),
@@ -512,8 +517,33 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
+    const replyBtn = createElement("button", {
+      class: own ? "msg-shift-only" : "",
+      "data-testid": `msg-reply-${msg.id}`,
+      "aria-label": messagingText("action.reply"),
+    });
+    replyBtn.appendChild(createIcon("reply", 16));
+    replyBtn.title = messagingText("action.reply");
+    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
+    actionsBar.appendChild(replyBtn);
+
+    if (gates.pin.shown) {
+      const pinBtn = createElement("button", {
+        class: "msg-shift-only",
+        "data-testid": `msg-pin-${msg.id}`,
+        "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
+      });
+      pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
+      pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
+      pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
+        signal,
+      });
+      actionsBar.appendChild(pinBtn);
+    }
+
     if (gates.delete.shown) {
       const deleteBtn = createElement("button", {
+        class: "msg-shift-only",
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
       });
@@ -534,43 +564,36 @@ export function renderMessage(
       actionsBar.appendChild(deleteBtn);
     }
 
-    const copyLinkBtn = createElement("button", {
-      "data-testid": `msg-copy-link-${msg.id}`,
-      "aria-label": messagingText("action.copyLink"),
+    const moreBtn = createElement("button", {
+      "data-testid": `msg-more-${msg.id}`,
+      "aria-label": messagingText("action.more"),
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
     });
-    copyLinkBtn.appendChild(createIcon("link", 16));
-    copyLinkBtn.title = messagingText("action.copyLink");
-    copyLinkBtn.addEventListener("click", () => copyMessageLink(msg), { signal });
-    actionsBar.appendChild(copyLinkBtn);
-
-    // Someone else's message: report it, or one of its attachments (B9-10).
-    const onReport = opts.onReportClick;
-    if (onReport !== undefined && gates.report.shown) {
-      const reportBtn = createElement("button", {
-        "data-testid": `msg-report-${msg.id}`,
-        "aria-label": reportEntryText("reportMessage"),
-        "aria-haspopup": "dialog",
-      });
-      reportBtn.appendChild(createIcon("flag", 16));
-      reportBtn.title = reportEntryText("reportMessage");
-      reportBtn.addEventListener("click", () => onReport(msg.id), { signal });
-      actionsBar.appendChild(reportBtn);
-    }
-
-    if (gates.copyId.shown) {
-      const copyIdBtn = createElement("button", {
-        "data-testid": `msg-copy-id-${msg.id}`,
-        "aria-label": messagingText("action.copyId"),
-      });
-      copyIdBtn.appendChild(createIcon("hash", 16));
-      copyIdBtn.title = messagingText("action.copyId");
-      copyIdBtn.addEventListener(
-        "click",
-        () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
-        { signal },
-      );
-      actionsBar.appendChild(copyIdBtn);
-    }
+    moreBtn.appendChild(createIcon("ellipsis", 16));
+    moreBtn.title = messagingText("action.more");
+    moreBtn.addEventListener(
+      "click",
+      () => {
+        // Below and left-aligned with the button, as Discord opens it.
+        const rect = moreBtn.getBoundingClientRect();
+        const markUnread = opts.markUnread;
+        withMessageMenu((menu) =>
+          menu.openMessageMenu({
+            msg,
+            opts,
+            x: rect.left,
+            y: rect.bottom,
+            target: null,
+            signal,
+            invoker: moreBtn,
+            ...(markUnread !== undefined ? { markUnread } : {}),
+          }),
+        );
+      },
+      { signal },
+    );
+    actionsBar.appendChild(moreBtn);
 
     el.appendChild(actionsBar);
   }

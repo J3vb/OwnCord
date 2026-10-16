@@ -99,10 +99,14 @@ async function boot(page: Page, prefs?: AppearancePrefs): Promise<void> {
 
 const reportDialog = (page: Page, name = "Report message") => page.getByRole("dialog", { name });
 
-/** Open the message's report form from the keyboard; returns its opener. */
+/** Open the message's report form from the keyboard: the "..." button, then
+ *  the menu's Report Message. Returns the "..." button, the opener. */
 async function openFromKeyboard(page: Page): Promise<Locator> {
-  const opener = page.getByTestId("msg-report-201");
+  const opener = page.getByTestId("msg-more-201");
   await opener.focus();
+  await page.keyboard.press("Enter");
+  // Keyboard all the way: a mouse click would change the focus-visible modality.
+  await page.getByTestId("msg-menu-report").focus();
   await page.keyboard.press("Enter");
   await expect(reportDialog(page)).toBeVisible();
   return opener;

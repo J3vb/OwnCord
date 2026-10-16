@@ -23,14 +23,13 @@ import { wantsNativeMenu } from "@lib/dom";
 import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
 
-import { quickReactionEmoji } from "./quick-reactions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
 import type { MessageListOptions } from "../MessageList";
 import { connectText } from "../../i18n/connect";
 import { imageMenuText } from "../../i18n/imageMenu";
 import { messageMenuText } from "../../i18n/messageMenu";
 import { copyWithToast } from "../../features/developer-mode/developerTools";
 import { messagingText } from "../../i18n/messaging";
-import { buildCustomEmojiNode } from "./custom-emoji";
 import {
   ROW_FOCUSABLE_SELECTOR,
   deleteLockReason,
@@ -59,9 +58,6 @@ export interface MessageMenuRequest {
   readonly markUnread?: (messageId: number) => void;
 }
 
-/** Quick-reaction emoji in the menu; the hover bar shows the same number. */
-const QUICK_REACTIONS = 3;
-
 let menuOwner: Disposable | null = null;
 
 /** Close the open message menu, if any. */
@@ -89,11 +85,6 @@ function selectionIn(row: HTMLElement | null): string {
   if (anchorNode === null || focusNode === null) return "";
   if (!row.contains(anchorNode) || !row.contains(focusNode)) return "";
   return selection.toString();
-}
-
-function emojiNode(emoji: string): { node: Node; name: string } {
-  const node = buildCustomEmojiNode(emoji);
-  return { node: node ?? document.createTextNode(emoji), name: emoji };
 }
 
 function buildItems(
@@ -162,7 +153,7 @@ function buildItems(
     if (atReactionLimit(msg.reactions, emoji)) continue;
     const { node, name } = emojiNode(emoji);
     items.push({
-      label: messageMenuText("reactWith", { name }),
+      label: messagingText("action.reactWith", { name }),
       content: node,
       testId: `msg-menu-quick-${emoji}`,
       disabled: reactLock !== null,

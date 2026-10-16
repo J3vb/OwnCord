@@ -123,6 +123,9 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Set by the list itself for the rows it renders (the hover bar's "..."
+   *  menu); callers never pass it. */
+  readonly markUnread?: (messageId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -492,12 +495,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
 
+  /** What every row is rendered with: the options plus the list's own Mark
+   *  Unread, so a row's "..." menu offers it like the right-click menu does. */
+  const rowOptions: MessageListOptions = { ...options, markUnread: markUnreadFrom };
+
   /** Render one virtual item — the single place the three item kinds map to DOM. */
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
-    const el = renderMessage(item.message, item.isGrouped, allMessages, options, owner.signal);
+    const el = renderMessage(item.message, item.isGrouped, allMessages, rowOptions, owner.signal);
     rowOwners.set(el, owner);
     return el;
   }
@@ -1839,6 +1846,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
     window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
+
+    // Shift reveals the hover bar's Pin and Delete (WP 3A-7): one pair of
+    // window listeners toggles a class on the list root, and CSS shows the
+    // extra buttons. A lost keyup (focus left the window, the tab was hidden)
+    // would leave them out, so both of those reset it. Owned by disposable.signal.
+    const setShiftHeld = (held: boolean): void => {
+      root?.classList.toggle("shift-held", held);
+    };
+    const trackShift = (e: KeyboardEvent): void => setShiftHeld(e.shiftKey);
+    window.addEventListener("keydown", trackShift, { signal: disposable.signal });
+    window.addEventListener("keyup", trackShift, { signal: disposable.signal });
+    window.addEventListener("blur", () => setShiftHeld(false), { signal: disposable.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.hidden) setShiftHeld(false);
+      },
+      { signal: disposable.signal },
+    );
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.
