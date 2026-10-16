@@ -34,7 +34,7 @@ import {
   nativeCameraSupport,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
-import { getVideoCodecPref, vp9Offered } from "../../features/voice/videoCodec";
+import { getVideoCodecPref, h265Offered, vp9Offered } from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
@@ -783,18 +783,22 @@ function buildVoiceAudioTabInner(
   // The Linux native engine always publishes VP8 (lib/videoCodec).
   if (!isLinuxDesktop()) {
     const offerVp9 = vp9Offered();
+    const offerH265 = h265Offered();
     const savedCodec = getVideoCodecPref();
     cameraCard.append(
       ...qualityGroup(
         t("voiceAudio.videoCodec"),
         t("voiceAudio.videoCodecDesc"),
         "videoCodec",
-        // A saved VP9 that is no longer offered reads as VP8, as the resolver does.
-        savedCodec === "vp9" && !offerVp9 ? "vp8" : savedCodec,
+        // A saved VP9 or H.265 that is no longer offered reads as VP8, as the resolver does.
+        (savedCodec === "vp9" && !offerVp9) || (savedCodec === "h265" && !offerH265)
+          ? "vp8"
+          : savedCodec,
         [
           ["vp8", t("voiceAudio.videoCodec.vp8")],
           ["h264", t("voiceAudio.videoCodec.h264")],
           ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
+          ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
           ["auto", t("voiceAudio.videoCodec.auto")],
         ],
       ),

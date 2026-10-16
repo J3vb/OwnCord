@@ -24,12 +24,27 @@ const E2EE_DECRYPTABLE: ReadonlySet<string> = new Set(["vp8", "h264", "vp9", "h2
  *  to exercise the downgrade by hand. */
 export const DEV_VP8_ONLY_KEY = "owncord:dev:videoDecodeVp8Only";
 
+/** Dev-only localStorage key: any value shows the H.265 entry in the video
+ *  codec setting (WP M-6a). Hidden from users until hardware results are in. */
+export const DEV_H265_OPTION_KEY = "owncord:dev:videoCodecH265";
+
 let memo: readonly VideoCodecName[] | null = null;
 
 function devForcesVp8(): boolean {
   if (!import.meta.env.DEV) return false;
   try {
     return localStorage.getItem(DEV_VP8_ONLY_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the dev flag that shows the H.265 setting is set. Always false in a
+ *  production build. */
+export function devShowsH265(): boolean {
+  if (!import.meta.env.DEV) return false;
+  try {
+    return localStorage.getItem(DEV_H265_OPTION_KEY) !== null;
   } catch {
     return false;
   }
@@ -70,7 +85,7 @@ export type PeerDecodeLists = ReadonlyArray<readonly string[] | undefined>;
 
 /** `preferred` when every peer decodes it, else VP8. An absent or empty peer
  *  list is the baseline; no peers means `preferred`. */
-export function pickCommonCodec<C extends "vp8" | "h264" | "vp9">(
+export function pickCommonCodec<C extends "vp8" | "h264" | "vp9" | "h265">(
   preferred: C,
   peers: PeerDecodeLists,
 ): C | "vp8" {

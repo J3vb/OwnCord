@@ -235,7 +235,7 @@ describe("videoLayerOptions", () => {
     },
   );
 
-  it.each(["vp8", "h264"] as const)("keeps today's camera options for %s", (codec) => {
+  it.each(["vp8", "h264", "h265"] as const)("keeps today's camera options for %s", (codec) => {
     expect(videoLayerOptions("camera", codec, "low", 15)).toEqual({ simulcast: true });
     expect(videoLayerOptions("camera", codec, "medium", 30)).toEqual({ simulcast: true });
     expect(videoLayerOptions("camera", codec, "source", 30)).toEqual({ simulcast: false });
@@ -245,17 +245,20 @@ describe("videoLayerOptions", () => {
     });
   });
 
-  it.each(["vp8", "h264"] as const)("keeps today's screen share options for %s", (codec) => {
-    expect(videoLayerOptions("screen", codec, "medium", 30)).toEqual({
-      simulcast: true,
-      screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
-    });
-    expect(videoLayerOptions("screen", codec, "high", 60)).toEqual({
-      simulcast: true,
-      screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
-    });
-    expect(videoLayerOptions("screen", codec, "high", 120)).toEqual({ simulcast: false });
-    expect(videoLayerOptions("screen", codec, "low", 30)).toEqual({ simulcast: false });
-    expect(videoLayerOptions("screen", codec, "source", 30)).toEqual({ simulcast: false });
-  });
+  it.each(["vp8", "h264", "h265"] as const)(
+    "keeps today's screen share options for %s",
+    (codec) => {
+      expect(videoLayerOptions("screen", codec, "medium", 30)).toEqual({
+        simulcast: true,
+        screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
+      });
+      expect(videoLayerOptions("screen", codec, "high", 60)).toEqual({
+        simulcast: true,
+        screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],
+      });
+      expect(videoLayerOptions("screen", codec, "high", 120)).toEqual({ simulcast: false });
+      expect(videoLayerOptions("screen", codec, "low", 30)).toEqual({ simulcast: false });
+      expect(videoLayerOptions("screen", codec, "source", 30)).toEqual({ simulcast: false });
+    },
+  );
 });

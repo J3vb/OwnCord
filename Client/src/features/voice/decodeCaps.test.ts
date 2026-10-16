@@ -118,6 +118,19 @@ describe("pickCommonCodec", () => {
     ["vp9 with an unknown peer", "vp9", [undefined], "vp8"],
     ["vp9 with a baseline peer", "vp9", [["vp8", "h264"]], "vp8"],
     ["vp9 when every peer lists it", "vp9", [["vp8", "vp9"], ["vp9"]], "vp9"],
+    ["h265 alone", "h265", [], "h265"],
+    ["h265 with an unknown peer", "h265", [undefined], "vp8"],
+    ["h265 with a baseline peer", "h265", [["vp8", "h264"]], "vp8"],
+    ["h265 with a peer that lists only vp9", "h265", [["h265"], ["vp8", "vp9"]], "vp8"],
+    [
+      "h265 when every peer lists it",
+      "h265",
+      [
+        ["vp8", "h265"],
+        ["h265", "vp9"],
+      ],
+      "h265",
+    ],
   ] as const)("%s", (_name, preferred, peers, expected) => {
     expect(pickCommonCodec(preferred, peers)).toBe(expected);
   });

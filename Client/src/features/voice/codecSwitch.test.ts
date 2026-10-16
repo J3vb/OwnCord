@@ -21,6 +21,7 @@ const {
 
 const VP8_PEER = ["vp8", "h264"];
 const VP9_PEER = ["vp8", "h264", "vp9"];
+const H265_PEER = ["vp8", "h264", "h265"];
 
 /** Put `peers` (user id -> decode list) in the current channel. */
 function setPeers(peers: ReadonlyMap<number, readonly string[]>): void {
@@ -55,7 +56,15 @@ interface Rig {
 }
 
 /** `delayed`: a republish stays in flight until `releaseAll`. */
-function rig(opts: { screen?: PublishCodec; camera?: PublishCodec; delayed?: boolean } = {}): Rig {
+function rig(
+  opts: {
+    screen?: PublishCodec;
+    camera?: PublishCodec;
+    delayed?: boolean;
+    preferred?: PublishCodec;
+  } = {},
+): Rig {
+  const preferred = opts.preferred ?? "vp9";
   const shareVideo = {} as LocalVideoTrack;
   const cameraVideo = {} as LocalVideoTrack;
   const screen: ScreenTrackState = { manualScreenTracks: [], generation: 0 };
@@ -65,14 +74,14 @@ function rig(opts: { screen?: PublishCodec; camera?: PublishCodec; delayed?: boo
     screen.announced = shareVideo;
     screen.quality = "medium";
     screen.fps = 30;
-    screen.preferred = "vp9";
+    screen.preferred = preferred;
     screen.published = opts.screen;
   }
   if (opts.camera !== undefined) {
     camera.manualCameraTrack = cameraVideo;
     camera.announced = cameraVideo;
     camera.quality = "medium";
-    camera.preferred = "vp9";
+    camera.preferred = preferred;
     camera.published = opts.camera;
   }
   const calls: string[] = [];
@@ -167,6 +176,27 @@ describe("CodecSwitchController", () => {
     await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS);
 
     expect(r.calls).toEqual(["camera:vp8"]);
+    r.controller.stop();
+  });
+
+  it("switches an H.265 share down to VP8 when a viewer without H.265 joins, and back up (WP M-6a)", async () => {
+    const r = rig({ screen: "h265", preferred: "h265" });
+    r.controller.kick();
+    join(2, VP9_PEER);
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    leave();
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS);
+    expect(r.calls).toEqual(["screen:vp8", "screen:h265"]);
+    r.controller.stop();
+  });
+
+  it("leaves an H.265 share alone when the new viewer decodes H.265 (WP M-6a)", async () => {
+    const r = rig({ screen: "h265", camera: "h265", preferred: "h265" });
+    r.controller.kick();
+    join(2, H265_PEER);
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS);
+    expect(r.calls).toEqual([]);
     r.controller.stop();
   });
 
