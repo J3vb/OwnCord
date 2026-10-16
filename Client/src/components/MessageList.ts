@@ -40,6 +40,8 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
+import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
+import { withMessageMenu } from "./message-list/message-menu-loader";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
@@ -138,9 +140,6 @@ const UNREAD_BAR_CLEARANCE = 40;
 
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
-
-/** Controls a keyboard user can land on inside a rendered row. */
-const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
 
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
@@ -1647,6 +1646,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       { signal: disposable.signal },
     );
     disposable.signal.addEventListener("abort", () => closeProfilePopup?.(), { once: true });
+
+    // One delegated listener opens the message menu, by right-click and by the
+    // Menu key / Shift+F10 (which dispatch `contextmenu` to the focused control
+    // with no pointer position). The lazy module decides whether the target
+    // offers a menu (an image's own listener stops the event first; a text
+    // field keeps the webview's own menu), and main.ts already suppresses the
+    // webview's menu everywhere else, so nothing is prevented here.
+    contentContainer.addEventListener(
+      "contextmenu",
+      (e) => {
+        const { clientX: x, clientY: y, target } = e;
+        withMessageMenu((m) =>
+          m.openMessageMenuAt({ opts: options, x, y, target, signal: disposable.signal }),
+        );
+      },
+      { signal: disposable.signal },
+    );
 
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.

@@ -92,7 +92,7 @@ function readStoredRecent(): string[] {
  * lands, or after a failed fetch is retried. Persisting the filtered list
  * turns "do not show this" into "delete this", for every server at once.
  */
-function getRecentEmoji(): string[] {
+export function getRecentEmoji(): string[] {
   try {
     // A `:shortcode:`-shaped entry is only meaningful when it still resolves
     // on *this* server: a custom emoji clicked on one server would otherwise

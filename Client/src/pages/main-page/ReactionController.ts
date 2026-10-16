@@ -5,23 +5,16 @@
 
 import { createElement } from "@lib/dom";
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { channelCanReact, reactionLockReason } from "@components/message-list/reactions";
+import {
+  atReactionLimit,
+  channelCanReact,
+  reactionLockReason,
+} from "@components/message-list/reactions";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
 import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
-
-/** The server refuses a new emoji on a message that already has this many (3A-12). */
-export const MAX_DISTINCT_REACTIONS = 20;
-
-/** A new emoji would push the message past the cap; existing pills stay clickable. */
-function atReactionLimit(reactions: readonly { emoji: string }[], emoji: string | null): boolean {
-  return (
-    reactions.length >= MAX_DISTINCT_REACTIONS &&
-    (emoji === null || !reactions.some((r) => r.emoji === emoji))
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Types

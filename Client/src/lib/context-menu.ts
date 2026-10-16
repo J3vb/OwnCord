@@ -16,16 +16,40 @@ import { setRovingTabindex } from "./a11y";
 const SUBMENU_SELECTOR = ".context-menu__submenu";
 
 export interface ContextMenuItem {
+  /** The row's text, or its `aria-label` when `content` is given. */
   readonly label: string;
-  readonly onClick: () => void;
+  /** Receives the click, so a row can read `shiftKey`. A keyboard activation
+   *  (Enter/Space) arrives as a click too. */
+  readonly onClick: (e: MouseEvent) => void;
   readonly danger?: boolean;
   readonly testId?: string;
+  /** Shown but not actionable: skipped by the arrow keys, ignores clicks, and
+   *  stays open so the reason in `title` can be read. */
+  readonly disabled?: boolean;
+  readonly title?: string;
+  /** Rendered in place of the text label (an emoji). */
+  readonly content?: Node;
+}
+
+/** A divider between two rows. */
+export interface ContextMenuSeparator {
+  readonly separator: true;
 }
 
 export interface ContextMenuOptions {
   readonly x: number;
   readonly y: number;
-  readonly items: readonly ContextMenuItem[];
+  readonly items: readonly (ContextMenuItem | ContextMenuSeparator)[];
+  /** `count` consecutive items from index `start` sit side by side in one
+   *  `role="group"` row (the message menu's quick reactions). */
+  readonly group?: { readonly start: number; readonly count: number };
+  /** Where focus goes on close when the control that had it before the menu
+   *  opened has left the page (a row rebuilt by scrolling). */
+  readonly restoreFocusTo?: () => HTMLElement | null;
+  /** The menu's accessible name. */
+  readonly ariaLabel?: string;
+  /** Runs once when the menu goes away, by any path. */
+  readonly onClosed?: () => void;
   /** AbortSignal for automatic cleanup when parent component is destroyed. */
   readonly signal: AbortSignal;
   /** CSS class added to the menu root (for styling/selection). */
@@ -95,6 +119,8 @@ export interface MenuKeyboardOptions {
   readonly signal: AbortSignal;
   /** Remove/abort the menu. Escape and outside dismissal run this. */
   readonly onClose: () => void;
+  /** Fallback focus target when the previously focused control is gone. */
+  readonly restoreFocusTo?: () => HTMLElement | null;
 }
 
 /**
@@ -122,7 +148,9 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
   const restore = (): void => {
     const active = doc.activeElement;
     const lost = active === null || active === doc.body || menu.contains(active);
-    if (lost && previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    if (!lost) return;
+    if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    else opts.restoreFocusTo?.()?.focus();
   };
   const close = (): void => {
     opts.onClose();
@@ -235,7 +263,7 @@ export function clampMenuToViewport(menu: HTMLElement, x: number, y: number): vo
  * Closes on click outside or when signal is aborted.
  */
 export function showContextMenu(opts: ContextMenuOptions): void {
-  const { x, y, items, signal, className } = opts;
+  const { x, y, items, signal, className, group } = opts;
   const menuClass = className ?? "context-menu";
 
   // Remove any existing context menu with same class, releasing its dismiss
@@ -247,6 +275,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   });
 
   const menu = createElement("div", { class: `context-menu ${menuClass}` });
+  if (opts.ariaLabel !== undefined) menu.setAttribute("aria-label", opts.ariaLabel);
 
   const dismiss = new Disposable();
   dismissOwners.set(menu, dismiss);
@@ -258,28 +287,59 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     restoreFocus();
   };
 
+  if (opts.onClosed !== undefined) dismiss.addCleanup(opts.onClosed);
+
   let hasSeparator = false;
-  for (const item of items) {
+  let groupRow: HTMLElement | null = null;
+  items.forEach((item, index) => {
+    if ("separator" in item) {
+      menu.appendChild(createElement("div", { class: "context-menu-sep", role: "separator" }));
+      hasSeparator = false;
+      return;
+    }
     if (hasSeparator && item.danger) {
       menu.appendChild(createElement("div", { class: "context-menu-sep" }));
     }
 
+    const disabled = item.disabled === true;
     const el = createMenuItem(
       item.label,
-      item.danger ? "context-menu-item danger" : "context-menu-item",
+      [
+        "context-menu-item",
+        item.danger ? "danger" : "",
+        disabled ? "disabled" : "",
+        item.content !== undefined ? "context-menu-item--content" : "",
+      ]
+        .filter((c) => c !== "")
+        .join(" "),
       item.testId !== undefined ? { testId: item.testId } : {},
     );
+    if (item.content !== undefined) {
+      el.replaceChildren(item.content);
+      el.setAttribute("aria-label", item.label);
+    }
+    if (item.title !== undefined) el.title = item.title;
+    if (disabled) el.setAttribute("aria-disabled", "true");
     el.addEventListener(
       "click",
-      () => {
+      (e) => {
+        if (disabled) return;
         closeMenu();
-        item.onClick();
+        item.onClick(e);
       },
       { signal },
     );
-    menu.appendChild(el);
+    if (group !== undefined && index >= group.start && index < group.start + group.count) {
+      if (groupRow === null) {
+        groupRow = createElement("div", { class: "context-menu-group", role: "group" });
+        menu.appendChild(groupRow);
+      }
+      groupRow.appendChild(el);
+    } else {
+      menu.appendChild(el);
+    }
     hasSeparator = !item.danger;
-  }
+  });
 
   // Kept on screen: a menu opened near the bottom/right edge (a channel low
   // in the sidebar at the 940x500 minimum window) otherwise runs off and its
@@ -296,7 +356,11 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     dismiss.addCleanup(() => reposition.disconnect());
   }
 
-  restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
+  restoreFocus = enableMenuKeyboard(menu, {
+    signal: dismiss.signal,
+    onClose: closeMenu,
+    ...(opts.restoreFocusTo !== undefined ? { restoreFocusTo: opts.restoreFocusTo } : {}),
+  });
 
   // Close on click outside (deferred so the opening click doesn't immediately close)
   setOwnedTimeout(

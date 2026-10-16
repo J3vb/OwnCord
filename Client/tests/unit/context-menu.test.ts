@@ -564,5 +564,132 @@ describe("showContextMenu", () => {
       invoker.remove();
       input.remove();
     });
+
+    it("separator entry renders a divider and no menu item", async () => {
+      const menu = await open([
+        { label: "One", onClick: vi.fn() },
+        { separator: true },
+        { label: "Two", onClick: vi.fn(), danger: true },
+      ]);
+      expect(menu.querySelectorAll('[role="menuitem"]').length).toBe(2);
+      // The explicit divider stands in for the automatic one before a danger row.
+      expect(menu.querySelectorAll(".context-menu-sep").length).toBe(1);
+    });
+
+    it("disabled item is skipped by the arrows and ignores clicks", async () => {
+      const blocked = vi.fn();
+      const menu = await open([
+        { label: "One", onClick: vi.fn() },
+        { label: "Two", onClick: blocked, disabled: true, title: "Offline" },
+        { label: "Three", onClick: vi.fn() },
+      ]);
+      const rows = menu.querySelectorAll<HTMLElement>('[role="menuitem"]');
+      expect(rows[1]!.getAttribute("aria-disabled")).toBe("true");
+      expect(rows[1]!.title).toBe("Offline");
+      rows[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement).toBe(rows[2]);
+      rows[1]!.click();
+      expect(blocked).not.toHaveBeenCalled();
+      // A refused click leaves the menu open so the reason stays readable.
+      expect(document.querySelector(".kbd-menu")).not.toBeNull();
+    });
+
+    it("onClick receives the click event", async () => {
+      const onClick = vi.fn();
+      const menu = await open([{ label: "One", onClick }]);
+      menu
+        .querySelector("button")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+      expect(onClick).toHaveBeenCalledTimes(1);
+      expect((onClick.mock.calls[0]![0] as MouseEvent).shiftKey).toBe(true);
+    });
+
+    it("content node keeps label as aria-label", async () => {
+      const menu = await open([
+        { label: "React with X", content: document.createTextNode("X"), onClick: vi.fn() },
+      ]);
+      const row = menu.querySelector<HTMLElement>('[role="menuitem"]')!;
+      expect(row.getAttribute("aria-label")).toBe("React with X");
+      expect(row.textContent).toBe("X");
+    });
+
+    it("group puts the chosen items in one role=group row", async () => {
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [
+          { label: "A", onClick: vi.fn() },
+          { label: "B", onClick: vi.fn() },
+          { label: "C", onClick: vi.fn() },
+        ],
+        group: { start: 0, count: 2 },
+        ariaLabel: "Things",
+        signal: ac.signal,
+        className: "kbd-menu",
+      });
+      const menu = document.querySelector<HTMLElement>(".kbd-menu")!;
+      expect(menu.getAttribute("aria-label")).toBe("Things");
+      expect(menu.querySelectorAll('[role="group"] [role="menuitem"]').length).toBe(2);
+      expect(menu.querySelectorAll(':scope > [role="menuitem"]').length).toBe(1);
+    });
+
+    it("onClosed runs once when the menu closes", async () => {
+      const onClosed = vi.fn();
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "One", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "kbd-menu",
+        onClosed,
+      });
+      document.querySelector<HTMLElement>(".kbd-menu button")!.click();
+      expect(onClosed).toHaveBeenCalledTimes(1);
+    });
+
+    it("restoreFocusTo used when the invoker is disconnected", async () => {
+      const invoker = document.createElement("button");
+      const fallback = document.createElement("button");
+      document.body.append(invoker, fallback);
+      invoker.focus();
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "One", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "kbd-menu",
+        restoreFocusTo: () => fallback,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      // The row was rebuilt while the menu was open.
+      invoker.remove();
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(document.activeElement).toBe(fallback);
+      fallback.remove();
+    });
+
+    it("restoreFocusTo is not used while the invoker is still on the page", async () => {
+      const invoker = document.createElement("button");
+      const fallback = document.createElement("button");
+      document.body.append(invoker, fallback);
+      invoker.focus();
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "One", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "kbd-menu",
+        restoreFocusTo: () => fallback,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(document.activeElement).toBe(invoker);
+      invoker.remove();
+      fallback.remove();
+    });
   });
 });
