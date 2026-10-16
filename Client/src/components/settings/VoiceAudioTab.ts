@@ -203,9 +203,9 @@ function buildVoiceAudioTabInner(
   const section = createElement("div", { class: "settings-pane active" });
   // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
   // its capture takes the input volume, sensitivity and automatic sensitivity
-  // like the web processor, and reports its level while a call or the mic
-  // test runs, which drives the meter. The webview's microphone is not the
-  // engine's, so the meter opens none there.
+  // like the web processor, and reports its level in a call, in the mic test
+  // and in the capture-only monitor the meter runs outside a call. The
+  // webview's microphone is not the engine's, so the meter opens none there.
   const nativeAudio = isLinuxDesktop();
 
   // Five cards: when you transmit, what you speak into, what you hear, what
@@ -353,7 +353,7 @@ function buildVoiceAudioTabInner(
   meterWrap.append(meterBar, sensitivityValue);
   micCard.appendChild(meterWrap);
   if (nativeAudio) {
-    // The engine's capture runs in a call and while the mic test does.
+    // The mic test and a call share one capture, so the test waits for the call.
     micCard.appendChild(
       createElement(
         "p",
@@ -515,6 +515,9 @@ function buildVoiceAudioTabInner(
   let nativeTestId: number | null = null;
   let nativeTestRequest = 0;
   let nativeTestStarting = false;
+  /** Whether the current (or starting) native test is the meter's
+   *  capture-only monitor rather than the mic test. */
+  let nativeMonitoring = false;
   let nativeTestEndedEarly: number | null = null;
   let nativeTestFloor: NoiseFloorTracker | null = null;
   let unsubscribeTestEvents: (() => void) | null = null;
@@ -554,6 +557,7 @@ function buildVoiceAudioTabInner(
   /** Forget the running test: its id, floor, subscription and meter. */
   function endNativeTest(): void {
     nativeTestId = null;
+    nativeMonitoring = false;
     nativeTestFloor = null;
     unsubscribeTestEvents?.();
     unsubscribeTestEvents = null;
@@ -567,9 +571,12 @@ function buildVoiceAudioTabInner(
       return;
     }
     if (event.type === "ended") {
-      // A call joined: the host has already stopped the test.
+      // A call joined: the host has already stopped the test. The meter
+      // follows the call's own capture from here.
+      const monitor = nativeMonitoring;
       nativeTestRequest++;
       endNativeTest();
+      if (monitor) return;
       micTesting = false;
       paintTestButton(false);
       setText(micTestDesc, t("voiceAudio.micTest.inCall"));
@@ -580,23 +587,27 @@ function buildVoiceAudioTabInner(
     if (next !== null) updateNativeTest({ kind: "voiceGate", threshold: next, retune: true });
   }
 
-  async function startNativeTest(): Promise<void> {
+  async function startNativeTest(monitor = false): Promise<void> {
     const request = ++nativeTestRequest;
-    setText(micTestDesc, t("voiceAudio.micTest.desc"));
+    // A test replaces the monitor in the host, which ends it silently.
+    if (nativeMonitoring && !monitor) nativeTestId = null;
+    nativeMonitoring = monitor;
+    if (!monitor) setText(micTestDesc, t("voiceAudio.micTest.desc"));
     makeNativeTestFloor();
-    unsubscribeTestEvents?.();
-    // Before the start, so no early report is missed.
-    unsubscribeTestEvents = desktop.nativeVoice.onMicTestEvent(onTestEvent);
+    // Before the start, so no early report is missed; a running monitor's
+    // subscription already serves.
+    unsubscribeTestEvents ??= desktop.nativeVoice.onMicTestEvent(onTestEvent);
     nativeTestStarting = true;
     nativeTestEndedEarly = null;
     try {
       const id = await desktop.nativeVoice.startMicTest({
         input: loadPref<string>("audioInputDevice", ""),
-        output: loadPref<string>("audioOutputDevice", ""),
+        output: monitor ? "" : loadPref<string>("audioOutputDevice", ""),
         audio: nativeTestAudio(),
         inputGain: inputVolumePercent,
-        outputGain: micTestVolume(loadPref<number>("outputVolume", 100)),
+        outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
         threshold: nativeTestThreshold(),
+        ...(monitor ? { monitor } : {}),
       });
       if (signal.aborted || request !== nativeTestRequest) {
         // Torn down or superseded while starting: stop exactly this test.
@@ -607,6 +618,7 @@ function buildVoiceAudioTabInner(
       }
       if (nativeTestEndedEarly === id) {
         endNativeTest();
+        if (monitor) return;
         micTesting = false;
         paintTestButton(false);
         setText(micTestDesc, t("voiceAudio.micTest.inCall"));
@@ -615,6 +627,13 @@ function buildVoiceAudioTabInner(
       nativeTestId = id;
     } catch (err) {
       if (signal.aborted || request !== nativeTestRequest) return;
+      if (monitor) {
+        // A call holds the capture (its own levels drive the meter) or the
+        // device did not open: the bar stays empty.
+        log.debug("The meter's monitor could not start", err);
+        endNativeTest();
+        return;
+      }
       log.warn("The mic test could not start", err);
       endNativeTest();
       micTesting = false;
@@ -625,6 +644,7 @@ function buildVoiceAudioTabInner(
           ? t("voiceAudio.micTest.inCall")
           : t("voiceAudio.micTest.failed"),
       );
+      startMicMeter();
     } finally {
       if (request === nativeTestRequest) nativeTestStarting = false;
     }
@@ -681,7 +701,10 @@ function buildVoiceAudioTabInner(
       paintTestButton(micTesting);
       if (nativeAudio) {
         if (micTesting) void startNativeTest();
-        else stopNativeTest();
+        else {
+          stopNativeTest();
+          startMicMeter();
+        }
         return;
       }
       if (!micTesting) stopMicTestPlayback();
@@ -1435,21 +1458,28 @@ function buildVoiceAudioTabInner(
       }
     })();
   }
-  /** The native engine's meter: the call capture's level reports, after its
+  /** The native engine's meter: the capture's level reports, after its
    *  input volume and with its gate's verdict, so the bar shows what the gate
-   *  does. Outside a call none arrive and the bar stays empty. */
+   *  does. In a call they are the call's own; outside one the host runs a
+   *  capture-only monitor (a mic test without playout), which a call, the mic
+   *  test or the tab closing ends. */
   function startNativeMeter(): void {
     lastHeardAt = Number.NEGATIVE_INFINITY;
-    registerMic(
-      onNativeInputLevel((level, gateOpen) => {
-        if (level !== null) {
-          paintMeter(level, gateOpen);
-          return;
-        }
-        // The capture stopped (mute or leave): back to the empty bar.
-        clearMeter();
-      }),
-    );
+    const stopCallLevels = onNativeInputLevel((level, gateOpen) => {
+      if (level !== null) {
+        paintMeter(level, gateOpen);
+        return;
+      }
+      // The call's capture stopped (mute or leave): the empty bar, and the
+      // monitor again once the device is free.
+      clearMeter();
+      if (!micTesting && nativeTestId === null && !nativeTestStarting) void startNativeTest(true);
+    });
+    registerMic(() => {
+      stopCallLevels();
+      if (nativeMonitoring) stopNativeTest();
+    });
+    if (!micTesting) void startNativeTest(true);
   }
   /** Back to the empty bar: no level, no status. */
   function clearMeter(): void {

@@ -148,6 +148,18 @@ says exactly what the beta does and does not claim about who can read what.
 - **On Linux with Wayland, screen shares go up to 60 fps.** The PipeWire
   capture runs at 60 fps. So the screen-share picker turns off 120 fps there,
   and a saved 120 fps setting falls back to 60.
+- **On Linux, the mic test does not run during a call.** The call and the test
+  would both need the microphone, and the Linux voice engine lets only one
+  capture own it. **Settings › Voice & Audio** says to leave the voice channel
+  first. In a call the level bar already follows the call's own microphone, so
+  you can still check your level and sensitivity there. On Windows the test
+  also runs in a call.
+- **On Linux, the connection test cannot check incoming media.** The Linux
+  web view has no WebRTC, so the test has no receiver to inspect and reports
+  that stage as not tested, even in a call. Hearing or seeing another
+  participant in the call is the check. On Windows the test counts decoded
+  audio and video for three seconds. The microphone check does open your
+  microphone on both platforms.
 
 ## FAQ
 

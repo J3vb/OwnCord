@@ -363,9 +363,11 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.micFailed":
     "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
   "diagnostics.detail.micNativePresent":
-    "Your microphone is connected. On Linux it opens when you join a call; nothing was recorded.",
+    "Your microphone opened and reported audio. The test capture has stopped; nothing was recorded or sent.",
   "diagnostics.detail.micNativeDefault":
-    "Your saved microphone is not connected, so calls will use the system default.",
+    "Your saved microphone is not connected, so calls will use the system default. The default opened and reported audio; nothing was recorded or sent.",
+  "diagnostics.detail.micNativeInCall":
+    "You are in a call, so its capture already holds your microphone and it was not opened again. The level bar in Voice & Video settings shows it live.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":
@@ -388,7 +390,7 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.mediaMissing":
     "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
   "diagnostics.detail.mediaNative":
-    "Incoming media cannot be checked on Linux yet. Your call is connected.",
+    "Incoming media cannot be checked on Linux: the web view has no WebRTC, so this test has no receiver to inspect. Hearing or seeing another participant in your call is the check.",
   "diagnostics.detail.mediaFailed":
     "Incoming media could not be inspected. Rejoin the call and retry.",
   "diagnostics.detail.connectionTimeout":
@@ -483,5 +485,5 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.nativeNote":
-    "On Linux, the level bar shows your microphone in a voice channel or while the mic test runs.",
+    "On Linux, the mic test cannot run during a call; the level bar then shows your call's microphone.",
 });

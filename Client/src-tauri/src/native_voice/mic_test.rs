@@ -15,6 +15,11 @@
 //! peers when nobody else is talking. Open speakers can howl, as on the web;
 //! the tab tells the user to wear headphones.
 //!
+//! `monitor` is the same test without the playout: the capture and its level
+//! reports only, which drives the settings tab's meter and the diagnostics
+//! microphone check outside a call. It takes the test's slot, so it obeys the
+//! same join rule and a real test replaces it.
+//!
 //! A test and a session never run together (`mod.rs`'s join rule).
 use std::sync::Arc;
 
@@ -43,6 +48,9 @@ pub struct MicTestOptions {
     pub output_gain: f32,
     /// The voice gate's threshold (0: no gate).
     pub threshold: f32,
+    /// Capture and report levels only: no output is opened or played.
+    #[serde(default)]
+    pub monitor: bool,
 }
 
 /// A live change to a running test.
@@ -92,6 +100,7 @@ pub struct MicTest {
     playout: Playout,
     apm: Arc<Apm>,
     audio: AudioOptions,
+    monitor: bool,
     retired: Vec<Arc<Apm>>,
     reports: tokio::task::JoinHandle<()>,
 }
@@ -114,12 +123,17 @@ pub async fn release(test: Option<MicTest>) {
 
 impl MicTest {
     /// No streams yet: the processing and the slots only.
-    fn idle(audio: AudioOptions, reports: tokio::task::JoinHandle<()>) -> Self {
+    pub(super) fn idle(
+        audio: AudioOptions,
+        monitor: bool,
+        reports: tokio::task::JoinHandle<()>,
+    ) -> Self {
         Self {
             capture: Capture::default(),
             playout: Playout::default(),
             apm: Apm::new(&audio),
             audio,
+            monitor,
             retired: Vec::new(),
             reports,
         }
@@ -133,17 +147,19 @@ impl MicTest {
         on_level: LevelSink,
         reports: tokio::task::JoinHandle<()>,
     ) -> Result<Self, String> {
-        let mut test = Self::idle(opts.audio, reports);
-        test.playout.mixer().add_loopback();
-        test.playout
-            .mixer()
-            .set_gain(LOOPBACK, Volume::Microphone, opts.output_gain);
-        if let Err(e) = test.playout.set_device(&opts.output) {
-            if test.playout.playing().is_none() {
-                return Err(e);
+        let mut test = Self::idle(opts.audio, opts.monitor, reports);
+        if !opts.monitor {
+            test.playout.mixer().add_loopback();
+            test.playout
+                .mixer()
+                .set_gain(LOOPBACK, Volume::Microphone, opts.output_gain);
+            if let Err(e) = test.playout.set_device(&opts.output) {
+                if test.playout.playing().is_none() {
+                    return Err(e);
+                }
+                // A fallback to the default output: it plays.
+                log::warn!("[native_voice] mic test output: {e}");
             }
-            // A fallback to the default output: it plays.
-            log::warn!("[native_voice] mic test output: {e}");
         }
         test.capture.configure(
             test.apm.clone(),
@@ -172,6 +188,8 @@ impl MicTest {
             MicTestUpdate::VoiceGate { threshold, retune } => {
                 self.capture.set_voice_gate(threshold, retune);
             }
+            MicTestUpdate::OutputGain { .. } | MicTestUpdate::OutputDevice { .. }
+                if self.monitor => {}
             MicTestUpdate::OutputGain { gain } => {
                 self.playout
                     .mixer()
@@ -230,7 +248,7 @@ mod tests {
     }
 
     fn idle(audio: AudioOptions) -> MicTest {
-        MicTest::idle(audio, tokio::spawn(async {}))
+        MicTest::idle(audio, false, tokio::spawn(async {}))
     }
 
     #[tokio::test]
@@ -257,8 +275,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_monitor_ignores_output_updates_and_opens_no_output() {
+        let mut test = MicTest::idle(audio(true, false), true, tokio::spawn(async {}));
+        test.update(MicTestUpdate::OutputGain { gain: 0.5 })
+            .unwrap();
+        test.update(MicTestUpdate::OutputDevice {
+            device_id: "x".into(),
+        })
+        .unwrap();
+        assert!(test.playout.playing().is_none(), "no output was opened");
+    }
+
     #[test]
     fn mic_test_wire_format() {
+        let monitor: MicTestOptions = serde_json::from_str(
+            r#"{"input":"","output":"","audio":{"echoCancellation":true,"noiseSuppression":false,"autoGainControl":true},"inputGain":100,"outputGain":1,"threshold":0,"monitor":true}"#,
+        )
+        .unwrap();
+        assert!(monitor.monitor);
+        let plain: MicTestOptions = serde_json::from_str(
+            r#"{"input":"","output":"","audio":{"echoCancellation":true,"noiseSuppression":false,"autoGainControl":true},"inputGain":100,"outputGain":1,"threshold":0}"#,
+        )
+        .unwrap();
+        assert!(!plain.monitor, "absent means a full test");
         let level = serde_json::to_value(MicTestEvent::InputLevel {
             rms: 0.5,
             open: true,
@@ -327,6 +367,7 @@ mod tests {
             input_gain: 100.0,
             output_gain: 0.5,
             threshold: 0.0,
+            monitor: false,
         };
         let test = tokio::task::spawn_blocking(move || {
             MicTest::start(

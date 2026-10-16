@@ -1774,6 +1774,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const nativeCameraSupport = vi.fn();
   const nativeVideoCodecs = vi.fn();
   const startMicTest = vi.fn();
+  /** The meter's capture-only monitor, which shares the host's start command. */
+  const startMonitor = vi.fn();
   const updateMicTest = vi.fn();
   const stopMicTest = vi.fn();
   const onMicTestEvent = vi.fn();
@@ -1788,6 +1790,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   beforeEach(async () => {
     vi.resetModules();
     startMicTest.mockReset().mockResolvedValue(7);
+    startMonitor.mockReset().mockResolvedValue(99);
     updateMicTest.mockReset().mockResolvedValue(undefined);
     stopMicTest.mockReset().mockResolvedValue(undefined);
     unsubscribeTest.mockReset();
@@ -1827,7 +1830,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         nativeVoice: {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
-          startMicTest: (...args: unknown[]) => startMicTest(...args) as unknown,
+          startMicTest: (options: { monitor?: boolean }) =>
+            (options.monitor === true ? startMonitor(options) : startMicTest(options)) as unknown,
           updateMicTest: (...args: unknown[]) => updateMicTest(...args) as unknown,
           stopMicTest: (...args: unknown[]) => stopMicTest(...args) as unknown,
           onMicTestEvent: (...args: unknown[]) => onMicTestEvent(...args) as unknown,
@@ -1989,9 +1993,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         "Enhanced Noise Suppression",
       ]),
     );
-    // The capture, and so the meter, runs only in a call until the mic test.
+    // The meter runs outside a call too; only the test waits for the call.
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
-    expect(note?.textContent).toContain("in a voice channel or while the mic test runs");
+    expect(note?.textContent).toContain("mic test cannot run during a call");
     // The native engine acquires no audio through the webview. The camera
     // preview may still call getUserMedia (video only) since voice #22 starts
     // it on the default device; no audio request may occur.
@@ -2089,6 +2093,128 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(desc.textContent).toBe(NORMAL_DESC);
     expect(tab.element.textContent).not.toContain("not available on Linux yet");
     expect(startMicTest).not.toHaveBeenCalled();
+  });
+
+  describe("the meter's capture-only monitor", () => {
+    const meterWidth = (element: HTMLElement) =>
+      element.querySelector<HTMLElement>(".mic-meter-level")!.style.width;
+    const level = (rms: number, test = 99): void =>
+      testHandler?.({ test, event: { type: "inputLevel", rms, open: true } });
+
+    it("starts when the tab opens, on the saved microphone and with no output", async () => {
+      localStorage.setItem("owncord:settings:audioInputDevice", '"guid-mic"');
+      localStorage.setItem("owncord:settings:inputVolume", "120");
+      await mount();
+      await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(1));
+      expect(startMonitor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: "guid-mic",
+          output: "",
+          inputGain: 120,
+          outputGain: 0,
+          monitor: true,
+        }),
+      );
+      expect(startMicTest).not.toHaveBeenCalled();
+    });
+
+    it("moves the bar with its level reports and ignores another test's", async () => {
+      const tab = await mount();
+      await settle();
+      level(0.05);
+      expect(meterWidth(tab.element)).not.toBe("0%");
+      level(0, 99);
+      expect(meterWidth(tab.element)).toBe("0%");
+      level(0.05);
+      const before = meterWidth(tab.element);
+      level(0.5, 123);
+      expect(meterWidth(tab.element)).toBe(before);
+    });
+
+    it("stops with the tab, once, and not again at the overlay's end", async () => {
+      const tab = await mount();
+      await settle();
+      tab.tab.cleanup();
+      expect(stopMicTest).toHaveBeenCalledTimes(1);
+      expect(stopMicTest).toHaveBeenCalledWith(99);
+      tab.ac.abort();
+      expect(stopMicTest).toHaveBeenCalledTimes(1);
+    });
+
+    it("is stopped when a start still in flight resolves after the tab closed", async () => {
+      let resolveStart!: (id: number) => void;
+      startMonitor.mockReturnValue(
+        new Promise<number>((resolve) => {
+          resolveStart = resolve;
+        }),
+      );
+      const tab = await mount();
+      tab.ac.abort();
+      expect(stopMicTest).not.toHaveBeenCalled();
+      resolveStart(5);
+      await vi.waitFor(() => expect(stopMicTest).toHaveBeenCalledWith(5));
+    });
+
+    it("hands the capture to the mic test and takes it back when the test stops", async () => {
+      const tab = await mount();
+      await settle();
+      await startTest(tab.element);
+      // The host replaced the monitor itself: no stop for it.
+      expect(stopMicTest).not.toHaveBeenCalled();
+      expect(startMonitor).toHaveBeenCalledTimes(1);
+      micTestRow(tab.element).button.click();
+      expect(stopMicTest).toHaveBeenCalledTimes(1);
+      expect(stopMicTest).toHaveBeenCalledWith(7);
+      await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(2));
+    });
+
+    it("follows the call when one joins, and returns when the call's capture stops", async () => {
+      const tab = await mount();
+      await settle();
+      testHandler?.({ test: 99, event: { type: "ended" } });
+      // A call joined: no stop, no test messaging, the button is untouched.
+      expect(stopMicTest).not.toHaveBeenCalled();
+      const { button, desc } = micTestRow(tab.element);
+      expect(button.textContent).toBe("Let's Check");
+      expect(desc.textContent).toBe(NORMAL_DESC);
+      expect(startMonitor).toHaveBeenCalledTimes(1);
+      nativeLevelListener?.(0.05, true);
+      expect(meterWidth(tab.element)).not.toBe("0%");
+      // The call ended: the bar empties and the monitor runs again.
+      nativeLevelListener?.(null, false);
+      expect(meterWidth(tab.element)).toBe("0%");
+      await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(2));
+    });
+
+    it("stays quiet when a call holds the capture, and retries when it lets go", async () => {
+      startMonitor.mockRejectedValueOnce(new Error("mic test unavailable during a call"));
+      const tab = await mount();
+      await settle();
+      expect(micTestRow(tab.element).desc.textContent).toBe(NORMAL_DESC);
+      nativeLevelListener?.(null, false);
+      await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(2));
+    });
+
+    it("does not start a monitor over a running mic test", async () => {
+      const tab = await mount();
+      await settle();
+      await startTest(tab.element);
+      nativeLevelListener?.(null, false);
+      await settle();
+      expect(startMonitor).toHaveBeenCalledTimes(1);
+    });
+
+    it("moves to a newly chosen microphone", async () => {
+      const tab = await mount();
+      await settle();
+      const select = [...tab.element.querySelectorAll("select")].find(
+        (sel) => sel.getAttribute("aria-label") === "Input Device",
+      )!;
+      select.value = "alsa:usb";
+      select.dispatchEvent(new Event("change"));
+      await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledTimes(2));
+      expect(stopMicTest).toHaveBeenCalledWith(99);
+    });
   });
 
   it("on Linux a native device change refills the lists outside a call, and stops after the tab is torn down", async () => {
@@ -2443,7 +2569,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       }
     });
 
-    it("does nothing when no test runs", async () => {
+    it("does nothing when neither a test nor a monitor runs", async () => {
+      startMonitor.mockRejectedValue(new Error("mic test unavailable during a call"));
       const tab = await mount();
       const slider = tab.element.querySelector<HTMLInputElement>(
         'input[aria-label="Input Volume"]',

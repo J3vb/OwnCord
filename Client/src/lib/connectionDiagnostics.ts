@@ -5,6 +5,8 @@ import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/preferences";
 import { isMissingDeviceError } from "@lib/audioPipeline";
 import { nativeAudioDevices, type AudioDevice } from "../features/voice/native/devices";
+import { probeNativeMicrophone, type NativeMicProbe } from "../features/voice/native/micProbe";
+import { isLinuxDesktop } from "../features/voice/native/platform";
 import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
@@ -37,6 +39,9 @@ export interface DiagnosticServices {
   /** The native backend's microphones on Linux, where the webview cannot
    *  open the devices voice uses; null elsewhere. */
   listNativeInputs(): Promise<AudioDevice[] | null>;
+  /** Opens the native capture for about a second (Linux) and stops it;
+   *  aborting `signal` stops it too. */
+  probeNativeInput(input: string, signal: AbortSignal): Promise<NativeMicProbe>;
 }
 
 /** NativeRoom has no browser signaling socket; it reports its own. */
@@ -64,6 +69,7 @@ export function configureConnectionDiagnostics(api: ApiClient, ws: WsClient): vo
     getRoom: async () => (await import("@lib/livekitSession")).getRoomForStats(),
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
     listNativeInputs: () => nativeAudioDevices("audioinput"),
+    probeNativeInput: probeNativeMicrophone,
   };
 }
 
@@ -172,13 +178,14 @@ export async function runConnectionDiagnostics(
   };
   const check = async (
     stage: DiagnosticStage,
-    task: () => Promise<string>,
+    task: () => Promise<string | { status: "not-tested"; detail: string }>,
     failure: (error: unknown) => string,
   ): Promise<void> => {
     emit(stage, "running", t("diagnostics.detail.checking"));
     try {
-      const detail = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
-      emit(stage, "passed", detail);
+      const outcome = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
+      if (typeof outcome === "string") emit(stage, "passed", outcome);
+      else emit(stage, outcome.status, outcome.detail);
     } catch (error) {
       lifetime.throwIfAborted();
       emit(stage, "failed", failure(error));
@@ -227,11 +234,18 @@ export async function runConnectionDiagnostics(
         const selected = loadPref<string>("audioInputDevice", "");
         const nativeInputs = await services.listNativeInputs();
         if (nativeInputs !== null) {
-          // Linux voice opens the device in the native backend only inside a
-          // call, so the check confirms the device it will use is present.
+          // Linux voice opens the device in the native backend, so the check
+          // opens it there for a second and passes only when levels arrive.
           // i18n-exempt: internal guard mapped to the microphone failure catalog line
           if (nativeInputs.length === 0) throw new Error("No native microphone.");
-          return selected === "" || nativeInputs.some((d) => d.deviceId === selected)
+          const present = selected === "" || nativeInputs.some((d) => d.deviceId === selected);
+          const probe = await services.probeNativeInput(present ? selected : "", lifetime);
+          if (probe === "in-call") {
+            return { status: "not-tested", detail: t("diagnostics.detail.micNativeInCall") };
+          }
+          // i18n-exempt: internal guard mapped to the microphone failure catalog line
+          if (probe === "silent") throw new Error("No audio from the native microphone.");
+          return present
             ? t("diagnostics.detail.micNativePresent")
             : t("diagnostics.detail.micNativeDefault");
         }
@@ -272,7 +286,11 @@ export async function runConnectionDiagnostics(
   const room = await bounded(Promise.resolve(services.getRoom()), lifetime, 5000);
   if (!room) {
     emit("signaling", "not-tested", t("diagnostics.detail.joinVoice"));
-    emit("media", "not-tested", t("diagnostics.detail.joinCall"));
+    emit(
+      "media",
+      "not-tested",
+      t(isLinuxDesktop() ? "diagnostics.detail.mediaNative" : "diagnostics.detail.joinCall"),
+    );
     return;
   }
   const native = nativeSignaling(room);
