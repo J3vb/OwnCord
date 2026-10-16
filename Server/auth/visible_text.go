@@ -32,9 +32,14 @@ func (e visibleTextError) Is(target error) bool { return target == ErrVisibleTex
 const zwj = '\u200d'
 
 // isVariationSelector reports U+FE0E / U+FE0F, which trail an emoji base.
-func isVariationSelector(r rune) bool { return r == '︎' || r == '\ufe0f' }
+func isVariationSelector(r rune) bool { return r == '\ufe0e' || r == '\ufe0f' }
 
 func isSymbol(r rune) bool { return unicode.In(r, unicode.So, unicode.Sk) }
+
+// isVariationBase reports the runes an emoji or text variation selector may
+// follow: any symbol or punctuation, which covers every standardized emoji
+// variation base that is not a keycap digit (e.g. U+2194 is Sm, U+203C is Po).
+func isVariationBase(r rune) bool { return unicode.In(r, unicode.S, unicode.P) }
 
 // isBlankFiller reports the default-ignorable characters that render as
 // nothing (or as a blank letter) yet are not Cc/Cf: they would let a name or
@@ -85,7 +90,7 @@ func zwjJoinsSymbols(runes []rune, i int) bool {
 //     ZWJ directly between two symbols so emoji sequences survive;
 //   - line and paragraph separators (U+2028, U+2029), which render as breaks;
 //   - blank fillers (see isBlankFiller) and variation selectors, except
-//     U+FE0E/U+FE0F straight after a symbol (So/Sk) so emoji keep working,
+//     U+FE0E/U+FE0F straight after a symbol or punctuation so emoji keep working,
 //     and the U+FE0F of a keycap (digit, '#' or '*', U+FE0F, U+20E3);
 //   - more than two combining marks (Mn/Me) in a row.
 //
@@ -102,7 +107,7 @@ func ValidateVisibleText(s string) error {
 		case isBlankFiller(r):
 			return visibleTextError("must not contain invisible characters")
 		case isAnyVariationSelector(r):
-			if (r == '\ufe0e' || r == '\ufe0f') && i > 0 && isSymbol(runes[i-1]) {
+			if isVariationSelector(r) && i > 0 && isVariationBase(runes[i-1]) {
 				continue
 			}
 			if isKeycapSelector(runes, i) {
