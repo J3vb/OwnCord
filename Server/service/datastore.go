@@ -42,8 +42,7 @@ type Store interface {
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	SearchMessages(ctx context.Context, query string, channelID *int64, page db.SearchPage) ([]db.MessageSearchResult, error)
-	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page db.SearchPage) ([]db.MessageSearchResult, error)
+	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error

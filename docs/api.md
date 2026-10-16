@@ -1345,13 +1345,43 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param        | Type   | Default        | Range                   | Description                                                                                                                                                    |
-| ------------ | ------ | -------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`) |
-| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                            |
-| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                      |
-| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                                                                      |
-| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                     |
+| Param        | Type   | Default        | Range                   | Description                                                                                                                                                                                          |
+| ------------ | ------ | -------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`          | string | (required)     | non-empty               | Search words and filters (see [Filters](#filters)). Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`) |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                                                                  |
+| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                                                            |
+| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first. A query with filters and no words is always newest first                                                                                  |
+| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                                                           |
+| `tz`         | string | `UTC`          | IANA zone name          | Time zone for the `before:`, `after:` and `during:` day boundaries, e.g. `Europe/Amsterdam`. Unknown names are a 400                                                                                 |
+
+#### Filters
+
+Filters are `key:value` tokens inside `q`; the remaining words are the search
+text. Keys are case-insensitive and only count at the start of a token, so
+`http://x`, `12:30` and `note:x` stay ordinary words. A value may be
+double-quoted to hold spaces (`from:"ann lee"`); an unterminated quote runs to
+the end of `q`.
+
+| Filter        | Value                              | Matches                                                                  |
+| ------------- | ---------------------------------- | ------------------------------------------------------------------------ |
+| `from:name`   | username, optional leading `@`     | Messages by that user (case-insensitive)                                 |
+| `in:name`     | channel name, optional leading `#` | Messages in every readable channel with that name (names are not unique) |
+| `before:date` | `YYYY-MM-DD`                       | Sent before 00:00 of that day in `tz`                                    |
+| `after:date`  | `YYYY-MM-DD`                       | Sent from 00:00 of the day after, in `tz`                                |
+| `during:date` | `YYYY-MM-DD`                       | Sent during that day in `tz`                                             |
+
+- Repeated `from:` or `in:` values match any of them; different filters must all
+  match. Several date filters intersect, and an empty range returns no results.
+- An empty value (`from:`) is ignored. At most 25 filters per query and 10
+  values each of `from:` and `in:`.
+- An unknown user or channel name returns an empty `200`. `in:` only matches
+  channels the caller can read, so a private, unacknowledged NSFW or someone
+  else's DM channel gives exactly the answer a nonexistent name gives, with or
+  without `channel_id`. `channel_id` itself keeps its `403` / `404` answers.
+- A query with filters and no words has no relevance order: results are newest
+  first and page with `next_before`, the same as `sort=recent`. Send
+  `sort=recent&before=<next_before>` for the following pages; filters and scope
+  carry over because `q` is sent again.
 
 #### Response 200 OK
 
@@ -1381,12 +1411,12 @@ when there are no more results. It is always `null` for `sort=relevance`.
 
 #### Error Responses
 
-| Status | Code                            | When                                                                                       |
-| ------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
-| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
-| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                        |
-| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                         |
-| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                              |
+| Status | Code                            | When                                                                                                                                                                                                     |
+| ------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent`; bad `tz`; a malformed `before:` / `after:` / `during:` date; too many filters (the message names the filter) |
+| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                                                                                                                                      |
+| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                                                                                                                                       |
+| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                                                                                                                                            |
 
 ---
 
