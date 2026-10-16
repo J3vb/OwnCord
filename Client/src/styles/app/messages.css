@@ -1359,6 +1359,20 @@ ul.md-list-nested {
   background: var(--bg-hover);
   color: var(--text-normal);
 }
+/* Quick-reaction emoji: the glyph itself, not a monochrome icon. */
+.msg-actions-bar .msg-quick-react {
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+/* Pin, Delete and (own message) Reply show only while Shift is held
+   (MessageList toggles .shift-held on its root). They also carry
+   tabindex=-1, so Shift+Tab never lands on one that vanishes on keyup. */
+.msg-actions-bar .msg-shift-only {
+  display: none;
+}
+.messages-container.shift-held .msg-actions-bar .msg-shift-only {
+  display: flex;
+}
 
 /* Reply compose bar */
 .reply-bar {

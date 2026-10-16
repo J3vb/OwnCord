@@ -9,6 +9,8 @@
 // here, and nowhere else. Set in the config module so Stryker's child
 // processes inherit it.
 process.env.OC_ALLOW_UNPINNED_TZ = "1";
+// Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
+process.env.OC_MUTATION_RUN = "1";
 
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {

@@ -33,6 +33,7 @@ export const nativeVoice: NativeVoice = {
   unpublishCamera: async (session, sid) => (await service()).unpublishCamera(session, sid),
   listCameras: async () => (await service()).listCameras(),
   cameraSupport: async () => (await service()).cameraSupport(),
+  videoCodecs: async () => (await service()).videoCodecs(),
   startCamera: async (session, source, capture) =>
     (await service()).startCamera(session, source, capture),
   stopCamera: async (session, capture) => (await service()).stopCamera(session, capture),
@@ -44,6 +45,7 @@ export const nativeVoice: NativeVoice = {
     (await service()).startScreen(session, source, capture),
   publishScreen: async (session, capture, options) =>
     (await service()).publishScreen(session, capture, options),
+  unpublishScreen: async (session, capture) => (await service()).unpublishScreen(session, capture),
   stopScreen: async (session, capture) => (await service()).stopScreen(session, capture),
   changeCamera: async (session, source, capture) =>
     (await service()).changeCamera(session, source, capture),

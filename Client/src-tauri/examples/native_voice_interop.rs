@@ -28,6 +28,11 @@
 //! gone.
 //! `--simulcast` (with `--video`) publishes that camera simulcast, as the app
 //! does for every camera quality but "source".
+//! `--codec h264` (with `--video`) publishes the camera as H.264 instead of
+//! the default VP8 (WP LP-7c).
+//! `--probe-codecs` prints `{"event":{"type":"codecs","h264":bool}}` and exits:
+//! whether this build's libwebrtc can encode H.264, so the browser half can
+//! skip its H.264 case with a reason instead of failing it.
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
@@ -65,7 +70,8 @@ mod linux {
     use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
     use owncord_client_lib::native_voice::screen::{self, CaptureOptions, Target};
     use owncord_client_lib::native_voice::session::{
-        process_threads, shared_key_material, CameraOptions, Event, NativeSession, ScreenOptions,
+        process_threads, shared_key_material, CameraOptions, Event, NativeSession, PublishCodec,
+        ScreenOptions,
     };
     use tokio_tungstenite::tungstenite::Message;
 
@@ -217,6 +223,7 @@ mod linux {
         width: u32,
         height: u32,
         simulcast: bool,
+        codec: PublishCodec,
     ) -> Result<(u64, String), String> {
         let (capture, started) = session
             .start_camera(
@@ -238,6 +245,7 @@ mod linux {
                     max_bitrate: 1_700_000,
                     max_framerate: 30.0,
                     simulcast,
+                    codec,
                 },
             )
             .await?;
@@ -326,6 +334,7 @@ mod linux {
                     max_bitrate: 3_000_000,
                     max_framerate: 15.0,
                     simulcast: false,
+                    codec: PublishCodec::default(),
                 },
             )
             .await?;
@@ -338,6 +347,11 @@ mod linux {
     }
 
     pub async fn run() -> Result<(), String> {
+        if std::env::args().any(|a| a == "--probe-codecs") {
+            let codecs = owncord_client_lib::native_voice::probe_video_codecs();
+            emit(serde_json::json!({ "event": { "type": "codecs", "h264": codecs.h264 } }));
+            return Ok(());
+        }
         let url = arg("--url").ok_or("--url required")?;
         let token = arg("--token").ok_or("--token required")?;
         let key = arg("--key").ok_or("--key required")?;
@@ -362,6 +376,11 @@ mod linux {
         let video = size_arg("--video")?;
         let screen_size = size_arg("--screen")?;
         let simulcast = std::env::args().any(|a| a == "--simulcast");
+        let codec = match arg("--codec").as_deref() {
+            None | Some("vp8") => PublishCodec::Vp8,
+            Some("h264") => PublishCodec::H264,
+            Some(_) => return Err("--codec must be vp8 or h264".into()),
+        };
 
         if cycles > 0 {
             emit(
@@ -410,7 +429,7 @@ mod linux {
             // A synthetic camera through the same capture thread and publish
             // the app uses (CI has no camera).
             let (mut capture, mut camera_sid) =
-                start_camera(&mut session, width, height, simulcast).await?;
+                start_camera(&mut session, width, height, simulcast, codec).await?;
             let camera_cycles: u32 = arg("--camera-cycles")
                 .as_deref()
                 .unwrap_or("0")
@@ -433,7 +452,7 @@ mod linux {
                     session.stop_camera(capture).await;
                     let stale = camera_sid;
                     (capture, camera_sid) =
-                        start_camera(&mut session, width, height, simulcast).await?;
+                        start_camera(&mut session, width, height, simulcast, codec).await?;
                     session.unpublish_camera(&stale).await;
                     await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 }

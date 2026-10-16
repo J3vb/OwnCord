@@ -399,7 +399,7 @@ test.describe("B9-19 messaging text", () => {
 
     const own = page.locator("[data-testid='message-101']");
     await own.hover();
-    await expect(page.locator("[data-testid='msg-reply-101']")).toHaveAccessibleName("Reply");
+    await expect(page.locator("[data-testid='msg-more-101']")).toHaveAccessibleName("More");
     await expect(page.locator("[data-testid='msg-edit-101']")).toHaveAccessibleName("Edit");
     await expect(page.locator("[data-testid='msg-react-101']")).toHaveAccessibleName("React");
 
@@ -436,14 +436,24 @@ test.describe("B9-19 messaging text", () => {
     await own.hover();
     for (const [testId, english] of [
       ["msg-react-101", "React"],
-      ["msg-reply-101", "Reply"],
       ["msg-edit-101", "Edit"],
+      ["msg-more-101", "More"],
+    ] as const) {
+      const btn = page.locator(`[data-testid='${testId}']`);
+      await expect(btn).toHaveAccessibleName(expanded(english));
+      await expect(btn).toBeVisible();
+    }
+    // Reply and Delete on your own message show while Shift is held.
+    await page.keyboard.down("Shift");
+    for (const [testId, english] of [
+      ["msg-reply-101", "Reply"],
       ["msg-delete-101", "Delete"],
     ] as const) {
       const btn = page.locator(`[data-testid='${testId}']`);
       await expect(btn).toHaveAccessibleName(expanded(english));
       await expect(btn).toBeVisible();
     }
+    await page.keyboard.up("Shift");
 
     // The pinned panel's complementary landmark and close control are named
     // from the seam, and its empty state stays whole.

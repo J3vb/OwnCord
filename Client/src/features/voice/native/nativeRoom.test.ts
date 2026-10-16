@@ -182,6 +182,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["publishScreen", args]);
         return Promise.resolve("TR_screen");
       },
+      unpublishScreen: (...args: unknown[]) => {
+        host.calls.push(["unpublishScreen", args]);
+        return Promise.resolve();
+      },
       stopScreen: (...args: unknown[]) => {
         host.calls.push(["stopScreen", args]);
         return Promise.resolve();
@@ -1376,12 +1380,57 @@ describe("NativeRoom camera", () => {
         [
           1,
           1,
-          { width: 1280, height: 720, maxBitrate: 1_700_000, maxFramerate: 30, simulcast: true },
+          {
+            width: 1280,
+            height: 720,
+            maxBitrate: 1_700_000,
+            maxFramerate: 30,
+            simulcast: true,
+            codec: "vp8",
+          },
         ],
       ],
     ]);
     // The self-view preview reads the host capture back over the socket.
     expect(host.renderers[0]!.url).toBe("ws://127.0.0.1:9/tok/camera");
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
+  });
+
+  it("publishCamera passes the codec", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const cam = await startCamera(room);
+    for (const [videoCodec, codec] of [
+      ["h264", "h264"],
+      ["vp8", "vp8"],
+      // The native engine has no VP9 or H.265: anything else is VP8.
+      ["vp9", "vp8"],
+      ["h265", "vp8"],
+    ] as const) {
+      host.calls.length = 0;
+      // oxlint-disable-next-line no-await-in-loop -- one publish at a time
+      await room.localParticipant.publishTrack(cam, { ...cameraOptions, videoCodec });
+      const call = host.calls.find(([n]) => n === "publishCamera")!;
+      expect(call[1][2]).toMatchObject({ codec });
+    }
+  });
+
+  it("a codec republish keeps the capture and publishes with the new codec", async () => {
+    const { room, cam } = await publishedCamera();
+    const capture = cam.capture;
+    await room.localParticipant.publishTrack(cam, { ...cameraOptions, videoCodec: "h264" });
+    host.calls.length = 0;
+    // The shared republish: unpublish without stopping the track, then publish.
+    await room.localParticipant.unpublishTrack(cam.mediaStreamTrack, false);
+    expect(host.calls.map(([n]) => n)).toEqual(["unpublishCamera"]);
+    expect(host.renderers[0]!.disposed).toBe(false);
+    await room.localParticipant.publishTrack(cam, { ...cameraOptions, videoCodec: "vp8" });
+    expect(host.calls.map(([n]) => n)).toEqual(["unpublishCamera", "publishCamera"]);
+    expect(host.calls.filter(([n]) => n === "stopCamera")).toHaveLength(0);
+    expect(host.calls.at(-1)).toEqual([
+      "publishCamera",
+      [1, capture, expect.objectContaining({ codec: "vp8" })],
+    ]);
     expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
   });
 
@@ -1682,7 +1731,14 @@ describe("NativeRoom screen share", () => {
       [
         1,
         4,
-        { width: 1280, height: 720, maxBitrate: 1_500_000, maxFramerate: 5, simulcast: false },
+        {
+          width: 1280,
+          height: 720,
+          maxBitrate: 1_500_000,
+          maxFramerate: 5,
+          simulcast: false,
+          codec: "vp8",
+        },
       ],
     ]);
     expect(pub).toMatchObject({ trackSid: "TR_screen", source: "screen_share" });
@@ -1696,6 +1752,42 @@ describe("NativeRoom screen share", () => {
     screen.stop();
     expect(host.calls.filter(([n]) => n === "stopScreen")).toHaveLength(1);
     expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("publishScreen passes the codec", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "h264" });
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [1, 4, expect.objectContaining({ codec: "h264" })],
+    ]);
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "vp9" });
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [1, 4, expect.objectContaining({ codec: "vp8" })],
+    ]);
+  });
+
+  it("a codec republish keeps the screen capture and publishes with the new codec", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "h264" });
+    host.calls.length = 0;
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack, false);
+    expect(host.calls).toEqual([["unpublishScreen", [1, 4]]]);
+    expect(host.renderers[0]!.disposed).toBe(false);
+    expect(nativeCounters.screenTracks).toBe(1);
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "vp8" });
+    expect(host.calls.map(([n]) => n)).toEqual(["unpublishScreen", "publishScreen"]);
+    expect(host.calls.filter(([n]) => n === "stopScreen")).toHaveLength(0);
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [1, 4, expect.objectContaining({ codec: "vp8" })],
+    ]);
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(screen);
   });
 
   it("publishes with simulcast when the picked quality asks for it", async () => {
@@ -1716,7 +1808,14 @@ describe("NativeRoom screen share", () => {
       [
         1,
         4,
-        { width: 1280, height: 720, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+        {
+          width: 1280,
+          height: 720,
+          maxBitrate: 3_000_000,
+          maxFramerate: 30,
+          simulcast: true,
+          codec: "vp8",
+        },
       ],
     ]);
   });

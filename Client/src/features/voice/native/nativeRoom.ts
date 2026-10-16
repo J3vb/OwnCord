@@ -232,6 +232,16 @@ interface PublishOptions {
   /** The selected preset's capture size; the host downscales a larger source. */
   resolution?: { width: number; height: number };
   videoEncoding?: { maxBitrate: number; maxFramerate?: number };
+  /** The codec `resolveVideoCodec` chose; the native engine publishes VP8
+   *  unless this is `h264`. */
+  videoCodec?: string;
+}
+
+/** The native publish's codec for the shared path's `videoCodec` option:
+ *  H.264 when asked for, VP8 for everything else (the native engine has no
+ *  VP9 or H.265). */
+function nativeCodec(options: PublishOptions): "vp8" | "h264" {
+  return options.videoCodec === "h264" ? "h264" : "vp8";
 }
 
 /** A local camera or screen publication, as `getLocalCameraStream`,
@@ -387,14 +397,18 @@ export class NativeRoom {
       options: PublishOptions,
     ) =>
       (options.source ?? (track as PublishableTrack).source) === "screen_share"
-        ? this.publishScreen(track)
+        ? this.publishScreen(track, options)
         : this.publishCamera(track as NativeCameraTrack, options),
     /** Takes the `mediaStreamTrack`, as the shared camera and screen-share
-     *  paths pass it. */
-    unpublishTrack: async (track: MediaStreamTrack): Promise<void> => {
+     *  paths pass it. `stopOnUnpublish` false (a codec republish) unpublishes
+     *  only: the host capture and its preview keep running for the publish
+     *  that follows. */
+    unpublishTrack: async (track: MediaStreamTrack, stopOnUnpublish = true): Promise<void> => {
       const pubs = this.localParticipant.trackPublications;
-      if (pubs.get("camera")?.track.mediaStreamTrack === track) await this.unpublishCamera();
-      if (pubs.get("screen_share")?.track.mediaStreamTrack === track) await this.unpublishScreen();
+      if (pubs.get("camera")?.track.mediaStreamTrack === track)
+        await this.unpublishCamera(stopOnUnpublish);
+      if (pubs.get("screen_share")?.track.mediaStreamTrack === track)
+        await this.unpublishScreen(stopOnUnpublish);
     },
   };
 
@@ -736,6 +750,7 @@ export class NativeRoom {
         maxBitrate: encoding.maxBitrate,
         maxFramerate: encoding.maxFramerate,
         simulcast: options.simulcast ?? false,
+        codec: nativeCodec(options),
       })
       .catch(async (err: unknown) => {
         await desktop.nativeVoice.stopCamera(session, track.capture).catch(() => {});
@@ -769,10 +784,17 @@ export class NativeRoom {
       .catch((err) => log.warn("native stopCamera failed", { capture: track.capture, err }));
   }
 
-  private async unpublishCamera(): Promise<void> {
+  /** `stopCapture` false unpublishes alone and leaves the capture, and the
+   *  track that owns it, running (a codec republish publishes it again). */
+  private async unpublishCamera(stopCapture = true): Promise<void> {
     const camera = this.localParticipant.trackPublications.get("camera");
     if (camera === undefined) return;
     this.localParticipant.trackPublications.delete("camera");
+    if (!stopCapture) {
+      if (this.sessionId !== null)
+        await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
+      return;
+    }
     if (camera.track instanceof NativeCameraTrack) {
       // Stops the host capture (and, if still current, unpublishes).
       camera.track.stop();
@@ -860,7 +882,10 @@ export class NativeRoom {
       .catch((err) => log.warn("native stopScreen failed", { capture: track.capture, err }));
   }
 
-  private async publishScreen(track: PublishableTrack): Promise<NativeLocalPublication> {
+  private async publishScreen(
+    track: PublishableTrack,
+    options: PublishOptions,
+  ): Promise<NativeLocalPublication> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (!(track instanceof NativeScreenTrack))
@@ -876,6 +901,7 @@ export class NativeRoom {
       maxBitrate: encoding.maxBitrate,
       maxFramerate: encoding.maxFramerate,
       simulcast: encoding.simulcast,
+      codec: nativeCodec(options),
     });
     if (this.sessionId !== session)
       // i18n-exempt: internal native-room state guard, never rendered
@@ -893,11 +919,18 @@ export class NativeRoom {
 
   /** Unpublishing a screen share stops its track, and with it the host
    *  capture (which unpublishes): the shared code stops the track next
-   *  anyway, and stop() is idempotent. */
-  private async unpublishScreen(): Promise<void> {
+   *  anyway, and stop() is idempotent. With `stopCapture` false (a codec
+   *  republish) it unpublishes alone and the capture keeps running. */
+  private async unpublishScreen(stopCapture = true): Promise<void> {
     const screen = this.localParticipant.trackPublications.get("screen_share");
     if (screen === undefined) return;
     this.localParticipant.trackPublications.delete("screen_share");
+    if (!stopCapture) {
+      // A codec republish: unpublish alone, the capture publishes again next.
+      if (this.sessionId !== null && screen.track instanceof NativeScreenTrack)
+        await desktop.nativeVoice.unpublishScreen(this.sessionId, screen.track.capture);
+      return;
+    }
     if (screen.track instanceof NativeScreenTrack) screen.track.stop();
   }
 

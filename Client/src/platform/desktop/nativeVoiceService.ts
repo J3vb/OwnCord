@@ -10,6 +10,7 @@ import type {
   NativeVoiceCameraPreview,
   NativeVoiceCameraStarted,
   NativeVoiceCameraSupport,
+  NativeVoiceVideoCodecs,
   NativeToneNote,
   NativeVoiceConnected,
   NativeVoiceDevices,
@@ -94,6 +95,15 @@ export const nativeVoice: NativeVoice = {
     invoke<void>("native_voice_unpublish_camera", { session, sid }),
   listCameras: () => invoke<NativeVoiceCameraDevice[]>("native_voice_list_cameras"),
   cameraSupport: () => invoke<NativeVoiceCameraSupport>("native_voice_camera_support"),
+  async videoCodecs() {
+    try {
+      return await invoke<NativeVoiceVideoCodecs>("native_voice_video_codecs");
+    } catch {
+      // A failed probe reads as no H.264: the picker disables it and the
+      // publish stays on VP8.
+      return { h264: false };
+    }
+  },
   startCamera: (session, source, capture) =>
     invoke<NativeVoiceCameraStarted>("native_voice_start_camera", { session, source, capture }),
   stopCamera: (session, capture) => invoke<void>("native_voice_stop_camera", { session, capture }),
@@ -105,6 +115,13 @@ export const nativeVoice: NativeVoice = {
     invoke<NativeVoiceScreenStarted>("native_voice_start_screen", { session, source, capture }),
   publishScreen: (session, capture, options) =>
     invoke<string>("native_voice_publish_screen", { session, capture, options }),
+  async unpublishScreen(session, capture) {
+    try {
+      await invoke<void>("native_voice_unpublish_screen", { session, capture });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
   async changeCamera(session, source, capture) {
     try {

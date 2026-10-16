@@ -25,6 +25,17 @@ function stubGpu(renderer: string): void {
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
+vi.mock("../../src/features/voice/native/videoCodecs", () => ({
+  nativeVideoCodecs: () => Promise.resolve({ h264: true }),
+}));
+// The Linux case waits for the codec probe, so the tab outlives the build:
+// keep the native device lists and hot-plug watch off the real desktop host.
+vi.mock("../../src/features/voice/native/devices", () => ({
+  nativeAudioDevices: async () => null,
+  nativeCameraDevices: async () => null,
+  nativeCameraSupport: async () => null,
+  onNativeDevicesChanged: () => null,
+}));
 vi.mock("livekit-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("livekit-client")>()),
   supportsVP9: () => false,
@@ -100,9 +111,15 @@ describe("VoiceAudioTab H.265 entry (WP M-6)", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "auto"]);
   });
 
-  it("is never shown on Linux: the whole codec choice is hidden", () => {
+  it("never offers H.265 on Linux", async () => {
     isLinuxDesktop.mockReturnValue(true);
-    expect(codecOptions()).toEqual([]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    await vi.waitFor(() => {
+      const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
+    });
+    ac.abort();
   });
 
   it("shows a saved H.265 that is no longer offered as VP8", () => {

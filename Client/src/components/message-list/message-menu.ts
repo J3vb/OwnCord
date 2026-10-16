@@ -23,14 +23,13 @@ import { wantsNativeMenu } from "@lib/dom";
 import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
 
-import { quickReactionEmoji } from "./quick-reactions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
 import type { MessageListOptions } from "../MessageList";
 import { connectText } from "../../i18n/connect";
 import { imageMenuText } from "../../i18n/imageMenu";
 import { messageMenuText } from "../../i18n/messageMenu";
 import { copyWithToast } from "../../features/developer-mode/developerTools";
 import { messagingText } from "../../i18n/messaging";
-import { buildCustomEmojiNode } from "./custom-emoji";
 import {
   ROW_FOCUSABLE_SELECTOR,
   deleteLockReason,
@@ -59,9 +58,6 @@ export interface MessageMenuRequest {
   readonly markUnread?: (messageId: number) => void;
 }
 
-/** Quick-reaction emoji in the menu; the hover bar shows the same number. */
-const QUICK_REACTIONS = 3;
-
 let menuOwner: Disposable | null = null;
 
 /** Close the open message menu, if any. */
@@ -89,11 +85,6 @@ function selectionIn(row: HTMLElement | null): string {
   if (anchorNode === null || focusNode === null) return "";
   if (!row.contains(anchorNode) || !row.contains(focusNode)) return "";
   return selection.toString();
-}
-
-function emojiNode(emoji: string): { node: Node; name: string } {
-  const node = buildCustomEmojiNode(emoji);
-  return { node: node ?? document.createTextNode(emoji), name: emoji };
 }
 
 function buildItems(
@@ -162,7 +153,7 @@ function buildItems(
     if (atReactionLimit(msg.reactions, emoji)) continue;
     const { node, name } = emojiNode(emoji);
     items.push({
-      label: messageMenuText("reactWith", { name }),
+      label: messagingText("action.reactWith", { name }),
       content: node,
       testId: `msg-menu-quick-${emoji}`,
       disabled: reactLock !== null,
@@ -326,6 +317,35 @@ export function openMessageMenuAt(at: MessageMenuAt): void {
 }
 
 /**
+ * Open the menu from a hover bar's "..." button, below and left-aligned with
+ * it (Discord's placement). The list's own signal owns the menu, so a row
+ * patch or a virtual-scroll rebuild of the row does not close it. Opens
+ * nothing for a row that is not a confirmed server message.
+ */
+export function openMessageMenuFromButton(at: {
+  readonly opts: MessageListOptions;
+  readonly button: HTMLElement;
+  readonly signal: AbortSignal;
+  readonly markUnread?: (messageId: number) => void;
+}): void {
+  const row = at.button.closest<HTMLElement>('.message[data-testid^="message-"]');
+  const id = Number(row?.dataset["testid"]?.slice("message-".length));
+  const msg = findMessage(at.opts.channelId, id);
+  if (msg === undefined || msg.user.id === 0 || !isActionableMessage(msg)) return;
+  const rect = at.button.getBoundingClientRect();
+  openMessageMenu({
+    msg,
+    opts: at.opts,
+    x: rect.left,
+    y: rect.bottom,
+    target: null,
+    signal: at.signal,
+    invoker: at.button,
+    ...(at.markUnread !== undefined ? { markUnread: at.markUnread } : {}),
+  });
+}
+
+/**
  * Open the menu for `req.msg`. Opens nothing for a row that is not a confirmed
  * server message, or one that vanished while the module loaded.
  */
@@ -375,7 +395,11 @@ export function openMessageMenu(req: MessageMenuRequest): void {
     restoreFocusTo: () =>
       invoker?.isConnected === true
         ? invoker
-        : (rowOf(msg.id)?.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR) ?? null),
+        : ((invoker !== undefined
+            ? rowOf(msg.id)?.querySelector<HTMLElement>(`[data-testid="msg-more-${msg.id}"]`)
+            : null) ??
+          rowOf(msg.id)?.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR) ??
+          null),
     onClosed: () => owner.destroy(),
   });
 }

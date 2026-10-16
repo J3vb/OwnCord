@@ -325,33 +325,16 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("offers Report on someone else's message only, and passes its id (B9-10)", () => {
-      const onReportClick = vi.fn();
+    it("keeps Report off the hover bar: it lives in the message menu (WP 3A-7)", () => {
       const ac = new AbortController();
       const theirs = renderMessage(
         makeMessage({ id: 5, user: { id: 11, username: "Bob", avatar: null } }),
         false,
         [],
-        makeOpts({ onReportClick }),
+        makeOpts({ onReportClick: vi.fn() }),
         ac.signal,
       );
-      const btn = theirs.querySelector<HTMLButtonElement>("[data-testid='msg-report-5']");
-      expect(btn?.getAttribute("aria-label")).toBe("Report message");
-      expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
-      btn?.click();
-      expect(onReportClick).toHaveBeenCalledWith(5);
-
-      const mine = renderMessage(makeMessage(), false, [], makeOpts({ onReportClick }), ac.signal);
-      expect(mine.querySelector("[data-testid^='msg-report-']")).toBeNull();
-      // No handler, no dead button.
-      const unwired = renderMessage(
-        makeMessage({ id: 6, user: { id: 11, username: "Bob", avatar: null } }),
-        false,
-        [],
-        makeOpts(),
-        ac.signal,
-      );
-      expect(unwired.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      expect(theirs.querySelector("[data-testid^='msg-report-']")).toBeNull();
       ac.abort();
     });
 
@@ -1207,116 +1190,23 @@ describe("renderers", () => {
   // Developer mode — copy ID button
   // ---------------------------------------------------------------------------
 
-  describe("developer mode — Copy ID button", () => {
-    it("renders Copy ID button when developerMode is enabled", () => {
-      // loadPref reads from localStorage with the "owncord:settings:" prefix
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      // Dispatch pref-change to invalidate the cached developerModeEnabled value
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
-      expect(copyIdBtn).not.toBeNull();
-      expect(copyIdBtn!.getAttribute("aria-label")).toBe("Copy ID");
-
-      // Clean up: restore developer mode to false
+  describe("developer mode — Copy ID", () => {
+    it("is not a hover-bar button in either mode; the message menu offers it (WP 3A-7)", () => {
+      for (const mode of ["true", "false"]) {
+        localStorage.setItem("owncord:settings:developerMode", mode);
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
+        );
+        const msg = makeMessage();
+        const ac = new AbortController();
+        const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+        expect(el.querySelector("[data-testid^='msg-copy-id-']")).toBeNull();
+        ac.abort();
+      }
       localStorage.setItem("owncord:settings:developerMode", "false");
       window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
+        new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
       );
-      ac.abort();
-    });
-
-    it("Copy ID button calls clipboard.writeText on click", () => {
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.assign(navigator, { clipboard: { writeText: writeTextMock } });
-
-      const msg = makeMessage({ id: 42 });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
-      expect(copyIdBtn).not.toBeNull();
-      copyIdBtn.click();
-
-      expect(writeTextMock).toHaveBeenCalledWith("42");
-
-      // Clean up
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-      ac.abort();
-    });
-
-    it("Copy ID button handles clipboard failure gracefully", () => {
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      Object.assign(navigator, {
-        clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
-      });
-
-      const msg = makeMessage({ id: 42 });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
-      // Should not throw
-      expect(() => copyIdBtn.click()).not.toThrow();
-
-      // Clean up
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-      ac.abort();
-    });
-
-    it("does not render Copy ID button when developerMode is disabled", () => {
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
-      expect(copyIdBtn).toBeNull();
-
-      ac.abort();
     });
   });
 

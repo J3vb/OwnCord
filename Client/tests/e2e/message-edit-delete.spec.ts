@@ -85,11 +85,12 @@ test.describe("Message Delete Flow", () => {
   test("clicking Delete marks the message as deleted", async ({ page }) => {
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
-    const deleteBtn = page.locator("[data-testid='msg-delete-101']");
 
-    // Delete opens a confirmation dialog (P4-12); confirming sends the
-    // chat_delete WS message.
-    await deleteBtn.click();
+    // The hover bar's Delete is Shift-only and skips the confirmation (WP
+    // 3A-7), so the confirmed path goes through the "..." menu's Delete
+    // Message (P4-12); confirming sends the chat_delete WS message.
+    await page.locator("[data-testid='msg-more-101']").click();
+    await page.locator("[data-testid='msg-menu-delete']").click();
     await page.locator("[data-testid='msg-delete-confirm']").click();
 
     // Soft-delete: message stays in DOM but shows "[message deleted]"
