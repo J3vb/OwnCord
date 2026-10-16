@@ -1,6 +1,6 @@
 /**
  * The inline message editor (WP 3A-8): a textarea inside the message row, as
- * Discord does it. Lazy — loaded through inline-edit-loader.ts, so neither the
+ * Discord does it. Lazy — loaded through inlineEditLoader.ts, so neither the
  * module nor its copy ships in the main-page chunk.
  *
  * One session owns one textarea. MessageList moves that same node into every
@@ -12,9 +12,9 @@
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { inlineEditText } from "../../i18n/inlineEdit";
-import { replaceEmojiShortcodes } from "../../features/messaging/shortcodes";
-import { FORMAT_MARKERS, wrapWithMarker } from "../../features/messaging/markdownMarkers";
-import { MAX_MESSAGE_LEN } from "../../features/messaging/messageLimits";
+import { replaceEmojiShortcodes } from "./shortcodes";
+import { FORMAT_MARKERS, wrapWithMarker } from "./markdownMarkers";
+import { MAX_MESSAGE_LEN } from "./messageLimits";
 
 export interface InlineEditOptions {
   readonly messageId: number;
@@ -79,7 +79,12 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
     saveLink,
   );
 
-  const error = createElement("div", { class: "msg-inline-edit-error", role: "alert" });
+  const errorId = `msg-edit-error-${id}`;
+  const error = createElement("div", {
+    class: "msg-inline-edit-error",
+    id: errorId,
+    role: "alert",
+  });
   error.hidden = true;
   element.append(textarea, hint, error);
 
@@ -91,6 +96,15 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
   function setError(text: string | null): void {
     error.textContent = text ?? "";
     error.hidden = text === null;
+    // The textarea points at the message while it is shown, so a screen reader
+    // reads it with the field and not only as a one-off live announcement.
+    if (text === null) {
+      textarea.removeAttribute("aria-invalid");
+      textarea.removeAttribute("aria-describedby");
+    } else {
+      textarea.setAttribute("aria-invalid", "true");
+      textarea.setAttribute("aria-describedby", errorId);
+    }
   }
 
   function save(): void {

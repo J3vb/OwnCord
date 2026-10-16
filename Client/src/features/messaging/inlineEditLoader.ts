@@ -8,13 +8,13 @@ import { createLogger } from "@lib/logger";
 
 const log = createLogger("inline-edit");
 
-type InlineEditModule = typeof import("./inline-edit");
+type InlineEditModule = typeof import("./inlineEdit");
 
 let loading: Promise<InlineEditModule> | null = null;
 
 function load(): Promise<InlineEditModule> {
   // A failed load is forgotten, so the next edit tries the import again.
-  loading ??= import("./inline-edit").catch((err: unknown) => {
+  loading ??= import("./inlineEdit").catch((err: unknown) => {
     loading = null;
     throw err;
   });
