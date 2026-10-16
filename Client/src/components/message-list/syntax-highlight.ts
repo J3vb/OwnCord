@@ -9,12 +9,17 @@
  * Pure and DOM-free; the renderer turns tokens into spans.
  */
 
-export type TokenClass = "keyword" | "string" | "comment" | "number";
+export type TokenClass = "keyword" | "string" | "comment" | "number" | "inserted" | "deleted";
 
 export interface CodeToken {
   readonly text: string;
-  /** null renders as plain text. */
+  /** null renders as plain text (or as `ansi` classes when that is set). */
   readonly cls: TokenClass | null;
+  /**
+   * Space-separated CSS class names of an ansi run (`ansi-31 ansi-b`). Set only
+   * by the ansi highlighter, on tokens whose `cls` is null.
+   */
+  readonly ansi?: string;
 }
 
 interface Pattern {
@@ -65,6 +70,18 @@ const JS_LIKE_NO_BT: readonly Pattern[] = [
 
 /** C/C++ preprocessor directive (`#include`, `#define`). */
 const C_PREPROC: Pattern = { re: /#[ \t]*[a-z]+/y, cls: "keyword" };
+
+/**
+ * Unified diff. Every pattern is anchored with ^ and the m flag: with the
+ * sticky flag ^ matches only when lastIndex sits at a line start, so a "-" or
+ * "+" in the middle of a line is never coloured. File and hunk headers come
+ * first so "+++ b/x" and "--- a/x" are not read as an insertion and a deletion.
+ */
+const DIFF_PATTERNS: readonly Pattern[] = [
+  { re: /^(?:diff --git |index |@@|(?:\+\+\+|---)(?=[ \t]|$))[^\n]*/my, cls: "keyword" },
+  { re: /^\+[^\n]*/my, cls: "inserted" },
+  { re: /^-[^\n]*/my, cls: "deleted" },
+];
 
 const LANGS: Readonly<Record<string, LangSpec>> = {
   javascript: {
@@ -228,6 +245,7 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     ],
     keywords: kw("true false null"),
   },
+  diff: { patterns: DIFF_PATTERNS, keywords: new Set() },
 };
 
 /** Aliases accepted after the opening fence. */
@@ -277,6 +295,9 @@ const ALIASES: Readonly<Record<string, string>> = {
   mysql: "sql",
   yaml: "yaml",
   yml: "yaml",
+  diff: "diff",
+  patch: "diff",
+  ansi: "ansi",
 };
 
 const DEFAULT_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/y;
@@ -294,12 +315,103 @@ export function resolveLanguage(tag: string | null): string | null {
   return canonical === undefined ? null : canonical;
 }
 
+// -- ansi ---------------------------------------------------------------------
+
+interface AnsiState {
+  fg: number;
+  bg: number;
+  bold: boolean;
+  underline: boolean;
+}
+
+/** Class names for a style, or null for the default style. */
+function ansiClasses(st: AnsiState): string | null {
+  const names: string[] = [];
+  if (st.fg > 0) names.push(`ansi-${st.fg}`);
+  if (st.bg > 0) names.push(`ansi-${st.bg}`);
+  if (st.bold) names.push("ansi-b");
+  if (st.underline) names.push("ansi-u");
+  return names.length > 0 ? names.join(" ") : null;
+}
+
+/** Apply one SGR parameter list. Codes outside the supported set are ignored. */
+function applySgr(st: AnsiState, body: string): void {
+  for (const part of body.split(";")) {
+    const n = part === "" ? 0 : Number(part);
+    if (n === 0) {
+      st.fg = 0;
+      st.bg = 0;
+      st.bold = false;
+      st.underline = false;
+    } else if (n === 1) st.bold = true;
+    else if (n === 4) st.underline = true;
+    else if (n >= 30 && n <= 37) st.fg = n;
+    else if (n >= 40 && n <= 47) st.bg = n;
+  }
+}
+
+/**
+ * Tokenize Discord-style ```ansi text: `ESC [ params m` sequences set the
+ * style of the text after them and are dropped from the output. Other CSI
+ * sequences are dropped without effect; an ESC that does not start a complete
+ * CSI sequence stays as text. Linear: a scan for a sequence stops at the next
+ * character that cannot belong to one, which includes the next ESC.
+ */
+function highlightAnsi(code: string): CodeToken[] {
+  const tokens: CodeToken[] = [];
+  const st: AnsiState = { fg: 0, bg: 0, bold: false, underline: false };
+  let classes: string | null = null;
+  const push = (text: string): void => {
+    if (text.length === 0) return;
+    const last = tokens[tokens.length - 1];
+    if (last !== undefined && (last.ansi ?? null) === classes) {
+      tokens[tokens.length - 1] =
+        classes === null
+          ? { text: last.text + text, cls: null }
+          : { text: last.text + text, cls: null, ansi: classes };
+      return;
+    }
+    tokens.push(classes === null ? { text, cls: null } : { text, cls: null, ansi: classes });
+  };
+
+  let start = 0;
+  let i = code.indexOf("\u001b");
+  while (i !== -1) {
+    let end = -1;
+    if (code.charCodeAt(i + 1) === 0x5b) {
+      let j = i + 2;
+      for (; j < code.length; j++) {
+        const c = code.charCodeAt(j);
+        if (!((c >= 0x30 && c <= 0x39) || c === 0x3b)) break;
+      }
+      const fin = code.charCodeAt(j);
+      if (j < code.length && fin >= 0x40 && fin <= 0x7e) {
+        push(code.slice(start, i));
+        if (fin === 0x6d) {
+          applySgr(st, code.slice(i + 2, j));
+          classes = ansiClasses(st);
+        }
+        end = j + 1;
+      }
+    }
+    if (end === -1) {
+      i = code.indexOf("\u001b", i + 1);
+      continue;
+    }
+    start = end;
+    i = code.indexOf("\u001b", start);
+  }
+  push(code.slice(start));
+  return tokens;
+}
+
 /**
  * Tokenize `code` for `lang` (a canonical id from {@link resolveLanguage}).
  * Unknown languages return a single plain token, so the caller never has to
  * branch on support.
  */
 export function highlightCode(code: string, lang: string | null): CodeToken[] {
+  if (lang === "ansi") return highlightAnsi(code);
   const spec = lang === null ? undefined : LANGS[lang];
   if (spec === undefined) return code.length > 0 ? [{ text: code, cls: null }] : [];
 

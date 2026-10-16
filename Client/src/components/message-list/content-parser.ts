@@ -722,11 +722,13 @@ function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>
   const block = createElement("div", { class: "msg-codeblock" });
   if (segment.canonical !== null) block.setAttribute("data-lang", segment.canonical);
   for (const token of segment.tokens) {
-    if (token.cls === null) {
+    if (token.cls === null && token.ansi === undefined) {
       block.appendChild(document.createTextNode(token.text));
       continue;
     }
-    const span = createElement("span", { class: `tok-${token.cls}` });
+    const span = createElement("span", {
+      class: token.cls === null ? (token.ansi ?? "") : `tok-${token.cls}`,
+    });
     setText(span, token.text);
     block.appendChild(span);
   }
