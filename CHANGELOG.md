@@ -59,6 +59,7 @@ and only when it changes something a contributor or fork holder must do
 
 - On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
 - On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
+- On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.
 - Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
 
 **Profiles**
@@ -75,7 +76,9 @@ and only when it changes something a contributor or fork holder must do
 - Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
 - Typing `#` in the message box suggests channels to link, as `@` does for people.
 - Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
+- Right-clicking a message now opens a menu, as in Discord: three quick reactions, Add Reaction, Edit Message (your own), Reply, Copy Text (and Copy when you have selected some of it), Pin Message, Copy Message Link, Delete Message (hold Shift to skip the confirmation), Report Message, and Copy Message ID in developer mode. Right-clicking a link adds Copy Link and Open Link. Actions you cannot use right now, such as reacting while offline or timed out, are greyed out with the reason. The menu also opens from the keyboard with the Menu key or Shift+F10 on a message's buttons.
 - Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
+- Linux: spell checking in the message composer, in the system language (needs a hunspell dictionary).
 - Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
 - A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
@@ -140,6 +143,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- On Linux the voice panel's ping read "—" with empty signal bars, a watched screen share had no quality chip, and your own Go Live showed no frame rate. All three now show, as on Windows.
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 - On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.

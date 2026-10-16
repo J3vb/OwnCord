@@ -207,6 +207,108 @@ export interface NativeVoiceScreenOptions {
   simulcast: boolean;
 }
 
+/** What the settings tab's mic test starts with (Linux only). */
+export interface NativeMicTestOptions {
+  /** `listDevices` ids; empty selects the host default. */
+  input: string;
+  output: string;
+  audio: NativeVoiceAudioOptions;
+  /** The input volume, percent (0-200). */
+  inputGain: number;
+  /** The output volume, linear (0-1). */
+  outputGain: number;
+  /** The voice gate's threshold on the web path's scale; 0 is no gate. */
+  threshold: number;
+}
+
+/** A live change to a running mic test. */
+export type NativeMicTestUpdate =
+  | { kind: "processing"; audio: NativeVoiceAudioOptions }
+  | { kind: "inputGain"; percent: number }
+  | { kind: "voiceGate"; threshold: number; retune: boolean }
+  | { kind: "outputGain"; gain: number }
+  | { kind: "inputDevice"; deviceId: string }
+  | { kind: "outputDevice"; deviceId: string };
+
+export type NativeMicTestEvent =
+  | { type: "inputLevel"; rms: number; open: boolean }
+  /** The host stopped the test (a call joined). */
+  | { type: "ended" };
+
+export interface NativeMicTestEnvelope {
+  /** The id `startMicTest` resolved with. */
+  test: number;
+  event: NativeMicTestEvent;
+}
+
+/** The host's refusal of a mic test start during a call. */
+// i18n-exempt: the host's refusal code, matched by the tab, never shown
+export const NATIVE_MIC_TEST_IN_CALL = "mic test unavailable during a call";
+
+/** One W3C-shaped stats entry (`RTCStats` field names) of a transport, cut to
+ *  what `connectionStats.ts` reads. Times are seconds, as in the W3C reports. */
+export type NativeVoiceStatsEntry =
+  | {
+      type: "candidate-pair";
+      id: string;
+      currentRoundTripTime: number;
+      bytesSent: number;
+      bytesReceived: number;
+    }
+  | { type: "outbound-rtp"; id: string; kind: string; packetsSent: number; bytesSent: number }
+  | {
+      type: "inbound-rtp";
+      id: string;
+      kind: string;
+      packetsReceived: number;
+      bytesReceived: number;
+      packetsLost: number;
+      jitter: number;
+    }
+  | {
+      type: "remote-inbound-rtp";
+      id: string;
+      kind: string;
+      /** The id of the outbound entry this one reports on. */
+      localId: string;
+      packetsLost: number;
+      jitter: number;
+    };
+
+/** A subscribed remote video track's receiver sample. */
+export interface NativeVoiceReceiverSample {
+  frameWidth: number;
+  frameHeight: number;
+  framesDecoded: number;
+  bytesReceived: number;
+  packetsLost: number;
+  packetsReceived: number;
+  mimeType?: string;
+}
+
+/** One encoder layer of a local video track. */
+export interface NativeVoiceSenderLayer {
+  framesPerSecond?: number;
+  frameWidth: number;
+  frameHeight: number;
+  qualityLimitationReason: string;
+  encoderImplementation?: string;
+  active: boolean;
+}
+
+/** One stats sample of a native session (LP-5). */
+export interface NativeVoiceStats {
+  /** Host wall clock (ms since the epoch) at collection. */
+  atMs: number;
+  publisher: NativeVoiceStatsEntry[];
+  /** Empty in single-PC mode. */
+  subscriber: NativeVoiceStatsEntry[];
+  /** Subscribed remote video by publication sid. */
+  remoteVideo: Record<string, NativeVoiceReceiverSample>;
+  /** Local video by source. */
+  localVideo: { camera?: NativeVoiceSenderLayer[]; screen_share?: NativeVoiceSenderLayer[] };
+}
+
 /** A simulcast layer, as `native_voice_set_video_view` names it. */
 export type NativeVideoQuality = "low" | "medium" | "high";
 
@@ -241,6 +343,9 @@ export interface NativeVoice {
    *  echo canceller's reference switch to them within a few frames, muted
    *  or not. */
   setAudioProcessing(session: number, audio: NativeVoiceAudioOptions): Promise<void>;
+  /** One stats sample of `session` (LP-5); null when the host could not read
+   *  one (stale session, timeout). Never rejects. */
+  getStats(session: number): Promise<NativeVoiceStats | null>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */
@@ -338,6 +443,21 @@ export interface NativeVoice {
   /** Switch the session's capture (`audioinput`) or playout (`audiooutput`)
    *  device to a `listDevices` id; an empty id selects the host default. */
   setDevice(session: number, kind: "audioinput" | "audiooutput", deviceId: string): Promise<void>;
+  /** Start the mic test: the chosen microphone, with the call's processing,
+   *  gain and voice gate, played back on the chosen output (the echo
+   *  canceller gets no reference). Replaces a running test. Resolves with the
+   *  test's id once the streams are open; rejects with the host's reason, a
+   *  call in progress being `NATIVE_MIC_TEST_IN_CALL`. */
+  startMicTest(options: NativeMicTestOptions): Promise<number>;
+  /** Apply a live change to test `test`; a stale id is a no-op. A device
+   *  fallback rejects while the test plays on the default. */
+  updateMicTest(test: number, update: NativeMicTestUpdate): Promise<void>;
+  /** Stop test `test`; a stale id is a no-op. */
+  stopMicTest(test: number): Promise<void>;
+  /** The mic test's level reports and its end, for every test. Returns a
+   *  synchronous unsubscribe that is safe to call before the host
+   *  subscription has finished registering. */
+  onMicTestEvent(handler: (envelope: NativeMicTestEnvelope) => void): () => void;
   /** Room events for every session. Returns a synchronous unsubscribe that
    *  is safe to call before the host subscription has finished registering. */
   onEvent(handler: (envelope: NativeVoiceEnvelope) => void): () => void;

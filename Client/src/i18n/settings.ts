@@ -375,7 +375,8 @@ export const settingsText = defineCatalog("settings", {
     "Hear yourself the way others will, through your output device. Use headphones to avoid echo.",
   "voiceAudio.micTest.start": "Let's Check",
   "voiceAudio.micTest.stop": "Stop Testing",
-  "voiceAudio.micTest.linux": "The mic test is not available on Linux yet.",
+  "voiceAudio.micTest.inCall": "Leave the voice channel to test your mic.",
+  "voiceAudio.micTest.failed": "The mic test could not start.",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
   "voiceAudio.gstreamerMissing":
@@ -439,5 +440,5 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.nativeNote":
-    "On Linux, the level bar shows your microphone while you are in a voice channel.",
+    "On Linux, the level bar shows your microphone in a voice channel or while the mic test runs.",
 });

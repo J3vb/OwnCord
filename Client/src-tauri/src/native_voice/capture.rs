@@ -6,8 +6,8 @@
 //! standalone audio processing module (APM): echo cancellation against what
 //! `playout.rs` actually plays, noise suppression, gain control and a
 //! high-pass filter. With Enhanced Noise Suppression on it then goes through
-//! RNNoise (`nnnoiseless`), and into the published track's
-//! `NativeAudioSource`. RNNoise runs after the APM, as on the web path, where
+//! RNNoise (`nnnoiseless`), and into a `Sink`: the published track's
+//! `NativeAudioSource`, or the mic test's loopback queue. RNNoise runs after the APM, as on the web path, where
 //! the browser's processing precedes the RNNoise worklet: the echo canceller
 //! needs the linear echo path that RNNoise would break. Last, the
 //! input-sensitivity gate (`VoiceGate`) and push-to-talk's gate decide
@@ -24,7 +24,9 @@ use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
-use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
+use super::playout::{
+    host_devices, pinned_listed, Mixer, Selected, WatchedHost, Watcher, FOLLOW_EVERY, LOOPBACK,
+};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 use super::stream_format::{pick_config, typed};
 
@@ -540,8 +542,39 @@ pub fn list_inputs() -> Vec<DeviceInfo> {
         .collect()
 }
 
+/// Where processed 10 ms frames go. Lock order: the input callback's state
+/// lock, then (Loopback) the mixer's; the playout callback takes the mixer's
+/// alone.
+#[derive(Clone)]
+pub enum Sink {
+    /// The published microphone track (a call).
+    Track(NativeAudioSource),
+    /// The mic test's own playout queue.
+    Loopback(Arc<Mixer>),
+}
+
+impl Sink {
+    fn deliver(&self, frame: &[i16]) {
+        match self {
+            Self::Track(source) => {
+                // The source is unbuffered (queue 0), so this completes at once.
+                let _ = source
+                    .capture_frame(&AudioFrame {
+                        data: frame.into(),
+                        sample_rate: SAMPLE_RATE,
+                        num_channels: 1,
+                        samples_per_channel: FRAME as u32,
+                    })
+                    .now_or_never();
+            }
+            Self::Loopback(mixer) => mixer.push(LOOPBACK, frame),
+        }
+    }
+}
+
 /// The session's microphone: the selected device and, while unmuted, its
-/// input stream feeding the published track's source.
+/// input stream feeding the published track's source (or the mic test's
+/// loopback).
 #[derive(Default)]
 pub struct Capture {
     /// The selected id (empty: the default), shared with the watcher.
@@ -573,11 +606,11 @@ type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
 type Processing = Arc<Shared<Option<(Arc<Apm>, bool)>>>;
 
 /// What an input stream feeds: the processing and the published track's
-/// source, shared with the watcher so a reopen feeds the current ones.
+/// sink, shared with the watcher so a reopen feeds the current ones.
 #[derive(Default, Clone)]
 struct Feed {
     processing: Processing,
-    source: Arc<Mutex<Option<NativeAudioSource>>>,
+    sink: Arc<Mutex<Option<Sink>>>,
     /// Push-to-talk's gate, followed by every stream opened from this feed.
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate, likewise.
@@ -588,7 +621,7 @@ struct Feed {
 
 impl Feed {
     fn ready(&self) -> bool {
-        self.processing.snapshot().1.is_some() && lock(&self.source).is_some()
+        self.processing.snapshot().1.is_some() && lock(&self.sink).is_some()
     }
 
     /// A processor on the latest processing, which keeps following it.
@@ -604,8 +637,8 @@ impl Feed {
 
     fn open(&self, device: &cpal::Device, dead: Arc<AtomicBool>) -> Result<cpal::Stream, String> {
         let processor = self.processor()?;
-        let source = lock(&self.source).clone().ok_or("no microphone track")?;
-        open_input(device, processor, source, dead)
+        let sink = lock(&self.sink).clone().ok_or("no capture sink")?;
+        open_input(device, processor, sink, dead)
     }
 }
 
@@ -664,10 +697,11 @@ impl Capture {
         usize::from(self.stream().is_some())
     }
 
-    /// Start capturing into `source` (the first unmute publishes it). A cached
-    /// device that no longer opens (unplugged) is resolved again once.
-    pub fn start(&mut self, source: NativeAudioSource) -> Result<(), String> {
-        *lock(&self.feed.source) = Some(source);
+    /// Start capturing into `sink` (the first unmute publishes a track's
+    /// source). A cached device that no longer opens (unplugged) is resolved
+    /// again once.
+    pub fn start(&mut self, sink: Sink) -> Result<(), String> {
+        *lock(&self.feed.sink) = Some(sink);
         if self.stream().is_some() {
             return Ok(());
         }
@@ -829,7 +863,7 @@ fn pick(
 fn open_input(
     device: &cpal::Device,
     processor: Processor,
-    source: NativeAudioSource,
+    sink: Sink,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     let supported = device
@@ -839,7 +873,7 @@ fn open_input(
     let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
         .ok_or("the capture device offers no 48 kHz format")?;
     // Shared by the two build attempts; only the one that succeeds runs.
-    let state = Arc::new(Mutex::new((processor, source)));
+    let state = Arc::new(Mutex::new((processor, sink)));
     let build = |buffer_size| {
         let config = cpal::StreamConfig {
             buffer_size,
@@ -870,7 +904,7 @@ where
 fn build_input<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    state: Arc<Mutex<(Processor, NativeAudioSource)>>,
+    state: Arc<Mutex<(Processor, Sink)>>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::Error>
 where
@@ -882,18 +916,8 @@ where
         config,
         move |data, _| {
             let mut guard = state.lock().unwrap_or_else(|p| p.into_inner());
-            let (processor, source) = &mut *guard;
-            processor.push(to_mono(data, width), |frame| {
-                // The source is unbuffered (queue 0), so this completes at once.
-                let _ = source
-                    .capture_frame(&AudioFrame {
-                        data: frame.into(),
-                        sample_rate: SAMPLE_RATE,
-                        num_channels: 1,
-                        samples_per_channel: FRAME as u32,
-                    })
-                    .now_or_never();
-            });
+            let (processor, sink) = &mut *guard;
+            processor.push(to_mono(data, width), |frame| sink.deliver(frame));
         },
         // A stream the sound server tore down (suspend/resume, a
         // pulseaudio restart) is reported only here: flag it so the
@@ -1018,10 +1042,26 @@ mod tests {
             1,
             0,
         );
-        *lock(&capture.feed.source) = Some(source);
+        *lock(&capture.feed.sink) = Some(Sink::Track(source));
         assert!(watchers.ready(), "the watcher sees the source set after it");
-        *lock(&capture.feed.source) = None;
+        *lock(&capture.feed.sink) = None;
         assert!(!watchers.ready());
+    }
+
+    /// The mic test's sink hands every processed frame to the loopback
+    /// queue, which plays once it holds its prime.
+    #[test]
+    fn a_loopback_sink_delivers_processed_frames_to_the_mixer() {
+        let mixer = Arc::new(Mixer::default());
+        mixer.add_loopback();
+        let sink = Sink::Loopback(mixer.clone());
+        let frame: Vec<i16> = (0..FRAME).map(|i| ((i % 40) as i16 - 20) * 400).collect();
+        for _ in 0..3 {
+            sink.deliver(&frame);
+        }
+        let mut out = vec![0.0f32; FRAME * 3];
+        mixer.mix(&mut out, 1);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "the audio is present");
     }
 
     /// DP-30: push-to-talk's gate keeps the capture and its processing
