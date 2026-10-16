@@ -53,7 +53,9 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
 }
 
 /// The `RoomOptions` every native session connects with: dynacast on, so a
-/// video layer nobody subscribes to is paused, and GCM e2ee.
+/// video layer nobody subscribes to is paused (the SDK re-applies the
+/// paused layers after every publisher renegotiation, so starting or stopping
+/// another track does not resume them), and GCM e2ee.
 fn room_options(key_provider: KeyProvider) -> RoomOptions {
     let mut options = RoomOptions::default();
     options.dynacast = true;
@@ -96,7 +98,7 @@ pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
 /// Layer control for one remote video (P3-07, the web path's
 /// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
 /// comes at `quality`. The webview maps a tile's size to a quality
-/// (`video_quality`) by choice; livekit 0.9.3's `update_video_dimensions` is
+/// (`video_quality`) by choice; livekit 0.9.5's `update_video_dimensions` is
 /// not used. Runs without the session lock;
 /// the webview sends a publication's next view only once this returns.
 pub async fn set_video_view(
