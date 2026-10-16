@@ -202,6 +202,7 @@ export const shards = {
     "src/lib/updater.ts",
     "src/lib/voiceJoinTrace.ts",
     "src/lib/voiceShortcuts.ts",
+    "src/lib/globalKeys.ts",
   ], // ~1171 mutants (estimated)
   // icons.ts is a table of Lucide SVG path strings at module level. Every
   // mutant there is static, so each one re-runs the whole suite; on runs

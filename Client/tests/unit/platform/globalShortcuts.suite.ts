@@ -4,6 +4,23 @@
 // shortcut (toggling the live call's mute/deafen) is pinned by the MainPage
 // tests that drive the same event.
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { GlobalKeysStatus } from "../../../src/platform/contracts/globalShortcuts";
+
+const portalStatus: GlobalKeysStatus = {
+  backend: "portal",
+  portalVersion: 2,
+  triggers: { ptt: "F8", mute: "Ctrl+Alt+M", deafen: null },
+  canConfigure: true,
+};
+
+async function rejection(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
 import type { GlobalShortcuts } from "../../../src/platform/contracts/globalShortcuts";
 
 export interface NativeControl {
@@ -15,6 +32,16 @@ export interface NativeControl {
   keyCodes(): { muteVk: number; deafenVk: number } | undefined;
   /** Whether the platform reports global key observation. */
   supported: boolean;
+  /** The next answer of `global_keys_status`. */
+  statusIs(payload: unknown): void;
+  /** Make a command reject with `reason` (the host's bare error code). */
+  rejects(command: string, reason: unknown): void;
+  /** The arguments of the last call of `command`. */
+  lastArgs(command: string): Record<string, unknown> | undefined;
+  /** The host emits `global-keys-changed`. */
+  emitsStatus(payload: unknown): Promise<void>;
+  /** How many `global-keys-changed` listeners are registered right now. */
+  statusListeners(): number;
 }
 
 export interface GlobalShortcutsSubject {
@@ -69,6 +96,87 @@ export function describeGlobalShortcutsSuite(
       await ctx.subject.setKeys({ muteVk: 0x4b, deafenVk: 0x71 });
       expect(ctx.native.commands()).toContain("voice_shortcuts_set_keys");
       expect(ctx.native.keyCodes()).toEqual({ muteVk: 0x4b, deafenVk: 0x71 });
+    });
+
+    check("status reports the backend and the bound triggers", async () => {
+      ctx.native.statusIs(portalStatus);
+      expect(await ctx.subject.status()).toEqual(portalStatus);
+    });
+
+    check("status maps a rejected invoke to backend none", async () => {
+      ctx.native.rejects("global_keys_status", "boom");
+      expect(await ctx.subject.status()).toEqual({
+        backend: "none",
+        portalVersion: 0,
+        triggers: { ptt: null, mute: null, deafen: null },
+        canConfigure: false,
+      });
+    });
+
+    check("status reads a payload it cannot parse as backend none", async () => {
+      ctx.native.statusIs({ backend: "carrier-pigeon" });
+      expect((await ctx.subject.status()).backend).toBe("none");
+    });
+
+    check("status reads an empty trigger as unbound", async () => {
+      ctx.native.statusIs({ ...portalStatus, triggers: { ptt: "", mute: "x", deafen: null } });
+      expect((await ctx.subject.status()).triggers).toEqual({ ptt: null, mute: "x", deafen: null });
+    });
+
+    check("bindPortal hands the suggested keys to the host and returns its status", async () => {
+      ctx.native.statusIs(portalStatus);
+      const status = await ctx.subject.bindPortal({ pttVk: 0x77, muteVk: 0x4d, deafenVk: 0x44 });
+      expect(ctx.native.lastArgs("global_keys_portal_bind")).toEqual({
+        pttVk: 0x77,
+        muteVk: 0x4d,
+        deafenVk: 0x44,
+      });
+      expect(status).toEqual(portalStatus);
+    });
+
+    check("bindPortal surfaces bind_in_progress as a typed error", async () => {
+      ctx.native.rejects("global_keys_portal_bind", "bind_in_progress");
+      const err = await rejection(ctx.subject.bindPortal({ pttVk: 0, muteVk: 1, deafenVk: 2 }));
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe("bind_in_progress");
+    });
+
+    check("bindPortal reports a cancelled dialog and an unknown failure by code", async () => {
+      ctx.native.rejects("global_keys_portal_bind", "bind_cancelled");
+      const cancelled = await rejection(
+        ctx.subject.bindPortal({ pttVk: 0, muteVk: 1, deafenVk: 2 }),
+      );
+      expect((cancelled as { code?: string }).code).toBe("bind_cancelled");
+      ctx.native.rejects("global_keys_portal_bind", new Error("ipc down"));
+      const unknown = await rejection(ctx.subject.bindPortal({ pttVk: 0, muteVk: 1, deafenVk: 2 }));
+      expect((unknown as { code?: string }).code).toBe("unknown");
+    });
+
+    check("configurePortal opens the desktop settings or rejects with a code", async () => {
+      await ctx.subject.configurePortal();
+      expect(ctx.native.commands()).toContain("global_keys_portal_configure");
+      ctx.native.rejects("global_keys_portal_configure", "unsupported");
+      const err = await rejection(ctx.subject.configurePortal());
+      expect((err as { code?: string }).code).toBe("unsupported");
+    });
+
+    check("onStatusChange delivers a changed status and stops once unsubscribed", async () => {
+      const handler = vi.fn();
+      const unsubscribe = ctx.subject.onStatusChange(handler);
+      await ctx.native.emitsStatus(portalStatus);
+      unsubscribe();
+      await ctx.native.emitsStatus({
+        ...portalStatus,
+        triggers: { ptt: null, mute: null, deafen: null },
+      });
+      expect(handler.mock.calls).toEqual([[portalStatus]]);
+      expect(ctx.native.statusListeners()).toBe(0);
+    });
+
+    check("onStatusChange unsubscribed before the listener is ready still unlistens", async () => {
+      ctx.subject.onStatusChange(vi.fn())();
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+      expect(ctx.native.statusListeners()).toBe(0);
     });
   });
 }

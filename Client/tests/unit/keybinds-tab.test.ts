@@ -19,12 +19,30 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
 // U6: the tab discloses whether global (unfocused) shortcuts are available.
 const mockSupported = vi.fn(async () => true);
 const mockSetKeys = vi.fn(async () => {});
+// LP-9b: the backend the host reports; polling unless a test says otherwise.
+const pollingStatus = {
+  backend: "polling",
+  portalVersion: 0,
+  triggers: { ptt: null, mute: null, deafen: null },
+  canConfigure: false,
+};
+const mockStatus = vi.fn(async (): Promise<unknown> => pollingStatus);
+const mockBindPortal = vi.fn(async (..._args: unknown[]): Promise<unknown> => pollingStatus);
+const mockConfigurePortal = vi.fn(async () => {});
+const statusHandlers = new Set<(status: unknown) => void>();
 vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
   globalShortcuts: {
     supported: () => mockSupported(),
     start: vi.fn(async () => {}),
     setKeys: (...args: unknown[]) => mockSetKeys(...(args as [])),
     onShortcut: vi.fn(() => () => {}),
+    status: () => mockStatus(),
+    bindPortal: (...args: unknown[]) => mockBindPortal(...args),
+    configurePortal: () => mockConfigurePortal(),
+    onStatusChange: (handler: (status: unknown) => void) => {
+      statusHandlers.add(handler);
+      return () => statusHandlers.delete(handler);
+    },
   },
 }));
 
@@ -33,6 +51,11 @@ import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
 describe("KeybindsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    statusHandlers.clear();
+    mockStatus.mockImplementation(async () => pollingStatus);
+    mockBindPortal.mockImplementation(async () => pollingStatus);
+    mockSupported.mockImplementation(async () => true);
+    mockPttSupported.mockImplementation(async () => true);
     localStorage.clear();
     mockCaptureKeyPress.mockReset();
     mockUpdatePttKey.mockReset();
@@ -562,7 +585,7 @@ describe("KeybindsTab", () => {
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     await vi.waitFor(() => {
       expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
       );
     });
   });
@@ -573,7 +596,7 @@ describe("KeybindsTab", () => {
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     await vi.waitFor(() => {
       expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
       );
     });
   });
@@ -588,9 +611,260 @@ describe("KeybindsTab", () => {
       expect(pttBtn.disabled).toBe(true);
     });
     // The hint says why, in the same region the capture button lives.
-    expect(el.textContent).toContain("Push to Talk needs global key observation");
+    expect(el.textContent).toContain("Push to Talk needs a global key service");
     // A key bound before (another session) can still be cleared.
     const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
     expect(clear.disabled).toBe(false);
+  });
+
+  describe("Wayland portal backend (LP-9b)", () => {
+    const bound = { ptt: null, mute: "Ctrl+Alt+M", deafen: "Ctrl+Alt+D" };
+    const portal = (
+      triggers: { ptt: string | null; mute: string | null; deafen: string | null },
+      portalVersion = 2,
+    ) => ({ backend: "portal", portalVersion, triggers, canConfigure: portalVersion >= 2 });
+    const unbound = { ptt: null, mute: null, deafen: null };
+    const testId = (el: HTMLElement, id: string): HTMLElement =>
+      el.querySelector(`[data-testid='${id}']`) as HTMLElement;
+    const kbdOf = (el: HTMLElement, label: string): string =>
+      [...el.querySelectorAll(".keybind-row")]
+        .find((row) => row.querySelector(".setting-label")?.textContent === label)!
+        .querySelector(".kbd")!.textContent!;
+    const portalErr = (code: string) => Object.assign(new Error(code), { code });
+
+    it("shows the reported triggers and hides the Ctrl+Shift capture rows", async () => {
+      mockStatus.mockResolvedValue(portal(bound));
+      const el = buildKeybindsTab(new AbortController().signal);
+      await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle Deafen")).toBe("Ctrl+Alt+D");
+      // The polling rows stay hidden, and the polling probe is never asked.
+      expect(testId(el, "keybind-global-mute").closest("div[style]")).toHaveProperty(
+        "style.display",
+        "none",
+      );
+      expect(mockSupported).not.toHaveBeenCalled();
+      // Both bound: nothing left to set up.
+      expect(testId(el, "keybinds-portal-setup").style.display).toBe("none");
+    });
+
+    it("offers Change in system settings on portal v2 and calls configurePortal", async () => {
+      mockStatus.mockResolvedValue(portal(bound, 2));
+      const el = buildKeybindsTab(new AbortController().signal);
+      const change = testId(el, "keybinds-portal-change") as HTMLButtonElement;
+      await vi.waitFor(() => expect(change.style.display).toBe(""));
+      expect(testId(el, "keybinds-portal-where").style.display).toBe("none");
+      change.click();
+      await vi.waitFor(() => expect(mockConfigurePortal).toHaveBeenCalledTimes(1));
+    });
+
+    it("says where to change the keys on portal v1 instead of a button", async () => {
+      mockStatus.mockResolvedValue(portal(bound, 1));
+      const el = buildKeybindsTab(new AbortController().signal);
+      const where = testId(el, "keybinds-portal-where");
+      await vi.waitFor(() => expect(where.style.display).toBe(""));
+      expect(where.textContent).toContain("GNOME Settings > Keyboard > Shortcuts");
+      expect(testId(el, "keybinds-portal-change").style.display).toBe("none");
+    });
+
+    it("offers only setup while the desktop holds no keys", async () => {
+      mockStatus.mockResolvedValue(portal(unbound, 2));
+      const el = buildKeybindsTab(new AbortController().signal);
+      await vi.waitFor(() => expect(testId(el, "keybinds-portal-setup").style.display).toBe(""));
+      expect(testId(el, "keybinds-portal-change").style.display).toBe("none");
+      expect(testId(el, "keybinds-portal-where").style.display).toBe("none");
+    });
+
+    it("never shows the portal UI or asks the portal on a polling desktop", async () => {
+      mockSupported.mockResolvedValue(true);
+      const el = buildKeybindsTab(new AbortController().signal);
+      const row = testId(el, "keybind-global-mute").closest("div[style]") as HTMLElement;
+      await vi.waitFor(() => expect(row.style.display).toBe(""));
+      expect(testId(el, "keybinds-portal").style.display).toBe("none");
+      expect(testId(el, "ptt-portal-note").style.display).toBe("none");
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      expect(mockBindPortal).not.toHaveBeenCalled();
+      expect(el.textContent).not.toContain("Waiting for your desktop");
+    });
+
+    it("lets a status event outrank the older first answer", async () => {
+      let answer: (status: unknown) => void = () => {};
+      mockStatus.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+      const el = buildKeybindsTab(new AbortController().signal);
+      await vi.waitFor(() => expect(statusHandlers.size).toBe(1));
+      for (const handler of statusHandlers) handler(portal(bound));
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+
+      // The answer was computed before the event: it must not undo it.
+      answer(pollingStatus);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(testId(el, "keybinds-portal").style.display).toBe("");
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(mockSupported).not.toHaveBeenCalled();
+    });
+
+    it("keeps the unsupported note when no portal exists", async () => {
+      mockStatus.mockResolvedValue({ ...pollingStatus, backend: "none" });
+      mockSupported.mockResolvedValue(false);
+      const el = buildKeybindsTab(new AbortController().signal);
+      const hint = testId(el, "keybinds-global-hint");
+      await vi.waitFor(() => expect(hint.textContent).toContain("no global shortcut service"));
+      expect(testId(el, "keybinds-portal").style.display).toBe("none");
+    });
+
+    it("binds through the portal, saves the pref and shows the new triggers", async () => {
+      mockStatus.mockResolvedValue(portal(unbound));
+      mockBindPortal.mockResolvedValue(portal(bound));
+      const el = buildKeybindsTab(new AbortController().signal);
+      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
+      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      setUp.click();
+      await vi.waitFor(() => expect(setUp.style.display).toBe("none"));
+      expect(mockBindPortal).toHaveBeenCalledWith({ pttVk: 0, muteVk: 0x4d, deafenVk: 0x44 });
+      expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+    });
+
+    it("a bind resolving after unmount touches nothing and still saves the pref", async () => {
+      mockStatus.mockResolvedValue(portal(unbound));
+      let finish: (status: unknown) => void = () => {};
+      mockBindPortal.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+      const controller = new AbortController();
+      const el = buildKeybindsTab(controller.signal);
+      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
+      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
+      setUp.click();
+      expect(setUp.disabled).toBe(true);
+      controller.abort();
+      const before = el.innerHTML;
+      finish(portal(bound));
+      await vi.waitFor(() =>
+        expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true"),
+      );
+      expect(el.innerHTML).toBe(before);
+    });
+
+    it("a cancelled bind leaves the set-up button and saves nothing", async () => {
+      mockStatus.mockResolvedValue(portal(unbound));
+      mockBindPortal.mockRejectedValue(portalErr("bind_cancelled"));
+      const el = buildKeybindsTab(new AbortController().signal);
+      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
+      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
+      setUp.click();
+      const note = testId(el, "keybinds-portal-note");
+      await vi.waitFor(() => expect(note.textContent).toContain("cancelled"));
+      expect(note.style.display).toBe("");
+      expect(setUp.disabled).toBe(false);
+      expect(setUp.style.display).toBe("");
+      expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBeNull();
+    });
+
+    it("follows a status change while the tab is open and stops after it closes", async () => {
+      mockStatus.mockResolvedValue(portal(unbound));
+      const controller = new AbortController();
+      const el = buildKeybindsTab(controller.signal);
+      // The Push to Talk control and the global section share one subscription.
+      await vi.waitFor(() => expect(statusHandlers.size).toBe(1));
+      for (const handler of statusHandlers) handler(portal(bound));
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      controller.abort();
+      expect(statusHandlers.size).toBe(0);
+    });
+
+    it("drops the portal controls when the portal goes away, and takes them back", async () => {
+      mockStatus.mockResolvedValue(portal(bound));
+      mockSupported.mockResolvedValue(false);
+      mockPttSupported.mockResolvedValue(false);
+      const el = buildKeybindsTab(new AbortController().signal);
+      await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+      const ptt = el.querySelector(
+        '[aria-label="Push to Talk keybind — click to capture"]',
+      ) as HTMLButtonElement;
+      expect(ptt.disabled).toBe(false);
+
+      for (const handler of statusHandlers)
+        handler({ backend: "none", portalVersion: 0, triggers: unbound, canConfigure: false });
+      expect(testId(el, "keybinds-portal").style.display).toBe("none");
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      await vi.waitFor(() => expect(ptt.disabled).toBe(true));
+      expect(testId(el, "keybinds-global-hint").style.display).toBe("");
+      expect(el.textContent).toContain("Push to Talk needs a global key service");
+
+      for (const handler of statusHandlers) handler(portal(bound));
+      expect(testId(el, "keybinds-portal").style.display).toBe("");
+      expect(ptt.disabled).toBe(false);
+      expect(testId(el, "keybinds-portal").querySelectorAll(".keybind-section-header").length).toBe(
+        1,
+      );
+    });
+
+    describe("push to talk", () => {
+      const pttButton = (el: HTMLElement): HTMLButtonElement =>
+        el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
+
+      it("accepts only function keys and binds through the portal", async () => {
+        mockStatus.mockResolvedValue(portal(unbound));
+        mockBindPortal.mockResolvedValue(portal({ ...bound, ptt: "F8" }));
+        const el = buildKeybindsTab(new AbortController().signal);
+        const btn = pttButton(el);
+        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+        // The slider stays usable and the unsupported note never shows.
+        expect(el.textContent).not.toContain("Push to Talk needs a global key service");
+
+        btn.click();
+        expect(btn.textContent).toBe("Press a function key (F1-F24)...");
+        capture(document, "Space");
+        capture(document, "ControlLeft");
+        expect(mockBindPortal).not.toHaveBeenCalled();
+        capture(document, "F8");
+
+        await vi.waitFor(() => expect(btn.textContent).toBe("F8"));
+        expect(mockBindPortal).toHaveBeenCalledWith({ pttVk: 0x77, muteVk: 0x4d, deafenVk: 0x44 });
+        expect(mockUpdatePttKey).toHaveBeenCalledWith(0x77);
+        expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
+        expect(mockCaptureKeyPress).not.toHaveBeenCalled();
+      });
+
+      it("shows the portal trigger, not the VK name, once bound", async () => {
+        localStorage.setItem("owncord:settings:pttVk", String(0x77));
+        mockStatus.mockResolvedValue(portal({ ...bound, ptt: "F8" }));
+        const el = buildKeybindsTab(new AbortController().signal);
+        const btn = pttButton(el);
+        await vi.waitFor(() => expect(btn.textContent).toBe("F8"));
+      });
+
+      it("a cancelled PTT bind keeps the key unset and says so", async () => {
+        mockStatus.mockResolvedValue(portal(unbound));
+        mockBindPortal.mockRejectedValue(portalErr("bind_cancelled"));
+        const el = buildKeybindsTab(new AbortController().signal);
+        const btn = pttButton(el);
+        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+        btn.click();
+        capture(document, "F8");
+        const note = testId(el, "ptt-portal-note");
+        await vi.waitFor(() => expect(note.textContent).toContain("cancelled"));
+        expect(btn.textContent).toBe("Not set");
+        expect(mockUpdatePttKey).not.toHaveBeenCalled();
+        expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBeNull();
+      });
+
+      it("a PTT bind resolving after the tab closes still arms push to talk and saves the pref", async () => {
+        mockStatus.mockResolvedValue(portal(unbound));
+        let finish: (status: unknown) => void = () => {};
+        mockBindPortal.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+        const controller = new AbortController();
+        const el = buildKeybindsTab(controller.signal);
+        const btn = pttButton(el);
+        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+        btn.click();
+        capture(document, "F8");
+        controller.abort();
+        finish(portal({ ...bound, ptt: "F8" }));
+        await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x77));
+        expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
+        expect(btn.textContent).toBe("Waiting for your desktop...");
+      });
+    });
   });
 });
