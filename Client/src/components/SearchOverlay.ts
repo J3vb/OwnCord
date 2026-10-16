@@ -596,7 +596,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     retryBtn = createElement(
       "button",
       {
-        class: "search-overlay-retry",
+        class: "search-overlay-retry messages-retry-btn",
         type: "button",
         style: "display:none",
         "data-testid": "search-retry",
