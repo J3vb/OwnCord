@@ -14,8 +14,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 const loader = vi.hoisted(() => ({ failLoad: false }));
-vi.mock("@components/message-list/inline-edit-loader", async (importActual) => {
-  const actual = await importActual<typeof import("@components/message-list/inline-edit-loader")>();
+vi.mock("../../src/features/messaging/inlineEditLoader", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/features/messaging/inlineEditLoader")>();
   return {
     ...actual,
     withInlineEdit: (use: Parameters<typeof actual.withInlineEdit>[0], onError?: () => void) => {

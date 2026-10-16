@@ -4,6 +4,7 @@
  */
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
 
 test.describe("Message Edit Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -113,5 +114,62 @@ test.describe("Message Delete Flow", () => {
     // The deleted message leaves the list (the store keeps a tombstone).
     await expect(ownMessage).toHaveCount(0, { timeout: 5000 });
     await expect(page.getByText("[message deleted]")).toHaveCount(0);
+  });
+});
+
+test.describe("Inline edit accessibility", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockTauriFullSessionWithMessagesAndEcho(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await page.locator("[data-testid='message-101']").hover();
+    await page.locator("[data-testid='msg-edit-101']").click();
+  });
+
+  test("the open editor has named controls, a visible focus ring and readable hint text", async ({
+    page,
+  }) => {
+    const row = page.locator("[data-testid='message-101']");
+    const editor = row.locator("[data-testid='msg-edit-input-101']");
+    await expect(editor).toBeFocused();
+
+    expect(await findUnnamedControls(row)).toEqual([]);
+    expect((await focusIndicator(page)).problems).toEqual([]);
+
+    for (const link of ["msg-edit-cancel-101", "msg-edit-save-101"]) {
+      const control = row.locator(`[data-testid='${link}']`);
+      // Tab, as a keyboard user arrives (a script focus() is not focus-visible).
+      await page.keyboard.press("Tab");
+      await expect(control).toBeFocused();
+      expect((await focusIndicator(page)).problems).toEqual([]);
+      await expect(async () => {
+        expect((await textContrast(control)).ratio).toBeGreaterThanOrEqual(Q1.text);
+      }).toPass();
+    }
+  });
+
+  test("the too-long error is announced, tied to the field and readable", async ({ page }) => {
+    const row = page.locator("[data-testid='message-101']");
+    const editor = row.locator("[data-testid='msg-edit-input-101']");
+    await editor.fill("a".repeat(4001));
+    await editor.press("Enter");
+
+    const error = row.locator(".msg-inline-edit-error");
+    await expect(error).toBeVisible();
+    await expect(error).toHaveAttribute("role", "alert");
+    await expect(editor).toHaveAttribute("aria-invalid", "true");
+    const errorId = await error.getAttribute("id");
+    expect(errorId).toBeTruthy();
+    await expect(editor).toHaveAttribute("aria-describedby", errorId!);
+
+    expect(await findUnnamedControls(row)).toEqual([]);
+    await expect(async () => {
+      expect((await textContrast(error)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    }).toPass();
+
+    await editor.fill("short again");
+    await expect(error).toBeHidden();
+    await expect(editor).not.toHaveAttribute("aria-invalid", /.*/);
+    await expect(editor).not.toHaveAttribute("aria-describedby", /.*/);
   });
 });

@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The inline message editor (message-list/inline-edit.ts). Its own catalog so
+/** The inline message editor (features/messaging/inlineEdit.ts). Its own catalog so
  *  the copy loads with that lazy module, not with the main page. */
 export const inlineEditText = defineCatalog("inlineEdit", {
   label: "Edit message",
