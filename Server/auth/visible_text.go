@@ -54,6 +54,16 @@ func isBlankFiller(r rune) bool {
 
 func isAnyVariationSelector(r rune) bool { return r >= '\ufe00' && r <= '\ufe0f' }
 
+// isKeycapSelector reports whether runes[i] is the U+FE0F of a keycap emoji:
+// a digit, '#' or '*', then U+FE0F, then U+20E3 COMBINING ENCLOSING KEYCAP.
+func isKeycapSelector(runes []rune, i int) bool {
+	if runes[i] != '\ufe0f' || i == 0 || i+1 >= len(runes) || runes[i+1] != '\u20e3' {
+		return false
+	}
+	base := runes[i-1]
+	return (base >= '0' && base <= '9') || base == '#' || base == '*'
+}
+
 // zwjJoinsSymbols reports whether the ZWJ at runes[i] sits between two
 // symbols (So/Sk). Variation selectors after the left-hand symbol are skipped
 // so that sequences such as heart + FE0F + ZWJ + fire still count.
@@ -75,7 +85,8 @@ func zwjJoinsSymbols(runes []rune, i int) bool {
 //     ZWJ directly between two symbols so emoji sequences survive;
 //   - line and paragraph separators (U+2028, U+2029), which render as breaks;
 //   - blank fillers (see isBlankFiller) and variation selectors, except
-//     U+FE0E/U+FE0F straight after a symbol (So/Sk) so emoji keep working;
+//     U+FE0E/U+FE0F straight after a symbol (So/Sk) so emoji keep working,
+//     and the U+FE0F of a keycap (digit, '#' or '*', U+FE0F, U+20E3);
 //   - more than two combining marks (Mn/Me) in a row.
 //
 // It does not trim, collapse or length-check: run CollapseSpaces first and the
@@ -92,6 +103,9 @@ func ValidateVisibleText(s string) error {
 			return visibleTextError("must not contain invisible characters")
 		case isAnyVariationSelector(r):
 			if (r == '\ufe0e' || r == '\ufe0f') && i > 0 && isSymbol(runes[i-1]) {
+				continue
+			}
+			if isKeycapSelector(runes, i) {
 				continue
 			}
 			return visibleTextError("must not contain invisible characters")
