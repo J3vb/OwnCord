@@ -178,6 +178,13 @@ says exactly what the beta does and does not claim about who can read what.
   participant in the call is the check. On Windows the test counts decoded
   audio and video for three seconds. The microphone check does open your
   microphone on both platforms.
+- **On Linux with Wayland, the desktop picks what you share.** The share
+  picker shows no thumbnails, because the desktop's own dialog does the
+  choosing. After a reconnect the share cannot resume on its own: the desktop
+  asks you to pick again.
+- **On Linux with Wayland, the window opens where the desktop puts it.**
+  Wayland does not let apps place their own windows, so the last window
+  position is not restored. The window size is.
 
 ## FAQ
 
