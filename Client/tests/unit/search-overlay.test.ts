@@ -941,8 +941,68 @@ describe("createSearchOverlay", () => {
     });
 
     it("does not throw on a hostile regex-like query", async () => {
-      const { overlay } = await run([makeResult({ content: "a.*( b" })], "a.*(");
-      expect(container.querySelector("mark.search-hit")!.textContent).toBe("a.*(");
+      const { overlay } = await run([makeResult({ content: "ab.*( b" })], "ab.*(");
+      expect(container.querySelector("mark.search-hit")!.textContent).toBe("ab");
+      overlay.destroy?.();
+    });
+
+    it("marks the match exactly when earlier text changes length when lowercased", async () => {
+      const { overlay } = await run(
+        [makeResult({ content: "\u0130\u0130\u0130\u0130 hello" })],
+        "hello",
+      );
+      const marks = [...container.querySelectorAll("mark.search-hit")].map((m) => m.textContent);
+      expect(marks).toEqual(["hello"]);
+      overlay.destroy?.();
+    });
+
+    it("does not split an emoji before the match", async () => {
+      const { overlay } = await run([makeResult({ content: "\u{1F600}\u{1F600} hello" })], "hello");
+      const text = container.querySelector(".search-result-content")!.textContent;
+      expect(text).toBe("\u{1F600}\u{1F600} hello");
+      expect(container.querySelector("mark.search-hit")!.textContent).toBe("hello");
+      overlay.destroy?.();
+    });
+
+    it("splits a query on non-alphanumerics like the server does", async () => {
+      const a = await run([makeResult({ content: "foo bar" })], "foo-bar");
+      expect([...container.querySelectorAll("mark.search-hit")].map((m) => m.textContent)).toEqual([
+        "foo",
+        "bar",
+      ]);
+      a.overlay.destroy?.();
+      container.innerHTML = "";
+      const b = await run([makeResult({ content: "a foo b" })], "-foo");
+      expect([...container.querySelectorAll("mark.search-hit")].map((m) => m.textContent)).toEqual([
+        "foo",
+      ]);
+      b.overlay.destroy?.();
+    });
+
+    it("does not cut a surrogate pair at the window start or end", async () => {
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      // Start cut: the hit sits at 70, so the window starts at 10, inside the
+      // emoji at 9-10.
+      const startCut = "a".repeat(9) + "\u{1F600}" + "a".repeat(51) + "needle" + "b".repeat(300);
+      const s1 = await run([makeResult({ content: startCut })], "needle");
+      const t1 = container.querySelector(".search-result-content")!.textContent!;
+      expect(t1).not.toMatch(lone);
+      expect(t1).toContain("\u{1F600}");
+      s1.overlay.destroy?.();
+      container.innerHTML = "";
+      // End cut: the 200-unit window ends inside the emoji at 199-200.
+      const endCut = "needle" + "a".repeat(193) + "\u{1F600}" + "b".repeat(50);
+      const s2 = await run([makeResult({ content: endCut })], "needle");
+      const t2 = container.querySelector(".search-result-content")!.textContent!;
+      expect(t2).not.toMatch(lone);
+      s2.overlay.destroy?.();
+    });
+
+    it("uses a neutral Spoiler label in the preview", async () => {
+      const { overlay } = await run([makeResult({ content: "||secret|| tail" })], "zzz");
+      const text = container.querySelector(".search-result-content")!.textContent!;
+      expect(text).toContain("Spoiler");
+      expect(text).not.toContain("revealed");
       overlay.destroy?.();
     });
 
@@ -967,6 +1027,66 @@ describe("createSearchOverlay", () => {
       expect(onSearch.mock.calls[1]![0]).toBe("hello");
       expect(container.querySelectorAll(".search-result-item").length).toBe(1);
       expect(retryBtn.style.display).toBe("none");
+      overlay.destroy?.();
+    });
+
+    it("a retried Load more clears the failed status and appends rows", async () => {
+      const onSearch = vi
+        .fn()
+        .mockResolvedValueOnce({ results: [makeResult({ message_id: 1 })], next_before: 1 })
+        .mockRejectedValueOnce(new Error("net"))
+        .mockResolvedValue({ results: [makeResult({ message_id: 2, content: "second" })] });
+      const { overlay } = await run([], "hello", onSearch);
+      const more = container.querySelector("[data-testid='search-load-more']") as HTMLButtonElement;
+      more.click();
+      await vi.advanceTimersByTimeAsync(0);
+      const status = container.querySelector(".search-overlay-status")!;
+      expect(status.textContent).toBe("Search failed");
+      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      retryBtn.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(status.textContent).not.toContain("failed");
+      expect((status as HTMLElement).style.display).toBe("none");
+      expect(container.querySelectorAll(".search-result-item").length).toBe(2);
+      overlay.destroy?.();
+    });
+
+    it("moves focus to the search input after Retry", async () => {
+      const onSearch = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("net"))
+        .mockResolvedValue({ results: [makeResult()] });
+      const { overlay, input } = await run([], "hello", onSearch);
+      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      retryBtn.focus();
+      expect(document.activeElement).toBe(retryBtn);
+      retryBtn.click();
+      expect(document.activeElement).toBe(input);
+      overlay.destroy?.();
+    });
+
+    it("changing scope clears a failed search and hides Retry", async () => {
+      const onSearch = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("net"))
+        .mockResolvedValue({ results: [] });
+      const overlay = createSearchOverlay(makeOptions({ onSearch, currentChannelId: 42 }));
+      overlay.mount(container);
+      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+      input.value = "h";
+      input.dispatchEvent(new Event("input"));
+      await vi.advanceTimersByTimeAsync(300);
+      input.value = "hello";
+      input.dispatchEvent(new Event("input"));
+      await vi.advanceTimersByTimeAsync(600);
+      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      expect(retryBtn.style.display).not.toBe("none");
+      input.value = "";
+      (
+        container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement
+      ).click();
+      expect(retryBtn.style.display).toBe("none");
+      expect(container.querySelector(".search-overlay-status")!.textContent).toBe("");
       overlay.destroy?.();
     });
 

@@ -67,7 +67,9 @@ const MIN_TERM_LEN = 2;
 /**
  * The words to highlight for a query: whitespace-split, `key:value` filter
  * tokens (including a quoted value that holds spaces) dropped, quotes removed,
- * terms under 2 chars ignored. Mirrors the server's lexSearch.
+ * then every remaining token split on non letter/digit/mark characters (the
+ * server's sanitizeFTSQuery turns those into separators) and terms under 2
+ * chars ignored. Mirrors the server's lexSearch.
  */
 export function highlightTerms(query: string): string[] {
   const terms: string[] = [];
@@ -89,56 +91,64 @@ export function highlightTerms(query: string): string[] {
         j = close === -1 ? n : close + 1;
       }
     } else {
-      const term = token.replace(/"/g, "");
-      if (term.length >= MIN_TERM_LEN) terms.push(term);
+      for (const part of token.replace(/"/g, "").split(/[^\p{L}\p{N}\p{M}]+/u)) {
+        if (Array.from(part).length >= MIN_TERM_LEN) terms.push(part);
+      }
     }
     i = j;
   }
   return terms;
 }
 
-/** Index of the earliest case-insensitive hit of any term, with its length, or null. */
-function firstHit(text: string, terms: readonly string[]): { at: number; len: number } | null {
-  const lower = text.toLowerCase();
-  let best: { at: number; len: number } | null = null;
-  for (const t of terms) {
-    const at = lower.indexOf(t.toLowerCase());
-    if (at !== -1 && (best === null || at < best.at)) best = { at, len: t.length };
-  }
-  return best;
+/**
+ * One case-insensitive regex over the terms (longest first so the longer of
+ * two overlapping terms wins), or null when there is nothing to match. It runs
+ * on the original text, so offsets never drift the way a lowercased copy can
+ * ("İ" lowercases to two units), and the `u` flag keeps surrogate pairs whole.
+ */
+function termRegex(terms: readonly string[]): RegExp | null {
+  if (terms.length === 0) return null;
+  const alts = terms
+    .toSorted((a, b) => b.length - a.length)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(alts.join("|"), "giu");
 }
+
+const isLowSurrogate = (text: string, at: number): boolean => {
+  const c = text.charCodeAt(at);
+  return c >= 0xdc00 && c <= 0xdfff;
+};
 
 /** Plain-text preview: markdown stripped, windowed around the first hit, capped. */
 function buildPreview(raw: string, terms: readonly string[], spoilerLabel: string): string {
   const plain = markdownToPlainText(raw, spoilerLabel);
-  const hit = firstHit(plain, terms);
+  const re = termRegex(terms);
+  const hit = re === null ? null : re.exec(plain);
   let start = 0;
-  if (hit !== null && hit.at > WINDOW_LEAD) start = hit.at - WINDOW_LEAD;
-  const body = plain.slice(start, start + PREVIEW_MAX);
-  return (start > 0 ? "\u2026" : "") + body + (start + PREVIEW_MAX < plain.length ? "\u2026" : "");
+  if (hit !== null && hit.index > WINDOW_LEAD) start = hit.index - WINDOW_LEAD;
+  // Never cut through a surrogate pair: step back so the pair stays whole at
+  // the start, and stop before its high half at the end.
+  if (start > 0 && isLowSurrogate(plain, start)) start--;
+  let end = start + PREVIEW_MAX;
+  if (end < plain.length && isLowSurrogate(plain, end)) end--;
+  return (
+    (start > 0 ? "\u2026" : "") + plain.slice(start, end) + (end < plain.length ? "\u2026" : "")
+  );
 }
 
 /** Fill `el` with `text`, each case-insensitive term hit wrapped in a <mark>. */
 function fillHighlighted(el: HTMLElement, text: string, terms: readonly string[]): void {
-  const lower = text.toLowerCase();
-  const lowered = terms.map((t) => t.toLowerCase());
+  const re = termRegex(terms);
   let pos = 0;
-  while (pos < text.length) {
-    let at = -1;
-    let len = 0;
-    for (const t of lowered) {
-      const k = lower.indexOf(t, pos);
-      if (k !== -1 && (at === -1 || k < at || (k === at && t.length > len))) {
-        at = k;
-        len = t.length;
-      }
+  if (re !== null) {
+    for (const m of text.matchAll(re)) {
+      if (m[0] === "") continue;
+      if (m.index > pos) el.appendChild(document.createTextNode(text.slice(pos, m.index)));
+      const mark = createElement("mark", { class: "search-hit" });
+      setText(mark, m[0]);
+      el.appendChild(mark);
+      pos = m.index + m[0].length;
     }
-    if (at === -1) break;
-    if (at > pos) el.appendChild(document.createTextNode(text.slice(pos, at)));
-    const mark = createElement("mark", { class: "search-hit" });
-    setText(mark, text.slice(at, at + len));
-    el.appendChild(mark);
-    pos = at + len;
   }
   if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
 }
@@ -247,7 +257,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const content = createElement("div", { class: "search-result-content" });
       fillHighlighted(
         content,
-        buildPreview(r.content, terms, messagingText("spoiler.revealed")),
+        buildPreview(r.content, terms, messagingText("search.spoiler")),
         terms,
       );
 
@@ -299,6 +309,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     const f = failedSearch;
     if (f === null) return;
     executeSearch(f.query, f.before, f.append);
+    input.focus();
   }
 
   function executeSearch(query: string, before: number | undefined, append: boolean): void {
@@ -314,6 +325,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     if (retryBtn !== null) retryBtn.style.display = "none";
 
     if (append) {
+      // A retried Load more must not keep showing the old failure.
+      setStatus("");
       loadingMore = true;
       renderLoadMore();
     } else {
@@ -336,7 +349,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
         if (!append) activeIndex = 0;
         loadingMore = false;
         renderResults();
-        if (!append) setStatus(results.length === 0 ? messagingText("search.empty") : "");
+        setStatus(!append && results.length === 0 ? messagingText("search.empty") : "");
       })
       .catch((err: unknown) => {
         if (thisSearch !== searchAbort) return;
@@ -413,6 +426,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     lastQuery = "";
     nextBefore = null;
     loadingMore = false;
+    // Drop a failed search with its Retry: it belonged to the old scope.
+    setStatus("");
     renderResults();
     if (input.value.trim().length >= MIN_QUERY_LEN) {
       doSearch();
