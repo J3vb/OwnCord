@@ -56,6 +56,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// The bind dialog is the user's; nothing runs while they read it.
 const BIND_TIMEOUT: Duration = Duration::from_secs(300);
 const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
+/// Portal-closed sessions replaced before the next successful bind.
+const MAX_REOPENS: u8 = 3;
 /// How long the loop blocks on the bus before it reads commands again.
 const TICK: Duration = Duration::from_millis(50);
 const RECONNECT: Duration = Duration::from_secs(2);
@@ -207,8 +209,9 @@ enum Effect {
     VoiceShortcut(&'static str),
     PttError,
     StatusChanged,
-    /// A new portal owner appeared and we hold no session: probe and create
-    /// one again.
+    /// We hold no session while the portal is there (a new owner appeared,
+    /// or it closed ours): probe, create one again and load what it
+    /// remembers.
     Reestablish,
     /// Bind once more with the preferred triggers of the earlier bind.
     Rebind,
@@ -226,6 +229,9 @@ struct Core {
     establishing: bool,
     /// False on a desktop known not to send `Deactivated`.
     ptt_allowed: bool,
+    /// Sessions the portal may still close before we stop replacing them, so
+    /// a portal that closes every new session cannot spin this thread.
+    reopens_left: u8,
 }
 
 impl Core {
@@ -238,6 +244,7 @@ impl Core {
             triggers: Triggers::default(),
             ptt_held: false,
             bound_this_run: false,
+            reopens_left: MAX_REOPENS,
         }
     }
 
@@ -302,6 +309,7 @@ impl Core {
             }
             Event::BindDone(triggers) => {
                 self.bound_this_run = true;
+                self.reopens_left = MAX_REOPENS;
                 match triggers {
                     Some(triggers) => self.set_triggers(triggers, armed),
                     None => Vec::new(),
@@ -358,7 +366,12 @@ impl Core {
                     return Vec::new();
                 }
                 self.bound_this_run = false;
-                self.lost(armed)
+                let mut effects = self.lost(armed);
+                if !self.establishing && self.reopens_left > 0 {
+                    self.reopens_left -= 1;
+                    effects.push(Effect::Reestablish);
+                }
+                effects
             }
             Event::BusLost => {
                 self.version = None;
@@ -996,10 +1009,13 @@ impl Worker {
             }
         };
         self.dispatch(bus, Event::Probed(version))?;
-        self.shared.mark_probed();
         if version.is_some() {
             self.create_session(bus)?;
+            // A new session lists the shortcuts the desktop kept from an
+            // earlier run, before any bind.
+            self.refresh(bus)?;
         }
+        self.shared.mark_probed();
         Ok(())
     }
 
@@ -1752,7 +1768,7 @@ mod tests {
     }
 
     #[test]
-    fn session_closed_is_treated_like_a_restart_without_rebind() {
+    fn session_closed_opens_a_new_session_without_rebind() {
         let mut core = bound_core();
         core.on_event(activated(ID_PTT), ARMED, 0x77);
         let effects = core.on_event(
@@ -1767,19 +1783,39 @@ mod tests {
             vec![
                 Effect::PttState(false),
                 Effect::PttError,
-                Effect::StatusChanged
+                Effect::StatusChanged,
+                Effect::Reestablish
             ]
         );
         assert_eq!(core.status().triggers, Triggers::default());
+        assert!(!core.bound_this_run, "a later restart does not rebind");
+    }
+
+    #[test]
+    fn a_portal_closing_every_session_is_replaced_only_a_few_times() {
+        let mut core = Core::new(true);
+        core.on_event(Event::Probed(Some(2)), IDLE, 0);
+        let mut reopened = 0;
+        for n in 0..10 {
+            let session = format!("{SESSION}{n}");
+            core.on_event(Event::SessionCreated(session.clone()), IDLE, 0);
+            let effects = core.on_event(Event::SessionClosed { session }, IDLE, 0);
+            if effects.contains(&Effect::Reestablish) {
+                reopened += 1;
+            }
+        }
+        assert_eq!(reopened, usize::from(MAX_REOPENS));
+
+        core.on_event(Event::SessionCreated(SESSION.into()), IDLE, 0);
+        core.on_event(Event::BindDone(Some(bound_triggers())), IDLE, 0);
         let effects = core.on_event(
-            Event::NameOwnerChanged {
-                old: String::new(),
-                new: ":1.7".into(),
+            Event::SessionClosed {
+                session: SESSION.into(),
             },
-            ARMED,
-            0x77,
+            IDLE,
+            0,
         );
-        assert_eq!(effects, vec![Effect::Reestablish], "no rebind");
+        assert!(effects.contains(&Effect::Reestablish), "a bind resets it");
     }
 
     #[test]
@@ -1864,6 +1900,8 @@ mod tests {
         /// The portal announces itself while the session is being made, as
         /// D-Bus activation does.
         activate_on_create: Arc<AtomicBool>,
+        /// ListShortcuts answers with the triggers the desktop remembered.
+        answer_list: Arc<AtomicBool>,
     }
 
     impl Script {
@@ -1920,8 +1958,14 @@ mod tests {
             }
             Ok(vec![path])
         }
-        fn list(&mut self, _: &str, _: u64) -> Result<Vec<String>, String> {
-            Err("no list".into())
+        fn list(&mut self, session: &str, token: u64) -> Result<Vec<String>, String> {
+            lock(&self.0.calls).push(format!("list {session}"));
+            if !self.0.answer_list.load(Ordering::SeqCst) {
+                return Err("no list".into());
+            }
+            let path = format!("/req/{token}");
+            self.0.push(answered(&path, None, Some(bound_triggers())));
+            Ok(vec![path])
         }
         fn configure(&mut self, _: &str) -> Result<(), String> {
             lock(&self.0.calls).push("configure".into());
@@ -1986,6 +2030,41 @@ mod tests {
             })
             .expect("send the bind");
         answer
+    }
+
+    #[test]
+    fn a_new_session_loads_the_triggers_the_desktop_remembered() {
+        let script = Script::default();
+        script.answer_list.store(true, Ordering::SeqCst);
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        assert_eq!(handle.shared.status().triggers, bound_triggers());
+        assert!(!script.called("bind"), "no bind dialog at startup");
+        stop_handle(handle);
+    }
+
+    #[test]
+    fn a_session_the_portal_closes_is_replaced_and_listed_again() {
+        let script = Script::default();
+        script.answer_list.store(true, Ordering::SeqCst);
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        script.push(Incoming::Event(Event::SessionClosed {
+            session: SESSION.into(),
+        }));
+        let replacement = format!("list {SESSION}");
+        wait_until("the replacement session is listed", || {
+            lock(&script.calls)
+                .iter()
+                .any(|c| c.starts_with(&replacement) && c != &replacement)
+        });
+        wait_until("the remembered triggers are back", || {
+            handle.shared.status().triggers == bound_triggers()
+        });
+        assert!(!script.called("bind"), "closing is not a reason to rebind");
+        stop_handle(handle);
     }
 
     #[test]
