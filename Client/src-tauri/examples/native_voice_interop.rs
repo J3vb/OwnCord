@@ -48,6 +48,22 @@
 //! `--screen-cycles N` (with `--screen`) first stops and restarts the share
 //! N times, printing the thread and file-descriptor counts before and after
 //! and checking that a stale stop leaves the live share alone.
+//! `--screen-audio` (with `--screen`) also publishes the share's audio the way
+//! the app does (`ScreenshareAudio`, 128 kbps, no DTX, no RED), from a
+//! synthetic 2-channel source (440 Hz left, 660 Hz right: CI has no sound
+//! server) and reports its sid as a `screenAudio` event. The browser half
+//! asserts it decodes with the right key, and logs the channel count it
+//! decoded: libwebrtc may negotiate mono until the SDK can signal stereo
+//! (LP-8d).
+//! `--screen-audio-cycles N` (with `--screen-audio`) first publishes and
+//! unpublishes the app's real capture-fed share audio N times (silence here:
+//! no sound server), printing the thread count before and after: each cycle
+//! starts and joins the capture thread.
+//! `--republish-screen` (with `--screen-audio`) then unpublishes and
+//! republishes the video with the capture kept, the way a codec change does,
+//! and reports the audio sid again (`screenAudio`, phase `after-republish`):
+//! it must be the same one. It finishes by stopping the share and reporting
+//! the session's resources (`screenStopped`): video and audio are both gone.
 //! `--volume G` sets every remote participant's volume to G the way the
 //! per-user volume menu does, pulls the session's own playout mix at the
 //! device cadence (CI has no sound device to play it on) and reports its RMS
@@ -70,8 +86,8 @@ mod linux {
     use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
     use owncord_client_lib::native_voice::screen::{self, CaptureOptions, Target};
     use owncord_client_lib::native_voice::session::{
-        process_threads, shared_key_material, CameraOptions, Event, NativeSession, PublishCodec,
-        ScreenOptions,
+        process_threads, screen_audio_source, shared_key_material, CameraOptions, Event,
+        NativeSession, PublishCodec, ScreenOptions,
     };
     use tokio_tungstenite::tungstenite::Message;
 
@@ -116,6 +132,34 @@ mod linux {
                 data: data.into(),
                 sample_rate: SAMPLE_RATE,
                 num_channels: 1,
+                samples_per_channel: samples as u32,
+            };
+            if source.capture_frame(&frame).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Push 440 Hz (left) and 660 Hz (right) into the stereo `source` forever.
+    async fn play_stereo(source: NativeAudioSource) {
+        let samples = (SAMPLE_RATE as u64 * FRAME_MS / 1000) as usize;
+        let (mut left, mut right) = (0.0f64, 0.0f64);
+        let step = |hz: f64| 2.0 * std::f64::consts::PI * hz / SAMPLE_RATE as f64;
+        let (left_step, right_step) = (step(440.0), step(660.0));
+        let mut ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
+        loop {
+            ticker.tick().await;
+            let mut data = Vec::with_capacity(samples * 2);
+            for _ in 0..samples {
+                left += left_step;
+                right += right_step;
+                data.push((left.sin() * SINE_AMPLITUDE) as i16);
+                data.push((right.sin() * SINE_AMPLITUDE) as i16);
+            }
+            let frame = AudioFrame {
+                data: data.into(),
+                sample_rate: SAMPLE_RATE,
+                num_channels: 2,
                 samples_per_channel: samples as u32,
             };
             if source.capture_frame(&frame).await.is_err() {
@@ -314,6 +358,17 @@ mod linux {
         width: u32,
         height: u32,
     ) -> Result<u64, String> {
+        let capture = start_screen_capture(session, width, height).await?;
+        publish_screen_video(session, capture, width, height).await?;
+        Ok(capture)
+    }
+
+    /// Start the synthetic capture. Returns its id.
+    async fn start_screen_capture(
+        session: &mut NativeSession,
+        width: u32,
+        height: u32,
+    ) -> Result<u64, String> {
         let (capture, started) = session
             .start_screen(
                 Target::Synthetic { width, height },
@@ -324,13 +379,24 @@ mod linux {
                 },
             )
             .await?;
-        let (w, h) = started.await.map_err(|_| "screen capture dropped")??;
+        started.await.map_err(|_| "screen capture dropped")??;
+        Ok(capture)
+    }
+
+    /// Publish running capture `capture`'s video. `width` and `height` are
+    /// the synthetic source's own size.
+    async fn publish_screen_video(
+        session: &mut NativeSession,
+        capture: u64,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
         session
             .publish_screen(
                 capture,
                 ScreenOptions {
-                    width: w,
-                    height: h,
+                    width,
+                    height,
                     max_bitrate: 3_000_000,
                     max_framerate: 15.0,
                     simulcast: false,
@@ -338,7 +404,7 @@ mod linux {
                 },
             )
             .await?;
-        Ok(capture)
+        Ok(())
     }
 
     /// Whether a WebSocket handshake to `url` is refused.
@@ -474,6 +540,7 @@ mod linux {
         }
 
         let mut preview = None;
+        let mut stereo = None;
         if let Some((width, height)) = screen_size {
             let mut capture = share_screen(&mut session, width, height).await?;
             let screen_cycles: u32 = arg("--screen-cycles")
@@ -501,6 +568,54 @@ mod linux {
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "screen-after", "cycles": screen_cycles, "count": process_threads(), "fds": open_fds(), "captures": screen::active_captures() } }),
                 );
+            }
+            if std::env::args().any(|a| a == "--screen-audio") {
+                let audio_cycles: u32 = arg("--screen-audio-cycles")
+                    .as_deref()
+                    .unwrap_or("0")
+                    .parse()
+                    .map_err(|_| "--screen-audio-cycles")?;
+                if audio_cycles > 0 {
+                    emit(
+                        serde_json::json!({ "event": { "type": "threads", "phase": "screen-audio-before", "count": process_threads(), "fds": open_fds() } }),
+                    );
+                    for _ in 0..audio_cycles {
+                        let sid = session.publish_screen_audio(capture).await?;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        session.unpublish_screen_audio(&sid).await;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    emit(
+                        serde_json::json!({ "event": { "type": "threads", "phase": "screen-audio-after", "cycles": audio_cycles, "count": process_threads(), "fds": open_fds() } }),
+                    );
+                }
+                let source = screen_audio_source();
+                let sid = session
+                    .publish_screen_audio_source(capture, source.clone())
+                    .await?;
+                stereo = Some(tokio::spawn(play_stereo(source)));
+                emit(
+                    serde_json::json!({ "event": { "type": "screenAudio", "phase": "published", "sid": sid } }),
+                );
+                if std::env::args().any(|a| a == "--republish-screen") {
+                    // Let the browser subscribe and decode first, so the
+                    // test can see the audio carry on across the republish.
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    session.unpublish_screen_keep_capture(capture).await;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    publish_screen_video(&mut session, capture, width, height).await?;
+                    emit(
+                        serde_json::json!({ "event": { "type": "screenAudio", "phase": "after-republish", "sid": sid } }),
+                    );
+                    // Then stop the share: the video and its audio both go, and
+                    // so does the capture thread.
+                    tokio::time::sleep(Duration::from_secs(8)).await;
+                    let before = session.resources();
+                    session.stop_screen(capture).await;
+                    emit(
+                        serde_json::json!({ "event": { "type": "screenStopped", "before": before, "after": session.resources() } }),
+                    );
+                }
             }
             preview = Some(tokio::spawn(watch(
                 "preview".into(),
@@ -555,6 +670,9 @@ mod linux {
             }
         }
         sine.abort();
+        if let Some(stereo) = stereo {
+            stereo.abort();
+        }
         emit(
             serde_json::json!({ "event": { "type": "resources", "resources": session.resources() } }),
         );

@@ -139,6 +139,9 @@ pub struct Sources {
     /// The desktop portal picks (Wayland): `sources` is empty.
     pub portal: bool,
     pub sources: Vec<Source>,
+    /// Other applications' sound can be shared with the screen (a PulseAudio
+    /// protocol server answers): `share_audio::available()`.
+    pub audio: bool,
 }
 
 /// Enumerate what can be shared. Blocking: one capture per source for its
@@ -148,6 +151,7 @@ pub fn list_sources() -> Sources {
         return Sources {
             portal: true,
             sources: Vec::new(),
+            audio: super::share_audio::available(),
         };
     }
     let mut sources = Vec::new();
@@ -174,6 +178,7 @@ pub fn list_sources() -> Sources {
     Sources {
         portal: false,
         sources,
+        audio: super::share_audio::available(),
     }
 }
 
