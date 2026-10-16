@@ -83,13 +83,13 @@ export const shards = {
     "src/lib/noiseFloor.ts",
     "src/lib/media-visibility.ts",
   ], // ~987 mutants (estimated)
-  "audio-media-2": [
-    "src/lib/audioPipeline.ts",
+  "audio-media-2": ["src/lib/audioPipeline.ts"], // ~513 mutants (estimated); 664 lines
+  "audio-media-3": [
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
-  ], // ~982 mutants (estimated)
+  ], // ~536 mutants (estimated); 692 lines. Split from audio-media-2, which hit the 90-minute job limit at 1003/1049 mutants.
   "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"], // ~1182 mutants (estimated)
   "transport-auth-2": [
     "src/lib/ws.ts",
