@@ -13,6 +13,7 @@ import type {
   NativeVoiceEnvelope,
   NativeVoiceScreenSources,
   NativeVoiceScreenStarted,
+  NativeVoiceStats,
 } from "../../../src/platform/contracts/nativeVoice";
 import { NATIVE_MIC_TEST_IN_CALL } from "../../../src/platform/contracts/nativeVoice";
 
@@ -44,6 +45,10 @@ export interface NativeControl {
   startsMicTestAs(test: number): void;
   /** The host refuses the next mic test start with this reason. */
   refusesMicTest(reason: string): void;
+  /** The host answers the next stats read with this sample. */
+  reportsStats(reply: NativeVoiceStats): void;
+  /** The host fails the next stats read (stale session, timeout). */
+  failsStats(): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
@@ -251,6 +256,52 @@ export function describeNativeVoiceSuite(
         ["native_voice_set_device", { session: 7, kind: "audioinput", deviceId: "guid-mic" }],
         ["native_voice_set_device", { session: 7, kind: "audiooutput", deviceId: "" }],
       ]);
+    });
+
+    check("getStats forwards the host's sample for the session", async () => {
+      const reply: NativeVoiceStats = {
+        atMs: 1_700_000_000_000,
+        publisher: [
+          {
+            type: "candidate-pair",
+            id: "CP1",
+            currentRoundTripTime: 0.042,
+            bytesSent: 1,
+            bytesReceived: 2,
+          },
+        ],
+        subscriber: [],
+        remoteVideo: {
+          TR_1: {
+            frameWidth: 1280,
+            frameHeight: 720,
+            framesDecoded: 90,
+            bytesReceived: 1000,
+            packetsLost: 0,
+            packetsReceived: 50,
+            mimeType: "video/VP8",
+          },
+        },
+        localVideo: {
+          screen_share: [
+            {
+              framesPerSecond: 30,
+              frameWidth: 1920,
+              frameHeight: 1080,
+              qualityLimitationReason: "none",
+              active: true,
+            },
+          ],
+        },
+      };
+      ctx.native.reportsStats(reply);
+      await expect(ctx.subject.getStats(7)).resolves.toEqual(reply);
+      expect(ctx.native.commands()).toEqual([["native_voice_get_stats", { session: 7 }]]);
+    });
+
+    check("getStats reads a host failure as null", async () => {
+      ctx.native.failsStats();
+      await expect(ctx.subject.getStats(7)).resolves.toBeNull();
     });
 
     check("starts, updates and stops a mic test by id", async () => {

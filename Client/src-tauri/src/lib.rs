@@ -266,6 +266,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_get_stats,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_list_devices,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_device,

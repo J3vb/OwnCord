@@ -18,6 +18,7 @@ use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
@@ -711,6 +712,10 @@ fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
     }
 }
 
+/// The local (by source key) and remote (by publication sid) video tracks
+/// whose stats the webview reads.
+pub type StatsTracks = (Vec<(&'static str, LocalTrack)>, Vec<(String, RemoteTrack)>);
+
 impl NativeSession {
     /// Connect with the room key already installed: the TS key exchange
     /// finishes before `room.connect()` on every platform, so a session with
@@ -1258,6 +1263,47 @@ impl NativeSession {
         self.frames.set_screen(None);
         // Dropping joins the capture thread.
         self.screen.take();
+    }
+
+    /// The publisher and subscriber transports' raw stats.
+    pub async fn transport_stats(&self) -> Result<(Vec<RtcStats>, Vec<RtcStats>), String> {
+        let s = self
+            .room
+            .get_stats()
+            .await
+            .map_err(|e| format!("native voice stats: {e}"))?;
+        Ok((s.publisher_stats, s.subscriber_stats))
+    }
+
+    /// Handles (Arc clones) of the video tracks whose stats the webview
+    /// reads. Local tracks are keyed by source, not sid, so the lookup is
+    /// immune to the issued/live sid split after a full reconnect; remote
+    /// ones by publication sid (what `remote_pub_info` sends). Unsubscribed
+    /// publications have no track and are skipped.
+    pub fn stats_tracks(&self) -> StatsTracks {
+        let local = self
+            .room
+            .local_participant()
+            .track_publications()
+            .values()
+            .filter_map(|p| {
+                let key = match p.source() {
+                    TrackSource::Camera => "camera",
+                    TrackSource::Screenshare => "screen_share",
+                    _ => return None,
+                };
+                p.track().map(|t| (key, t))
+            })
+            .collect();
+        let remote = self
+            .room
+            .remote_participants()
+            .values()
+            .flat_map(|participant| participant.track_publications().into_values())
+            .filter(|p| p.kind() == TrackKind::Video)
+            .filter_map(|p| p.track().map(|t| (p.sid().to_string(), t)))
+            .collect();
+        (local, remote)
     }
 
     pub fn remote_publication(

@@ -17,6 +17,7 @@ import type {
   NativeVoiceResources,
   NativeVoiceScreenSources,
   NativeVoiceScreenStarted,
+  NativeVoiceStats,
 } from "../contracts/nativeVoice";
 
 import { createLogger } from "@lib/logger";
@@ -113,6 +114,14 @@ export const nativeVoice: NativeVoice = {
     } catch (err) {
       // The host rejects with its reason as a string; callers classify it.
       throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+  async getStats(session) {
+    try {
+      return await invoke<NativeVoiceStats>("native_voice_get_stats", { session });
+    } catch (err) {
+      log.debug("native stats unavailable", err);
+      return null;
     }
   },
   debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),

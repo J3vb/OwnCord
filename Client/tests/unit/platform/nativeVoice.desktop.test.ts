@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   changeRefusal: null as string | null,
   micTest: 0,
   micTestRefusal: null as string | null,
+  stats: null as unknown,
+  statsFails: false,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -35,6 +37,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "native_voice_screen_sources") return Promise.resolve(state.screen.sources);
     if (cmd === "native_voice_start_screen") return Promise.resolve(state.screen.started);
     if (cmd === "native_voice_publish_screen") return Promise.resolve(state.screen.sid);
+    if (cmd === "native_voice_get_stats") {
+      // Tauri rejects with the command's error string.
+      return state.statsFails
+        ? Promise.reject("native voice stats timed out")
+        : Promise.resolve(state.stats);
+    }
     if (cmd === "native_voice_start_mic_test") {
       const refusal = state.micTestRefusal;
       state.micTestRefusal = null;
@@ -61,6 +69,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 describeNativeVoiceSuite(async () => {
   state.commands.length = 0;
   state.handlers.clear();
+  state.stats = null;
+  state.statsFails = false;
   const mod = await import("../../../src/platform/desktop/nativeVoice");
   const desktopBinding: NativeVoice = mod.nativeVoice;
   return {
@@ -91,6 +101,13 @@ describeNativeVoiceSuite(async () => {
       },
       refusesMicTest(reason) {
         state.micTestRefusal = reason;
+      },
+      reportsStats(reply) {
+        state.stats = reply;
+        state.statsFails = false;
+      },
+      failsStats() {
+        state.statsFails = true;
       },
       commands: () => state.commands,
       async emits(envelope) {

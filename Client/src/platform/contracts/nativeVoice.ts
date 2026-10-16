@@ -245,6 +245,70 @@ export interface NativeMicTestEnvelope {
 // i18n-exempt: the host's refusal code, matched by the tab, never shown
 export const NATIVE_MIC_TEST_IN_CALL = "mic test unavailable during a call";
 
+/** One W3C-shaped stats entry (`RTCStats` field names) of a transport, cut to
+ *  what `connectionStats.ts` reads. Times are seconds, as in the W3C reports. */
+export type NativeVoiceStatsEntry =
+  | {
+      type: "candidate-pair";
+      id: string;
+      currentRoundTripTime: number;
+      bytesSent: number;
+      bytesReceived: number;
+    }
+  | { type: "outbound-rtp"; id: string; kind: string; packetsSent: number; bytesSent: number }
+  | {
+      type: "inbound-rtp";
+      id: string;
+      kind: string;
+      packetsReceived: number;
+      bytesReceived: number;
+      packetsLost: number;
+      jitter: number;
+    }
+  | {
+      type: "remote-inbound-rtp";
+      id: string;
+      kind: string;
+      /** The id of the outbound entry this one reports on. */
+      localId: string;
+      packetsLost: number;
+      jitter: number;
+    };
+
+/** A subscribed remote video track's receiver sample. */
+export interface NativeVoiceReceiverSample {
+  frameWidth: number;
+  frameHeight: number;
+  framesDecoded: number;
+  bytesReceived: number;
+  packetsLost: number;
+  packetsReceived: number;
+  mimeType?: string;
+}
+
+/** One encoder layer of a local video track. */
+export interface NativeVoiceSenderLayer {
+  framesPerSecond?: number;
+  frameWidth: number;
+  frameHeight: number;
+  qualityLimitationReason: string;
+  encoderImplementation?: string;
+  active: boolean;
+}
+
+/** One stats sample of a native session (LP-5). */
+export interface NativeVoiceStats {
+  /** Host wall clock (ms since the epoch) at collection. */
+  atMs: number;
+  publisher: NativeVoiceStatsEntry[];
+  /** Empty in single-PC mode. */
+  subscriber: NativeVoiceStatsEntry[];
+  /** Subscribed remote video by publication sid. */
+  remoteVideo: Record<string, NativeVoiceReceiverSample>;
+  /** Local video by source. */
+  localVideo: { camera?: NativeVoiceSenderLayer[]; screen_share?: NativeVoiceSenderLayer[] };
+}
+
 /** A simulcast layer, as `native_voice_set_video_view` names it. */
 export type NativeVideoQuality = "low" | "medium" | "high";
 
@@ -279,6 +343,9 @@ export interface NativeVoice {
    *  echo canceller's reference switch to them within a few frames, muted
    *  or not. */
   setAudioProcessing(session: number, audio: NativeVoiceAudioOptions): Promise<void>;
+  /** One stats sample of `session` (LP-5); null when the host could not read
+   *  one (stale session, timeout). Never rejects. */
+  getStats(session: number): Promise<NativeVoiceStats | null>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */
