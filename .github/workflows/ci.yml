@@ -68,7 +68,6 @@ jobs:
       browser: ${{ steps.select.outputs.browser }}
       integration: ${{ steps.select.outputs.integration }}
       native: ${{ steps.select.outputs.native }}
-      harness: ${{ steps.select.outputs.harness }}
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
       permissions: ${{ steps.select.outputs.permissions }}
@@ -1316,24 +1315,12 @@ jobs:
         timeout-minutes: 8
         run: bash ../scripts/ci/playwright-install.sh
 
-      # Fast feedback by default. `client-e2e-parity` runs the complete
-      # 694-test suite against the built bundle, and until this split this job
-      # ran those same 694 against the dev server — the two configs share
-      # testDir and testIgnore, so the jobs differed only in which server served
-      # the app (10.8 and 8.8 minutes for one identical test set).
-      #
-      # So this leg runs the 137-test smoke set (Client/playwright.config.smoke.ts)
-      # and widens back to the full 694 when the specs or their fixtures moved —
-      # at that point the smoke set is no longer a fair sample of the change.
-      # The two steps are complementary rather than a default and an override,
-      # so exactly one runs; the full-suite condition doubles as the fail-safe,
-      # running the full suite if the selection job did not succeed.
-      - name: Run Playwright tests (full development suite)
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.harness == 'true' }}
-        run: npx playwright test --config=playwright.config.ts
-
+      # Fast feedback: this job runs the 137-test smoke set
+      # (Client/playwright.config.smoke.ts) against the Vite dev server.
+      # `client-e2e-parity` runs the complete suite against the built
+      # bundle on every browser change, including when Change selection fails
+      # (its own `if:` fail-safe), so the full suite is not repeated here.
       - name: Run Playwright tests (smoke)
-        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.harness != 'true' }}
         run: npm run test:e2e:smoke
 
       # Browser-mode unit tests (tests/browser/): real AudioContext + WASM

@@ -218,8 +218,8 @@ source): 411 Vitest files and 132 Playwright specs.
 - **Playwright web E2E**, two blocking jobs:
   - `client-e2e-parity` runs the full 694-test suite against the production
     bundle;
-  - `client-e2e` runs a 137-test smoke set against the Vite dev server. It
-    widens to the full suite when the specs or fixtures themselves change.
+  - `client-e2e` always runs the 137-test smoke set against the Vite dev
+    server; the full suite runs only in `client-e2e-parity`.
 - **Native Tauri suite**, the `client-native` job on `windows-latest` (a
   100-minute budget, on pull requests to `main` and `dev`). It builds the app,
   runs the `native-core` Playwright project, then the auth, UI and

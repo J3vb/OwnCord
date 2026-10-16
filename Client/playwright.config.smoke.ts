@@ -17,9 +17,9 @@ import base from "./playwright.config";
  * This is a `testMatch` list rather than a tag, because a tag has to be added to
  * every spec it covers and this file is the one place the selection is
  * reviewable. Adding a spec here is a one-line change; the full development run
- * is still available as `npm run test:e2e`, and CI widens to it automatically
- * when the e2e specs or fixtures themselves change (the `harness` capability in
- * scripts/ci-select.mjs).
+ * is still available as `npm run test:e2e`, but CI runs only this smoke set
+ * against the dev server. The full suite runs in `client-e2e-parity` against the
+ * production bundle.
  *
  * The three `*.parity.spec.ts` files are included deliberately: they are the
  * specs written for dev-versus-production differences, which is exactly what a
