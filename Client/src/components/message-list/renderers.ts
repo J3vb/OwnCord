@@ -7,26 +7,18 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@lib/preferences";
-import { channelBitOrRole } from "@lib/permissions";
-import { channelsStore } from "@stores/channels.store";
-import { showToast } from "@lib/toast";
-import { formatMessageLink } from "@lib/deep-link";
+import {
+  connectionLockReason,
+  copyMessageLink,
+  copyWithToast,
+  messageActionGates,
+} from "./message-actions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
-import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
-
-/** Cached value of the developerMode preference. Invalidated on pref change. */
-let developerModeEnabled = loadPref<boolean>("developerMode", false);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "developerMode") {
-    developerModeEnabled = loadPref<boolean>("developerMode", false);
-  }
-}) as EventListener);
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -68,12 +60,7 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
-import {
-  channelCanReact,
-  reactionLockReason,
-  renderReactions,
-  wireReactionControl,
-} from "./reactions";
+import { renderReactions, wireReactionControl } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
 
@@ -177,9 +164,7 @@ function applyDeleteGate(
   }
   btn.disabled = true;
   btn.setAttribute("aria-disabled", "true");
-  btn.title = shellText(
-    status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
-  );
+  btn.title = connectionLockReason(status) ?? messagingText("action.delete");
 }
 
 /** Toggle the delete gate on every rendered delete control for the current
@@ -472,6 +457,7 @@ export function renderMessage(
   // The hover action bar (react/reply/pin/edit/delete) only applies to
   // confirmed server messages — not deleted rows or unsent optimistic rows.
   if (!msg.deleted && msg.status === "sent") {
+    const gates = messageActionGates(msg, opts);
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
     const reactBtn = createElement("button", {
@@ -485,7 +471,7 @@ export function renderMessage(
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
-      reactionLockReason(channelCanReact(msg.channelId)),
+      gates.react.reason,
       signal,
     );
     actionsBar.appendChild(reactBtn);
@@ -508,20 +494,11 @@ export function renderMessage(
     pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
       signal,
     });
-    // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but
-    // any DM participant may pin — so offering it to a plain member is a
-    // broken affordance (PRD.md: permission is a pre-disabled affordance, not
-    // a rejection after the fact).
-    // In a channel it follows the server's per-channel verdict (a channel
-    // override can grant or deny it), falling back to the role on an older server.
-    if (
-      opts.channelType === "dm" ||
-      channelBitOrRole(channelsStore.getState().channels.get(msg.channelId)?.canPin)
-    ) {
+    if (gates.pin.shown) {
       actionsBar.appendChild(pinBtn);
     }
 
-    if (msg.user.id === opts.currentUserId) {
+    if (gates.edit.shown) {
       const editBtn = createElement("button", {
         "data-testid": `msg-edit-${msg.id}`,
         "aria-label": messagingText("action.edit"),
@@ -532,13 +509,7 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    // Own message (always), or someone else's where the channel allows it. A
-    // DM never lets anyone delete the other participant's messages.
-    if (
-      msg.user.id === opts.currentUserId ||
-      (opts.channelType !== "dm" &&
-        channelBitOrRole(channelsStore.getState().channels.get(msg.channelId)?.canDeleteOthers))
-    ) {
+    if (gates.delete.shown) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
@@ -566,23 +537,12 @@ export function renderMessage(
     });
     copyLinkBtn.appendChild(createIcon("link", 16));
     copyLinkBtn.title = messagingText("action.copyLink");
-    copyLinkBtn.addEventListener(
-      "click",
-      () => {
-        // No silent success: a copy with no feedback is indistinguishable
-        // from a clipboard that refused.
-        void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
-          () => showToast(messagingText("toast.linkCopied"), "success"),
-          () => showToast(messagingText("toast.linkCopyFailed"), "error"),
-        );
-      },
-      { signal },
-    );
+    copyLinkBtn.addEventListener("click", () => copyMessageLink(msg), { signal });
     actionsBar.appendChild(copyLinkBtn);
 
     // Someone else's message: report it, or one of its attachments (B9-10).
     const onReport = opts.onReportClick;
-    if (onReport !== undefined && msg.user.id !== opts.currentUserId) {
+    if (onReport !== undefined && gates.report.shown) {
       const reportBtn = createElement("button", {
         "data-testid": `msg-report-${msg.id}`,
         "aria-label": reportEntryText("reportMessage"),
@@ -594,7 +554,7 @@ export function renderMessage(
       actionsBar.appendChild(reportBtn);
     }
 
-    if (developerModeEnabled) {
+    if (gates.copyId.shown) {
       const copyIdBtn = createElement("button", {
         "data-testid": `msg-copy-id-${msg.id}`,
         "aria-label": messagingText("action.copyId"),
@@ -603,14 +563,7 @@ export function renderMessage(
       copyIdBtn.title = messagingText("action.copyId");
       copyIdBtn.addEventListener(
         "click",
-        () => {
-          // No silent success: a copy with no feedback is indistinguishable
-          // from a clipboard that refused.
-          void navigator.clipboard.writeText(String(msg.id)).then(
-            () => showToast(messagingText("toast.idCopied"), "success"),
-            () => showToast(messagingText("toast.idCopyFailed"), "error"),
-          );
-        },
+        () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
         { signal },
       );
       actionsBar.appendChild(copyIdBtn);

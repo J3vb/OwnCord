@@ -31,6 +31,20 @@ export function reactionLockReason(canReact?: boolean): string | null {
   return canReact === false ? messagingText("reaction.channelLocked") : null;
 }
 
+/** The server refuses a new emoji on a message that already has this many (3A-12). */
+const MAX_DISTINCT_REACTIONS = 20;
+
+/** A new emoji would push the message past the cap; existing pills stay clickable. */
+export function atReactionLimit(
+  reactions: readonly { emoji: string }[],
+  emoji: string | null,
+): boolean {
+  return (
+    reactions.length >= MAX_DISTINCT_REACTIONS &&
+    (emoji === null || !reactions.some((r) => r.emoji === emoji))
+  );
+}
+
 /** The server's can_react verdict for a channel; undefined when it never said. */
 export function channelCanReact(channelId: number): boolean | undefined {
   return channelsStore.getState().channels.get(channelId)?.canReact;

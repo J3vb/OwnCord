@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, onTestFinished } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
+import { quickReactionEmoji } from "@components/message-list/quick-reactions";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";
@@ -697,5 +698,24 @@ describe("EmojiPicker", () => {
 
     expect(cellTitles).toContain(":blobwave:");
     reopened.destroy();
+  });
+});
+
+describe("quickReactionEmoji", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("falls back to the fixed defaults with no recents", () => {
+    expect(quickReactionEmoji(3)).toEqual(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}"]);
+  });
+
+  it("puts recents first, pads with defaults and never repeats", () => {
+    localStorage.setItem("owncord:recent-emoji", JSON.stringify(["\u{1F680}", "\u{1F44D}"]));
+    expect(quickReactionEmoji(3)).toEqual(["\u{1F680}", "\u{1F44D}", "\u2764\uFE0F"]);
+  });
+
+  it("drops a recent custom shortcode that no longer resolves", () => {
+    localStorage.setItem("owncord:recent-emoji", JSON.stringify([":gone:"]));
+    expect(quickReactionEmoji(3)).toEqual(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}"]);
   });
 });
