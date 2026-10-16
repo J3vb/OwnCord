@@ -141,6 +141,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- On Linux the voice panel's ping read "—" with empty signal bars, a watched screen share had no quality chip, and your own Go Live showed no frame rate. All three now show, as on Windows.
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 - On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.

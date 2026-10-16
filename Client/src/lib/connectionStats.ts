@@ -26,10 +26,12 @@ export interface ConnectionStats {
   /** Worst interarrival jitter, milliseconds, among audio streams in either
    *  direction that carried packets since the last poll. */
   readonly jitter: number;
-  /** False until a real sample has been extracted. The native Linux path has
-   *  no browser peer connection (NativeRoom.engine.pcManager is undefined), so
-   *  no sample ever arrives; the widget must render "not available" rather
-   *  than its hardcoded initial "4 green bars, —" (voice #7). */
+  /** False until a real sample has been extracted. Before the first sample
+   *  (and on the native Linux path whenever the host returns none: not
+   *  connected, a failed read, no transports) the widget must render "not
+   *  available" rather than its hardcoded initial "4 green bars, —"
+   *  (voice #7). On Linux, `NativeRoom.engine.pcManager` serves the host's
+   *  stats in the same W3C shape (WP LP-5). */
   readonly available: boolean;
 }
 

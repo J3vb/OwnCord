@@ -265,6 +265,7 @@ pub fn run() {
             native_voice::native_voice_set_screenshare_volume,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
+            native_voice::native_voice_get_stats,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_list_devices,
             #[cfg(target_os = "linux")]

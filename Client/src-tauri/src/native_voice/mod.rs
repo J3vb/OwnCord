@@ -26,6 +26,7 @@ pub mod mic_test;
 pub mod playout;
 pub mod screen;
 pub mod session;
+pub mod stats;
 pub mod stream_format;
 pub mod video;
 
@@ -907,6 +908,74 @@ pub async fn native_voice_debug_info(
     state: tauri::State<'_, NativeVoiceState>,
 ) -> Result<Resources, String> {
     Ok(state.inner.lock().await.resources())
+}
+
+/// How long one stats read may take. The transport read runs under the
+/// session lock, so a wedged signaling thread must not hold mute/PTT commands.
+const STATS_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+}
+
+/// One stats sample for the webview's connection panel, tile chip and Go Live
+/// readout (LP-5). A stale session or a failed or slow transport read is an
+/// error (ping is the core output); a failed per-track read only drops that
+/// track's sample.
+#[tauri::command]
+pub async fn native_voice_get_stats(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+) -> Result<stats::Stats, String> {
+    // Only `Inner` is taken, no new lock. The transport stats need the room,
+    // which lives in `Inner`, so they are read under it, bounded by
+    // STATS_TIMEOUT. Per-track stats are read after the guard drops, from
+    // Arc'd track handles.
+    let (transport, local, remote) = {
+        let mut inner = state.inner.lock().await;
+        let s = inner.current(session)?;
+        let (local, remote) = s.stats_tracks();
+        let transport = tokio::time::timeout(STATS_TIMEOUT, s.transport_stats())
+            .await
+            .map_err(|_| "native voice stats timed out".to_string())??;
+        (transport, local, remote)
+    };
+    let per_track = async {
+        let mut local_video = std::collections::BTreeMap::new();
+        let mut remote_video = std::collections::BTreeMap::new();
+        for (key, track) in local {
+            match track.get_stats().await {
+                Ok(s) => {
+                    local_video.insert(key, stats::sender_layers(&s));
+                }
+                Err(e) => log::debug!("[native_voice] {key} sender stats: {e}"),
+            }
+        }
+        for (sid, track) in remote {
+            match track.get_stats().await {
+                Ok(s) => {
+                    if let Some(r) = stats::receiver_sample(&s) {
+                        remote_video.insert(sid, r);
+                    }
+                }
+                Err(e) => log::debug!("[native_voice] {sid} receiver stats: {e}"),
+            }
+        }
+        (local_video, remote_video)
+    };
+    // A slow per-track read only drops the track samples: the ping still arrives.
+    let (local_video, remote_video) = tokio::time::timeout(STATS_TIMEOUT, per_track)
+        .await
+        .unwrap_or_default();
+    Ok(stats::Stats {
+        at_ms: now_ms(),
+        publisher: stats::transport_entries(&transport.0),
+        subscriber: stats::transport_entries(&transport.1),
+        remote_video,
+        local_video,
+    })
 }
 
 #[cfg(test)]
