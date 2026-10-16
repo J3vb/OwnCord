@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::{
-    AudioEncoding, TrackPublishOptions, VideoCodec, VideoEncoding, VideoPreset,
+    AudioEncoding, DegradationPreference, TrackPublishOptions, VideoCodec, VideoEncoding,
+    VideoPreset,
 };
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
@@ -548,7 +549,9 @@ pub struct ScreenOptions {
 /// one lower layer (`SCREENSHARE_SIMULCAST_LAYERS`): 720p at 15 fps and at
 /// most 1.2 Mbps, so a viewer who cannot take the full stream still gets
 /// readable text instead of a frozen frame, and the top layer keeps most of
-/// the budget.
+/// the budget. Like the web path's `screenShareDegradation`, a 120 fps share
+/// degrades `Balanced` (resolution before frame rate); lower rates keep
+/// resolution.
 fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
     TrackPublishOptions {
         source: TrackSource::Screenshare,
@@ -568,6 +571,11 @@ fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
             max_framerate: opts.max_framerate,
         }),
         video_codec: opts.codec.video_codec(),
+        degradation_preference: Some(if opts.max_framerate >= 120.0 {
+            DegradationPreference::Balanced
+        } else {
+            DegradationPreference::MaintainResolution
+        }),
         ..Default::default()
     }
 }
@@ -1951,6 +1959,25 @@ mod tests {
         let opts = screen_publish_options(&screen(false));
         assert!(!opts.simulcast);
         assert!(opts.simulcast_layers.is_none());
+    }
+
+    #[test]
+    fn a_120_fps_screen_share_degrades_balanced_and_lower_rates_keep_resolution() {
+        let mut opts = screen(false);
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::MaintainResolution)
+        );
+        opts.max_framerate = 60.0;
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::MaintainResolution)
+        );
+        opts.max_framerate = 120.0;
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::Balanced)
+        );
     }
 
     fn camera(height: u32, simulcast: bool) -> CameraOptions {
