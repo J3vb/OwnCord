@@ -255,14 +255,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     let roleChangeRunning = false;
     for (const role of options.availableRoles) {
       const cls =
-        role === options.currentRole
+        role.toLowerCase() === options.currentRole.toLowerCase()
           ? "context-menu__item context-menu__item--active"
           : "context-menu__item";
       const roleOption = createMenuItem(
         role,
         cls,
         () => {
-          if (roleChangeRunning || role === options.currentRole) return;
+          if (roleChangeRunning || role.toLowerCase() === options.currentRole.toLowerCase()) return;
           roleChangeRunning = true;
           roleOption.classList.add("context-menu__item--pending");
           const done = (): void => {

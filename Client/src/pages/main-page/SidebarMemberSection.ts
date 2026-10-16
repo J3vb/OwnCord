@@ -11,7 +11,7 @@ import { createMemberList } from "@components/MemberList";
 import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
-import { getRoleIdByName } from "@stores/channels.store";
+import { channelsStore, getRoleIdByName } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
@@ -271,6 +271,14 @@ export function createSidebarMemberSection(
   unsubs.push(
     membersStore.subscribeSelector(
       (state) => state.roleRevision,
+      () => void refreshBanned(),
+    ),
+  );
+  // A roles_update only touches channelsStore, so a role edit that grants (or
+  // revokes) BAN_MEMBERS on the viewer's role would never reach the bans list.
+  unsubs.push(
+    channelsStore.subscribeSelector(
+      (state) => state.roles,
       () => void refreshBanned(),
     ),
   );

@@ -440,7 +440,7 @@ function renderVoiceChannelItem(
 
       const avatar = createAvatarElement(
         { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
-        { className: "vu-avatar", background: pickAvatarColor(resolved) },
+        { className: "vu-avatar", background: pickAvatarColor(user.username) },
       );
       // The name follows, so the avatar's initial would only repeat it.
       avatar.setAttribute("aria-hidden", "true");

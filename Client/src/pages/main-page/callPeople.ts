@@ -33,7 +33,7 @@ export function buildCallPeople(users: Iterable<VoiceUser>, cache: CallAvatarCac
           {
             // The DM call panel's large avatar, which the avatar tile sizes.
             className: "dcp-avatar dcp-avatar--lg",
-            background: pickAvatarColor(name),
+            background: pickAvatarColor(user.username),
           },
         ),
       };
