@@ -55,6 +55,33 @@ export function applyFontSize(): void {
   document.documentElement.style.setProperty("--font-size", `${effectiveFontSize()}px`);
 }
 
+/** Saturation slider range (percent) and its default, which is "off". */
+export const DEFAULT_SATURATION_PCT = 100;
+
+/**
+ * The stored saturation, 0-100. A value that is not a whole-number-or-fraction
+ * in range (a hand-edit, "abc", 500) is not clamped, it is the default: a
+ * corrupted entry must never leave the UI grey.
+ */
+export function effectiveSaturation(): number {
+  const stored: unknown = loadPref<number>("saturation", DEFAULT_SATURATION_PCT);
+  return typeof stored === "number" && stored >= 0 && stored <= 100
+    ? stored
+    : DEFAULT_SATURATION_PCT;
+}
+
+/**
+ * Write `--ui-saturation` (0-1) and the `custom-saturation` marker. The filter
+ * in accessibility.css hangs off the marker, so the default 100 % adds no
+ * filter (and no stacking context) anywhere.
+ */
+export function applySaturation(): void {
+  const pct = effectiveSaturation();
+  const root = document.documentElement;
+  root.style.setProperty("--ui-saturation", String(pct / 100));
+  root.classList.toggle("custom-saturation", pct !== DEFAULT_SATURATION_PCT);
+}
+
 /**
  * Apply stored appearance preferences (theme, font size, compact mode).
  * Call at app startup so the UI doesn't flash default styles.
@@ -63,6 +90,11 @@ export function applyStoredAppearance(): void {
   applyThemeChoice(getActiveThemeName());
   restoreAccent();
   applyFontSize();
+  applySaturation();
+  document.documentElement.classList.toggle(
+    "underline-links",
+    loadPref<boolean>("underlineLinks", false),
+  );
   document.documentElement.classList.toggle(
     "compact-mode",
     loadPref<boolean>("compactMode", false),

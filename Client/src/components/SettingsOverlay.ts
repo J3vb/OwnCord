@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Safety (once its feature ships), Appearance, Notifications, Text & Images, Accessibility, Voice & Video, Keybinds, Advanced, Logs, About.
+ * Tabs: Account, Safety (once its feature ships), Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds, Advanced, Logs, About.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -31,6 +31,8 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
+import { confirmLogout } from "../features/settings/logoutConfirm";
+import { readAppVersion } from "../features/whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
 
 const log = createLogger("SettingsOverlay");
@@ -101,10 +103,10 @@ export type TabName =
   | "Account"
   | "Safety"
   | "Appearance"
-  | "Notifications"
-  | "Text & Images"
   | "Accessibility"
   | "Voice & Video"
+  | "Text & Images"
+  | "Notifications"
   | "Keybinds"
   | "Advanced"
   | "Logs"
@@ -114,10 +116,10 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
   Safety: "shield",
   Appearance: "palette",
-  Notifications: "bell",
-  "Text & Images": "image",
   Accessibility: "eye",
   "Voice & Video": "mic",
+  "Text & Images": "image",
+  Notifications: "bell",
   Keybinds: "keyboard",
   Advanced: "settings",
   Logs: "scroll-text",
@@ -131,15 +133,19 @@ const ACCOUNT = "Account" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.about")
 const ABOUT = "About" satisfies TabName;
 
-/** What each tab is called on screen (B9-20 moved every label onto the seam). */
+/**
+ * What each tab is called on screen (B9-20 moved every label onto the seam).
+ * The key order is the nav order: Discord's app-settings order, then the
+ * OwnCord-only tabs.
+ */
 const TAB_LABEL_KEYS = {
   Account: "tabs.account",
   Safety: "tabs.safety",
   Appearance: "tabs.appearance",
-  Notifications: "tabs.notifications",
-  "Text & Images": "tabs.textImages",
   Accessibility: "tabs.accessibility",
   "Voice & Video": "tabs.voice",
+  "Text & Images": "tabs.textImages",
+  Notifications: "tabs.notifications",
   Keybinds: "tabs.keybinds",
   Advanced: "tabs.advanced",
   Logs: "tabs.logs",
@@ -178,6 +184,8 @@ export function createSettingsOverlay(
   let unsubUi: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
   let unsubUpdate: (() => void) | null = null;
+  /** Closes the open Log Out prompt without confirming; null when none is open. */
+  let closeLogoutPrompt: (() => void) | null = null;
   /**
    * Scopes the *current* tab build's element listeners. `renderActiveTab()`
    * aborts the previous one before building the next, so a discarded pane's
@@ -316,6 +324,8 @@ export function createSettingsOverlay(
   }
 
   function hide(): void {
+    // A Log Out prompt left open must not outlive the panel it belongs to.
+    closeLogoutPrompt?.();
     root?.classList.remove("open");
     // The hidden pane is rebuilt on reopen (contentLive), so drop its build
     // now: anything shown once (recovery codes, a recovery kit secret) is
@@ -515,10 +525,33 @@ export function createSettingsOverlay(
         { class: "settings-nav-item danger" },
         settingsText("shell.logOut"),
       );
-      logoutBtn.addEventListener("click", () => options.onLogout(), { signal: disposable.signal });
+      logoutBtn.addEventListener(
+        "click",
+        () => {
+          closeLogoutPrompt = confirmLogout({
+            signal: disposable.signal,
+            onConfirm: () => options.onLogout(),
+            onClosed: () => {
+              closeLogoutPrompt = null;
+            },
+            fallbackFocus: () => logoutBtn,
+          });
+        },
+        { signal: disposable.signal },
+      );
       appendChildren(logoutWrap, logoutSep, logoutBtn);
       sidebar.appendChild(logoutWrap);
     }
+
+    // The app version, small and muted at the very bottom of the nav. Read
+    // lazily: a host that reports none leaves the nav as it was.
+    const versionEl = createElement("div", { class: "settings-sidebar-version" });
+    if (!authenticated) versionEl.classList.add("solo");
+    void readAppVersion().then((version) => {
+      if (version === null || disposable.signal.aborted) return;
+      versionEl.textContent = settingsText("shell.version", { version });
+      sidebar.appendChild(versionEl);
+    });
 
     // Page title (h1) at top of content area — created here, inserted in renderActiveTab
     pageTitle = createElement("h1", {}, tabLabel(activeTab));
@@ -546,7 +579,8 @@ export function createSettingsOverlay(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && root?.classList.contains("open")) {
+        // The Log Out prompt owns Escape while it is open.
+        if (e.key === "Escape" && closeLogoutPrompt === null && root?.classList.contains("open")) {
           requestClose();
         }
       },
@@ -605,6 +639,8 @@ export function createSettingsOverlay(
   }
 
   function destroy(): void {
+    closeLogoutPrompt?.();
+    closeLogoutPrompt = null;
     disposable.destroy();
     if (unsubUi !== null) {
       unsubUi();

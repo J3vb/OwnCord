@@ -48,3 +48,21 @@
    applyFontSize() is the single writer and derives the size from both the
    slider and the toggle (OC-0319). The .large-font class stays as a state
    marker for anything that wants to hang non-font-size styling off it. */
+
+/* Accessibility: always underline links. A state class on <html>; the rule is
+   one selector on message links, which already underline on hover. */
+.underline-links .msg-link {
+  text-decoration: underline;
+}
+
+/* Accessibility: saturation. appearance.ts writes --ui-saturation (0-1) and
+   adds .custom-saturation only when it is not 100 %, so the default adds no
+   filter and no stacking context. The filter is applied to colour-carrying
+   text and accent buttons only: never to the app root or a container, because
+   a filter inherits into every child and would also wash out images, video and
+   avatars. */
+.custom-saturation .message .msg-author,
+.custom-saturation .member-item .mi-name,
+.custom-saturation .btn-primary {
+  filter: saturate(var(--ui-saturation, 1));
+}

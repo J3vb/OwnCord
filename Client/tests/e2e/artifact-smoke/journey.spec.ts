@@ -133,6 +133,7 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
       expect(secret).toMatch(/\S{16,}/);
       await app.click("[data-testid='shown-once-done']");
       await app.click(".settings-nav-item.danger", "Log Out");
+      await app.click("[data-testid='logout-confirm']");
       await waitFor(app, "#host");
       await app.fill("#host", host);
       await app.click("[data-testid='recover-account-link']");

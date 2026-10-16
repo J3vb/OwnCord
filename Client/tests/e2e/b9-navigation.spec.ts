@@ -212,6 +212,7 @@ test.describe("B9-4 shared navigation", () => {
     // → logout
     await gear.click();
     await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await page.locator("[data-testid='logout-confirm']").click();
     await expect(page.locator("[data-testid='app-layout']")).toHaveCount(0, { timeout: 10_000 });
 
     // → the next session starts on a channel, with no view left over.
