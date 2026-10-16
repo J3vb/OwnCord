@@ -496,7 +496,7 @@ func TestPurgeAfterBan_ConcurrentPurgesDoNotDoubleCount(t *testing.T) {
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	const rows = 250
-	var all []int64
+	all := make([]int64, 0, rows)
 	for range rows {
 		all = append(all, banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute))
 	}
@@ -505,11 +505,9 @@ func TestPurgeAfterBan_ConcurrentPurgesDoNotDoubleCount(t *testing.T) {
 	results := make([]BanPurgeResult, len(actors))
 	var wg sync.WaitGroup
 	for i, actor := range actors {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results[i] = f.mod.PurgeAfterBan(context.Background(), actor, fixtureMember2, time.Hour)
-		}()
+		})
 	}
 	wg.Wait()
 

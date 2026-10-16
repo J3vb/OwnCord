@@ -76,7 +76,7 @@ func TestPurgeUserChannelMessagesSince_LimitBatches(t *testing.T) {
 		seedStamped(t, database, ch, target, "spam", banPurgeStamp(time.Minute))
 	}
 
-	var sizes []int
+	sizes := make([]int, 0, 4)
 	for range 4 {
 		ids, err := database.PurgeUserChannelMessagesSince(ctx, ch, target, banPurgeStamp(time.Hour), 100)
 		if err != nil {
