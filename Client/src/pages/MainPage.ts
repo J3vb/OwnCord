@@ -484,9 +484,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       showToast(shellText("channel.notConnected"), "error");
       return;
     }
-    // The existing voiceStore subscriber turns the camera on once connected.
-    cameraOnJoin = withVideo ? active.id : null;
+    cameraOnJoin = null;
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
+    if (withVideo) {
+      const v = voiceStore.getState();
+      if (v.currentChannelId === active.id && v.voiceStatus === "connected") {
+        // Already in this call: the join was a no-op, so there is no
+        // "connected" to wait for.
+        if (!v.localCamera) {
+          enableCamera().catch((err: unknown) => {
+            log.error("Camera on call start failed", { error: String(err) });
+          });
+        }
+      } else if (v.currentChannelId === active.id) {
+        // The join started; the voiceStore subscriber turns the camera on once
+        // connected. A refused join (backoff) leaves nothing armed.
+        cameraOnJoin = active.id;
+      }
+    }
     ringAfterJoin(active.id);
   }
 
@@ -1257,6 +1272,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             showToast(shellText("channel.notConnected"), "error");
             return;
           }
+          cameraOnJoin = null;
           createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
         },
         onRingAgain: (channelId) => {

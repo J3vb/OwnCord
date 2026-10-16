@@ -2531,6 +2531,8 @@ describe("createChannelController", () => {
       expect(group.isGroup).toBe(true);
       expect(group.avatar.classList.contains("dm-avatar-stack")).toBe(true);
       expect(group.avatar.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
+      expect(group.avatar.dataset["testid"]).toBe("ch-avatar-stack");
+      expect(group.avatar.getAttribute("aria-hidden")).toBe("true");
     });
 
     it("falls back to 'Offline' when DM channel not found in dmStore", () => {

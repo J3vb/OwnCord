@@ -162,7 +162,17 @@ function dmStatusLabel(status: string): string {
 /** The header's mark for a DM: the partner's avatar, or a group's face stack. */
 function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
   if (dm.isGroup) {
-    return buildGroupAvatarStack(dm.channelId, dm.participants, label, pickAvatarColor(label));
+    // The row's colour for a group, and a testid of its own so the header's
+    // stack never doubles the row's.
+    const stack = buildGroupAvatarStack(
+      dm.channelId,
+      dm.participants,
+      label,
+      "#5865F2",
+      "ch-avatar-stack",
+    );
+    stack.setAttribute("aria-hidden", "true");
+    return stack;
   }
   const member = membersStore.getState().members.get(dm.recipient.id);
   const wrapper = createAvatarElement(
@@ -175,6 +185,15 @@ function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
   );
   wrapper.setAttribute("aria-hidden", "true");
   return wrapper;
+}
+
+/** What the header's avatar is drawn from; equal keys mean the same picture. */
+function dmHeaderAvatarKey(dm: DmChannel, label: string): string {
+  if (dm.isGroup) {
+    return `g|${label}|${dm.participants.map((p) => `${p.id}:${p.avatar}`).join(",")}`;
+  }
+  const member = membersStore.getState().members.get(dm.recipient.id);
+  return `u|${label}|${dm.recipient.id}|${member?.avatar ?? dm.recipient.avatar}`;
 }
 
 function currentMessageUser(): MessageUser | null {
@@ -1090,6 +1109,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
+      // Presence changes re-run this; the picture only needs rebuilding when
+      // what it is drawn from changed, or it would flicker on every update.
+      let headerAvatar: { key: string; el: HTMLElement } | null = null;
       const refreshDmHeader = (): void => {
         const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
         // A group has no single presence to show, so the subtitle lists who is
@@ -1112,7 +1134,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         updateChatHeaderForDm(chatHeaderRefs, {
           username: headerName,
           status: subtitle,
-          avatar: dmChannel !== undefined ? buildDmHeaderAvatar(dmChannel, headerName) : null,
+          avatar: ((): HTMLElement | null => {
+            if (dmChannel === undefined) return null;
+            const key = dmHeaderAvatarKey(dmChannel, headerName);
+            if (headerAvatar === null || headerAvatar.key !== key) {
+              headerAvatar = { key, el: buildDmHeaderAvatar(dmChannel, headerName) };
+            }
+            return headerAvatar.el;
+          })(),
           isGroup: dmChannel?.isGroup === true,
         });
         // Both are clickable: a 1:1 name opens the profile panel and a group

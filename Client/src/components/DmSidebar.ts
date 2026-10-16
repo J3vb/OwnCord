@@ -124,10 +124,11 @@ export function buildGroupAvatarStack(
   participants: readonly DmParticipant[],
   fallbackLabel: string,
   background: string,
+  testId = `dm-avatar-stack-${channelId}`,
 ): HTMLDivElement {
   const stack = createElement("div", {
     class: "dm-avatar dm-avatar-stack",
-    "data-testid": `dm-avatar-stack-${channelId}`,
+    "data-testid": testId,
   });
   const shown = participants.slice(0, 2);
   // An empty group (every other member has left) still needs a mark, so fall

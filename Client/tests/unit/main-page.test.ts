@@ -1735,6 +1735,54 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("Video while already connected in the DM's call turns the camera on at once (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected",
+      localCamera: false,
+    }));
+    voiceStore.flush();
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    page.destroy?.();
+  });
+
+  it("a Video start refused by join backoff does not arm the camera for a later plain join (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+    const { noteJoinFailed } = await import("../../src/features/voice/joinBackoff");
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    // The refused join left no channel; a later join of the same DM, plain.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    page.destroy?.();
+    const { noteJoinSucceeded } = await import("../../src/features/voice/joinBackoff");
+    noteJoinSucceeded();
+  });
+
   it("a plain header call leaves the camera off (3B-1)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
