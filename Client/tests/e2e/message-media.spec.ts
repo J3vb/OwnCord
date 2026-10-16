@@ -194,6 +194,16 @@ async function currentTransform(page: Page): Promise<{ scale: number; x: number;
   });
 }
 
+async function openedUrls(page: Page): Promise<unknown[]> {
+  return page.evaluate(() =>
+    (
+      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { url?: unknown } }> }
+    ).__invokeLog
+      .filter((e) => e.cmd === "plugin:opener|open_url")
+      .map((e) => e.args?.url),
+  );
+}
+
 async function invokedCommands(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.map((e) => e.cmd),
@@ -266,9 +276,8 @@ test.describe("Image lightbox", () => {
     await page.keyboard.press("Tab");
     await expect(openOriginal).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect
-      .poll(async () => (await invokedCommands(page)).includes("plugin:opener|open_url"))
-      .toBe(true);
+    await expect.poll(async () => (await openedUrls(page)).length).toBe(1);
+    expect(await openedUrls(page)).toEqual([IMAGE_URL]);
 
     // Escape still dismisses it.
     await page.keyboard.press("Escape");

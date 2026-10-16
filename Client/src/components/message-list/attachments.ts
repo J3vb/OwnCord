@@ -943,9 +943,12 @@ export function loadExternalImage(
   })();
 
   externalInFlight.set(key, promise);
-  void promise.finally(() => {
+  // then(f, f), not finally(f): finally would leave this side branch rejected
+  // and unhandled when the broker call throws; callers still see the rejection.
+  const forget = (): void => {
     if (externalInFlight.get(key) === promise) externalInFlight.delete(key);
-  });
+  };
+  void promise.then(forget, forget);
   return promise;
 }
 
@@ -1593,12 +1596,23 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     disposable.signal,
   );
 
+  // aria-disabled, not disabled: a disabled button drops focus and with it the
+  // Tab cycle, which keys off the focused control.
+  let saving = false;
   downloadBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    save().catch((err: unknown) => {
-      log.error("Lightbox download failed", { error: String(err) });
-      showToast(mediaControlsText("lightbox.saveFailed"), "error");
-    });
+    if (saving) return;
+    saving = true;
+    downloadBtn.setAttribute("aria-disabled", "true");
+    save()
+      .catch((err: unknown) => {
+        log.error("Lightbox download failed", { filename: alt, error: String(err) });
+        showToast(messageStatusText("file.downloadFailed", { filename: alt }), "error");
+      })
+      .finally(() => {
+        saving = false;
+        downloadBtn.removeAttribute("aria-disabled");
+      });
   });
   openBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1620,8 +1634,8 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
-    // Focus stays on the close button, so the Menu key / Shift+F10 open the
-    // image's menu from there, centred on the image.
+    // The Menu key / Shift+F10 open the image's menu from whichever toolbar
+    // button has focus, centred on the image.
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       e.preventDefault();
       img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));

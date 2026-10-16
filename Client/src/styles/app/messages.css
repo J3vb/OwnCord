@@ -1090,11 +1090,6 @@ ul.md-list-nested {
 .image-lightbox-action:hover {
   background: var(--scrim-hover);
 }
-.image-lightbox-close:focus-visible,
-.image-lightbox-action:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
 
 /* File attachment */
 .msg-file {

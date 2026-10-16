@@ -7,6 +7,5 @@ export const mediaControlsText = defineCatalog("mediaControls", {
   "lightbox.close": "Close image",
   "lightbox.download": "Download image",
   "lightbox.openOriginal": "Open original",
-  "lightbox.saveFailed": "Couldn't save the image",
   "lightbox.openFailed": "Couldn't open the image",
 });

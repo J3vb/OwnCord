@@ -35,6 +35,11 @@ import {
   openImageLightbox,
   setServerHost,
 } from "../../src/components/message-list/attachments";
+import { desktop } from "../../src/platform/desktop";
+import {
+  resetExternalConsent,
+  setExternalConsentChoice,
+} from "../../src/features/content-consent/external";
 import { cascadedDeclaration } from "../helpers/app-css";
 
 const LINK = "https://static.klipy.com/gifs/cat.gif";
@@ -462,7 +467,48 @@ describe("lightbox toolbar", () => {
     buttons()[0]!.click();
     await flush();
 
-    expect(showToastMock).toHaveBeenCalledWith(expect.any(String), "error");
+    expect(showToastMock).toHaveBeenCalledTimes(1);
+    expect(showToastMock).toHaveBeenCalledWith(
+      "Download failed for photo.png \u2014 check logs for details",
+      "error",
+    );
+  });
+
+  it("Download reports a save that rejects outside the save functions' own handling", async () => {
+    setExternalConsentChoice("auto");
+    onTestFinished(() => resetExternalConsent());
+    vi.spyOn(desktop.externalContent, "image").mockRejectedValue(new Error("broker down"));
+    openImageLightbox("blob:http://localhost/abc", "cat.gif", { url: LINK });
+
+    buttons()[0]!.click();
+    await flush();
+
+    expect(showToastMock).toHaveBeenCalledWith(
+      "Download failed for cat.gif \u2014 check logs for details",
+      "error",
+    );
+    expect(buttons()[0]!.hasAttribute("aria-disabled")).toBe(false);
+  });
+
+  it("a second Download click while a save is pending opens no second dialog", async () => {
+    setServerHost("chat.example.com");
+    let release: (path: string | null) => void = () => undefined;
+    saveMock.mockReturnValue(new Promise<string | null>((r) => (release = r)));
+    openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
+    const download = buttons()[0]!;
+
+    download.click();
+    download.click();
+    await flush();
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    expect(download.getAttribute("aria-disabled")).toBe("true");
+
+    release(null);
+    await flush();
+    expect(download.hasAttribute("aria-disabled")).toBe(false);
+    download.click();
+    await flush();
+    expect(saveMock).toHaveBeenCalledTimes(2);
   });
 
   it("Tab follows the visual order Download, Open original, Close, and Shift+Tab goes back", () => {
