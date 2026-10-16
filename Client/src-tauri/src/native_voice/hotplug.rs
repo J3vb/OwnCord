@@ -121,7 +121,7 @@ pub(super) fn ensure_watch(
     true
 }
 
-/// One tick's snapshot: `None` when the sound server did not answer (no
+/// One tick's snapshot: `None` when the sound server did not answer (neither
 /// default device) or listed nothing at all, which is a restart, not an unplug.
 fn snapshot(answered: bool, devices: impl FnOnce() -> Devices) -> Option<Devices> {
     if !answered {
@@ -140,7 +140,11 @@ pub(super) fn host_lister() -> impl FnMut() -> Option<Devices> + Send + 'static 
     let mut host: Option<Arc<WatchedHost>> = None;
     move || {
         let host = host.get_or_insert_with(WatchedHost::new);
-        let answered = host.default_id(cpal::Host::default_output_device).is_some();
+        // Either default answering proves the server is up: a machine whose
+        // only output (or only input) was just unplugged has no default on that
+        // side, and that is a real change, not an outage.
+        let answered = host.default_id(cpal::Host::default_output_device).is_some()
+            || host.default_id(cpal::Host::default_input_device).is_some();
         snapshot(answered, || {
             host.with(|h| Devices {
                 inputs: input_devices(h).into_iter().map(|(i, _)| i).collect(),
