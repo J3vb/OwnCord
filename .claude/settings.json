@@ -18,7 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/claude-hook.mjs\" session-start"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/claude-hook.mjs\" session-start",
+            "timeout": 240
           }
         ]
       }
