@@ -125,8 +125,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
   on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
-  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
-  video only (no screen-share audio on Linux). Change source there is the
+  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; the
+  picker's Share audio switch (on when a PulseAudio-protocol sound server
+  answers) adds a `NativeScreenAudioTrack` that follows the share. Change source there is the
   track's own (`NativeScreenTrack.changeSource`, the host's
   `native_voice_change_screen`), reached through `lib/screenShare.ts`'s
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.

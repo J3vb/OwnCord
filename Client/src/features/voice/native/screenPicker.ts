@@ -37,6 +37,10 @@ export interface ScreenSharePick {
   maxFramerate: number;
   /** Publish with the 720p 15 fps simulcast layer. */
   simulcast: boolean;
+  /** Share other applications' sound with the picture. Absent when the host
+   *  cannot capture it (no PulseAudio-protocol sound server); the Share
+   *  audio switch's answer otherwise. */
+  audio?: boolean;
 }
 
 /** The last confirmed pick, for a share restarted after a reconnect. */
@@ -52,6 +56,9 @@ export async function armScreenRestart(): Promise<boolean> {
   if (pick === null || pick.source === "portal") return false;
   const listed = await desktop.nativeVoice.screenSources();
   if (!listed.sources.some((s) => s.id === pick.source)) return false;
+  // The pick is reused as it was, audio included: a sound server that is
+  // restarting does not fail the host's publish (it retries and publishes
+  // silence until the server returns).
   restartPick = pick;
   return true;
 }
@@ -74,6 +81,7 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
   const pick = await showPicker({
     sources: listed.sources,
     portal: listed.portal,
+    audioAvailable: listed.audio,
     defaultQuality: getScreenShareQuality(),
     defaultFps: getScreenShareFps(),
   });
@@ -84,6 +92,8 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
     maxBitrate: getScreenShareMaxBitrate(pick.quality, pick.fps),
     maxFramerate: getEffectiveScreenShareFps(pick.quality, pick.fps),
     simulcast: isScreenShareSimulcast(pick.quality, pick.fps),
+    // Kept with the pick, so a restart after a reconnect shares audio again.
+    ...(pick.audio === undefined ? {} : { audio: pick.audio }),
   };
   return lastPick;
 }

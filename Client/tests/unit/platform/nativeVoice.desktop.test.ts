@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
   changeRefusal: null as string | null,
+  audioRefusal: null as string | null,
   cameraChangeRefusal: null as string | null,
   micTest: 0,
   micTestRefusal: null as string | null,
@@ -65,6 +66,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       const refusal = state.micTestRefusal;
       state.micTestRefusal = null;
       return refusal === null ? Promise.resolve(state.micTest) : Promise.reject(refusal);
+    }
+    if (cmd === "native_voice_publish_screen_audio") {
+      const refusal = state.audioRefusal;
+      state.audioRefusal = null;
+      return refusal === null ? Promise.resolve(state.screen.sid) : Promise.reject(refusal);
     }
     if (cmd === "native_voice_change_camera") {
       const refusal = state.cameraChangeRefusal;
@@ -131,6 +137,9 @@ describeNativeVoiceSuite(async () => {
       },
       refusesScreenChange(reason) {
         state.changeRefusal = reason;
+      },
+      refusesScreenAudio(reason) {
+        state.audioRefusal = reason;
       },
       startsMicTestAs(test) {
         state.micTest = test;
