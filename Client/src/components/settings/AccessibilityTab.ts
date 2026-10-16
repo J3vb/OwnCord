@@ -98,7 +98,7 @@ function group(title: string): HTMLDivElement {
 
 /** The Saturation row: a 0-100 % slider that writes the pref and re-applies it. */
 function buildSaturationRow(signal: AbortSignal): HTMLDivElement {
-  const row = createElement("div", { class: "setting-row" });
+  const row = createElement("div", { class: "setting-row setting-slider" });
   const info = createElement("div", {});
   appendChildren(
     info,

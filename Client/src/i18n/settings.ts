@@ -56,7 +56,7 @@ export const settingsText = defineCatalog("settings", {
   "accessibility.group.colors": "Colors",
   "accessibility.saturation.label": "Saturation",
   "accessibility.saturation.desc":
-    "Make role colors, names and accent buttons more or less vivid. Images and video are not changed",
+    "Make colored names and primary buttons more or less vivid. Images and video are not changed",
   "accessibility.saturation.value": "{percent}%",
   "accessibility.textSize.label": "Text size",
   "accessibility.textSize.desc": "Set in Appearance",
