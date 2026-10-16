@@ -175,6 +175,9 @@ type Hub struct {
 	// visibility, member payloads and dispatch.
 	readers HubReaders
 
+	// privacy is the channel-level private flag source (nil: nothing private).
+	privacy ChannelPrivacy
+
 	// presence is the connection lifecycle's own two writes (readers.go's
 	// PresenceStamper): the status a session comes online as, and the offline
 	// stamp when its last pump exits. Required, like settings and voice.

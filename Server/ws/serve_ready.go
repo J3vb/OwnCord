@@ -255,7 +255,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // gets one) reads as false, which is correct either way — nothing needs
 // acknowledging there. timedOut is the caller's current timeout verdict,
 // fed into every channel's affordances — see readyAffordances (OC-0434).
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
+func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -272,7 +272,8 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// Age-gate flag. The server enforces content behaviour on a
 			// flagged channel now (B5-7, permissions.CanReadContent); see
 			// nsfw_acknowledged below for the caller's own consent state.
-			"nsfw": visibleChannels[i].NSFW,
+			"nsfw":    visibleChannels[i].NSFW,
+			"private": privacy.Private(visibleChannels[i].ID), // 3D-6, channel-level
 			// Whether THIS caller has acknowledged the label (B5-7). Always
 			// present, like nsfw itself — false for an unlabelled channel,
 			// where it means nothing but must not be omitted (two different
@@ -439,7 +440,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
+	// The lock is cosmetic: a failed read must not fail ready (nothing is
+	// private then, as on the single-channel frames).
+	privacy := h.privacySnapshot(ctx)
+	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut, privacy)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker

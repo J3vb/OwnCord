@@ -46,7 +46,7 @@ func sampleChannel() *db.Channel {
 }
 
 func TestBuildChannelCreate_Type(t *testing.T) {
-	msg := buildChannelCreateFor(sampleChannel(), channelAffordances{CanSend: true})
+	msg := buildChannelCreateFor(sampleChannel(), false, channelAffordances{CanSend: true})
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -60,7 +60,7 @@ func TestBuildChannelCreate_Type(t *testing.T) {
 
 func TestBuildChannelCreate_Payload(t *testing.T) {
 	ch := sampleChannel()
-	msg := buildChannelCreateFor(ch, channelAffordances{CanSend: true})
+	msg := buildChannelCreateFor(ch, false, channelAffordances{CanSend: true})
 	var env struct {
 		Type    string         `json:"type"`
 		Payload channelPayload `json:"payload"`
@@ -90,7 +90,7 @@ func TestBuildChannelCreate_Payload(t *testing.T) {
 }
 
 func TestBuildChannelUpdate_Type(t *testing.T) {
-	msg := buildChannelUpdate(sampleChannel())
+	msg := buildChannelUpdate(sampleChannel(), false)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -104,7 +104,7 @@ func TestBuildChannelUpdate_Type(t *testing.T) {
 
 func TestBuildChannelUpdate_Payload(t *testing.T) {
 	ch := sampleChannel()
-	msg := buildChannelUpdate(ch)
+	msg := buildChannelUpdate(ch, false)
 	var env struct {
 		Payload channelPayload `json:"payload"`
 	}
@@ -150,7 +150,7 @@ func TestBuildChannelDelete_Payload(t *testing.T) {
 
 // TestBuildChannelCreate_ValidJSON verifies the output is always valid JSON.
 func TestBuildChannelCreate_ValidJSON(t *testing.T) {
-	msg := buildChannelCreateFor(sampleChannel(), channelAffordances{CanSend: true})
+	msg := buildChannelCreateFor(sampleChannel(), false, channelAffordances{CanSend: true})
 	if !json.Valid(msg) {
 		t.Errorf("buildChannelCreateFor output is not valid JSON: %s", msg)
 	}
@@ -158,7 +158,7 @@ func TestBuildChannelCreate_ValidJSON(t *testing.T) {
 
 // TestBuildChannelUpdate_ValidJSON verifies the output is always valid JSON.
 func TestBuildChannelUpdate_ValidJSON(t *testing.T) {
-	msg := buildChannelUpdate(sampleChannel())
+	msg := buildChannelUpdate(sampleChannel(), false)
 	if !json.Valid(msg) {
 		t.Errorf("buildChannelUpdate output is not valid JSON: %s", msg)
 	}
@@ -858,8 +858,8 @@ func flaggedSampleChannel() *db.Channel {
 func TestBuildChannelMessages_CarryFeatureFlags(t *testing.T) {
 	ch := flaggedSampleChannel()
 	for name, msg := range map[string][]byte{
-		"channel_create": buildChannelCreateFor(ch, channelAffordances{CanSend: true}),
-		"channel_update": buildChannelUpdate(ch),
+		"channel_create": buildChannelCreateFor(ch, false, channelAffordances{CanSend: true}),
+		"channel_update": buildChannelUpdate(ch, false),
 	} {
 		t.Run(name, func(t *testing.T) {
 			var env struct {
@@ -892,10 +892,10 @@ func TestBuildChannelUpdate_FeatureFlagWireNames(t *testing.T) {
 	var env struct {
 		Payload map[string]any `json:"payload"`
 	}
-	if err := json.Unmarshal(buildChannelUpdate(flaggedSampleChannel()), &env); err != nil {
+	if err := json.Unmarshal(buildChannelUpdate(flaggedSampleChannel(), false), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"nsfw", "slow_mode", "voice_max_users", "voice_max_video"} {
+	for _, key := range []string{"nsfw", "private", "slow_mode", "voice_max_users", "voice_max_video"} {
 		if _, ok := env.Payload[key]; !ok {
 			t.Errorf("payload is missing %q; got keys %v", key, env.Payload)
 		}
@@ -909,7 +909,7 @@ func TestBuildChannelUpdate_UnflaggedChannelSendsZeroes(t *testing.T) {
 	var env struct {
 		Payload map[string]any `json:"payload"`
 	}
-	if err := json.Unmarshal(buildChannelUpdate(sampleChannel()), &env); err != nil {
+	if err := json.Unmarshal(buildChannelUpdate(sampleChannel(), false), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if env.Payload["nsfw"] != false {

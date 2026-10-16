@@ -66,6 +66,11 @@ type HubOptions struct {
 	// test database.
 	Auth SocketAuthenticator
 
+	// ChannelPrivacy backs the channel-level private flag on channel frames.
+	// Optional: nil means nothing is private. Production passes
+	// Services.ChannelPrivacy; test helpers default it over the test database.
+	ChannelPrivacy ChannelPrivacy
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -176,7 +181,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
-
 	ringSize := cmp.Or(max(opts.ReplayRingSize, 0), 1000) // unset or negative: 1000
 
 	reg := NewHandlerRegistry()
@@ -201,6 +205,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		voiceMod:            newUserLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
+		privacy:             opts.ChannelPrivacy,
 		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),

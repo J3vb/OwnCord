@@ -279,6 +279,11 @@ type channelPayload struct {
 	// shipped so clients can gate or label it; the server applies no content
 	// behaviour of its own to a flagged channel.
 	NSFW bool `json:"nsfw"`
+	// Private is the channel-level lock flag (3D-6): the default role cannot
+	// read the channel after its override is applied. Always sent, like NSFW,
+	// and identical for every recipient — never per-viewer — so the shared
+	// channel_update frame stays shared. See permissions.IsChannelPrivate.
+	Private bool `json:"private"`
 	// Voice capacity limits (0 = unlimited), the same values the voice-join
 	// path enforces with CHANNEL_FULL / VIDEO_LIMIT. Sent so the sidebar can
 	// show "3/5" and the client can explain a refusal it could have predicted.
@@ -311,7 +316,7 @@ type channelPayload struct {
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
 // channel_create and channel_update broadcasts. One constructor so the two
 // events can never disagree about which fields a client is told about.
-func channelPayloadFrom(ch *db.Channel) channelPayload {
+func channelPayloadFrom(ch *db.Channel, private bool) channelPayload {
 	return channelPayload{
 		ID:            ch.ID,
 		Name:          ch.Name,
@@ -321,6 +326,7 @@ func channelPayloadFrom(ch *db.Channel) channelPayload {
 		Position:      ch.Position,
 		SlowMode:      ch.SlowMode,
 		NSFW:          ch.NSFW,
+		Private:       private,
 		VoiceMaxUsers: ch.VoiceMaxUsers,
 		VoiceMaxVideo: ch.VoiceMaxVideo,
 	}
@@ -745,8 +751,8 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
 // carrying that client's own affordance verdicts (see channelAffordances).
-func buildChannelCreateFor(ch *db.Channel, a channelAffordances) []byte {
-	p := channelPayloadFrom(ch)
+func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) []byte {
+	p := channelPayloadFrom(ch, private)
 	p.CanSend = &a.CanSend
 	p.CanModerateVoice = &a.CanModerateVoice
 	p.CanDeleteOthers = &a.CanDeleteOthers
@@ -759,10 +765,10 @@ func buildChannelCreateFor(ch *db.Channel, a channelAffordances) []byte {
 }
 
 // buildChannelUpdate constructs a channel_update broadcast.
-func buildChannelUpdate(ch *db.Channel) []byte {
+func buildChannelUpdate(ch *db.Channel, private bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelUpdate,
-		Payload: channelPayloadFrom(ch),
+		Payload: channelPayloadFrom(ch, private),
 	})
 }
 
