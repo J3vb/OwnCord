@@ -707,6 +707,63 @@ describe("syntax highlighting", () => {
     expect(tokens[0]).toEqual({ text: "func", cls: "keyword" });
   });
 
+  it("highlights each added language's keyword, string and comment", () => {
+    const cases: [string, string, string, string, string][] = [
+      [
+        "c",
+        '#include <stdio.h>\nint main() { return 0; } // c\nchar *s = "x";',
+        "int",
+        '"x"',
+        "// c",
+      ],
+      ["cpp", 'namespace a { auto s = "x"; } /* c */', "namespace", '"x"', "/* c */"],
+      ["java", 'public class A { String s = "x"; } // c', "class", '"x"', "// c"],
+      ["csharp", 'using System; var s = "x"; // c', "using", '"x"', "// c"],
+      ["sql", "SELECT 'x' FROM t; -- c", "SELECT", "'x'", "-- c"],
+      ["yaml", 'name: "x" # c\nok: true', "true", '"x"', "# c"],
+    ];
+    for (const [lang, code, keyword, str, comment] of cases) {
+      const tokens = highlightCode(code, lang);
+      expect(tokens).toContainEqual({ text: keyword, cls: "keyword" });
+      expect(tokens).toContainEqual({ text: str, cls: "string" });
+      expect(tokens).toContainEqual({ text: comment, cls: "comment" });
+      expect(tokens.map((t) => t.text).join("")).toBe(code);
+    }
+  });
+
+  it("highlights yaml keys", () => {
+    expect(highlightCode("name: x", "yaml")[0]).toEqual({ text: "name", cls: "keyword" });
+  });
+
+  it("resolves aliases for the added languages", () => {
+    expect(resolveLanguage("c")).toBe("c");
+    expect(resolveLanguage("h")).toBe("c");
+    expect(resolveLanguage("cpp")).toBe("cpp");
+    expect(resolveLanguage("c++")).toBe("cpp");
+    expect(resolveLanguage("hpp")).toBe("cpp");
+    expect(resolveLanguage("cs")).toBe("csharp");
+    expect(resolveLanguage("c#")).toBe("csharp");
+    expect(resolveLanguage("yml")).toBe("yaml");
+    expect(resolveLanguage("postgres")).toBe("sql");
+    expect(resolveLanguage("mysql")).toBe("sql");
+  });
+
+  it("keeps c++ and c# fence tags intact through the fence parser", () => {
+    expect(splitCodeFences("```c++\nint x;\n```")[0]).toMatchObject({ lang: "c++" });
+    expect(splitCodeFences("```c#\nint x;\n```")[0]).toMatchObject({ lang: "c#" });
+  });
+
+  it("matches SQL keywords case-insensitively", () => {
+    expect(highlightCode("SELECT", "sql")[0]).toEqual({ text: "SELECT", cls: "keyword" });
+    expect(highlightCode("select", "sql")[0]).toEqual({ text: "select", cls: "keyword" });
+  });
+
+  it("does not start a SQL string inside a -- comment", () => {
+    const tokens = highlightCode("-- don't stop\nselect 1", "sql");
+    expect(tokens[0]).toEqual({ text: "-- don't stop", cls: "comment" });
+    expect(tokens.filter((t) => t.cls === "string")).toEqual([]);
+  });
+
   it("does not treat a keyword-prefixed identifier as a keyword", () => {
     const tokens = highlightCode("constant = 1", "javascript");
     expect(tokens[0]!.cls).toBeNull();
