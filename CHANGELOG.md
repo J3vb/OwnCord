@@ -58,6 +58,7 @@ and only when it changes something a contributor or fork holder must do
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
 - With Developer Mode on, right-clicking a member adds **Copy User ID** and right-clicking a channel adds **Copy Channel ID**, next to the existing Copy Message ID.
+- Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 
 **Voice**
 
@@ -132,6 +133,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Upload File moved from Ctrl+U to Ctrl+Shift+U, as in Discord. Ctrl+U is now only Underline in the message box.
+- Compact mode now changes only the message list, as in Discord: the channel list, members, header, voice list and user bar keep their normal size.
 - On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
 
 ### Fixed

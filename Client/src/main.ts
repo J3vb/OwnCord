@@ -43,6 +43,7 @@ import {
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
+import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
@@ -165,6 +166,8 @@ void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+// Native webview zoom: the stored level now, and the zoom keys everywhere.
+startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
 
 // A profile from before automatic sensitivity keeps a tuned slider.
 migrateAutoInputSensitivity();

@@ -106,6 +106,11 @@ describe("Tauri default capability — HTTP scope", () => {
     );
   });
 
+  it("grants core:webview:allow-set-webview-zoom (the zoom keys and slider set the webview's zoom)", () => {
+    // Without it every setZoom call is ACL-rejected and zoom silently stays at 100%.
+    expect(find("core:webview:allow-set-webview-zoom")).toBe("core:webview:allow-set-webview-zoom");
+  });
+
   it("filesystem grants stay under $APPLOG only", () => {
     // $APPDATA holds credential_fallback.json/.key, certs.json and
     // identity_pins.json. fs:default grants recursive read of the app data

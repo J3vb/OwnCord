@@ -30,4 +30,17 @@ describe("compact mode header time CSS", () => {
       keyword(cascadedDeclaration(".compact-mode .message.grouped .msg-header", "display")),
     ).toBe("none");
   });
+
+  it("leaves the shell at its normal size; only the message list is compact", () => {
+    for (const [sel, prop] of [
+      [".compact-mode .channel-item", "padding"],
+      [".compact-mode .channel-sidebar-header", "height"],
+      [".compact-mode .chat-header", "height"],
+      [".compact-mode .member-item", "padding"],
+      [".compact-mode .voice-user-item", "padding"],
+      [".compact-mode .user-bar", "height"],
+    ] as const) {
+      expect(cascadedDeclaration(sel, prop)).toBeUndefined();
+    }
+  });
 });
