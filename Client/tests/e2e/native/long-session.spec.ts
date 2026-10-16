@@ -55,11 +55,17 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   const picker = page.locator(".reaction-picker-wrap .emoji-picker.open");
   // The hover bar pops in on hover, and the edit's re-render can move the row
   // under the pointer; on WebView2 a single click then waited 30 s for a
-  // stable target. Hover and click again until the picker opens.
+  // stable target. Hover and click again until the picker opens. The button
+  // toggles the picker, and the first picker of a session builds cold and can
+  // take seconds to show: click only while no picker is open, or a retry
+  // closes it again (or lands on its full-window backdrop).
+  const pickerWrap = page.locator(".reaction-picker-wrap");
   await expect(async () => {
-    await edited.hover();
-    await edited.locator("[data-testid^='msg-react-']").click({ timeout: 3_000 });
-    await expect(picker).toBeVisible({ timeout: 2_000 });
+    if ((await pickerWrap.count()) === 0) {
+      await edited.hover();
+      await edited.locator("[data-testid^='msg-react-']").click({ timeout: 3_000 });
+    }
+    await expect(picker).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
   await picker.locator(".ep-emoji").first().click();
   await expect(edited.locator(".reaction-chip.me")).toHaveCount(1);
