@@ -38,7 +38,10 @@ test.describe("Toast Notifications", () => {
 
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
+    // Pin shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-pin-101']").click();
+    await page.keyboard.up("Shift");
 
     const toast = page.locator("[data-testid='toast']");
     await expect(toast.first()).toBeVisible({ timeout: 5_000 });
@@ -103,7 +106,9 @@ test.describe("Toast Notifications", () => {
     await ownMessage.hover();
 
     // Two real app paths with distinct copy: pinning shows a success toast…
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-pin-101']").click();
+    await page.keyboard.up("Shift");
     await expect(page.locator("[data-testid='toast']", { hasText: "Message pinned" })).toBeVisible({
       timeout: 5_000,
     });
@@ -111,7 +116,10 @@ test.describe("Toast Notifications", () => {
     // …and unpinning shows its own, without replacing the pin toast — both
     // live in the same container at once.
     await ownMessage.hover();
+    // Pin shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-pin-101']").click();
+    await page.keyboard.up("Shift");
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Message unpinned" }),
     ).toBeVisible({

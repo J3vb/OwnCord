@@ -143,6 +143,13 @@ const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
 
+/** The hover bar's "..." button the event came from, if any. */
+function moreButtonOf(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLElement>(".msg-actions-bar [data-testid^='msg-more-']")
+    : null;
+}
+
 /** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
 const UNREAD_BAR_CLEARANCE = 40;
 
@@ -1822,6 +1829,53 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       },
       { signal: disposable.signal },
     );
+    // The hover bar's "..." button: one delegated listener, so the menu is
+    // owned by the list's signal and survives its row being patched or rebuilt.
+    // A click on "..." while its menu is open closes it (the outside mousedown
+    // already has), so the open state is noted at pointerdown, before that.
+    let moreWasOpen = false;
+    contentContainer.addEventListener(
+      "pointerdown",
+      (e) => {
+        moreWasOpen = moreButtonOf(e.target)?.getAttribute("aria-expanded") === "true";
+      },
+      { signal: disposable.signal },
+    );
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        // Reset on every click, so a press on More released elsewhere cannot
+        // leave the flag set; a keyboard click (detail 0) had no pointerdown.
+        const skip = moreWasOpen && e.detail > 0;
+        moreWasOpen = false;
+        const button = moreButtonOf(e.target);
+        if (button === null || skip) return;
+        const testId = button.dataset["testid"] ?? "";
+        withMessageMenu((m) => {
+          // The first open waits for the menu module; a patch or scroll in that
+          // time replaces the button, so anchor on the live one, or open nothing.
+          const live = button.isConnected
+            ? button
+            : (contentContainer?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null);
+          if (live === null) return;
+          m.openMessageMenuFromButton({
+            opts: options,
+            button: live,
+            signal: disposable.signal,
+            markUnread: markUnreadFrom,
+          });
+        });
+      },
+      { signal: disposable.signal },
+    );
+    // Shift pressed before the pointer arrived still reveals Pin and Delete.
+    contentContainer.addEventListener(
+      "mouseover",
+      (e) => {
+        root?.classList.toggle("shift-held", e.shiftKey);
+      },
+      { signal: disposable.signal },
+    );
     // Alt+click on a message row marks it unread (the lazy module decides which
     // targets count: not a link, button, image or text field).
     contentContainer.addEventListener(
@@ -1839,6 +1893,38 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
     window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
+
+    // Shift reveals the hover bar's Pin and Delete (WP 3A-7): one pair of
+    // window listeners toggles a class on the list root, and CSS shows the
+    // extra buttons. A lost keyup (focus left the window, the tab was hidden)
+    // would leave them out, so both of those reset it. Owned by disposable.signal.
+    const setShiftHeld = (held: boolean): void => {
+      root?.classList.toggle("shift-held", held);
+    };
+    const trackShift = (e: KeyboardEvent): void => {
+      // Releasing Shift hides the Shift-only buttons: if one holds focus, hand
+      // it to the row's "..." first so it does not drop to <body>.
+      if (e.type === "keyup" && !e.shiftKey) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.classList.contains("msg-shift-only")) {
+          active
+            .closest(".msg-actions-bar")
+            ?.querySelector<HTMLElement>("[data-testid^='msg-more-']")
+            ?.focus();
+        }
+      }
+      setShiftHeld(e.shiftKey);
+    };
+    window.addEventListener("keydown", trackShift, { signal: disposable.signal });
+    window.addEventListener("keyup", trackShift, { signal: disposable.signal });
+    window.addEventListener("blur", () => setShiftHeld(false), { signal: disposable.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.hidden) setShiftHeld(false);
+      },
+      { signal: disposable.signal },
+    );
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.

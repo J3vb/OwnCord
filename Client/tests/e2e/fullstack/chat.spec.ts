@@ -225,8 +225,9 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   await submit(after);
   const doomed = row(bob, gone);
   await doomed.hover();
-  const del = doomed.locator("[data-testid^='msg-delete-']");
-  await del.click();
+  // Through the menu: the bar's Delete is Shift-only and skips the confirm.
+  await doomed.locator("[data-testid^='msg-more-']").click();
+  await bob.locator("[data-testid='msg-menu-delete']").click();
   await bob.locator("[data-testid='msg-delete-confirm']").click();
   await expect(row(bob, gone)).toHaveCount(0);
 

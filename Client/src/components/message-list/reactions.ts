@@ -158,7 +158,7 @@ export function applyReactionLock(el: HTMLElement, locked: string | null, defaul
 export function refreshReactionLocks(root: ParentNode, channelId: number): void {
   const locked = reactionLockReason(channelCanReact(channelId));
   for (const el of root.querySelectorAll<HTMLElement>(
-    ".reaction-chip, [data-testid^='msg-react-']",
+    ".reaction-chip, [data-testid^='msg-react-'], [data-testid^='msg-quick-react-']",
   )) {
     applyReactionLock(el, locked, defaultTitles.get(el) ?? "");
   }
