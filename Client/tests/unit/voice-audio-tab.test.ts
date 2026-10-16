@@ -1918,6 +1918,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       "Linux encodes video in software; VP8 uses the least CPU.",
     );
     expect(tab.element.textContent).not.toContain("Intel graphics");
+    // The 120 fps hardware H.264 rule does not apply to the native engine.
+    expect(tab.element.textContent).not.toContain("A 120 fps screen share uses H.264");
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );

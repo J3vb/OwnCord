@@ -984,7 +984,7 @@ function buildVoiceAudioTabInner(
     return [
       ...qualityGroup(
         t("voiceAudio.videoCodec"),
-        t("voiceAudio.videoCodecDesc"),
+        t(linux ? "voiceAudio.videoCodecDescLinux" : "voiceAudio.videoCodecDesc"),
         "videoCodec",
         unoffered ? "vp8" : savedCodec,
         [
