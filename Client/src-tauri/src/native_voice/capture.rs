@@ -524,7 +524,7 @@ fn is_monitor(id: &str) -> bool {
     id.ends_with(".monitor")
 }
 
-fn input_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
+pub(super) fn input_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
     let microphone = |d: &cpal::Device| d.id().is_ok_and(|id| !is_monitor(id.id()));
     host_devices(
         host.default_input_device().filter(microphone),

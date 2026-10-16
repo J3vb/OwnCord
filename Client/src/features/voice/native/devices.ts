@@ -43,3 +43,13 @@ export async function nativeCameraSupport(): Promise<NativeVoiceCameraSupport | 
   if (!isLinuxDesktop()) return null;
   return desktop.nativeVoice.cameraSupport();
 }
+
+/** Subscribe to the host's device hot-plug watch (Linux): `handler` runs, with
+ *  no payload, each time the capture or playout lists change, in or out of a
+ *  call. The event is only a trigger; callers re-list through
+ *  `nativeAudioDevices`. Returns a synchronous unsubscribe, or null off Linux,
+ *  where the webview's own `devicechange` is the only trigger. */
+export function onNativeDevicesChanged(handler: () => void): (() => void) | null {
+  if (!isLinuxDesktop()) return null;
+  return desktop.nativeVoice.watchDevices(() => handler());
+}
