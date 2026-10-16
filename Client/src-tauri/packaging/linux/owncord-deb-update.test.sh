@@ -168,6 +168,7 @@ test_oversize_source_is_truncated_and_fails_the_hash() {
   eq "a source over the cap exits 12" "$rc" 12
   eq "oversize never calls apt" "$(apt_calls)" 0
   eq "oversize leaves no work directory" "$(work_dirs)" 0
+  # shellcheck disable=SC2034 # read by the sourced helper
   MAX_COPY_BYTES=536870912
 }
 
@@ -210,8 +211,8 @@ test_happy_path_runs_apt_get_once_on_the_root_copy_with_exact_flags() {
     "$CACHE_ROOT"/update.*/owncord.deb) check "apt installs the copy under the work directory" 0 ;;
     *) check "apt installs the copy under the work directory" 1 "(got $copy)" ;;
   esac
-  [ "$copy" != "$T/src/update.deb" ]
-  check "apt never installs the source path" $?
+  if [ "$copy" = "$T/src/update.deb" ]; then not_source=1; else not_source=0; fi
+  check "apt never installs the source path" "$not_source"
   eq "the copy existed when apt ran" "$(cat "$T/apt.present")" present
   eq "work directory removed after success" "$(work_dirs)" 0
 }
