@@ -284,6 +284,58 @@ test.describe("Image lightbox", () => {
     await expect(page.locator(".image-lightbox")).toBeHidden();
   });
 
+  test("arrows step through a message's images, wrapping at the ends", async ({ page }) => {
+    const names = ["one", "two", "three"];
+    const message = {
+      ...mediaMessage(301, "three pictures"),
+      attachments: names.map((n) => ({
+        id: `gal-${n}`,
+        filename: `${n}.png`,
+        size: 100,
+        mime: "image/png",
+        url: `/api/v1/files/gal-${n}`,
+      })),
+    };
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: { messages: [message], has_more: false } },
+          { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+          ...names.map((n) => ({
+            pattern: `/api/v1/files/gal-${n}`,
+            status: 200,
+            body: null,
+            bodyBytes: LIGHTBOX_PNG_BYTES,
+            contentType: "image/png",
+          })),
+        ],
+        simulateWsFlow: true,
+      }),
+    );
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+
+    const second = page.locator("[data-testid='message-301'] .msg-image img").nth(1);
+    await expect(second).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+    await second.click();
+    const counter = page.locator(".image-lightbox-counter");
+    await expect(counter).toHaveText("2 of 3");
+
+    await page.keyboard.press("ArrowRight");
+    await expect(counter).toHaveText("3 of 3");
+    await page.keyboard.press("ArrowRight");
+    await expect(counter).toHaveText("1 of 3");
+    await page.getByRole("button", { name: "Next image" }).click();
+    await expect(counter).toHaveText("2 of 3");
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".image-lightbox")).toBeHidden();
+    await expect(second).toBeFocused();
+  });
+
   test("wheel zoom scales and dragging while zoomed pans the image", async ({ page }) => {
     await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
     const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
