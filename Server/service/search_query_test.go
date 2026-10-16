@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseSearch_TextOnlyUnchanged(t *testing.T) {
-	for _, q := range []string{"hello world", "  spaced   out ", "http://x 12:30 note:x", "a\"b c", "has:link"} {
+	for _, q := range []string{"hello world", "  spaced   out ", "http://x 12:30 note:x", "a\"b c", "has link", "embed:x"} {
 		p, err := ParseSearch(q, "")
 		if err != nil {
 			t.Fatalf("ParseSearch(%q): %v", q, err)
@@ -51,11 +51,11 @@ func TestParseSearch_UnterminatedQuoteRunsToEnd(t *testing.T) {
 }
 
 func TestParseSearch_UnknownKeyStaysText(t *testing.T) {
-	p, err := ParseSearch("http://x 12:30 note:x has:x mentions:bob pinned:true from:bob", "")
+	p, err := ParseSearch("http://x 12:30 note:x embed:link sticker:x from:bob", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Text != "http://x 12:30 note:x has:x mentions:bob pinned:true" || !slices.Equal(p.From, []string{"bob"}) {
+	if p.Text != "http://x 12:30 note:x embed:link sticker:x" || !slices.Equal(p.From, []string{"bob"}) {
 		t.Errorf("got %+v", p)
 	}
 }
@@ -178,7 +178,7 @@ func TestParseSearch_Limits(t *testing.T) {
 }
 
 func FuzzParseSearch(f *testing.F) {
-	for _, s := range []string{"", "from:bob hi", `from:"a b" in:#x`, "during:2026-01-01", `from:"`, "in:", "FROM: x", "a:b:c", "before:9999-12-31 after:0001-01-01"} {
+	for _, s := range []string{"", "from:bob hi", `from:"a b" in:#x`, "during:2026-01-01", `from:"`, "in:", "FROM: x", "a:b:c", "before:9999-12-31 after:0001-01-01", "has:link has:AUDIO mentions:@x pinned:true", `mentions:"`, "has:", "pinned:maybe"} {
 		f.Add(s, "UTC")
 	}
 	f.Fuzz(func(t *testing.T, q, tz string) {
@@ -202,7 +202,12 @@ func FuzzParseSearch(f *testing.F) {
 				t.Fatalf("text word %q is not from %q", w, q)
 			}
 		}
-		for _, v := range append(slices.Clone(p.From), p.In...) {
+		for _, h := range p.Has {
+			if !slices.Contains([]string{"link", "file", "image", "video", "sound"}, h) {
+				t.Fatalf("unknown has kind %q", h)
+			}
+		}
+		for _, v := range slices.Concat(p.From, p.In, p.Mentions) {
 			if !strings.Contains(q, v) {
 				t.Fatalf("filter value %q is not from %q", v, q)
 			}
@@ -219,4 +224,80 @@ func FuzzParseSearch(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestParseSearch_HasValues(t *testing.T) {
+	p, err := ParseSearch("HAS:Link has:image has:AUDIO has:sound has:file has:video x", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"link", "image", "sound", "file", "video"}; !slices.Equal(p.Has, want) {
+		t.Errorf("Has = %v, want %v", p.Has, want)
+	}
+	if p.Text != "x" || !p.HasFilters {
+		t.Errorf("text %q hasFilters %v", p.Text, p.HasFilters)
+	}
+}
+
+func TestParseSearch_MentionsAndPinned(t *testing.T) {
+	p, err := ParseSearch(`mentions:@Bob mentions:"ann lee" pinned:TRUE hi`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Bob", "ann lee"}; !slices.Equal(p.Mentions, want) {
+		t.Errorf("Mentions = %v, want %v", p.Mentions, want)
+	}
+	if p.Pinned == nil || !*p.Pinned || p.EmptyRange {
+		t.Errorf("Pinned = %v empty=%v", p.Pinned, p.EmptyRange)
+	}
+	p, err = ParseSearch("pinned:false", "")
+	if err != nil || p.Pinned == nil || *p.Pinned || !p.HasFilters {
+		t.Errorf("pinned:false = %+v, %v", p, err)
+	}
+	// Contradictory pinned values can match nothing.
+	p, err = ParseSearch("pinned:true pinned:false", "")
+	if err != nil || !p.EmptyRange {
+		t.Errorf("contradiction = %+v, %v; want EmptyRange", p, err)
+	}
+	// Empty values are dropped like any other key.
+	p, err = ParseSearch("has: mentions: pinned: hi", "")
+	if err != nil || p.HasFilters || p.Text != "hi" || p.Pinned != nil {
+		t.Errorf("empty values = %+v, %v", p, err)
+	}
+}
+
+func TestParseSearch_BadHasAndPinnedValues(t *testing.T) {
+	tests := []struct{ q, mention string }{
+		{"has:embed", "has:"},
+		{"has:sticker", "has:"},
+		{"has:poll", "has:"},
+		{"has:x", "has:"},
+		{"pinned:yes", "pinned:"},
+		{"pinned:1", "pinned:"},
+	}
+	for _, tc := range tests {
+		_, err := ParseSearch(tc.q, "")
+		if !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), tc.mention) {
+			t.Errorf("ParseSearch(%q) err = %v, want ErrBadRequest naming %q", tc.q, err, tc.mention)
+		}
+	}
+}
+
+func TestParseSearch_HasMentionsLimits(t *testing.T) {
+	if _, err := ParseSearch(strings.Repeat("mentions:a ", 10)+strings.Repeat("has:link ", 10), ""); err != nil {
+		t.Fatalf("10+10 values: %v", err)
+	}
+	for _, q := range []string{strings.Repeat("mentions:a ", 11), strings.Repeat("has:link ", 11)} {
+		if _, err := ParseSearch(q, ""); !errors.Is(err, ErrBadRequest) {
+			t.Errorf("%q: err = %v, want ErrBadRequest", q, err)
+		}
+	}
+	// The 25-token cap counts the new keys too.
+	ok := strings.Repeat("has:link ", 10) + strings.Repeat("mentions:a ", 10) + strings.Repeat("pinned:true ", 5)
+	if _, err := ParseSearch(ok, ""); err != nil {
+		t.Fatalf("25 tokens: %v", err)
+	}
+	if _, err := ParseSearch(ok+"pinned:true", ""); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("26 tokens: err = %v, want ErrBadRequest", err)
+	}
 }
