@@ -408,7 +408,7 @@ describe("lightbox toolbar", () => {
   it("renders Close, Download and Open original as labelled buttons for an external image", () => {
     openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
 
-    expect(labels()).toEqual(["Close image", "Download image", "Open original"]);
+    expect(labels()).toEqual(["Download image", "Open original", "Close image"]);
     for (const b of buttons()) {
       expect(b.tagName).toBe("BUTTON");
       expect(b.title).toBe(b.getAttribute("aria-label"));
@@ -419,13 +419,13 @@ describe("lightbox toolbar", () => {
     setServerHost("chat.example.com");
     openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
 
-    expect(labels()).toEqual(["Close image", "Download image"]);
+    expect(labels()).toEqual(["Download image", "Close image"]);
   });
 
   it("Open original opens the external address in the system browser", async () => {
     openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
 
-    buttons()[2]!.click();
+    buttons()[1]!.click();
     await flush();
 
     expect(openUrlMock).toHaveBeenCalledWith(LINK);
@@ -437,7 +437,7 @@ describe("lightbox toolbar", () => {
     openUrlMock.mockRejectedValue(new Error("no opener"));
     openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
 
-    buttons()[2]!.click();
+    buttons()[1]!.click();
     await flush();
 
     expect(showToastMock).toHaveBeenCalledWith("Couldn't open the image", "error");
@@ -448,7 +448,7 @@ describe("lightbox toolbar", () => {
     saveMock.mockResolvedValue(null);
     openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
 
-    buttons()[1]!.click();
+    buttons()[0]!.click();
     await flush();
 
     expect(saveMock).toHaveBeenCalledWith({ defaultPath: "photo.png" });
@@ -459,15 +459,15 @@ describe("lightbox toolbar", () => {
     saveMock.mockRejectedValue(new Error("disk full"));
     openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
 
-    buttons()[1]!.click();
+    buttons()[0]!.click();
     await flush();
 
     expect(showToastMock).toHaveBeenCalledWith(expect.any(String), "error");
   });
 
-  it("Tab cycles Close, Download, Open original, and Shift+Tab goes back", () => {
+  it("Tab follows the visual order Download, Open original, Close, and Shift+Tab goes back", () => {
     openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
-    const [close, download, open] = buttons();
+    const [download, open, close] = buttons();
     expect(document.activeElement).toBe(close);
 
     tab();
@@ -480,12 +480,14 @@ describe("lightbox toolbar", () => {
     expect(document.activeElement).toBe(open);
     tab(true);
     expect(document.activeElement).toBe(download);
+    tab(true);
+    expect(document.activeElement).toBe(close);
   });
 
   it("Tab cycles between two controls when Open original is hidden", () => {
     setServerHost("chat.example.com");
     openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
-    const [close, download] = buttons();
+    const [download, close] = buttons();
 
     tab();
     expect(document.activeElement).toBe(download);

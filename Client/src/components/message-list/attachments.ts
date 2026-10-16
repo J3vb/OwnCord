@@ -1421,8 +1421,7 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   overlay.appendChild(imgWrap);
 
   // Top-right toolbar: Close, Download and (external images only) Open
-  // original. DOM order is the Tab order; the row is laid out right to left so
-  // Close stays in the corner.
+  // original, left to right with Close in the corner.
   const toolbar = createElement("div", { class: "image-lightbox-toolbar" });
   const lightboxButton = (
     cls: string,
@@ -1439,16 +1438,15 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
     toolbar.appendChild(btn);
     return btn;
   };
-  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
+  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
+  // Only a public address opens in the system browser; a server attachment's
+  // address needs the session token, which the browser would not have.
+  const originalUrl = sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null;
   const downloadBtn = lightboxButton(
     "image-lightbox-action",
     mediaControlsText("lightbox.download"),
     "download",
   );
-  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
-  // Only a public address opens in the system browser; a server attachment's
-  // address needs the session token, which the browser would not have.
-  const originalUrl = sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null;
   const openBtn =
     originalUrl === null
       ? null
@@ -1457,8 +1455,10 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
           mediaControlsText("lightbox.openOriginal"),
           "external-link",
         );
+  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
+  // DOM order is the visual order left to right, and so the Tab order.
   const controls: HTMLButtonElement[] =
-    openBtn === null ? [closeBtn, downloadBtn] : [closeBtn, downloadBtn, openBtn];
+    openBtn === null ? [downloadBtn, closeBtn] : [downloadBtn, openBtn, closeBtn];
   overlay.appendChild(toolbar);
 
   // Zoom & pan state

@@ -256,6 +256,7 @@ test.describe("Image lightbox", () => {
     await expect(openOriginal).toBeVisible();
     await expect(page.locator(".image-lightbox-close")).toBeFocused();
 
+    // Tab order is the visual order: Download, Open original, Close.
     await page.keyboard.press("Tab");
     await expect(download).toBeFocused();
     await page.keyboard.press("Enter");

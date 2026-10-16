@@ -1069,7 +1069,6 @@ ul.md-list-nested {
   top: 16px;
   right: 16px;
   display: flex;
-  flex-direction: row-reverse;
   gap: 8px;
   z-index: 1;
 }
