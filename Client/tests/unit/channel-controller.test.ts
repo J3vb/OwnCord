@@ -188,6 +188,8 @@ vi.mock("@lib/read-state", () => ({
 }));
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
+/** The messages store's pin revision for channel 42, which a chat_pinned moves. */
+const { mockPinRevision } = vi.hoisted(() => ({ mockPinRevision: { value: 0 } }));
 
 const {
   mockReattachToPresent,
@@ -204,6 +206,9 @@ const {
 }));
 
 vi.mock("@stores/messages.store", () => ({
+  messagesStore: {
+    getState: () => ({ pinRevision: new Map([[42, mockPinRevision.value]]) }),
+  },
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
   addOptimisticMessage: mockAddOptimistic,
@@ -1986,6 +1991,50 @@ describe("createChannelController", () => {
         [42, 5, true],
         [42, 5, false],
       ]);
+    });
+
+    it("onPinClick: a chat_pinned before the rejection keeps its truth, no revert", async () => {
+      const opts = makeOpts();
+      let reject: (e: Error) => void = () => {};
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockPinRevision.value = 0;
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      // The server's broadcast lands while the request is pending.
+      mockPinRevision.value = 1;
+      reject(new Error("late"));
+
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
+      });
+      expect(mockSetMessagePinned.mock.calls).toEqual([[42, 5, true]]);
+      mockPinRevision.value = 0;
+    });
+
+    it("onPinClick: a second click while the first is pending is ignored, then allowed again", async () => {
+      const opts = makeOpts();
+      let resolve: () => void = () => {};
+      const pinMessage = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = pinMessage;
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      capturedMessageListOpts!.onPinClick(5, 42, true);
+      expect(pinMessage).toHaveBeenCalledOnce();
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
+
+      resolve();
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Message pinned", "success");
+      });
+      await Promise.resolve();
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      expect(pinMessage).toHaveBeenCalledTimes(2);
     });
 
     it("onPinClick failure on an unpin restores the pinned state", async () => {

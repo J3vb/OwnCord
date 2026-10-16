@@ -2,7 +2,8 @@
  * The warning before a masked link (`[label](url)`) leaves the app: the visible
  * text is not the address, so the viewer sees where it really goes first.
  * Loaded on demand from main.ts's link handler — nothing here is on the
- * startup path. Cancel, Escape and the backdrop open nothing; Enter confirms.
+ * startup path. Cancel, Escape and the backdrop open nothing; focus starts on
+ * Cancel and Enter acts on whichever button has focus.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -11,6 +12,8 @@ import { createModal } from "@lib/modalFactory";
 import { isDomainTrusted, linkDomain, trustDomain } from "@lib/trustedDomains";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
+
+let dialogShown = false;
 
 /**
  * Open `href` through `open`, after asking first unless its domain was trusted.
@@ -24,6 +27,9 @@ export function guardMaskedLink(href: string, open: (url: string) => void): void
     return;
   }
 
+  // A double-click must not stack two dialogs.
+  if (dialogShown) return;
+  dialogShown = true;
   const owner = new Disposable();
   const header = createElement("div", { class: "modal-header" });
   header.appendChild(
@@ -72,7 +78,10 @@ export function guardMaskedLink(href: string, open: (url: string) => void): void
     content,
     ariaLabelledBy: "masked-link-title",
     overlayAttrs: { "data-testid": "masked-link-dialog" },
-    onClose: () => owner.destroy(),
+    onClose: () => {
+      dialogShown = false;
+      owner.destroy();
+    },
   });
   modal.modal.setAttribute("aria-describedby", "masked-link-body");
 
@@ -84,25 +93,13 @@ export function guardMaskedLink(href: string, open: (url: string) => void): void
   cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
   go.addEventListener("click", confirm, { signal: owner.signal });
 
-  // Focus starts on Cancel, so Enter would activate it. Enter confirms instead
-  // until the viewer moves focus to a button themselves, when it acts on that.
+  // Focus starts on Cancel, so a stray Enter cancels rather than confirms. A
+  // held Enter would auto-repeat into the focused button: ignore the repeats.
   cancel.focus();
-  let focusMoved = false;
-  modal.modal.addEventListener(
-    "focusin",
-    (e) => {
-      if (e.target !== cancel) focusMoved = true;
-    },
-    { signal: owner.signal },
-  );
   modal.modal.addEventListener(
     "keydown",
     (e) => {
-      if (e.key !== "Enter" || e.isComposing) return;
-      const onOtherButton = focusMoved && e.target instanceof HTMLButtonElement;
-      if (onOtherButton) return;
-      e.preventDefault();
-      confirm();
+      if (e.repeat) e.preventDefault();
     },
     { signal: owner.signal },
   );

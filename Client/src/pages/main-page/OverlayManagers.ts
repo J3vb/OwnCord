@@ -19,6 +19,7 @@ import { showToast } from "@lib/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { uiStore } from "@stores/ui.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
@@ -405,12 +406,13 @@ export function createPinnedPanelController(opts: {
           live.signal,
           () => {
             if (ticket !== refetchTicket) return;
-            opts.api.getPins(id).then(
+            opts.api.getPins(id, live.signal).then(
               (next) => {
                 if (live.signal.aborted || ticket !== refetchTicket) return;
                 panel.setPins(next.messages.map(mapToPinnedMessage));
               },
               (err: unknown) => {
+                if (live.signal.aborted) return;
                 log.warn("Failed to refresh pinned messages", { error: String(err) });
               },
             );
@@ -432,6 +434,14 @@ export function createPinnedPanelController(opts: {
           panel.mount(container);
           live.onStoreChange(messagesStore, (s) => s.pinRevision?.get(id) ?? 0, refetch);
           live.onStoreChange(channelsStore, (s) => s.channels.get(id)?.canPin, syncPermission);
+          // Pins changed while the socket was down never sent a chat_pinned.
+          live.onStoreChange(
+            uiStore,
+            (s) => s.connectionStatus,
+            (status) => {
+              if (status === "connected") refetch();
+            },
+          );
           live.onStoreChange(membersStore, (s) => s.roleRevision ?? 0, syncPermission);
         },
         destroy(): void {

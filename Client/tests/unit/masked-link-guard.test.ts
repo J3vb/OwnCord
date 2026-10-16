@@ -73,28 +73,41 @@ describe("guardMaskedLink", () => {
     expect(q("masked-link-dialog")).toBeNull();
   });
 
-  it("Enter confirms while focus is still on its initial Cancel", () => {
+  it("Enter on the initial Cancel opens nothing (native activation of Cancel)", () => {
     guardMaskedLink("https://evil.example/", open);
-    q("masked-link-cancel")!.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
+    const cancel = q<HTMLButtonElement>("masked-link-cancel")!;
+    const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    cancel.dispatchEvent(ev);
 
-    expect(open).toHaveBeenCalledExactlyOnceWith("https://evil.example/");
-    expect(q("masked-link-dialog")).toBeNull();
+    // No custom handling: the browser's own Enter-click does the cancelling.
+    expect(ev.defaultPrevented).toBe(false);
+    expect(open).not.toHaveBeenCalled();
   });
 
-  it("Enter on the checkbox confirms", () => {
+  it("ignores auto-repeated key events", () => {
     guardMaskedLink("https://evil.example/", open);
-    const box = q<HTMLInputElement>("masked-link-trust")!;
-    box.focus();
-    box.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
-
-    expect(open).toHaveBeenCalledExactlyOnceWith("https://evil.example/");
+    const ev = new KeyboardEvent("keydown", {
+      key: "Enter",
+      repeat: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    q("masked-link-cancel")!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(open).not.toHaveBeenCalled();
   });
 
-  it("Enter on a button the viewer moved to leaves it to that button", () => {
+  it("a second call while a dialog is open does not stack another", () => {
+    guardMaskedLink("https://evil.example/", open);
+    guardMaskedLink("https://evil.example/", open);
+    expect(document.querySelectorAll('[data-testid="masked-link-dialog"]')).toHaveLength(1);
+
+    q<HTMLButtonElement>("masked-link-cancel")!.click();
+    guardMaskedLink("https://evil.example/", open);
+    expect(document.querySelectorAll('[data-testid="masked-link-dialog"]')).toHaveLength(1);
+  });
+
+  it("Enter on a button leaves it to that button", () => {
     guardMaskedLink("https://evil.example/", open);
     const go = q<HTMLButtonElement>("masked-link-go")!;
     go.focus();

@@ -122,6 +122,7 @@ import { createSearchOverlay } from "@components/SearchOverlay";
 import { channelsStore } from "@stores/channels.store";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import {
   mapInviteResponse,
   mapToPinnedMessage,
@@ -530,6 +531,33 @@ describe("createPinnedPanelController", () => {
       expect(mockPinnedSetPins).toHaveBeenCalledOnce();
       const shown = mockPinnedSetPins.mock.calls[0]![0] as Array<{ id: number }>;
       expect(shown.map((p) => p.id)).toEqual([7]);
+    });
+
+    it("refetches once when the connection returns, with the panel's abort signal", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      expect(api.getPins.mock.calls[0]).toHaveLength(1);
+
+      setConnectionStatus("reconnecting");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+      const signal = api.getPins.mock.calls[1]![1] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      expect(mockPinnedSetPins).toHaveBeenCalledOnce();
+
+      controller.cleanup();
+      expect(signal.aborted).toBe(true);
+      setConnectionStatus("reconnecting");
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
     });
 
     it("ignores a pin change in another channel", async () => {

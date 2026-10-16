@@ -77,6 +77,7 @@ import { setChannelMutesHost } from "@lib/channel-mutes";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
+import { showToast } from "@lib/toast";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -145,7 +146,10 @@ document.addEventListener("click", (e) => {
     }
     import("@components/MaskedLinkGuard").then(
       (m) => m.guardMaskedLink(href, open),
-      (err: unknown) => log.warn("masked link warning failed to load", err),
+      (err: unknown) => {
+        log.warn("masked link warning failed to load", err);
+        showToast(connectText("link.openFailed"), "error");
+      },
     );
   }
 });
