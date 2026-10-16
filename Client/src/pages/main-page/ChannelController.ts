@@ -37,6 +37,10 @@ import {
   invalidateChannelMessageWindow,
   clearChannelContent,
 } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
+import { resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/avatar";
+import { markdownToPlainText } from "@lib/markdown";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
@@ -76,6 +80,9 @@ const log = createLogger("channel-ctrl");
 const TRACKED_ACTION_EXPIRY_MS = 90_000;
 /** How long typing must pause before the draft is written to storage. */
 const DRAFT_SAVE_DELAY_MS = 750;
+
+/** Characters of the message shown in the delete confirm. */
+const DELETE_PREVIEW_MAX_CHARS = 200;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,6 +137,39 @@ function currentMessageUser(): MessageUser | null {
   const u = authStore.getState().user;
   if (u === null) return null;
   return { id: u.id, username: u.username, avatar: u.avatar };
+}
+
+/** The message the dialog is about: author and a truncated plain-text
+ *  excerpt, both set as text. An attachments-only message shows nothing
+ *  extra beyond its author. */
+function renderDeletePreview(msg: Message): HTMLElement {
+  const author = resolveDisplayName(resolveAuthor(msg.user));
+  const plain = Array.from(markdownToPlainText(msg.content, messagingText("spoiler.revealed")));
+  const excerpt = plain.slice(0, DELETE_PREVIEW_MAX_CHARS).join("");
+  const preview = createElement("div", {
+    class: "msg-delete-preview",
+    "data-testid": "msg-delete-preview",
+  });
+  preview.appendChild(createElement("span", { class: "msg-delete-preview-author" }, author));
+  if (excerpt !== "") {
+    const truncated = plain.length > DELETE_PREVIEW_MAX_CHARS;
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        truncated ? `${excerpt}\u2026` : excerpt,
+      ),
+    );
+  } else if (msg.attachments.length > 0) {
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        messagingText("reply.attachment"),
+      ),
+    );
+  }
+  return preview;
 }
 
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
@@ -968,7 +1008,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
     /** `onConfirm` runs just before the delete is sent. */
-    function openDeleteConfirm(msgId: number, onConfirm?: () => void): void {
+    function openDeleteConfirm(
+      msgId: number,
+      flow: { readonly onConfirm?: () => void; readonly clicked: boolean },
+    ): void {
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -978,6 +1021,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       body.appendChild(
         createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
       );
+      const target = getChannelMessages(channelId).find((m) => m.id === msgId);
+      if (target !== undefined) body.appendChild(renderDeletePreview(target));
+      // The tip is about the Delete click, so it is left out when no click
+      // opened this (an emptied edit).
+      if (flow.clicked) {
+        body.appendChild(
+          createElement(
+            "p",
+            { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
+            messagingText("delete.shiftTip"),
+          ),
+        );
+      }
       const footer = createElement("div", { class: "modal-footer" });
       const cancel = createElement(
         "button",
@@ -1005,7 +1061,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         "click",
         () => {
           modal.close();
-          onConfirm?.();
+          flow.onConfirm?.();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -1078,7 +1134,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Shift-click skips the prompt, as Discord's delete confirm does
         // (P4-12). A plain click opens a confirm.
         if (!shiftKey) {
-          openDeleteConfirm(msgId);
+          openDeleteConfirm(msgId, { clicked: true });
           return;
         }
         sendDelete(msgId);
@@ -1220,7 +1276,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // Discord's flow: clearing an edit and pressing Enter asks to delete the
       // message. Cancel leaves the edit open; Delete closes it first.
       onEmptyEdit: (messageId: number) => {
-        openDeleteConfirm(messageId, () => messageInput?.cancelEdit());
+        openDeleteConfirm(messageId, {
+          onConfirm: () => messageInput?.cancelEdit(),
+          clicked: false,
+        });
       },
       onDraftChange: scheduleDraftSave,
     });
@@ -1292,7 +1351,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       }
       return null;
     };
+    // The standing slow-mode note: shown from the first moment, for anyone
+    // slow mode would limit. Not a send gate, so the first send still goes.
+    const refreshSlowModeNote = (): void => {
+      const seconds = channelsStore.getState().channels.get(channelId)?.slowMode ?? 0;
+      messageInput?.setSlowModeNote(
+        seconds > 0 && !canManageMessages()
+          ? messagingText("composer.slowModeNote", { seconds: String(seconds) })
+          : null,
+      );
+    };
     const refreshComposerState = (): void => {
+      refreshSlowModeNote();
       messageInput?.setDisabled(computeComposerReason());
       // Slow mode gates the SEND only: the draft stays editable so the user
       // can keep typing through the cooldown (Discord parity, F12).
@@ -1484,9 +1554,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         () => refreshComposerState(),
       ),
     );
+    // A channel_update/create that changes the interval refreshes the note.
+    composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(channelId)?.slowMode ?? 0,
+        () => refreshComposerState(),
+      ),
+    );
     composerGatingUnsubs.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
+        () => refreshComposerState(),
+      ),
+    );
+    // A role change can make the user exempt from slow mode, or no longer so.
+    composerGatingUnsubs.push(
+      membersStore.subscribeSelector(
+        (s) => s.roleRevision ?? 0,
         () => refreshComposerState(),
       ),
     );

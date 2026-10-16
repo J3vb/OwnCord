@@ -18,6 +18,7 @@ const {
   mockScrollToMessage,
   mockSetDisabled,
   mockSetSendGate,
+  mockSetSlowModeNote,
   mockGetDraft,
   mockRestoreDraft,
   mockRestoreUnsent,
@@ -34,6 +35,7 @@ const {
       id: number;
       content?: string;
       user?: { id: number; username: string; display_name?: string | null };
+      attachments?: Array<{ id: string }>;
       deleted?: boolean;
       status?: string;
       correlationId?: string;
@@ -46,6 +48,7 @@ const {
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
   mockSetSendGate: vi.fn(),
+  mockSetSlowModeNote: vi.fn(),
   mockGetDraft: vi.fn<
     () => {
       content: string;
@@ -119,6 +122,7 @@ vi.mock("@components/MessageInput", () => ({
       isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
       setSendGate: mockSetSendGate,
+      setSlowModeNote: mockSetSlowModeNote,
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
       restoreUnsent: mockRestoreUnsent,
@@ -325,6 +329,7 @@ import {
   setActiveChannel,
   setRoles,
   updateChannel,
+  addChannel,
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
@@ -830,6 +835,104 @@ describe("createChannelController", () => {
         mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("delete confirm preview and Shift tip (3A-4)", () => {
+    function previewEl(): HTMLElement | null {
+      return document.querySelector("[data-testid='msg-delete-preview']");
+    }
+
+    it("shows the author and text of the message, plus the Shift tip", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "see you **soon**", user: { id: 2, username: "bob" }, attachments: [] },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.textContent).toContain("bob");
+      expect(previewEl()?.textContent).toContain("see you soon");
+      expect(document.querySelector("[data-testid='msg-delete-tip']")?.textContent).toBe(
+        "Tip: hold Shift when you click Delete to skip this.",
+      );
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("truncates a long message and sets markup as text, never HTML", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 5,
+          content: `<img src=x onerror=alert(1)>${"a".repeat(400)}`,
+          user: { id: 2, username: "bob" },
+          attachments: [],
+        },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.querySelector("img")).toBeNull();
+      const text = previewEl()?.querySelector(".msg-delete-preview-text")?.textContent ?? "";
+      expect(text.startsWith("<img src=x onerror=alert(1)>")).toBe(true);
+      expect(text.endsWith("\u2026")).toBe(true);
+      expect(Array.from(text).length).toBeLessThanOrEqual(201);
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("labels an attachments-only message instead of leaving the preview blank", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 5,
+          content: "",
+          user: { id: 2, username: "bob" },
+          attachments: [{ id: "a1" }],
+        },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.querySelector(".msg-delete-preview-text")?.textContent).toBe(
+        "Attachment",
+      );
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("still opens, with the tip and no preview, when the message is not in the window", () => {
+      mockGetChannelMessages.mockReturnValue([]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(99, false);
+
+      expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
+      expect(previewEl()).toBeNull();
+      expect(document.querySelector("[data-testid='msg-delete-tip']")).not.toBeNull();
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("the empty-edit confirm shows the preview too", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "mine", user: { id: 1, username: "me" }, attachments: [] },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts!.onEmptyEdit(5);
+
+      expect(previewEl()?.textContent).toContain("mine");
+      // No click opened this, so the Shift tip does not apply.
+      expect(document.querySelector("[data-testid='msg-delete-tip']")).toBeNull();
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
     });
   });
 
@@ -2567,6 +2670,98 @@ describe("createChannelController", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("slow-mode note up front (3A-4)", () => {
+    const base = { type: "text", category: null, position: 0, can_send: true } as const;
+
+    beforeEach(() => {
+      mockRole.value = "member";
+      setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+      setConnectionStatus("connected");
+    });
+
+    function seed(slowMode: number): void {
+      setChannels([
+        { ...base, id: 42, name: "general", slow_mode: slowMode },
+        { ...base, id: 43, name: "other", slow_mode: 0 },
+      ]);
+      setActiveChannel(42);
+    }
+
+    it("shows the note before any send, without gating the send", () => {
+      seed(5);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+      expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      ctrl.destroyChannel();
+    });
+
+    it("hides the note when slow mode is 0", () => {
+      seed(0);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("updates the note when the user's role changes", () => {
+      seed(5);
+      const before = membersStoreSubscribers.length;
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      for (const cb of membersStoreSubscribers.slice(before)) cb();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("hides the note for a moderator, who bypasses slow mode", () => {
+      seed(5);
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("follows a channel switch", () => {
+      seed(5);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+
+      setActiveChannel(43);
+      ctrl.mountChannel(43, "other");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("updates when slow mode changes through channel_create or channel_update", () => {
+      seed(0);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+
+      addChannel({ ...base, id: 42, name: "general", slow_mode: 10 });
+      channelsStore.flush();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(
+        "Slow mode is on: one message every 10s",
+      );
+
+      updateChannel({ id: 42, slow_mode: 0 });
+      channelsStore.flush();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
     });
   });
 

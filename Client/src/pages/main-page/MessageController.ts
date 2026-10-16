@@ -18,6 +18,7 @@ import {
   isWindowDetached,
   setChannelLoading,
   setChannelLoadError,
+  setOlderLoadFailed,
 } from "@stores/messages.store";
 
 const log = createLogger("message-ctrl");
@@ -53,6 +54,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
   const { api, showError } = opts;
 
   async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    // Mounting a channel starts it clean: an older-page failure from an
+    // earlier visit does not follow it back in.
+    setOlderLoadFailed(channelId, false);
     if (isChannelLoaded(channelId)) {
       log.debug("Messages already loaded", { channelId });
       return;
@@ -181,6 +185,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
         if (current.length > 0 && current[0]!.id === oldest.id) {
           prependMessages(channelId, resp.messages, resp.has_more);
         }
+        // The fetch itself succeeded, so any earlier failure is over; a page
+        // that no longer fits the window needs no Retry either.
+        setOlderLoadFailed(channelId, false);
       }
     } catch (err) {
       if (!signal.aborted) {
@@ -188,7 +195,14 @@ export function createMessageController(opts: MessageControllerOptions): Message
           channelId,
           error: String(err),
         });
-        showError(shellText("messages.loadOlderFailed"));
+        // Inline Retry at the top of the list (a toast would vanish and leave
+        // the reader at the top with no way to ask again). An aborted fetch
+        // never reaches here, so it sets no flag.
+        // Only for the window this fetch started from: after a jump replaced
+        // it, the failure belongs to a page nobody is waiting for.
+        if (getChannelMessages(channelId)[0]?.id === oldest.id) {
+          setOlderLoadFailed(channelId, true);
+        }
       }
     }
   }
