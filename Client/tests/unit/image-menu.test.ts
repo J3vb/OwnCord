@@ -393,3 +393,127 @@ describe("lightbox image menu", () => {
     expect(overlay.classList.contains("dragging")).toBe(false);
   });
 });
+
+describe("lightbox toolbar", () => {
+  const SERVER = "https://chat.example.com/api/v1/files/abc";
+  const buttons = (): HTMLButtonElement[] =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".image-lightbox-toolbar button"));
+  const labels = (): (string | null)[] => buttons().map((b) => b.getAttribute("aria-label"));
+  const tab = (shiftKey = false): void => {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true }),
+    );
+  };
+
+  it("renders Close, Download and Open original as labelled buttons for an external image", () => {
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+
+    expect(labels()).toEqual(["Close image", "Download image", "Open original"]);
+    for (const b of buttons()) {
+      expect(b.tagName).toBe("BUTTON");
+      expect(b.title).toBe(b.getAttribute("aria-label"));
+    }
+  });
+
+  it("hides Open original for a server attachment, whose address needs the token", () => {
+    setServerHost("chat.example.com");
+    openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
+
+    expect(labels()).toEqual(["Close image", "Download image"]);
+  });
+
+  it("Open original opens the external address in the system browser", async () => {
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+
+    buttons()[2]!.click();
+    await flush();
+
+    expect(openUrlMock).toHaveBeenCalledWith(LINK);
+    expect(showToastMock).not.toHaveBeenCalled();
+    expect(document.querySelector(".image-lightbox")).not.toBeNull();
+  });
+
+  it("Open original reports a failure to open", async () => {
+    openUrlMock.mockRejectedValue(new Error("no opener"));
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+
+    buttons()[2]!.click();
+    await flush();
+
+    expect(showToastMock).toHaveBeenCalledWith("Couldn't open the image", "error");
+  });
+
+  it("Download takes the save path the menu's Save Image takes", async () => {
+    setServerHost("chat.example.com");
+    saveMock.mockResolvedValue(null);
+    openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
+
+    buttons()[1]!.click();
+    await flush();
+
+    expect(saveMock).toHaveBeenCalledWith({ defaultPath: "photo.png" });
+  });
+
+  it("Download reports a failed save", async () => {
+    setServerHost("chat.example.com");
+    saveMock.mockRejectedValue(new Error("disk full"));
+    openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
+
+    buttons()[1]!.click();
+    await flush();
+
+    expect(showToastMock).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("Tab cycles Close, Download, Open original, and Shift+Tab goes back", () => {
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+    const [close, download, open] = buttons();
+    expect(document.activeElement).toBe(close);
+
+    tab();
+    expect(document.activeElement).toBe(download);
+    tab();
+    expect(document.activeElement).toBe(open);
+    tab();
+    expect(document.activeElement).toBe(close);
+    tab(true);
+    expect(document.activeElement).toBe(open);
+    tab(true);
+    expect(document.activeElement).toBe(download);
+  });
+
+  it("Tab cycles between two controls when Open original is hidden", () => {
+    setServerHost("chat.example.com");
+    openImageLightbox("blob:http://localhost/abc", "photo.png", { url: SERVER });
+    const [close, download] = buttons();
+
+    tab();
+    expect(document.activeElement).toBe(download);
+    tab();
+    expect(document.activeElement).toBe(close);
+  });
+
+  it("Escape still closes the lightbox and returns focus to the opener", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+    tab();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(document.querySelector(".image-lightbox")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("the zoom keys still work with a toolbar button focused", () => {
+    openImageLightbox("blob:http://localhost/abc", "cat", { url: LINK });
+    tab();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+
+    expect(document.querySelector<HTMLElement>(".image-lightbox img")!.style.transform).toContain(
+      "scale(1.3)",
+    );
+  });
+});

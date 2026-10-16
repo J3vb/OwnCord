@@ -1420,12 +1420,46 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
-  const closeBtn = createElement("button", {
-    class: "image-lightbox-close",
-    "aria-label": mediaControlsText("lightbox.close"),
-  });
-  closeBtn.appendChild(createIcon("x", 20));
-  overlay.appendChild(closeBtn);
+  // Top-right toolbar: Close, Download and (external images only) Open
+  // original. DOM order is the Tab order; the row is laid out right to left so
+  // Close stays in the corner.
+  const toolbar = createElement("div", { class: "image-lightbox-toolbar" });
+  const lightboxButton = (
+    cls: string,
+    label: string,
+    icon: "x" | "download" | "external-link",
+  ): HTMLButtonElement => {
+    const btn = createElement("button", {
+      class: cls,
+      type: "button",
+      "aria-label": label,
+      title: label,
+    });
+    btn.appendChild(createIcon(icon, 20));
+    toolbar.appendChild(btn);
+    return btn;
+  };
+  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
+  const downloadBtn = lightboxButton(
+    "image-lightbox-action",
+    mediaControlsText("lightbox.download"),
+    "download",
+  );
+  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
+  // Only a public address opens in the system browser; a server attachment's
+  // address needs the session token, which the browser would not have.
+  const originalUrl = sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null;
+  const openBtn =
+    originalUrl === null
+      ? null
+      : lightboxButton(
+          "image-lightbox-action",
+          mediaControlsText("lightbox.openOriginal"),
+          "external-link",
+        );
+  const controls: HTMLButtonElement[] =
+    openBtn === null ? [closeBtn, downloadBtn] : [closeBtn, downloadBtn, openBtn];
+  overlay.appendChild(toolbar);
 
   // Zoom & pan state
   let scale = 1;
@@ -1533,11 +1567,20 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
-  const sourceUrl = external !== undefined && "url" in external ? external.url : null;
+  // One save path for the menu's Save Image and the Download button.
+  const save = (): Promise<void> => {
+    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, alt);
+    if (sourceUrl === null) return saveImageBytes(img.src, "");
+    // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
+    // shows a one-frame preview.
+    return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
+      saveImageBytes(bytes ?? img.src, sourceUrl),
+    );
+  };
   bindImageMenu(
     {
       img,
-      link: sourceUrl !== null && isExternalUrl(sourceUrl) ? sourceUrl : null,
+      link: originalUrl,
       // img may still show the thumbnail or a frozen GIF frame it opened with.
       full:
         sourceUrl === null
@@ -1545,18 +1588,26 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
           : isServerUrl(sourceUrl)
             ? () => fetchImageAsObjectUrl(sourceUrl)
             : () => fetchExternalImage({ url: sourceUrl }),
-      save: () => {
-        if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, alt);
-        if (sourceUrl === null) return saveImageBytes(img.src, "");
-        // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
-        // shows a one-frame preview.
-        return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
-          saveImageBytes(bytes ?? img.src, sourceUrl),
-        );
-      },
+      save,
     },
     disposable.signal,
   );
+
+  downloadBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    save().catch((err: unknown) => {
+      log.error("Lightbox download failed", { error: String(err) });
+      showToast(mediaControlsText("lightbox.saveFailed"), "error");
+    });
+  });
+  openBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (originalUrl === null) return;
+    desktop.urlOpener.open(originalUrl).catch((err: unknown) => {
+      log.warn("Open original image failed", { error: String(err) });
+      showToast(mediaControlsText("lightbox.openFailed"), "error");
+    });
+  });
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1576,9 +1627,12 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
       img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     }
     if (e.key === "Tab") {
-      // Contain focus in the dialog: its close button is the only Tab stop.
+      // Contain focus in the dialog: Tab cycles through its toolbar buttons.
       e.preventDefault();
-      closeBtn.focus();
+      const at = controls.findIndex((c) => c === document.activeElement);
+      const step = e.shiftKey ? -1 : 1;
+      const next = at === -1 ? (e.shiftKey ? controls.length - 1 : 0) : at + step;
+      controls[(next + controls.length) % controls.length]?.focus();
     }
     // Ctrl/Cmd with these keys zooms the whole app, not the image.
     if (e.ctrlKey || e.metaKey) return;
@@ -1596,7 +1650,5 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   activeLightboxClose = close;
   document.body.appendChild(overlay);
-  // The close button is the one Tab stop, so the lightbox holds a single
-  // focusable control whose Escape/Tab behaviour never leaks behind it.
   closeBtn.focus();
 }
