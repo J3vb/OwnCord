@@ -255,6 +255,7 @@ test.describe("Settings — Voice & Video Tab", () => {
     await expect(codec.locator("option")).toHaveText([
       "VP8 (default, most compatible)",
       "H.264 (uses your graphics card when it can)",
+      "VP9 (sharper text)",
       "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
     ]);
   });
