@@ -49,3 +49,9 @@ WHERE c.channel_id = ? AND c.ended_at IS NULL;
 -- last_seen_at only moves forward, and only while the call is live.
 UPDATE message_calls SET last_seen_at = ?1
 WHERE message_id = ?2 AND ended_at IS NULL AND last_seen_at < ?1;
+
+-- name: InsertExistingMessageCallParticipant :exec
+-- Records a participant only while the user still exists, so a vanished user
+-- is skipped instead of failing the whole write.
+INSERT OR IGNORE INTO message_call_participants (message_id, user_id)
+SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2);

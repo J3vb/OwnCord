@@ -550,6 +550,11 @@ func TestCallLog_RequeuesNotesOnStoreError(t *testing.T) {
 	f.join(t, clAlice, clDM)
 	f.pass(t)
 	f.svc.st = good
+	f.pass(t) // still backing off: nothing is attempted yet
+	if f.open(t, clDM) != nil {
+		t.Fatal("a channel inside its retry delay was reconciled")
+	}
+	f.clock.advance(f.svc.coalesce)
 	f.pass(t)
 	if f.open(t, clDM) == nil {
 		t.Fatal("the join noted before a store error was lost")
@@ -669,5 +674,66 @@ func TestCallLog_JoinLeaveCyclingInsideGraceStaysOneRow(t *testing.T) {
 	}
 	if created, ended := f.sink.counts(); created != 1 || ended != 0 {
 		t.Errorf("frames created/ended = %d/%d, want 1/0", created, ended)
+	}
+}
+
+// An unanswered call leaves one row for the callee to see as a missed call:
+// the caller authors it and is its only participant, and the end reaches both.
+func TestCallLog_UnansweredCallLeavesOneMissedRow(t *testing.T) {
+	f := newCallLogFixture(t)
+	f.join(t, clAlice, clDM) // the caller; bob never joins
+	f.pass(t)
+	f.clock.advance(20 * time.Second)
+	f.leave(t, clAlice, clDM)
+	f.clock.advance(2 * time.Second)
+	f.pass(t)
+	f.clock.advance(11 * time.Second)
+	f.svc.reconcileDue(context.Background())
+
+	if n := f.callRows(t); n != 1 {
+		t.Fatalf("call rows = %d, want 1", n)
+	}
+	if f.open(t, clDM) != nil {
+		t.Fatal("the call is still live after the grace period")
+	}
+	created, ended := f.sink.counts()
+	if created != 1 || ended != 1 {
+		t.Fatalf("frames created/ended = %d/%d, want 1/1", created, ended)
+	}
+	start, end := f.sink.created[0], f.sink.ended[0]
+	if start.Author == nil || start.Author.ID != clAlice {
+		t.Errorf("author = %+v, want the caller", start.Author)
+	}
+	if !slices.Equal(end.Call.Participants, []int64{clAlice}) || end.Call.EndedAt == nil {
+		t.Errorf("ended call = %+v, want only the caller as a participant", end.Call)
+	}
+	for _, aud := range [][]int64{start.Audience, end.Audience} {
+		if !slices.Equal(aud, []int64{clAlice, clBob}) {
+			t.Errorf("audience = %v, want both DM members", aud)
+		}
+	}
+}
+
+// There is no server-side decline state: call_decline is a stateless nudge to
+// the caller's client, so a declined call is the callee never joining.
+func TestCallLog_CalleeDeclinesIsCalleeNeverJoining(t *testing.T) {
+	f := newCallLogFixture(t)
+	f.join(t, clAlice, clDM)
+	f.pass(t)
+	f.clock.advance(15 * time.Second)
+	f.leave(t, clAlice, clDM)
+	f.clock.advance(2 * time.Second)
+	f.pass(t)
+	f.clock.advance(11 * time.Second)
+	f.svc.reconcileDue(context.Background())
+
+	if n := f.callRows(t); n != 1 {
+		t.Fatalf("call rows = %d, want 1", n)
+	}
+	if _, ended := f.sink.counts(); ended != 1 {
+		t.Fatal("the call did not end")
+	}
+	if got := f.sink.ended[0].Call.Participants; !slices.Equal(got, []int64{clAlice}) {
+		t.Errorf("participants = %v, want the caller only", got)
 	}
 }

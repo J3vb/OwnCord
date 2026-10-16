@@ -252,3 +252,76 @@ func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
 		}
 	}
 }
+
+// The callee declining is a stateless nudge: it adds no participant to the
+// call row the caller's join produced.
+func TestCallLog_DeclineAddsNoParticipant(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	hub := newTestHubDeps(t, database, limiter, svc)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	alice, bob := seedOwnerUser(t, database, "decl-alice"), seedOwnerUser(t, database, "decl-bob")
+	dm, _, err := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range [][2]int64{{alice.ID, bob.ID}, {bob.ID, alice.ID}} {
+		if err := database.TrustSender(context.Background(), p[0], p[1], "accepted"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, bob, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	ctx := t.Context()
+	stop := svc.CallLog.StartCallLogWorker(ctx)
+	defer stop(ctx)
+	if err := svc.Voice.Join(ctx, alice.ID, dm.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	svc.Voice.NoteJoinCompleted(dm.ID, alice.ID)
+
+	raw, _ := json.Marshal(map[string]any{"type": "call_decline", "payload": map[string]any{"channel_id": dm.ID}})
+	hub.HandleMessageForTest(c, raw)
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case msg := <-send:
+			var env struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Kind string `json:"kind"`
+					Call struct {
+						Participants []int64 `json:"participants"`
+					} `json:"call"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(msg, &env) != nil || env.Type != "chat_message" || env.Payload.Kind != "call" {
+				continue
+			}
+			if len(env.Payload.Call.Participants) != 1 || env.Payload.Call.Participants[0] != alice.ID {
+				t.Errorf("participants = %v, want only the caller", env.Payload.Call.Participants)
+			}
+			var n int
+			if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_call_participants WHERE user_id = ?`, bob.ID).Scan(&n); err != nil || n != 0 {
+				t.Errorf("the callee was recorded as a participant (%d, %v)", n, err)
+			}
+			return
+		case <-deadline:
+			t.Fatal("the call row never reached the callee")
+		}
+	}
+}

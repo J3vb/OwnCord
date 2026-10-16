@@ -175,6 +175,23 @@ func (q *Queries) InsertCallMessage(ctx context.Context, arg InsertCallMessagePa
 	return i, err
 }
 
+const insertExistingMessageCallParticipant = `-- name: InsertExistingMessageCallParticipant :exec
+INSERT OR IGNORE INTO message_call_participants (message_id, user_id)
+SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2)
+`
+
+type InsertExistingMessageCallParticipantParams struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
+}
+
+// Records a participant only while the user still exists, so a vanished user
+// is skipped instead of failing the whole write.
+func (q *Queries) InsertExistingMessageCallParticipant(ctx context.Context, arg InsertExistingMessageCallParticipantParams) error {
+	_, err := q.db.ExecContext(ctx, insertExistingMessageCallParticipant, arg.MessageID, arg.UserID)
+	return err
+}
+
 const insertMessageCall = `-- name: InsertMessageCall :exec
 INSERT INTO message_calls (message_id, channel_id, started_at, last_seen_at)
 VALUES (?, ?, ?, ?)

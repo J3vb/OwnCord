@@ -52,14 +52,15 @@ func (d *DB) GetOpenCall(ctx context.Context, channelID int64) (*OpenCall, error
 }
 
 // AddCallParticipants records userIDs as participants of a call in one
-// transaction. A user already recorded is left alone.
+// transaction. A user already recorded is left alone, and a user who no
+// longer exists is skipped.
 func (d *DB) AddCallParticipants(ctx context.Context, messageID int64, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
 	return d.inWriteTx(ctx, "AddCallParticipants", func(q *dbgen.Queries) error {
 		for _, uid := range userIDs {
-			if err := q.InsertMessageCallParticipant(ctx, dbgen.InsertMessageCallParticipantParams{
+			if err := q.InsertExistingMessageCallParticipant(ctx, dbgen.InsertExistingMessageCallParticipantParams{
 				MessageID: messageID, UserID: uid,
 			}); err != nil {
 				return fmt.Errorf("insert participant: %w", err)

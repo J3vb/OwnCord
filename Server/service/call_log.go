@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -91,11 +90,19 @@ type CallLogService struct {
 	dirty      map[int64]*callLogPending
 	emptySince map[int64]time.Time
 	suppressed map[int64]struct{}
+	// retryAt and retryDelay back a channel off after a failed reconcile, so a
+	// store that keeps failing is retried on a growing delay instead of in a
+	// tight loop. recorded holds the participants already written for a live
+	// call (by message id), so an unchanged room costs no write, and audiences
+	// the audience a call's start went to, so its end reaches the same people.
+	retryAt    map[int64]time.Time
+	retryDelay map[int64]time.Duration
+	recorded   map[int64]map[int64]struct{}
+	audiences  map[int64][]int64
 
-	wake     chan struct{}
-	done     chan struct{}
-	stop     chan struct{}
-	stopOnce sync.Once
+	wake chan struct{}
+	// done is closed when the current loop exits.
+	done chan struct{}
 }
 
 // NewCallLogService creates a CallLogService. dms may be nil, in which case a
@@ -108,6 +115,10 @@ func NewCallLogService(st Store, dms *DMService) *CallLogService {
 		dirty:      make(map[int64]*callLogPending),
 		emptySince: make(map[int64]time.Time),
 		suppressed: make(map[int64]struct{}),
+		retryAt:    make(map[int64]time.Time),
+		retryDelay: make(map[int64]time.Duration),
+		recorded:   make(map[int64]map[int64]struct{}),
+		audiences:  make(map[int64][]int64),
 		wake:       make(chan struct{}, 1),
 	}
 }
@@ -220,6 +231,8 @@ func (s *CallLogService) dropState(channelID int64) {
 	delete(s.dirty, channelID)
 	delete(s.emptySince, channelID)
 	delete(s.suppressed, channelID)
+	delete(s.retryAt, channelID)
+	delete(s.retryDelay, channelID)
 }
 
 func (s *CallLogService) isSuppressed(channelID int64) bool {
@@ -258,32 +271,135 @@ func (s *CallLogService) clearEmptySince(channelID int64) {
 	delete(s.emptySince, channelID)
 }
 
-// nextGraceDeadline is the earliest moment a call whose room is empty may
-// end, or the zero time when no room is waiting out the grace period.
-func (s *CallLogService) nextGraceDeadline() time.Time {
+// nextDue is the earliest moment the worker has timed work: a room that may
+// end after its grace period, or a channel whose retry delay runs out. Zero
+// when there is none. A channel waiting out a retry delay is not due before it.
+func (s *CallLogService) nextDue() time.Time {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
 	var next time.Time
-	for _, since := range s.emptySince {
-		if d := since.Add(s.grace); next.IsZero() || d.Before(next) {
-			next = d
+	consider := func(t time.Time) {
+		if next.IsZero() || t.Before(next) {
+			next = t
 		}
+	}
+	for ch, since := range s.emptySince {
+		d := since.Add(s.grace)
+		if r, ok := s.retryAt[ch]; ok && r.After(d) {
+			d = r
+		}
+		consider(d)
+	}
+	for _, r := range s.retryAt {
+		consider(r)
 	}
 	return next
 }
 
-// graceDue lists the channels whose grace period has run out at now.
-func (s *CallLogService) graceDue(now time.Time) []int64 {
+// dueChannels lists the channels with timed work due at now: a room whose
+// grace period has run out, or a retry delay that has passed.
+func (s *CallLogService) dueChannels(now time.Time) []int64 {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
-	var due []int64
+	set := make(map[int64]struct{})
 	for ch, since := range s.emptySince {
-		if !now.Before(since.Add(s.grace)) {
-			due = append(due, ch)
+		d := since.Add(s.grace)
+		if r, ok := s.retryAt[ch]; ok && r.After(d) {
+			d = r
 		}
+		if !now.Before(d) {
+			set[ch] = struct{}{}
+		}
+	}
+	for ch, r := range s.retryAt {
+		if !now.Before(r) {
+			set[ch] = struct{}{}
+		}
+	}
+	due := make([]int64, 0, len(set))
+	for ch := range set {
+		due = append(due, ch)
 	}
 	slices.Sort(due)
 	return due
+}
+
+// takeDirtyFor removes and returns one channel's pending notes.
+func (s *CallLogService) takeDirtyFor(channelID int64) *callLogPending {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	p := s.dirty[channelID]
+	delete(s.dirty, channelID)
+	return p
+}
+
+// inBackoff reports whether a failed reconcile of the channel is still being
+// waited out.
+func (s *CallLogService) inBackoff(channelID int64) bool {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	r, ok := s.retryAt[channelID]
+	return ok && s.now().Before(r)
+}
+
+// noteFailure backs the channel off: at least the coalesce interval, doubling
+// per failure up to the tick.
+func (s *CallLogService) noteFailure(channelID int64) {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	d := s.retryDelay[channelID] * 2
+	d = max(d, s.coalesce)
+	d = min(d, max(s.tick, s.coalesce))
+	s.retryDelay[channelID] = d
+	s.retryAt[channelID] = s.now().Add(d)
+}
+
+func (s *CallLogService) clearRetry(channelID int64) {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	delete(s.retryAt, channelID)
+	delete(s.retryDelay, channelID)
+}
+
+// recordedSet returns a copy of the participants written for a call.
+func (s *CallLogService) recordedSet(messageID int64) map[int64]struct{} {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	out := make(map[int64]struct{}, len(s.recorded[messageID]))
+	for uid := range s.recorded[messageID] {
+		out[uid] = struct{}{}
+	}
+	return out
+}
+
+func (s *CallLogService) markRecorded(messageID int64, userIDs []int64) {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	set := s.recorded[messageID]
+	if set == nil {
+		set = make(map[int64]struct{}, len(userIDs))
+		s.recorded[messageID] = set
+	}
+	for _, uid := range userIDs {
+		set[uid] = struct{}{}
+	}
+}
+
+func (s *CallLogService) setAudience(messageID int64, audience []int64) {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	s.audiences[messageID] = slices.Clone(audience)
+}
+
+// forgetCall drops what is held for a call that has ended, returning the
+// audience its start went to.
+func (s *CallLogService) forgetCall(messageID int64) []int64 {
+	s.callLogMu.Lock()
+	defer s.callLogMu.Unlock()
+	aud := s.audiences[messageID]
+	delete(s.audiences, messageID)
+	delete(s.recorded, messageID)
+	return aud
 }
 
 // callLiveContent is the text only old clients show for a live call row.
@@ -309,18 +425,4 @@ func parseCallTime(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
-}
-
-// voiceJoinTime reads the instant a voice row was created from its join token
-// (db.newVoiceJoinToken: an RFC 3339 nanosecond instant, then a sequence).
-func voiceJoinTime(token string) (time.Time, bool) {
-	const instantLen = len("2006-01-02T15:04:05.000000000Z")
-	if len(token) < instantLen {
-		return time.Time{}, false
-	}
-	t, err := time.Parse(time.RFC3339Nano, token[:instantLen])
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t.UTC(), true
 }

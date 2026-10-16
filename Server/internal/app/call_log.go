@@ -10,8 +10,10 @@ import "context"
 // The loop context is deliberately not bgCtx: the event-persistence close step
 // cancels bgCtx, and the stop pass must still be able to write. This step's
 // close runs before that one (the reverse walk), under the close step's own
-// bounded context; the stop func joins the loop and records the last time each
-// live call was seen occupied.
+// bounded context. The stop func joins the loop and stamps last_seen_at on live
+// calls; the stamp for a room with someone in it relies on the voice grace
+// keeping the voice rows of dropped connections through the hub-notice step,
+// which closes before this one.
 func (a *App) startCallLog() error {
 	svc := a.runtime.Services
 	if svc == nil || svc.CallLog == nil {
