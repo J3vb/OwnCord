@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -181,10 +181,16 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
     mockRemoveOptimistic: vi.fn(),
   }));
 
-const { mockMarkChannelRead } = vi.hoisted(() => ({ mockMarkChannelRead: vi.fn() }));
+const { mockMarkChannelRead, mockLeaveChannel, mockMarkChannelReadSeen } = vi.hoisted(() => ({
+  mockMarkChannelRead: vi.fn(),
+  mockLeaveChannel: vi.fn(),
+  mockMarkChannelReadSeen: vi.fn(),
+}));
 
 vi.mock("@lib/read-state", () => ({
   markChannelRead: mockMarkChannelRead,
+  leaveChannel: mockLeaveChannel,
+  markChannelReadSeen: mockMarkChannelReadSeen,
 }));
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
@@ -325,6 +331,7 @@ import {
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { loadLastChannel } from "@lib/last-channel";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
@@ -485,6 +492,46 @@ describe("createChannelController", () => {
     ctrl.mountChannel(99, "random");
 
     expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
+  });
+
+  describe("with the server's read pointer (WP 3D-5d)", () => {
+    beforeEach(() => {
+      applyReadyCapabilities({ read_pointer: true });
+      mockLeaveChannel.mockClear();
+      mockMarkChannelReadSeen.mockClear();
+      mockMarkChannelRead.mockClear();
+    });
+    afterEach(() => resetServerCapabilities());
+
+    it("leaving a channel marks only what was seen, never everything", () => {
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      ctrl.mountChannel(99, "random");
+
+      expect(mockLeaveChannel).toHaveBeenCalledWith(42);
+      expect(mockMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("sending from a detached window marks what was seen, not everything", () => {
+      mockIsWindowDetached.mockReturnValueOnce(true);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", null, [], []);
+
+      expect(mockMarkChannelReadSeen).toHaveBeenCalledWith(42);
+      expect(mockMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("jumping to the present still marks at latest", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageListOpts.onJumpToPresent?.();
+
+      expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
+    });
   });
 
   it("does not mark anything read on the very first mount (no previous channel)", () => {

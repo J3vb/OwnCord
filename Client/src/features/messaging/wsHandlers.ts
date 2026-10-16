@@ -41,7 +41,7 @@ import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
-import { isChannelAway } from "@lib/read-state";
+import { isChannelAway, noteAwayUnread } from "@lib/read-state";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -143,6 +143,9 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     // between the server's registerNow and buildReady, then redelivered
     // as a queued chat_message) does not double-count.
     noteChannelMessage(payload.channel_id, payload.id, isMention, isAway);
+    // Counted unread in the channel on screen: the reader was away, so after a
+    // Mark Unread a later live arrival may release the hold (read-state.ts).
+    if (isAway && payload.channel_id === activeId) noteAwayUnread(payload.channel_id);
   }
 
   // Update DM store last message if this message belongs to a DM channel.

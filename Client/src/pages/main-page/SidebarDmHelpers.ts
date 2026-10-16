@@ -111,12 +111,18 @@ export async function handleCreateDm(
     };
 
     addDmChannel(dmChannel);
-    selectDmConversation(dmChannel, deps);
+    // The merged row, so a reopened DM keeps the pointer the store already had.
+    selectDmConversation(storedDm(dmChannel), deps);
     onReady?.(dmChannel);
   } catch (err) {
     const msg = errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
   }
+}
+
+/** The DM as the store holds it after addDmChannel merged it, else as given. */
+function storedDm(dmChannel: DmChannel): DmChannel {
+  return dmStore.getState().channels.find((c) => c.channelId === dmChannel.channelId) ?? dmChannel;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +139,7 @@ export async function handleCreateGroupDm(
     const result = await deps.api.createGroupDm(recipientIds, name);
     const dmChannel = dmChannelFromPayload(result);
     addDmChannel(dmChannel);
-    selectDmConversation(dmChannel, deps);
+    selectDmConversation(storedDm(dmChannel), deps);
   } catch (err) {
     const msg = errorText(err, connectText("app.dmCreateGroupFailed"));
     deps.getToast()?.show(msg, "error");
