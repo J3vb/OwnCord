@@ -103,6 +103,22 @@ describe("/spoiler hides everything it was given", () => {
     hidden("/spoiler a|b|c", "a|b|c");
   });
 
+  it("keeps a typed backslash-pipe from closing the spoiler", () => {
+    hidden("/spoiler a\\|b", "a\\|b");
+  });
+
+  it("leaves a pipe inside a URL or a single or double code span alone", () => {
+    expect(applySlashCommand("/spoiler https://x.com/?a|b")).toEqual({
+      text: "||https://x.com/?a|b||",
+    });
+    expect(applySlashCommand("/spoiler ``a|b`` and `c|d` e|f")).toEqual({
+      text: "||``a|b`` and `c|d` e\\|f||",
+    });
+    const host = render("/spoiler ``a|b`` x");
+    expect(host.querySelectorAll(".msg-spoiler")).toHaveLength(1);
+    expect(host.textContent).toBe(host.querySelector(".msg-spoiler")!.textContent);
+  });
+
   it("keeps a trailing backslash from escaping the closer", () => {
     hidden("/spoiler end\\", "end\\");
   });
@@ -130,6 +146,49 @@ describe("/me renders as one italic run", () => {
     expect(ems).toHaveLength(1);
     expect(ems[0]!.textContent).toBe(text);
     expect(host.textContent).toBe(text);
+  });
+});
+
+describe("/me leaves code spans, URLs and mentions as typed", () => {
+  it("shows a code span's underscores without backslashes", () => {
+    const host = render("/me runs `__init__` now");
+    expect(host.querySelectorAll("em")).toHaveLength(1);
+    expect(host.querySelector("em code")!.textContent).toBe("__init__");
+    expect(host.textContent).toBe("runs __init__ now");
+  });
+
+  it("keeps a URL with an underscore intact", () => {
+    const host = render("/me see https://x.com/_priv ok");
+    expect(host.querySelectorAll("em")).toHaveLength(1);
+    const link = host.querySelector("a")!;
+    expect(link.getAttribute("href")).toBe("https://x.com/_priv");
+    expect(link.textContent).toBe("https://x.com/_priv");
+  });
+
+  it("does not touch the @mention token the server matches", () => {
+    expect(applySlashCommand("/me pings @_bob here")).toEqual({ text: "_pings @_bob here_" });
+    expect(applySlashCommand("/me pings @bob_ here")).toEqual({ text: "_pings @bob_ here_" });
+    expect(applySlashCommand("/me a_b @x.y-z_1")).toEqual({ text: "_a_b @x.y-z_1_" });
+  });
+
+  it("keeps italics after a trailing backslash", () => {
+    const host = render("/me a\\");
+    expect(host.querySelectorAll("em")).toHaveLength(1);
+    expect(host.textContent).toBe("a\\");
+  });
+
+  it("keeps italics across a line that starts with a block marker", () => {
+    for (const marker of ["- ", "> ", "# ", "1. "]) {
+      const host = render(`/me a\n${marker}b`);
+      expect(host.querySelectorAll("em")).toHaveLength(1);
+      expect(host.textContent).toBe(`a\n${marker}b`);
+    }
+  });
+
+  it("shows a typed backslash-underscore literally inside the italics", () => {
+    const host = render("/me a\\_b");
+    expect(host.querySelectorAll("em")).toHaveLength(1);
+    expect(host.textContent).toBe("a\\_b");
   });
 });
 

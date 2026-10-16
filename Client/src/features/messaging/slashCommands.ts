@@ -7,6 +7,7 @@
  * frame, which this module never touches.
  */
 
+import { codeSpanEnd } from "../../lib/markdown";
 import type { messagingText } from "../../i18n/messaging";
 
 type MessagingKey = Parameters<typeof messagingText>[0];
@@ -45,37 +46,126 @@ const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[A-
 /** Block openers markdown reads at the start of a line, escaped to stay prose. */
 const LINE_LEAD = /^( *)(?:([-*+>#])|(\d{1,9})([.)]))/;
 
-/**
- * Make `text` safe inside `||…||`: a `|` outside an inline code span is
- * escaped so it cannot close the spoiler early, a fence is escaped so its
- * code is not split out of the spoiler, and a block opener (`- `, `> `, `#`,
- * `1.`) at the start of a later line is escaped so the paragraph is not split.
- */
-function escapeSpoiler(text: string): string {
-  const noFence = text.replace(/`{3,}/g, (run) => "\\`".repeat(run.length));
-  return noFence
-    .split("\n")
-    .map((line, i) => {
-      let out = line
-        .split(/(`[^`\n]*`)/)
-        .map((part, j) => (j % 2 === 1 ? part : part.replace(/\|/g, "\\|")))
-        .join("");
-      if (i > 0) {
-        out = out.replace(LINE_LEAD, (_m, sp: string, mark?: string, num?: string, dot?: string) =>
-          mark !== undefined ? `${sp}\\${mark}` : `${sp}${num}\\${dot}`,
-        );
-      }
-      return out;
-    })
-    .join("\n")
-    .replace(/(\\+)$/, (run) => (run.length % 2 === 1 ? `${run}\\` : run));
+/** Stands in for a backtick of a fence while the text is split. */
+const FENCE_MARK = "\uE000";
+const URL_RUN = /https?:\/\/[^\s<>"']+/iy;
+/** lib/mentions MENTION_TOKEN_REGEX's token, which Server/service/mentions.go shares. */
+const MENTION_RUN = /@[\p{L}\p{N}_.-]{1,64}/uy;
+
+interface Piece {
+  readonly text: string;
+  /** Code span, bare URL or @mention: sent exactly as typed. */
+  readonly keep: boolean;
 }
 
-/** Escape every `_` unless both neighbours are word characters (snake_case). */
-function escapeUnderscores(text: string): string {
-  return text.replace(/_/g, (m, offset: number) =>
-    isWordChar(text[offset - 1]) && isWordChar(text[offset + 1]) ? m : "\\_",
-  );
+/**
+ * Split `text` into runs the markdown and mention parsers read as units —
+ * code spans (same-length backtick runs, as lib/markdown's codeSpanEnd), bare
+ * URLs and, when `mentions` is set, `@name` tokens — and the prose between
+ * them. Escaping goes in the prose only: a backslash inside a code span or a
+ * URL shows, and `@\_bob` is no longer a mention.
+ */
+function splitPieces(text: string, mentions: boolean): Piece[] {
+  const pieces: Piece[] = [];
+  let start = 0;
+  let i = 0;
+  const take = (end: number): void => {
+    if (i > start) pieces.push({ text: text.slice(start, i), keep: false });
+    pieces.push({ text: text.slice(i, end), keep: true });
+    i = end;
+    start = end;
+  };
+  while (i < text.length) {
+    const c = text[i]!;
+    if (c === "`") {
+      const end = codeSpanEnd(text, i);
+      if (end > 0 && !text.slice(i, end).includes("\n")) {
+        take(end);
+        continue;
+      }
+      // An unclosed run is plain text; step over all of it.
+      while (text[i + 1] === "`") i++;
+    } else if ((c === "h" || c === "H") && !isWordChar(text[i - 1])) {
+      URL_RUN.lastIndex = i;
+      const m = URL_RUN.exec(text);
+      if (m !== null) {
+        take(i + m[0].length);
+        continue;
+      }
+    } else if (mentions && c === "@" && !/[\p{L}\p{N}_@]/u.test(text[i - 1] ?? " ")) {
+      MENTION_RUN.lastIndex = i;
+      const m = MENTION_RUN.exec(text);
+      if (m !== null) {
+        take(i + m[0].length);
+        continue;
+      }
+    }
+    i++;
+  }
+  if (start < text.length) pieces.push({ text: text.slice(start), keep: false });
+  return pieces;
+}
+
+/** Escape a block opener (`- `, `> `, `#`, `1.`) at the start of each later line. */
+function escapeLineLeads(text: string): string {
+  return text
+    .split("\n")
+    .map((line, i) =>
+      i === 0
+        ? line
+        : line.replace(LINE_LEAD, (_m, sp: string, mark?: string, num?: string, dot?: string) =>
+            mark !== undefined ? `${sp}\\${mark}` : `${sp}${num}\\${dot}`,
+          ),
+    )
+    .join("\n");
+}
+
+/** An odd run of trailing backslashes would escape what is appended after it. */
+function doubleTrailingBackslash(text: string): string {
+  return text.replace(/(\\+)$/, (run) => (run.length % 2 === 1 ? `${run}\\` : run));
+}
+
+/**
+ * Make `text` safe inside `||…||`: a `|` outside a code span or URL is
+ * escaped so it cannot close the spoiler early, a fence is escaped so its
+ * code is not split out of the spoiler, and a block opener at the start of a
+ * later line is escaped so the paragraph is not split.
+ */
+function escapeSpoiler(text: string): string {
+  // Fences become sentinels first so the code-span scan cannot pair them, and
+  // turn into escaped backticks last, after backslashes have been doubled.
+  const noFence = text.replace(/`{3,}/g, (run) => FENCE_MARK.repeat(run.length));
+  const piped = splitPieces(noFence, false)
+    .map((p) => (p.keep ? p.text : p.text.replace(/[\\|]/g, (c) => `\\${c}`)))
+    .join("")
+    .replaceAll(FENCE_MARK, "\\`");
+  return doubleTrailingBackslash(escapeLineLeads(piped));
+}
+
+/**
+ * Make `text` safe inside `_…_`: every `_` in the prose is escaped unless both
+ * neighbours are word characters (snake_case), and the block-opener and
+ * trailing-backslash rules apply. Known edge: a URL or @mention that ends in
+ * `_` at the very end of the text keeps it, so the closing `_` is read as part
+ * of a `__` run and the italics are lost (the link itself stays intact).
+ */
+function escapeItalic(text: string): string {
+  let offset = 0;
+  const escaped = splitPieces(text, true)
+    .map((p) => {
+      const at = offset;
+      offset += p.text.length;
+      if (p.keep) return p.text;
+      // A backslash is doubled first, so a typed `\_` stays an escaped
+      // backslash followed by an escaped underscore, never an unescaped one.
+      return p.text.replace(/[\\_]/g, (c, k: number) =>
+        c === "\\" || !(isWordChar(text[at + k - 1]) && isWordChar(text[at + k + 1]))
+          ? `\\${c}`
+          : c,
+      );
+    })
+    .join("");
+  return doubleTrailingBackslash(escapeLineLeads(escaped));
 }
 
 /** `text` followed by an emoticon, or the emoticon alone when there is no text. */
@@ -104,7 +194,7 @@ export function applySlashCommand(input: string): SlashResult | null {
     case "spoiler":
       return text === "" ? { empty: true, name } : { text: `||${escapeSpoiler(text)}||` };
     case "me":
-      return text === "" ? { empty: true, name } : { text: `_${escapeUnderscores(text)}_` };
+      return text === "" ? { empty: true, name } : { text: `_${escapeItalic(text)}_` };
     default:
       return null;
   }
