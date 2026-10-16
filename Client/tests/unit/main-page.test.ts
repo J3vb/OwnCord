@@ -1440,6 +1440,166 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     supported.mockRestore();
   });
 
+  describe("Wayland portal keys (LP-9b)", () => {
+    const portal = {
+      backend: "portal" as const,
+      portalVersion: 2,
+      triggers: { ptt: null, mute: null, deafen: null },
+      canConfigure: true,
+    };
+    // Spies on the shared registry would otherwise carry their calls into the next test.
+    const restore = ["status", "bindPortal", "supported", "start", "onStatusChange"] as const;
+    afterEach(() => {
+      localStorage.removeItem("owncord:settings:globalKeysPortalBound");
+      for (const name of restore) vi.mocked(desktop.globalShortcuts[name]).mockRestore?.();
+    });
+
+    it("restores the portal binding at startup only after an earlier successful bind", async () => {
+      const status = vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+
+      // Never bound before: no dialog is opened on its own.
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(bind).not.toHaveBeenCalled();
+      page.destroy?.();
+
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      localStorage.setItem("owncord:settings:pttVk", String(0x77));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
+      expect(bind).toHaveBeenCalledWith({ pttVk: 0x77, muteVk: 0x4d, deafenVk: 0x44 });
+      localStorage.removeItem("owncord:settings:pttVk");
+    });
+
+    it("does not reopen the dialog when the desktop already holds a trigger", async () => {
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      const status = vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue({
+        ...portal,
+        triggers: { ptt: null, mute: "Ctrl+Alt+M", deafen: null },
+      });
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(bind).not.toHaveBeenCalled();
+    });
+
+    it("forgets the earlier bind when the restore dialog is cancelled, and keeps it on other failures", async () => {
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal");
+      const pref = (): string | null =>
+        localStorage.getItem("owncord:settings:globalKeysPortalBound");
+
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      bind.mockRejectedValue(Object.assign(new Error("bind_timeout"), { code: "bind_timeout" }));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(pref()).toBe("true");
+      page.destroy?.();
+
+      bind.mockRejectedValue(
+        Object.assign(new Error("bind_cancelled"), { code: "bind_cancelled" }),
+      );
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(pref()).toBe("false"));
+    });
+
+    it("lets only the latest supported() answer set the flag when answers arrive out of order", async () => {
+      const changeHandlers = new Set<(s: typeof portal) => void>();
+      vi.spyOn(desktop.globalShortcuts, "onStatusChange").mockImplementation((handler) => {
+        changeHandlers.add(handler);
+        return () => changeHandlers.delete(handler);
+      });
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue({ ...portal, backend: "none" });
+      const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+      const answers: ((value: boolean) => void)[] = [];
+      const supported = vi
+        .spyOn(desktop.globalShortcuts, "supported")
+        .mockImplementation(() => new Promise<boolean>((resolve) => answers.push(resolve)));
+      const ws = fakeWs();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
+      for (const handler of changeHandlers) handler(portal);
+      expect(answers).toHaveLength(2);
+
+      // The newer query answers "no keys" first; the older "yes" must not undo it.
+      answers[1]?.(false);
+      await Promise.resolve();
+      answers[0]?.(true);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(start).not.toHaveBeenCalled();
+      (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+      );
+      expect(vi.mocked(ws.send).mock.calls.filter((c) => c[0].type === "voice_mute")).toHaveLength(
+        1,
+      );
+    });
+
+    it("does not bind on a desktop without the portal even after an earlier bind", async () => {
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      const status = vi
+        .spyOn(desktop.globalShortcuts, "status")
+        .mockResolvedValue({ ...portal, backend: "none" });
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(bind).not.toHaveBeenCalled();
+    });
+
+    it("keeps the in-app shortcut until both keys are bound, then stands down", async () => {
+      const changeHandlers = new Set<(s: typeof portal) => void>();
+      vi.spyOn(desktop.globalShortcuts, "onStatusChange").mockImplementation((handler) => {
+        changeHandlers.add(handler);
+        return () => changeHandlers.delete(handler);
+      });
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+      const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      const ws = fakeWs();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
+      (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+      const mutes = (): number =>
+        vi.mocked(ws.send).mock.calls.filter((c) => c[0].type === "voice_mute").length;
+      const press = (): void => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+        );
+      };
+
+      press();
+      expect(mutes()).toBe(1); // the in-app key still answers
+
+      supported.mockResolvedValue(true);
+      for (const handler of changeHandlers) handler(portal);
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      press();
+      expect(mutes()).toBe(1); // the desktop's key owns it now
+
+      page.destroy?.();
+      expect(changeHandlers.size).toBe(0);
+    });
+  });
+
   // WP 1D-1: outside a call the shortcut toggles the local, saved state and
   // sends nothing; the next join restates it to the server.
   it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {

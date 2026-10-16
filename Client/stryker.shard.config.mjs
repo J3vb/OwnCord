@@ -202,6 +202,7 @@ export const shards = {
     "src/lib/updater.ts",
     "src/lib/voiceJoinTrace.ts",
     "src/lib/voiceShortcuts.ts",
+    "src/lib/globalKeys.ts",
   ], // ~1171 mutants (estimated)
   "stores-1": [
     "src/stores/auth.store.ts",

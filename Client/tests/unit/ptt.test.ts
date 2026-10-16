@@ -1380,3 +1380,118 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     expect(commands()).toContain("ptt_start");
   });
 });
+
+// ---------------------------------------------------------------------------
+// LP-9b: the desktop's shortcut service binds the PTT key after the binding
+// started, and can lose it again.
+// ---------------------------------------------------------------------------
+
+describe("PTT on the portal backend (LP-9b)", () => {
+  const portalStatus = (ptt: string | null) => ({
+    backend: "portal",
+    portalVersion: 2,
+    triggers: { ptt, mute: null, deafen: null },
+    canConfigure: true,
+  });
+  let handlers: Map<string, (event: { payload: unknown }) => void>;
+  let unlistened: string[];
+  let supported: boolean;
+
+  beforeEach(() => {
+    resetAll();
+    vi.resetModules();
+    handlers = new Map();
+    unlistened = [];
+    supported = false;
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? supported : undefined),
+    );
+    let registration = 0;
+    mockListen.mockImplementation((event: string, fn: (e: { payload: unknown }) => void) => {
+      handlers.set(event, fn);
+      const id = `${event}#${++registration}`;
+      return Promise.resolve(() => unlistened.push(id));
+    });
+    testPrefs.set("pttVk", 0x77); // F8
+    testPrefs.set("inputMode", "ptt");
+    mockCurrentChannelId = 7;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  const starts = () => mockInvoke.mock.calls.filter((c) => c[0] === "ptt_start").length;
+  const emit = (event: string, payload: unknown) => handlers.get(event)!({ payload });
+  async function service() {
+    const mod = await import("../../src/platform/desktop/pushToTalkService");
+    return mod.pushToTalk;
+  }
+
+  it("a lost portal binding opens the gate and a rebind re-arms once", async () => {
+    const ptt = await service();
+    // Start before the desktop has bound the key: armed, but nothing can gate.
+    await ptt.init();
+    expect(starts()).toBe(1);
+    expect(mockPttPollingLive).toBe(false);
+    expect(mockSetPttGated).not.toHaveBeenCalled();
+
+    // The bind finishes: one new start, and the gate closes mid-call.
+    supported = true;
+    emit("global-keys-changed", portalStatus("F8"));
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(starts()).toBe(2);
+    expect(mockSetPttGated.mock.calls.map((c) => c[0])).toEqual([true]);
+
+    // The desktop drops the binding: the host reports ptt-error, the gate
+    // opens and PTT is not live, so the mic is never stranded closed.
+    emit("ptt-error", "portal_lost");
+    await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenLastCalledWith(false));
+    expect(mockPttPollingLive).toBe(false);
+
+    // A rebind re-arms exactly once; a repeated event while live starts nothing.
+    emit("global-keys-changed", portalStatus("F8"));
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(starts()).toBe(3);
+    emit("global-keys-changed", portalStatus("F8"));
+    // Long enough for a start (several awaited imports and invokes) to have run.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(starts()).toBe(3);
+    expect(mockSetPttGated.mock.calls.map((c) => c[0])).toEqual([true, false, true]);
+
+    // One set of listeners: each earlier binding's listeners were released.
+    expect(unlistened.filter((id) => id.startsWith("ptt-state"))).toHaveLength(2);
+    expect(unlistened.filter((id) => id.startsWith("ptt-error"))).toHaveLength(2);
+  });
+
+  it("a trigger the desktop drops while live opens the gate and stops PTT", async () => {
+    const ptt = await service();
+    await ptt.init();
+    supported = true;
+    emit("global-keys-changed", portalStatus("F8"));
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(mockSetPttGated).toHaveBeenLastCalledWith(true);
+
+    // The user cleared the key in system settings: no release can ever arrive.
+    emit("global-keys-changed", portalStatus(null));
+    await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenLastCalledWith(false));
+    expect(mockPttPollingLive).toBe(false);
+    expect(unlistened.filter((id) => id.startsWith("ptt-state"))).toHaveLength(2);
+
+    // Binding it again re-arms.
+    emit("global-keys-changed", portalStatus("F9"));
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(starts()).toBe(3);
+  });
+
+  it("ignores a status that leaves PTT unbound, or PTT off", async () => {
+    const ptt = await service();
+    await ptt.init();
+    emit("global-keys-changed", portalStatus(null));
+    emit("global-keys-changed", { ...portalStatus("F8"), backend: "polling" });
+    testPrefs.set("inputMode", "vad");
+    emit("global-keys-changed", portalStatus("F8"));
+    await Promise.resolve();
+    expect(starts()).toBe(1);
+  });
+});

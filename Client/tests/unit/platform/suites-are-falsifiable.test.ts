@@ -407,6 +407,10 @@ describeGlobalShortcutsSuite(async () => {
     start: async () => undefined,
     supported: async () => true,
     setKeys: async () => undefined,
+    status: async () => undefined,
+    bindPortal: async () => undefined,
+    configurePortal: async () => undefined,
+    onStatusChange: () => () => undefined,
     onShortcut: () => () => undefined,
   } as unknown as GlobalShortcuts;
   const native: GlobalShortcutsNativeControl = {
@@ -414,6 +418,11 @@ describeGlobalShortcutsSuite(async () => {
     commands: () => [],
     keyCodes: () => undefined,
     supported: true,
+    statusIs: () => undefined,
+    rejects: () => undefined,
+    lastArgs: () => undefined,
+    emitsStatus: async () => undefined,
+    statusListeners: () => 1,
   };
   return { subject, native };
 }, failEveryTest);

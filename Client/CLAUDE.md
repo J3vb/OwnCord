@@ -148,6 +148,17 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   CI has no display: the X11 capturer runs only under
   `xvfb-run cargo test -- --ignored x11`, and the Wayland portal only on a
   real desktop.
+- Global push to talk and mute/deafen keys come from one of three backends,
+  named by `desktop.globalShortcuts.status().backend`: `polling` (Windows,
+  X11), `portal` (Wayland, the xdg-desktop-portal GlobalShortcuts interface:
+  GNOME 48+ and KDE Plasma) or `none`. The Keybinds UI (`pttControls.ts`,
+  `KeybindsTab.ts`) and `MainPage` choose by that capability, never by an
+  `isLinuxDesktop()` branch. On `portal` the desktop owns and consumes the
+  keys: PTT is limited to function keys, `globalKeysPortalBound` remembers a
+  successful bind so startup rebinds silently, and `pushToTalkService.ts`
+  re-arms on `global-keys-changed` (loss arrives as the host's `ptt-error`).
+  Host side: `src-tauri/src/portal_shortcuts.rs`; only a real GNOME 48+/KDE
+  Wayland desktop proves the dialog and key delivery.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
   `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
