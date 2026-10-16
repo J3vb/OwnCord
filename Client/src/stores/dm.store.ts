@@ -34,6 +34,11 @@ export interface DmChannel {
   /** True for a group DM (3+ participants at creation). */
   readonly isGroup: boolean;
   readonly lastMessageId: number | null;
+  /**
+   * The current user's read pointer in this DM (see Channel.lastReadMessageId).
+   * Undefined when the server never said.
+   */
+  readonly lastReadMessageId?: number | undefined;
   readonly lastMessage: string;
   readonly lastMessageAt: string;
   readonly unreadCount: number;
@@ -85,6 +90,8 @@ export function addDmChannel(channel: DmChannel): void {
             // last message was, and blanking it would leave the row emptier
             // than before the rename.
             lastMessageId: channel.lastMessageId ?? existing.lastMessageId,
+            // dm_channel_open frames carry no pointer; do not forget ours.
+            lastReadMessageId: channel.lastReadMessageId ?? existing.lastReadMessageId,
             lastMessage: channel.lastMessage !== "" ? channel.lastMessage : existing.lastMessage,
             lastMessageAt:
               channel.lastMessageAt !== "" ? channel.lastMessageAt : existing.lastMessageAt,
@@ -138,6 +145,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     // carries it, so a DM mention badge survives a reconnect.
     mentionCount: dmChannel.mentionCount,
     lastMessageId: dmChannel.lastMessageId,
+    lastReadMessageId: dmChannel.lastReadMessageId,
     // Channel-level permission is always true for DMs; block state is layered on
     // top by the composer via blocks.store (see ChannelController), not canSend.
     canSend: true,
@@ -187,6 +195,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
     lastMessageId: p.last_message_id,
+    lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
@@ -305,6 +314,32 @@ export function reviseDmLastMessage(
     if (dm === undefined || dm.lastMessageId !== messageId) return prev;
     return { channels: prev.channels.map((c) => (c === dm ? { ...dm, ...patch } : c)) };
   });
+}
+
+/**
+ * Set a DM's read pointer (and optionally its counts) outright; the DM twin of
+ * channels.store's setReadPointer. A no-op for a DM this client does not list.
+ */
+export function setDmReadPointer(
+  channelId: number,
+  pointer: number | undefined,
+  counts?: { readonly unread: number; readonly mention: number },
+): void {
+  dmStore.setState((prev) =>
+    prev.channels.some((c) => c.channelId === channelId)
+      ? {
+          channels: prev.channels.map((c) =>
+            c.channelId === channelId
+              ? {
+                  ...c,
+                  lastReadMessageId: pointer,
+                  ...(counts && { unreadCount: counts.unread, mentionCount: counts.mention }),
+                }
+              : c,
+          ),
+        }
+      : prev,
+  );
 }
 
 /** Clear the unread and mention counts for a DM channel — they clear together,

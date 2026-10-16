@@ -140,6 +140,7 @@ export const shards = {
     "src/lib/savedDrafts.ts",
     "src/lib/reconcile.ts",
     "src/lib/safe-render.ts",
+    "src/lib/serverCapabilities.ts",
     "src/lib/store.ts",
     "src/lib/supportBundle.ts",
     "src/lib/themes.ts",

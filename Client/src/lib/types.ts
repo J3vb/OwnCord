@@ -206,6 +206,13 @@ export interface ReadyChannel {
    */
   readonly mention_count?: number;
   /**
+   * The caller's read pointer: the id of the last message they have read here
+   * (0 = nothing read). The NEW line goes on the first message above it.
+   * Absent from servers before the read pointer (and for voice channels): the
+   * client then keeps its count-based NEW line.
+   */
+  readonly last_read_message_id?: number;
+  /**
    * Whether the channel is labelled age-restricted. The server enforces it
    * (B5-7): none of its content reaches a caller without their own
    * acknowledgement. Absent from older servers, which is read as "not
@@ -361,6 +368,12 @@ export interface ReadyPayload {
     readonly message_deduplication?: boolean;
     readonly message_retry_window_seconds?: number;
     readonly message_retry_floor_ms?: number;
+    /**
+     * The server keeps a read pointer: `channel_focus` may skip marking read,
+     * `mark_read` may carry a `message_id`, and `mark_unread` and `read_state`
+     * exist (WP 3D-5). Absent means an older server.
+     */
+    readonly read_pointer?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];
@@ -810,6 +823,11 @@ export interface DmChannelPayload {
    * older servers, which shipped no DM mention state at all — treat as 0.
    */
   readonly mention_count?: number;
+  /**
+   * The caller's read pointer in this DM (see ReadyChannel). Only the ready and
+   * GET /dms entries carry it; dm_channel_open frames omit it.
+   */
+  readonly last_read_message_id?: number;
 }
 
 /** dm_channel_open carries the same shape as a ready-payload DM entry. */
@@ -936,6 +954,11 @@ export interface TypingStartPayload {
 
 export interface ChannelFocusPayload {
   readonly channel_id: number;
+  /**
+   * false = focus and subscribe without marking the channel read (only with
+   * the `read_pointer` capability). Absent means true, as for older clients.
+   */
+  readonly read?: boolean;
 }
 
 /**
@@ -945,6 +968,32 @@ export interface ChannelFocusPayload {
  */
 export interface MarkReadPayload {
   readonly channel_id: number;
+  /**
+   * Read up to this message (forward only, only with the `read_pointer`
+   * capability). Absent marks the channel read at its latest message.
+   */
+  readonly message_id?: number;
+}
+
+/**
+ * mark_unread — move the read pointer to just before `message_id`, so that
+ * message and everything after it is unread again (`read_pointer` capability).
+ */
+export interface MarkUnreadPayload {
+  readonly channel_id: number;
+  readonly message_id: number;
+}
+
+/**
+ * read_state — the caller's read pointer for one channel or DM after a
+ * `mark_read` or `mark_unread` was accepted. Targeted, unsequenced and never
+ * replayed; replaces the pointer and both counts outright.
+ */
+export interface ReadStatePayload {
+  readonly channel_id: number;
+  readonly last_read_message_id: number;
+  readonly unread_count: number;
+  readonly mention_count: number;
 }
 
 export interface PresenceUpdatePayload {
@@ -1039,6 +1088,7 @@ export type ServerMessage =
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
   | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
   | (WsEnvelope<MentionCountPayload> & { readonly type: "mention_count" })
+  | (WsEnvelope<ReadStatePayload> & { readonly type: "read_state" })
   | (WsEnvelope<ChannelActivityPayload> & { readonly type: "channel_activity" })
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
@@ -1066,6 +1116,7 @@ export type ClientMessage =
   | (WsEnvelope<TypingStartPayload> & { readonly type: "typing_start" })
   | (WsEnvelope<ChannelFocusPayload> & { readonly type: "channel_focus" })
   | (WsEnvelope<MarkReadPayload> & { readonly type: "mark_read" })
+  | (WsEnvelope<MarkUnreadPayload> & { readonly type: "mark_unread" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
