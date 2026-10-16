@@ -9,7 +9,7 @@ const log = createLogger("message-menu");
 
 /** Run `use` with the loaded menu module; a failed load is logged. */
 export function withMessageMenu(use: (menu: typeof import("./message-menu")) => void): void {
-  import("./message-menu").then(use, (err: unknown) =>
-    log.warn("Message menu failed to load", { error: String(err) }),
-  );
+  import("./message-menu")
+    .then(use)
+    .catch((err: unknown) => log.warn("Message menu failed to open", { error: String(err) }));
 }

@@ -115,7 +115,6 @@ describe("messageActionGates", () => {
     ["deleted", { deleted: true }],
     ["pending", { status: "pending" as const }],
     ["failed", { status: "failed" as const }],
-    ["system", { user: { id: 0, username: "System", avatar: null } }],
   ])("a %s row offers no actions", (_name, patch) => {
     signInAs("moderator");
     const msg = makeMessage(patch);

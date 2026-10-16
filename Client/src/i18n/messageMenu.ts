@@ -16,5 +16,7 @@ export const messageMenuText = defineCatalog("messageMenu", {
   delete: "Delete Message",
   report: "Report Message",
   copyId: "Copy Message ID",
+  quickReactions: "Quick reactions",
+  copied: "Copied",
   copyFailed: "Couldn't copy the text",
 });

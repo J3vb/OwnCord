@@ -65,7 +65,7 @@ export function connectionLockReason(
 /** Reply, copy link and the rest are unconditional on a sent row, so they have
  *  no gate; a row that is not a confirmed server message offers nothing at all. */
 export function isActionableMessage(msg: Message): boolean {
-  return !msg.deleted && msg.status === "sent" && msg.user.id !== 0;
+  return !msg.deleted && msg.status === "sent";
 }
 
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {

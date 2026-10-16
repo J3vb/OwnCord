@@ -406,7 +406,14 @@ describe("message right-click menu", () => {
     ["deleted", () => seed([mine({ deleted: true })])],
     ["gone", () => seed([])],
   ])("message %s while open: Delete, Edit, Reply and Pin do nothing", async (_name, change) => {
-    for (const id of ["msg-menu-delete", "msg-menu-edit", "msg-menu-reply", "msg-menu-pin"]) {
+    for (const id of [
+      "msg-menu-delete",
+      "msg-menu-edit",
+      "msg-menu-reply",
+      "msg-menu-pin",
+      "msg-menu-copy-text",
+      "msg-menu-copy-message-link",
+    ]) {
       signInAs("moderator");
       mount([mine()]);
       await open(text());
@@ -448,6 +455,71 @@ describe("message right-click menu", () => {
     expect(menu()).toBeNull();
     expect(document.activeElement).toBe(fresh);
     expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("row rebuilt while open: Open Link clicks the live anchor", async () => {
+    mount([makeMessage({ content: "see <https://example.com/page> now" })]);
+    const old = text().querySelector<HTMLAnchorElement>('a[href^="http"]')!;
+    const seen: EventTarget[] = [];
+    const spy = (e: Event): void => {
+      e.preventDefault();
+      seen.push(e.target!);
+    };
+    document.addEventListener("click", spy);
+    try {
+      await open(old);
+      seed([
+        makeMessage({
+          content: "see <https://example.com/page> now!",
+          editedAt: "2024-01-15T12:05:00Z",
+        }),
+      ]);
+      await vi.waitFor(() => expect(old.isConnected).toBe(false));
+      const fresh = text().querySelector<HTMLAnchorElement>('a[href^="http"]')!;
+      item("msg-menu-open-link")!.click();
+      expect(seen.filter((t) => t instanceof HTMLAnchorElement)).toEqual([fresh]);
+    } finally {
+      document.removeEventListener("click", spy);
+    }
+  });
+
+  it("pinned by someone else while open: Pin does nothing instead of unpinning", async () => {
+    signInAs("moderator");
+    mount([makeMessage({ pinned: false })]);
+    await open(text());
+    expect(names()).toContain("Pin Message");
+    seed([makeMessage({ pinned: true })]);
+    item("msg-menu-pin")!.click();
+    expect(opts.onPinClick).not.toHaveBeenCalled();
+  });
+
+  it("Copy Text and Copy show a success toast", async () => {
+    const { toasts } = await import("@lib/toast").then((m) => ({ toasts: m }));
+    const spy = vi.spyOn(toasts, "showToast");
+    mount([makeMessage({ content: "hello" })]);
+    await open(text());
+    item("msg-menu-copy-text")!.click();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("Copied", "success"));
+    spy.mockRestore();
+  });
+
+  it("the quick reactions are a named group; Left/Right move inside it", async () => {
+    mount([makeMessage()]);
+    await open(text());
+    const group = menu()!.querySelector('[role="group"]')!;
+    expect(group.getAttribute("aria-label")).toBe("Quick reactions");
+    const [a, b, c] = [...group.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await vi.waitFor(() => expect(document.activeElement).toBe(a));
+    const key = (el: HTMLElement, k: string): void => {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+    };
+    key(a!, "ArrowRight");
+    expect(document.activeElement).toBe(b);
+    key(b!, "ArrowRight");
+    key(c!, "ArrowRight");
+    expect(document.activeElement).toBe(c);
+    key(c!, "ArrowLeft");
+    expect(document.activeElement).toBe(b);
   });
 
   it("row rebuilt while open: an action still reaches the callback", async () => {
@@ -497,10 +569,27 @@ describe("message menu module", () => {
       invoker,
     });
     expect(invoker.getAttribute("aria-expanded")).toBe("true");
+    // The menu took focus; a programmatic close must hand it back.
+    await vi.waitFor(() => expect(document.activeElement).not.toBe(invoker));
     closeMessageMenu();
     expect(invoker.getAttribute("aria-expanded")).toBe("false");
     expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(invoker);
+
+    // Same for the owning list's signal aborting.
+    openMessageMenu({
+      msg: OTHER_MSG(),
+      opts: makeOpts(),
+      x: 1,
+      y: 1,
+      target: null,
+      signal: ac.signal,
+      invoker,
+    });
+    await vi.waitFor(() => expect(document.activeElement).not.toBe(invoker));
     ac.abort();
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(invoker);
     invoker.remove();
   });
 });

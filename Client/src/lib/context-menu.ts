@@ -46,6 +46,8 @@ export interface ContextMenuOptions {
   /** Where focus goes on close when the control that had it before the menu
    *  opened has left the page (a row rebuilt by scrolling). */
   readonly restoreFocusTo?: () => HTMLElement | null;
+  /** The accessible name of the `group` row. */
+  readonly groupLabel?: string;
   /** The menu's accessible name. */
   readonly ariaLabel?: string;
   /** Runs once when the menu goes away, by any path. */
@@ -198,12 +200,18 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
         }
       }
 
-      const items = menuItems(owner);
+      // Left/Right move along a side-by-side row (the quick reactions); Up/Down
+      // still walk the whole menu.
+      const row = target.closest<HTMLElement>('[role="group"]');
+      const sideways = e.key === "ArrowLeft" || e.key === "ArrowRight";
+      const items = menuItems(owner).filter((el) => !sideways || row?.contains(el) === true);
       const from = items.indexOf(target);
       if (from === -1) return;
       let to: number | null = null;
       if (e.key === "ArrowDown") to = Math.min(from + 1, items.length - 1);
       else if (e.key === "ArrowUp") to = Math.max(from - 1, 0);
+      else if (e.key === "ArrowRight" && row !== null) to = Math.min(from + 1, items.length - 1);
+      else if (e.key === "ArrowLeft" && row !== null) to = Math.max(from - 1, 0);
       else if (e.key === "Home") to = 0;
       else if (e.key === "End") to = items.length - 1;
       if (to === null) return;
@@ -332,6 +340,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     if (group !== undefined && index >= group.start && index < group.start + group.count) {
       if (groupRow === null) {
         groupRow = createElement("div", { class: "context-menu-group", role: "group" });
+        if (opts.groupLabel !== undefined) groupRow.setAttribute("aria-label", opts.groupLabel);
         menu.appendChild(groupRow);
       }
       groupRow.appendChild(el);

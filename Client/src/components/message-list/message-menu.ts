@@ -71,9 +71,10 @@ function rowOf(id: number): HTMLElement | null {
 }
 
 function copyText(text: string): void {
-  navigator.clipboard.writeText(text).catch(() => {
-    showToast(messageMenuText("copyFailed"), "error");
-  });
+  navigator.clipboard.writeText(text).then(
+    () => showToast(messageMenuText("copied"), "success"),
+    () => showToast(messageMenuText("copyFailed"), "error"),
+  );
 }
 
 /** The selected text, when the selection starts and ends inside `row`. */
@@ -123,27 +124,28 @@ function buildItems(
       {
         label: imageMenuText("copyLink"),
         testId: "msg-menu-copy-link",
-        onClick: () => {
+        onClick: act(() => {
           navigator.clipboard.writeText(href).then(
             () => showToast(imageMenuText("linkCopied"), "success"),
             () => showToast(imageMenuText("linkCopyFailed"), "error"),
           );
-        },
+        }),
       },
       {
         label: imageMenuText("openLink"),
         testId: "msg-menu-open-link",
         // Clicking the anchor itself, so the masked-link warning and the
-        // external-link handler decide, as for a plain click. A row rebuilt
-        // while the menu was open holds a fresh copy of the same link.
-        onClick: () => {
+        // external-link handler decide, as for a plain click. The row is looked
+        // up now, not at open: virtual scrolling may have replaced it, and its
+        // fresh copy of the same link is the one that is on the page.
+        onClick: act(() => {
           const el = anchor.isConnected
             ? anchor
-            : [...(row?.querySelectorAll<HTMLAnchorElement>(".msg-text a") ?? [])].find(
+            : [...(rowOf(msg.id)?.querySelectorAll<HTMLAnchorElement>(".msg-text a") ?? [])].find(
                 (a) => a.getAttribute("href") === href,
               );
           el?.click();
-        },
+        }),
       },
       sep,
     );
@@ -194,7 +196,7 @@ function buildItems(
     items.push({
       label: messageMenuText("copy"),
       testId: "msg-menu-copy",
-      onClick: () => copyText(selected),
+      onClick: act(() => copyText(selected)),
     });
   }
   if (msg.content.trim() !== "") {
@@ -208,13 +210,18 @@ function buildItems(
     items.push({
       label: msg.pinned ? messageMenuText("unpin") : messageMenuText("pin"),
       testId: "msg-menu-pin",
-      onClick: act((m) => opts.onPinClick(m.id, m.channelId, m.pinned)),
+      onClick: act((m) => {
+        // Pinned or unpinned by someone else since the label was drawn: sending
+        // now would do the opposite of what the row says.
+        if (m.pinned !== msg.pinned) return;
+        opts.onPinClick(m.id, m.channelId, m.pinned);
+      }),
     });
   }
   items.push({
     label: messagingText("action.copyLink"),
     testId: "msg-menu-copy-message-link",
-    onClick: () => copyMessageLink(msg),
+    onClick: act(() => copyMessageLink(msg)),
   });
 
   // -- Danger -----------------------------------------------------------------
@@ -247,7 +254,7 @@ function buildItems(
     items.push(sep, {
       label: messageMenuText("copyId"),
       testId: "msg-menu-copy-id",
-      onClick: () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
+      onClick: act(() => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed")),
     });
   }
   return { items, group: group.count > 0 ? group : null };
@@ -274,7 +281,8 @@ export function openMessageMenuAt(at: MessageMenuAt): void {
   const row = target?.closest<HTMLElement>('.message[data-testid^="message-"]');
   const id = Number(row?.dataset["testid"]?.slice("message-".length));
   const msg = findMessage(at.opts.channelId, id);
-  if (msg === undefined || !isActionableMessage(msg)) return;
+  // System rows (user 0) are drawn by another renderer and offer nothing.
+  if (msg === undefined || msg.user.id === 0 || !isActionableMessage(msg)) return;
   openMessageMenu({ ...at, msg, target });
 }
 
@@ -305,6 +313,12 @@ export function openMessageMenu(req: MessageMenuRequest): void {
   owner.addCleanup(() => {
     invoker?.setAttribute("aria-expanded", "false");
     if (menuOwner === owner) menuOwner = null;
+    // A programmatic close (another menu, the list's signal) has no Escape to
+    // restore focus: give it back unless something else already took it.
+    const active = document.activeElement;
+    if (invoker?.isConnected === true && (active === null || active === document.body)) {
+      invoker.focus();
+    }
   });
 
   const { items, group } = buildItems(req, row);
@@ -316,6 +330,7 @@ export function openMessageMenu(req: MessageMenuRequest): void {
     signal: owner.signal,
     className: "message-context-menu",
     ariaLabel: messageMenuText("label"),
+    groupLabel: messageMenuText("quickReactions"),
     // Virtual scrolling may replace the control that held focus: return to the
     // invoker, else to the rebuilt row's first control.
     restoreFocusTo: () =>
