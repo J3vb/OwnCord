@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import {
   findVersion,
   parseChangelog,
@@ -35,6 +35,18 @@ const SAMPLE = [
   "- First release",
 ].join("\n");
 
+/** Walk up from this file to the nearest CHANGELOG.md: works in the repo and in Stryker's sandbox. */
+function findChangelog(): string {
+  let dir = import.meta.dirname;
+  for (;;) {
+    const candidate = resolve(dir, "CHANGELOG.md");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error(`CHANGELOG.md not found above ${import.meta.dirname}`);
+    dir = parent;
+  }
+}
+
 describe("parseChangelog", () => {
   it("keeps released sections only, newest first, without the leading v", () => {
     const versions = parseChangelog(SAMPLE);
@@ -52,7 +64,7 @@ describe("parseChangelog", () => {
   });
 
   it("parses the repository's own CHANGELOG.md, with notes for this build's version", () => {
-    const md = readFileSync(resolve(import.meta.dirname, "../../../CHANGELOG.md"), "utf8");
+    const md = readFileSync(findChangelog(), "utf8");
     const pkg = JSON.parse(
       readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"),
     ) as { version: string };
