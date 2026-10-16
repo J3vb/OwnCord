@@ -83,6 +83,7 @@ type Store interface {
 	// remaining attempts (R3).
 	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
 	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
 	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)

@@ -223,3 +223,14 @@ type SocketAuthenticator interface {
 	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
 	TouchSession(ctx context.Context, tokenHash string) error
 }
+
+// ChannelPrivacy is the channel-level private flag (3D-6) the hub's channel
+// frames carry. service.ChannelPrivacyService satisfies it; a nil one means
+// nothing is private. The service owns the reads and the permission math.
+type ChannelPrivacy interface {
+	// Snapshot is one default-role read plus one bulk override read, for the
+	// ready payload and the timeout refresh.
+	Snapshot(ctx context.Context) (service.ChannelPrivacySnapshot, error)
+	// ChannelIsPrivate answers for a single-channel frame.
+	ChannelIsPrivate(ctx context.Context, channelID int64) (bool, error)
+}

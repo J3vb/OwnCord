@@ -63,6 +63,8 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		Voice:    svc.Voice,
 		Presence: svc.Users,
 		Auth:     svc.Sessions,
+		// Channel-level private flag on channel frames (3D-6).
+		ChannelPrivacy: svc.ChannelPrivacy,
 		// nil pluginRegistry means plugins are disabled; the hub no-ops.
 		PluginRegistry: pluginRegistry,
 		LiveKit:        lk,

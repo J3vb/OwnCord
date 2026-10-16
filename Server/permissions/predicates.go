@@ -113,6 +113,21 @@ func CanViewChannel(s Subject) error {
 	return nil
 }
 
+// IsChannelPrivate is the channel-level lock verdict (3D-6): a channel is
+// private when the default role cannot read it. defaultRolePerms is the
+// default (is_default) role's base permissions and o the channel's override
+// for that role; only the role layer applies — a per-member override is
+// per-viewer, and the verdict is the same for every recipient. It is
+// Subject.Has, so an Administrator default role is never private and an
+// override's allow still beats its deny. An archived channel is judged on its
+// permissions alone: the lock describes who may read, not whether it is listed.
+func IsChannelPrivate(defaultRolePerms int64, o ChannelOverride) bool {
+	return !Subject{
+		RolePerms: defaultRolePerms,
+		Override:  ChannelOverride{Allow: o.Allow, Deny: o.Deny},
+	}.Has(ReadMessages)
+}
+
 // CanAdmitSession decides whether a live socket may attach to a channel's
 // stream (channel_focus, the post-Subscribe revalidation). It is
 // CanViewChannel by definition: a session sees exactly what the user sees.

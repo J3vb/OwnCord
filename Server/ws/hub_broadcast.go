@@ -143,13 +143,14 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()
 	ctx := context.Background()
+	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
 		fireBroadcastChannelCreateRaceHook(uid)
 		live := h.GetClient(uid)
 		if live == nil {
 			continue
 		}
-		live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
+		live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
 	}
 }
 
@@ -157,7 +158,8 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 // clients whose current role may READ ch. Same disclosure as
 // BroadcastChannelCreate, as one shared sequenced frame.
 func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
-	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelUpdate(ch), "channel_update")
+	ctx := context.Background()
+	h.broadcastChannelScoped(ctx, ch.ID, buildChannelUpdate(ch, h.channelIsPrivate(ctx, ch.ID, ch.Type)), "channel_update")
 }
 
 // BroadcastChannelDelete sends a channel_delete message to all connected clients.
