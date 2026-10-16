@@ -105,6 +105,11 @@ says exactly what the beta does and does not claim about who can read what.
   & Audio**. Voice itself is not affected on either platform: on Linux the
   native voice engine routes it. See
   [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
+- **A `.deb` install updates itself only where it can ask for a password.**
+  The in-app update runs a root helper through `pkexec`, so it needs `pkexec`
+  and a polkit agent. A bare window manager has none: the update then says
+  OwnCord could not get permission, and you install the new `.deb` by hand. An
+  RPM install always updates by hand.
 - **On Linux, some media needs extra distro packages.**
   - Video attachments and YouTube embeds that use H264/AAC play only with
     `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`.

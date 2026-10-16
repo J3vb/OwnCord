@@ -248,7 +248,8 @@ describe("downloadAndInstallUpdate", () => {
     const first = downloadAndInstallUpdate("https://first.example");
     await vi.dynamicImportSettled();
     expect(state).toHaveBeenLastCalledWith({ status: "restarting" });
-    expect(unlisten).toHaveBeenCalledTimes(1);
+    // Both the progress and the installing listener are detached.
+    expect(unlisten).toHaveBeenCalledTimes(2);
     expect(downloadAndInstallUpdate("https://second.example")).toBe(first);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(relaunch).toHaveBeenCalledTimes(1);
@@ -267,9 +268,81 @@ describe("downloadAndInstallUpdate", () => {
 
     await downloadAndInstallUpdate("https://s.example");
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(listen).toHaveBeenCalledTimes(2);
-    expect(unlisten).toHaveBeenCalledTimes(2);
+    // Two listeners per attempt (progress, installing), every one detached.
+    expect(listen).toHaveBeenCalledTimes(4);
+    expect(unlisten).toHaveBeenCalledTimes(4);
     expect(relaunch).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("update-installing moves the state to installing", async () => {
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+    let finish!: () => void;
+    invoke.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const installation = downloadAndInstallUpdate("https://s.example");
+    await vi.dynamicImportSettled();
+
+    const installing = listen.mock.calls.find((call) => call[0] === "update-installing");
+    expect(installing).toBeDefined();
+    (installing?.[1] as () => void)();
+    expect(state).toHaveBeenLastCalledWith({ status: "installing" });
+
+    finish();
+    await installation;
+    // Both listeners are detached once the install returns.
+    expect(unlisten).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it("a cancelled prompt ends failed with reason cancelled and allows a retry", async () => {
+    invoke.mockRejectedValueOnce("update cancelled");
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toBe("update cancelled");
+    expect(state).toHaveBeenLastCalledWith({
+      status: "failed",
+      restartRequired: false,
+      reason: "cancelled",
+    });
+    expect(relaunch).not.toHaveBeenCalled();
+
+    await downloadAndInstallUpdate("https://s.example");
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(relaunch).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("not authorized ends failed with reason not-authorized", async () => {
+    invoke.mockRejectedValueOnce("update not authorized");
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toBe(
+      "update not authorized",
+    );
+    expect(state).toHaveBeenLastCalledWith({
+      status: "failed",
+      restartRequired: false,
+      reason: "not-authorized",
+    });
+    unsubscribe();
+  });
+
+  it("any other install error carries no reason", async () => {
+    invoke.mockRejectedValueOnce("download/install failed: package manager failed");
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toBe(
+      "download/install failed: package manager failed",
+    );
+    expect(state).toHaveBeenLastCalledWith({ status: "failed", restartRequired: false });
     unsubscribe();
   });
 

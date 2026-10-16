@@ -82,6 +82,13 @@ function buildProgressBar(p: DownloadProgress): HTMLDivElement | null {
   return row;
 }
 
+function failedText(state: Extract<UpdateInstallState, { status: "failed" }>): string {
+  if (state.restartRequired) return connectText("update.installedRestart");
+  if (state.reason === "cancelled") return connectText("update.cancelled");
+  if (state.reason === "not-authorized") return connectText("update.notAuthorized");
+  return connectText("update.failed");
+}
+
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
   const { serverUrl, keepChecking = false } = options;
   let container: Element | null = null;
@@ -136,7 +143,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     if (shownKey === key) return;
     removeBanner();
     if (outcome.kind === "available") showBanner(outcome.version);
-    else showManualUpgradeBanner();
+    else showManualUpgradeBanner(outcome.kind === "manual-upgrade" && outcome.unconfirmed === true);
   }
 
   /**
@@ -144,13 +151,19 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
    * serves no updater artifact for it, so the check can never report an
    * available update however far behind the client is. Answering that with
    * silence would be a claim — "you are up to date" — the user cannot check.
+   *
+   * `unconfirmed` is the .deb install that can update itself but was given no
+   * offer (an older server, one withholding the release, a release without a
+   * .deb). It may well be current, so it is told only that the server offered
+   * nothing, not that the install cannot update itself.
    */
-  function showManualUpgradeBanner(): void {
+  function showManualUpgradeBanner(unconfirmed: boolean): void {
     if (container === null || banner !== null) return;
 
+    const text = connectText(unconfirmed ? "update.unconfirmed" : "update.unavailable");
     banner = createElement("div", { class: "update-banner" });
     shownKey = MANUAL_KEY;
-    buildFrame(banner, "triangle-alert", connectText("update.unavailable"));
+    buildFrame(banner, "triangle-alert", text);
 
     const dismissBtn = createElement(
       "button",
@@ -164,7 +177,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     banner.appendChild(dismissBtn);
     container.prepend(banner);
-    announce(connectText("update.unavailable"));
+    announce(text);
   }
 
   function showBanner(version: string): void {
@@ -237,11 +250,11 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
         ? state.progress === null
           ? connectText("update.downloading")
           : formatDownloadProgress(state.progress)
-        : state.status === "restarting"
-          ? connectText("update.installedRestarting")
-          : state.restartRequired
-            ? connectText("update.installedRestart")
-            : connectText("update.failed");
+        : state.status === "installing"
+          ? connectText("update.installing")
+          : state.status === "restarting"
+            ? connectText("update.installedRestarting")
+            : failedText(state);
     const failed = state.status === "failed" && !state.restartRequired;
     const body = buildFrame(banner, failed ? "triangle-alert" : "download", text);
     if (state.status === "downloading" && state.progress !== null) {
@@ -254,12 +267,12 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     // live region keeps the phase and updates only when it changes.
     if (state.status === "downloading") {
       announce(connectText("update.downloading"));
+    } else if (state.status === "installing") {
+      announce(text);
     } else if (state.status === "restarting") {
       announce(connectText("update.installedRestarting"));
-    } else if (state.restartRequired) {
-      announce(connectText("update.installedRestart"));
     } else {
-      announce(connectText("update.failed"));
+      announce(failedText(state));
     }
 
     if (state.status === "failed") {
