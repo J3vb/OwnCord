@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
   changeRefusal: null as string | null,
+  micTest: 0,
+  micTestRefusal: null as string | null,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -33,6 +35,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "native_voice_screen_sources") return Promise.resolve(state.screen.sources);
     if (cmd === "native_voice_start_screen") return Promise.resolve(state.screen.started);
     if (cmd === "native_voice_publish_screen") return Promise.resolve(state.screen.sid);
+    if (cmd === "native_voice_start_mic_test") {
+      const refusal = state.micTestRefusal;
+      state.micTestRefusal = null;
+      return refusal === null ? Promise.resolve(state.micTest) : Promise.reject(refusal);
+    }
     if (cmd === "native_voice_change_screen") {
       const refusal = state.changeRefusal;
       state.changeRefusal = null;
@@ -79,6 +86,12 @@ describeNativeVoiceSuite(async () => {
       refusesScreenChange(reason) {
         state.changeRefusal = reason;
       },
+      startsMicTestAs(test) {
+        state.micTest = test;
+      },
+      refusesMicTest(reason) {
+        state.micTestRefusal = reason;
+      },
       commands: () => state.commands,
       async emits(envelope) {
         // Let the facade's service load and a registering subscription
@@ -86,6 +99,12 @@ describeNativeVoiceSuite(async () => {
         await import("../../../src/platform/desktop/nativeVoiceService");
         for (let i = 0; i < 4; i++) await Promise.resolve();
         for (const handler of state.handlers.get("native-voice") ?? [])
+          handler({ payload: envelope });
+      },
+      async emitsMicTest(envelope) {
+        await import("../../../src/platform/desktop/nativeVoiceService");
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+        for (const handler of state.handlers.get("native-voice-mic-test") ?? [])
           handler({ payload: envelope });
       },
     },

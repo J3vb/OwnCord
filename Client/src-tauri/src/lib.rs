@@ -286,6 +286,12 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_stop_camera_preview,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_mic_test,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_update_mic_test,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_mic_test,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_screen_sources,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_start_screen,

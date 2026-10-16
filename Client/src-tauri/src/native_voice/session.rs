@@ -27,7 +27,7 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture, GateSink, LevelSink};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
@@ -357,14 +357,14 @@ pub struct AudioOptions {
 /// callback can still hold an older generation after a second rebuild, so
 /// drop only the entries every follower has let go of, here on the caller's
 /// thread.
-fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+pub(super) fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
     retired.retain(|r| Arc::strong_count(r) > 1);
     retired.extend(old);
 }
 
 /// What a request to change the audio processing asks of a session.
 #[derive(Debug, PartialEq, Eq)]
-enum ProcessingChange {
+pub(super) enum ProcessingChange {
     /// Audio is not enabled yet: only remember the options.
     Remember,
     /// The options are what the running processing already has.
@@ -378,7 +378,7 @@ enum ProcessingChange {
     Rebuild,
 }
 
-fn processing_change(
+pub(super) fn processing_change(
     enabled: bool,
     current: Option<AudioOptions>,
     next: AudioOptions,
@@ -681,7 +681,9 @@ const CAPTURE_REPORT_QUEUE: usize = 64;
 /// an emit (it serializes and takes the webviews' lock): the sinks only
 /// queue, dropping a report when the queue is full, and the task emits, in
 /// order. It ends when the sinks are dropped with the capture.
-fn capture_report_sinks(on_event: EventSink) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
+pub(super) fn capture_report_sinks(
+    on_event: EventSink,
+) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
     let (reports, mut queue) = tokio::sync::mpsc::channel(CAPTURE_REPORT_QUEUE);
     let emitter = tokio::spawn(async move {
         while let Some(event) = queue.recv().await {
@@ -908,7 +910,7 @@ impl NativeSession {
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(source.clone())?;
+            self.capture.start(Sink::Track(source.clone()))?;
             self.mic_source = Some(source.clone());
             let published = self
                 .publish_audio(RtcAudioSource::Native(source), bitrate)
@@ -925,7 +927,7 @@ impl NativeSession {
         if enabled {
             // The interop example publishes its own source and captures nothing.
             if let Some(source) = &self.mic_source {
-                self.capture.start(source.clone())?;
+                self.capture.start(Sink::Track(source.clone()))?;
             }
             track.unmute();
         } else {
