@@ -37,9 +37,14 @@ func searchExtraFilters(q SearchQuery) (sql string, args []any, err error) {
 	}
 	for _, uid := range q.MentionIDs {
 		// A reply ping is a notification, not a mention in the text, and
-		// @everyone lives in messages.mentions_everyone, never here.
+		// @everyone lives in messages.mentions_everyone, never here. A message
+		// that pings and also names the user is stored as one reply_ping row,
+		// so that row still counts while the current text names the user
+		// (approximate, like has:link).
 		sb.WriteString(` AND EXISTS (SELECT 1 FROM message_mentions mm
-			WHERE mm.message_id = m.id AND mm.reply_ping = 0 AND mm.mentioned_user_id = ?)`)
+			JOIN users mu ON mu.id = mm.mentioned_user_id
+			WHERE mm.message_id = m.id AND mm.mentioned_user_id = ?
+			AND (mm.reply_ping = 0 OR instr(lower(m.content), '@' || lower(mu.username)) > 0))`)
 		args = append(args, uid)
 	}
 	if q.Pinned != nil {

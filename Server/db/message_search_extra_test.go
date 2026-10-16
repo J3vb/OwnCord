@@ -200,15 +200,19 @@ func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinged, err := database.CreateMessageWithMentions(ctx, ch, author, "hello again", nil, []int64{bob}, bob, false)
+	// A pure reply ping: bob is not named in the text.
+	pingOnly, err := database.CreateMessageWithMentions(ctx, ch, author, "hello again", nil, nil, bob, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pings bob and names him: stored as one reply_ping row, still a mention.
+	pinged, err := database.CreateMessageWithMentions(ctx, ch, author, "hey @EB look", nil, []int64{bob}, bob, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := db.SearchQuery{ChannelIDs: []int64{ch}, MentionIDs: []int64{bob}}
-	if got := searchIDs(t, database, q); !slices.Equal(got, []int64{msg.ID}) {
-		// pinged names bob in its text too, but that one row is flagged
-		// reply_ping = 1 (PK is message_id, user_id), so it does not match.
-		t.Fatalf("before edit = %v, want [%d]", got, msg.ID)
+	if got := searchIDs(t, database, q); !slices.Equal(got, []int64{msg.ID, pinged.ID}) {
+		t.Fatalf("before edit = %v, want [%d %d] (not the ping-only %d)", got, msg.ID, pinged.ID, pingOnly.ID)
 	}
 
 	// The edit rewrites the content and drops the text mention on both.

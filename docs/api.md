@@ -1384,9 +1384,9 @@ the end of `q`.
   `poll` are not supported and are a `400`.
 - `mentions:` matches `@user` mentions in the text. A reply ping (the reply
   notification to the replied-to author) and `@everyone` / `@here` do not count,
-  and an edit that removes the mention stops the match. A message that both
-  names a user and replies to them is stored as a reply ping, so it does not
-  match `mentions:` for that user. An unknown user returns an empty `200`.
+  and an edit that removes the mention stops the match. A reply that pings a
+  user and also names them in the text still matches, judged from the current
+  text (approximate: `@bobby` also counts for `bob`).
 - `pinned:` takes `true` or `false`; `pinned:true pinned:false` returns nothing.
 - An unknown user or channel name returns an empty `200`. `in:` only matches
   channels the caller can read, so a private, unacknowledged NSFW or someone
