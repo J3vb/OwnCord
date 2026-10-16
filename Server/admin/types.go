@@ -34,6 +34,9 @@ type HubBroadcaster interface {
 	BroadcastChannelUpdate(ch *db.Channel)
 	BroadcastChannelDelete(channelID int64)
 	BroadcastMemberBan(userID int64)
+	// BroadcastChatBulkDeleted tells a channel's subscribers that messageIDs
+	// were deleted at once (one committed batch of a ban's message purge).
+	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 	BroadcastMemberUpdate(userID int64, roleName string)
 	// RefreshChannelVisibility sends targeted channel_create/channel_delete
 	// messages after a channel permission override change so each connected

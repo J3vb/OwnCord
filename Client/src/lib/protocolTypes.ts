@@ -130,3 +130,13 @@ export const ServerRestartReason = {
 } as const;
 
 export type ServerRestartReasonValue = (typeof ServerRestartReason)[keyof typeof ServerRestartReason];
+
+// ---------------------------------------------------------------------------
+// chat_message.kind — the closed set of values
+// ---------------------------------------------------------------------------
+
+export const ChatMessageKind = {
+  CALL: "call", // a call log row in a DM, written and updated only by the server
+} as const;
+
+export type ChatMessageKindValue = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];

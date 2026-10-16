@@ -35,9 +35,12 @@ export default defineConfig({
   // time. Abort after 20 failures instead so the job reports a
   // usable red quickly. 0 = unlimited (local runs see every failure).
   maxFailures: process.env.CI ? 20 : 0,
-  // Self-terminate before the workflow's timeout-minutes (25) SIGKILLs the
-  // runner, so the HTML/JUnit report still gets written and uploaded.
-  globalTimeout: process.env.CI ? 20 * 60 * 1000 : 0,
+  // Self-terminate before the workflow's timeout-minutes (35) SIGKILLs the
+  // runner, so the HTML/JUnit report still gets written and uploaded. The full
+  // dev-server suite (782 tests on 2 workers) passed 20 minutes on 2026-10-16
+  // with nothing failing; the smoke set and the built-bundle parity run take
+  // far less.
+  globalTimeout: process.env.CI ? 30 * 60 * 1000 : 0,
   reporter: process.env.CI
     ? [
         ["html", { open: "never", outputFolder: "playwright-report/mock" }],

@@ -1137,6 +1137,16 @@ username, or an `@everyone` from a user without the bit, carries no mention
 semantics and stays plain text. The same two fields appear on pinned-message
 responses and on the WebSocket `chat_message`/`chat_edited` payloads.
 
+A DM can also hold a call log row: a message the server writes for a call in
+the DM's voice channel. It carries two more fields, both omitted for an ordinary
+message: `"kind": "call"` and `"call": {"started_at", "ended_at", "participants"}`.
+`started_at` and `ended_at` use the message `timestamp` format (`ended_at` is
+`null` while the call is live), and `participants` is the list of user IDs who
+were in the call at any point. `content` is fallback text for clients that do not
+know the field. A call row is read-only: editing, deleting, pinning, reacting to
+or replying to it is refused, and search does not return it. A client treats an
+unknown `kind` as an ordinary message and shows `content`.
+
 #### Pagination
 
 Use cursor-based pagination by passing the `id` of the last message as the `before` parameter:
@@ -3703,22 +3713,51 @@ audit row.
   "role_id": 3,
   "banned": true,
   "ban_reason": "spam",
-  "ban_duration_hours": 24
+  "ban_duration_hours": 24,
+  "delete_message_seconds": 86400
 }
 ```
 
 All fields optional. `ban_duration_hours` makes the ban temporary (1–8760;
 omitted or `0` = permanent) and is only meaningful with `banned: true`.
 
+`delete_message_seconds` (integer, 0–604800) also deletes the target's messages
+posted in the last that many seconds. It is accepted only with `banned: true`
+and needs `MANAGE_MESSAGES` as well as `BAN_MEMBERS`. Messages are deleted in
+every non-DM, non-archived channel where the actor holds `READ_MESSAGES` and
+`MANAGE_MESSAGES`, up to 10,000 messages or 20 seconds per request. The checks
+run before the ban is written, so a refused request bans nobody. Connected
+clients receive a `chat_bulk_deleted` event per batch. Omitting the field, or
+sending `0`, deletes nothing.
+
+The purge may stop early. When the response has `"complete": false`, send the
+same request again to continue. A retry must resend `ban_reason` and
+`ban_duration_hours` unchanged: if the target is already banned and the ban
+fields match, the ban is not written a second time (no new ledger row, no
+refreshed reason or expiry) and only the deletion continues. For a temporary
+ban, the same `ban_duration_hours` retried within an hour counts as unchanged.
+Each request measures the window back from its own arrival time, so a message
+that crosses the window's edge between two requests stays.
+
 #### Response 200 OK -- the updated user (same shape as the list entry).
+
+When `delete_message_seconds` was above 0, the object also carries:
+
+```json
+{ "purge": { "deleted": 42, "complete": true } }
+```
+
+`deleted` counts the messages deleted by this request. Without the field the
+response has no `purge` member.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                        |
-| ------ | ------------- | -------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
-| 403    | `FORBIDDEN`   | Missing bit, or the actor does not outrank the target                                        |
-| 404    | `NOT_FOUND`   | User not found                                                                               |
+| Status | Code           | Cause                                                                                                                                                                                               |
+| ------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Invalid id/body, `ban_duration_hours` or `delete_message_seconds` out of range or not an integer, `delete_message_seconds` above 0 without `banned: true`, or attempting to modify your own account |
+| 403    | `FORBIDDEN`    | Missing bit (including `MANAGE_MESSAGES` for `delete_message_seconds`), or the actor does not outrank the target                                                                                    |
+| 404    | `NOT_FOUND`    | User not found                                                                                                                                                                                      |
+| 429    | `RATE_LIMITED` | `delete_message_seconds` used again too soon (one per actor every 2 seconds); nothing was changed                                                                                                   |
 
 ---
 
@@ -5233,12 +5272,25 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact get 204. The `linux-x86_64-deb` and `linux-aarch64-deb` targets are served only with `?deb_install=pkexec` (see below). |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                                                                                                                  |
 
-#### Response 200 OK (update available)
+#### Query Parameters
+
+| Param         | Type   | Description                                                                                                                                                                                                                                                                                   |
+| ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deb_install` | string | Opt-in for the `linux-*-deb` targets. Exactly `pkexec` (case-sensitive) says the client can install a signed `.deb` through a privileged helper. Without it a `-deb` target always gets 204, so older `.deb` clients keep their "cannot update itself" notice. Ignored on every other target. |
+
+For an opted-in `-deb` client the server also answers **200 with the latest
+version** when the client is already current or newer, instead of 204. The
+Tauri plugin resolves the platform entry before it compares versions; the 200
+tells the client that the server can serve its package, so it can tell
+"up to date" from "this server cannot serve me". The protocol-epoch withhold
+and a release without a signed `.deb` still give 204.
+
+#### Response 200 OK (update available, or an opted-in `-deb` client)
 
 ```json
 {
@@ -5256,7 +5308,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date, no client build is published for `target`, or
+Client is already up-to-date (except an opted-in `-deb` client, see above), no client build is published for `target`, or
 the newest release speaks a **newer protocol epoch than this server** (read
 from the release's signed server-update manifest, `protocol_epoch`; a manifest
 that fails signature verification is withheld the same way). The server

@@ -130,6 +130,8 @@ function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageListOptio
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),
     onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
     onDeleteClick: vi.fn(),
     onReactionClick: vi.fn(),
     onPinClick: vi.fn(),
@@ -1117,20 +1119,21 @@ describe("renderers", () => {
 
       const ref = container.querySelector(".msg-reply-ref")!;
       expect(ref.querySelector(".rr-author")).toBeNull();
-      expect(ref.textContent).toBe("[message deleted]");
+      expect(ref.textContent).toBe("Original message was deleted");
       ac.abort();
     });
 
-    it("renders '[message deleted]' preview for deleted referenced message", () => {
+    it("says the original message was deleted, with no avatar or author, for a deleted loaded parent", () => {
       const original = makeMessage({ id: 1, content: "Original", deleted: true });
       const reply = makeMessage({ id: 2, replyTo: 1, content: "reply" });
       const ac = new AbortController();
       const el = renderMessage(reply, false, [original, reply], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const replyText = container.querySelector(".rr-text");
-      expect(replyText).not.toBeNull();
-      expect(replyText!.textContent).toBe("[message deleted]");
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.textContent).toBe("Original message was deleted");
+      expect(ref.classList.contains("msg-reply-ref--deleted")).toBe(true);
+      expect(ref.querySelector(".rr-avatar, .rr-author, .rr-text")).toBeNull();
 
       ac.abort();
     });

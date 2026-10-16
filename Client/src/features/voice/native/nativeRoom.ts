@@ -52,6 +52,7 @@ const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { CameraSwitchUnavailable } from "../cameraSwitch";
+import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
 import { noteChangedSource, pickChangeSource, pickScreenSource } from "./screenPicker";
 
@@ -167,7 +168,7 @@ export class NativeRemotePublication {
   setVideoQuality(quality: VideoQuality): void {
     this.setVideoView(this.isEnabled, (["low", "medium", "high"] as const)[quality] ?? "high");
   }
-  /** Maps the size to a quality by choice (livekit 0.9.3's
+  /** Maps the size to a quality by choice (livekit 0.9.5's
    *  update_video_dimensions exists but is not used): the smallest of the
    *  usual 180p/360p/720p layers that covers the tile. */
   setVideoDimensions({ width, height }: { width: number; height: number }): void {
@@ -253,7 +254,7 @@ interface NativeLocalPublication {
   readonly isMuted: boolean;
   /** The camera track is a `NativeCameraTrack`, the screen share a
    *  `NativeScreenTrack`; both stand in for `LocalVideoTrack`. */
-  readonly track: PublishableTrack | NativeCameraTrack | NativeScreenTrack;
+  readonly track: PublishableTrack | NativeCameraTrack | NativeScreenTrack | NativeScreenAudioTrack;
 }
 
 /** How long callers share one host stats reply: the poller, a watched tile
@@ -393,12 +394,15 @@ export class NativeRoom {
      *  is hidden. */
     createCameraTracks: (options: PublishOptions) => this.createCameraTracks(options),
     publishTrack: (
-      track: PublishableTrack | NativeCameraTrack | NativeScreenTrack,
+      track: PublishableTrack | NativeCameraTrack | NativeScreenTrack | NativeScreenAudioTrack,
       options: PublishOptions,
-    ) =>
-      (options.source ?? (track as PublishableTrack).source) === "screen_share"
+    ) => {
+      const source = options.source ?? (track as PublishableTrack).source;
+      if (source === "screen_share_audio") return this.publishScreenAudio(track);
+      return source === "screen_share"
         ? this.publishScreen(track, options)
-        : this.publishCamera(track as NativeCameraTrack, options),
+        : this.publishCamera(track as NativeCameraTrack, options);
+    },
     /** Takes the `mediaStreamTrack`, as the shared camera and screen-share
      *  paths pass it. `stopOnUnpublish` false (a codec republish) unpublishes
      *  only: the host capture and its preview keep running for the publish
@@ -409,6 +413,9 @@ export class NativeRoom {
         await this.unpublishCamera(stopOnUnpublish);
       if (pubs.get("screen_share")?.track.mediaStreamTrack === track)
         await this.unpublishScreen(stopOnUnpublish);
+      const audio = pubs.get("screen_share_audio");
+      if (audio?.track instanceof NativeScreenAudioTrack && audio.track.mediaStreamTrack === track)
+        await this.unpublishScreenAudio();
     },
   };
 
@@ -445,6 +452,8 @@ export class NativeRoom {
   private announcing = false;
   /** The live screen capture's track; null when not capturing. */
   private screen: NativeScreenTrack | null = null;
+  /** The share's audio track while one exists; it follows `screen`. */
+  private screenAudio: NativeScreenAudioTrack | null = null;
   /** The live camera capture's track; null when off. Its preview is the
    *  self-view and settings preview source. */
   private camera: NativeCameraTrack | null = null;
@@ -804,7 +813,7 @@ export class NativeRoom {
       await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
   }
 
-  private async createScreenTracks(): Promise<NativeScreenTrack[]> {
+  private async createScreenTracks(): Promise<Array<NativeScreenTrack | NativeScreenAudioTrack>> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
@@ -833,10 +842,18 @@ export class NativeRoom {
       (t) => this.changeScreenSource(session, t),
       () => this.readStats(),
     );
+    // The old share goes first (its stop also ends its audio), then both of
+    // the new one are in place.
     this.screen?.stop();
     this.screen = track;
+    if (pick.audio !== true) {
+      if (this.endedCapture === track.capture) track.end();
+      return [track];
+    }
+    const audioTrack = new NativeScreenAudioTrack((t) => this.stopScreenAudio(session, t));
+    this.screenAudio = audioTrack;
     if (this.endedCapture === track.capture) track.end();
-    return [track];
+    return [track, audioTrack];
   }
 
   /** Change source for the live share `track`: pick a source, then let the
@@ -873,9 +890,13 @@ export class NativeRoom {
   /** A stopped screen track: stop its host capture (a no-op for a capture a
    *  newer one replaced) and forget its publication. */
   private stopScreen(session: number, track: NativeScreenTrack): void {
-    if (this.screen === track) this.screen = null;
+    const current = this.screen === track;
+    if (current) this.screen = null;
     const pubs = this.localParticipant.trackPublications;
     if (pubs.get("screen_share")?.track === track) pubs.delete("screen_share");
+    // The host ends the audio with its capture: the track follows, but only
+    // when the live share stops, never a stale track's late stop.
+    if (current) this.screenAudio?.stop();
     if (this.sessionId !== session) return;
     desktop.nativeVoice
       .stopScreen(session, track.capture)
@@ -917,6 +938,68 @@ export class NativeRoom {
     return publication;
   }
 
+  /** Publish the share's audio on the running capture. A stop that lands
+   *  while the host publishes (the track is stopped, so its sid has no owner)
+   *  unpublishes the sid when it arrives, and nothing is stored. */
+  private async publishScreenAudio(track: PublishableTrack): Promise<NativeLocalPublication> {
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (this.sessionId === null) throw new Error("native room is not connected");
+    if (!(track instanceof NativeScreenAudioTrack))
+      // i18n-exempt: internal unsupported-path guard, never rendered
+      throw unsupported("publishing a browser screen audio track");
+    const session = this.sessionId;
+    const capture = this.screen?.capture;
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (capture === undefined) throw new Error("screen share is not running");
+    // A stale track must not replace a newer share's audio on the host.
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (track.isStopped || this.screenAudio !== track) throw new Error("screen audio is stale");
+    const sid = await desktop.nativeVoice.publishScreenAudio(session, capture);
+    if (this.sessionId !== session)
+      // i18n-exempt: internal native-room state guard, never rendered
+      throw new Error("native room disconnected during screen audio publish");
+    const publication: NativeLocalPublication = {
+      trackSid: sid,
+      source: "screen_share_audio",
+      kind: "audio",
+      isMuted: false,
+      track,
+    };
+    if (track.isStopped || this.screenAudio !== track) {
+      await desktop.nativeVoice
+        .unpublishScreenAudio(session, sid)
+        .catch((err: unknown) => log.warn("native unpublishScreenAudio failed", { sid, err }));
+      return publication;
+    }
+    this.localParticipant.trackPublications.set("screen_share_audio", publication);
+    return publication;
+  }
+
+  /** Unpublish the share's audio alone; the track is stopped next by the
+   *  shared code, and stop() is idempotent. */
+  private async unpublishScreenAudio(): Promise<void> {
+    const pubs = this.localParticipant.trackPublications;
+    const audio = pubs.get("screen_share_audio");
+    if (audio === undefined) return;
+    pubs.delete("screen_share_audio");
+    if (this.sessionId !== null)
+      await desktop.nativeVoice.unpublishScreenAudio(this.sessionId, audio.trackSid);
+  }
+
+  /** A stopped audio track: unpublish its sid and forget it. Fire and forget
+   *  (stop() is synchronous); a stale sid is a no-op in the host. */
+  private stopScreenAudio(session: number, track: NativeScreenAudioTrack): void {
+    if (this.screenAudio === track) this.screenAudio = null;
+    const pubs = this.localParticipant.trackPublications;
+    const pub = pubs.get("screen_share_audio");
+    if (pub?.track !== track) return;
+    pubs.delete("screen_share_audio");
+    if (this.sessionId !== session) return;
+    desktop.nativeVoice
+      .unpublishScreenAudio(session, pub.trackSid)
+      .catch((err) => log.warn("native unpublishScreenAudio failed", { sid: pub.trackSid, err }));
+  }
+
   /** Unpublishing a screen share stops its track, and with it the host
    *  capture (which unpublishes): the shared code stops the track next
    *  anyway, and stop() is idempotent. With `stopCapture` false (a codec
@@ -951,8 +1034,11 @@ export class NativeRoom {
     // The session close releases the host capture; this is the preview.
     this.screen?.stop();
     this.screen = null;
+    this.screenAudio?.stop();
+    this.screenAudio = null;
     this.endedCapture = null;
     this.localParticipant.trackPublications.delete("screen_share");
+    this.localParticipant.trackPublications.delete("screen_share_audio");
   }
 
   /** A subscribed remote video track: open its renderer and raise it the way

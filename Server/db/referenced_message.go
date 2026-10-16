@@ -55,7 +55,7 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 	}
 	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT m.id, m.deleted, m.content, u.id, u.username, u.avatar,
-		        EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+		        EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id), m.kind
 		 FROM messages m LEFT JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.id IN (%s)`, sb.String())
 	rows, err := d.reader.QueryContext(ctx, query, args...)
@@ -68,11 +68,12 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 			r        ReferencedMessage
 			deleted  int
 			hasAtt   int
+			kind     int64
 			uid      *int64
 			username *string
 			avatar   *string
 		)
-		if err := rows.Scan(&r.ID, &deleted, &r.Content, &uid, &username, &avatar, &hasAtt); err != nil {
+		if err := rows.Scan(&r.ID, &deleted, &r.Content, &uid, &username, &avatar, &hasAtt, &kind); err != nil {
 			return nil, fmt.Errorf("GetReferencedMessages scan: %w", err)
 		}
 		if deleted != 0 || uid == nil || username == nil {
@@ -83,6 +84,7 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 			r.Content = string(runes[:referencedSnippetRunes])
 		}
 		r.HasAttachments = hasAtt != 0
+		r.IsCall = kind == MessageKindCall
 		r.User = &UserPublic{ID: *uid, Username: *username, Avatar: avatar}
 		out[r.ID] = &r
 	}

@@ -16,7 +16,12 @@ import { createLogger } from "@lib/logger";
 import { ApiClientError } from "@lib/api";
 import { showToast } from "@lib/toast";
 import { findChannelById, navigateToChannel } from "@lib/channel-navigation";
-import { setAroundMessages, hasMessageLoaded, isChannelLoaded } from "@stores/messages.store";
+import {
+  setAroundMessages,
+  hasMessageLoaded,
+  isChannelLoaded,
+  getChannelMessages,
+} from "@stores/messages.store";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../../features/content-consent/nsfw";
 import type { ChannelController } from "./ChannelController";
 import { messagingText } from "../../i18n/messaging";
@@ -76,6 +81,14 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     // rather than blank the chat area on an unknown id.
     if (findChannelById(channelId) === null) {
       showToast(messagingText("jump.channelUnavailable"), "info");
+      return false;
+    }
+
+    // The store keeps a deleted message as a tombstone, so a jump to one is
+    // known to be pointless: the list does not draw it and the around fetch
+    // would 404.
+    if (getChannelMessages(channelId).some((m) => m.id === messageId && m.deleted)) {
+      showToast(messagingText("jump.gone"), "info");
       return false;
     }
 

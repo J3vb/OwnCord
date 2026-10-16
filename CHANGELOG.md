@@ -72,9 +72,17 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, plugging in or removing an audio device now updates the device lists in Settings → Voice & Video and switches over, in a call and outside one. A saved device that comes back is picked again.
 - Linux: switching camera in a call keeps your video tile instead of restarting it.
 - Linux: Settings → Voice & Video → Video Codec is now shown, with VP8, H.264 (when this build can encode it) and Auto.
+- On Linux, sharing your screen can now include the sound of your other apps: the share picker has a **Share audio** switch (on by default) when PulseAudio or pipewire-pulse is running. OwnCord's own sound is never shared. Viewers most likely hear it in mono for now.
 - Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
 - Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
+- Linux: paused video layers stay paused when you start or stop another camera or screen share.
+
+**Desktop UI (Linux)**
+
+- Linux: unread mentions now also show on the tray icon, as a red dot with the count as its title, so stock GNOME (with its tray extension) shows them as well as KDE's launcher count. The launcher count is now also sent to the desktop entry name AppImage integration tools usually create.
+- Linux: Away detection now works on KDE Plasma on Wayland and on wlroots desktops (Sway, Hyprland), where it used to fall back to activity inside the OwnCord window.
+- Servers can now offer updates to Linux clients installed from the `.deb`: a client that asks with `?deb_install=pkexec` on `GET /api/v1/client-update/linux-x86_64-deb` (or `linux-aarch64-deb`) gets the signed `.deb` of the latest release, and a 200 with the latest version when it is already current. Releases now publish a `.deb.sig` beside each `.deb`. Clients released so far do not ask, and still get 204, now even when GitHub cannot be reached (it used to be 502). The desktop app's `.deb` installer follows in a later change.
 
 **Profiles**
 
@@ -86,6 +94,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The search API understands `from:name`, `in:channel` (a channel name, in every channel with that name you can read), `before:`, `after:` and `during:` with `YYYY-MM-DD` dates, plus an optional `tz` time zone for the dates. A search can be filters only (`from:alex`) and then lists newest first, page by page. Unknown names give no results, and a channel you cannot read looks the same as one that does not exist.
 - The search API also understands `has:link`, `has:file`, `has:image`, `has:video` and `has:sound`, `mentions:name` (messages that mention that user in their text, not reply pings or @everyone) and `pinned:true` / `pinned:false`. Several `has:` or `mentions:` filters must all match.
+- Banning a member can now also delete their recent messages. `PATCH /api/v1/moderation/members/{id}` (and the admin panel's `PATCH /admin/api/users/{id}`) takes an optional `delete_message_seconds` (0 to 604800, only with `banned: true`) and deletes the member's messages from that long ago in the channels where you can read and manage messages. It needs the Manage Messages permission as well as Ban Members. Connected clients drop the messages right away, the response gains `purge` with the count and whether it finished, and a very large purge stops at 10,000 messages or 20 seconds with `complete: false`: send the same request again to continue. Requests without the field behave as before.
 - The server can now read a channel up to a given message and mark a message unread again: `mark_read` takes an optional `message_id`, there is a new `mark_unread`, and `channel_focus` takes `read: false` to focus without marking read. `mark_read` and `mark_unread` each answer with a `read_state` frame, and `ready` advertises `capabilities.read_pointer`. Clients that do not send the new fields behave as before.
 - A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. In the desktop app, the reply bar now names the author by display name and has an **@ ON / @ OFF** toggle: it starts on for each reply, is hidden when you reply to yourself, and a retried send keeps the choice.
 - A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone. The desktop app refuses a 21st emoji straight away and says the message has reached the reaction limit.
@@ -115,6 +124,8 @@ and only when it changes something a contributor or fork holder must do
 - A link whose text hides its address (`[text](address)`) now asks before leaving OwnCord, showing the full address; tick "Trust this site's links from now on" to skip the question for that site. Plain links open as before.
 - Links from `m.youtube.com`, `music.youtube.com`, `youtube-nocookie.com` and YouTube `/live/` addresses now get a video player in chat, like other YouTube links.
 - Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
+- Editing a message now happens inside the message itself, as in Discord: press ↑ in an empty message box or choose Edit, change the text in place, then Enter saves, Shift+Enter adds a line and Esc cancels. Saving an empty edit asks to delete the message. A save that fails reopens the editor with your text.
+- Deleted messages now disappear from the channel instead of leaving a "[message deleted]" row, and a reply to a deleted message says "Original message was deleted".
 
 **Voice and video**
 

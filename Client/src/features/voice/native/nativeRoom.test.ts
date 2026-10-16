@@ -71,6 +71,7 @@ const host = vi.hoisted(() => ({
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
   changeScreen: (): Promise<unknown> => Promise.resolve({ capture: 6, width: 800, height: 600 }),
   pickChange: (): Promise<string | null> => Promise.resolve("window:9"),
+  publishScreenAudio: (): Promise<string> => Promise.resolve("TR_audio"),
   noted: [] as string[],
   unsubscribed: 0,
   renderers: [] as FakeMedia[],
@@ -186,6 +187,14 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["unpublishScreen", args]);
         return Promise.resolve();
       },
+      publishScreenAudio: (...args: unknown[]) => {
+        host.calls.push(["publishScreenAudio", args]);
+        return host.publishScreenAudio();
+      },
+      unpublishScreenAudio: (...args: unknown[]) => {
+        host.calls.push(["unpublishScreenAudio", args]);
+        return Promise.resolve();
+      },
       stopScreen: (...args: unknown[]) => {
         host.calls.push(["stopScreen", args]);
         return Promise.resolve();
@@ -210,6 +219,8 @@ vi.mock("../../../platform/desktop", () => ({
 }));
 
 import { createNativeRoom } from "./nativeRoom";
+import { NativeScreenAudioTrack } from "./screenAudioTrack";
+import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";
 import { CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
@@ -259,6 +270,7 @@ beforeEach(() => {
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   host.changeScreen = () => Promise.resolve({ capture: 6, width: 800, height: 600 });
   host.pickChange = () => Promise.resolve("window:9");
+  host.publishScreenAudio = () => Promise.resolve("TR_audio");
   host.noted = [];
   nativeCounters.screenTracks = 0;
   host.renderers.length = 0;
@@ -1556,7 +1568,15 @@ const screenOptions = {
 };
 const share = async (room: ReturnType<typeof createNativeRoom>) => {
   const [screen] = await room.localParticipant.createScreenTracks();
-  return screen!;
+  return screen as NativeScreenTrack;
+};
+const audioOptions = { source: "screen_share_audio", simulcast: false };
+/** A share whose pick asked for audio: the video track and the audio track. */
+const shareWithAudio = async (room: ReturnType<typeof createNativeRoom>) => {
+  const pick = host.pick;
+  host.pick = () => pick().then((p) => ({ ...(p as object), audio: true }));
+  const [screen, audioTrack] = await room.localParticipant.createScreenTracks();
+  return { screen: screen as NativeScreenTrack, audioTrack: audioTrack as NativeScreenAudioTrack };
 };
 
 const publishedCamera = async () => {
@@ -2166,5 +2186,178 @@ describe("NativeRoom stats (LP-5)", () => {
       pub.getConnectionState(),
       pub.getSignallingState(),
     ]).toEqual(["unknown", "unknown", "unknown"]);
+  });
+});
+
+describe("NativeRoom screen-share audio (LP-8c)", () => {
+  beforeEach(() => {
+    (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
+      () => ({ getVideoTracks: () => [{ stop() {} }] });
+  });
+  afterEach(() => {
+    delete (HTMLCanvasElement.prototype as unknown as { captureStream?: unknown }).captureStream;
+  });
+
+  it("createScreenTracks adds a screen-audio track when the pick asks for it", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const none = await room.localParticipant.createScreenTracks();
+    expect(none).toHaveLength(1);
+    const { audioTrack } = await shareWithAudio(room);
+    expect(audioTrack).toBeInstanceOf(NativeScreenAudioTrack);
+    expect(audioTrack).toMatchObject({ kind: "audio", source: "screen_share_audio" });
+  });
+
+  it("publishing screen_share_audio calls the host and stores the publication", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    const pub = await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    expect(host.calls.at(-1)).toEqual(["publishScreenAudio", [1, 4]]);
+    expect(pub).toMatchObject({
+      trackSid: "TR_audio",
+      source: "screen_share_audio",
+      kind: "audio",
+    });
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")!.track).toBe(audioTrack);
+    // Unpublishing by the token unpublishes the sid and nothing else.
+    await room.localParticipant.unpublishTrack(audioTrack.mediaStreamTrack);
+    expect(host.calls.at(-1)).toEqual(["unpublishScreenAudio", [1, "TR_audio"]]);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")).toBeUndefined();
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeDefined();
+  });
+
+  it("a codec republish unpublishes only the video", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    host.calls.length = 0;
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack, false);
+    expect(host.calls).toEqual([["unpublishScreen", [1, 4]]]);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")!.track).toBe(audioTrack);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(names()).toEqual(["unpublishScreen", "publishScreen"]);
+  });
+
+  it("stopping the audio track unpublishes its sid once, and a stop of the share ends it too", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    host.calls.length = 0;
+    audioTrack.stop();
+    audioTrack.stop();
+    expect(host.calls).toEqual([["unpublishScreenAudio", [1, "TR_audio"]]]);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")).toBeUndefined();
+
+    // Stopping the video stops the audio that follows it.
+    const second = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(second.audioTrack, audioOptions);
+    host.calls.length = 0;
+    second.screen.stop();
+    expect(second.audioTrack.isStopped).toBe(true);
+    expect(names()).toEqual(["unpublishScreenAudio", "stopScreen"]);
+  });
+
+  it("a_share_audio_stopped_mid_publish_is_unpublished_when_its_sid_lands", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    let land!: (sid: string) => void;
+    host.publishScreenAudio = () => new Promise<string>((resolve) => (land = resolve));
+    const publishing = room.localParticipant.publishTrack(audioTrack, audioOptions);
+    await vi.waitFor(() => expect(names()).toContain("publishScreenAudio"));
+    audioTrack.stop();
+    // Nothing to unpublish yet: the sid is unknown.
+    expect(names()).not.toContain("unpublishScreenAudio");
+    land("TR_late");
+    await publishing;
+    expect(host.calls.at(-1)).toEqual(["unpublishScreenAudio", [1, "TR_late"]]);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")).toBeUndefined();
+  });
+
+  it("a_share_audio_publish_after_disconnect_throws_and_keeps_nothing", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    let land!: (sid: string) => void;
+    host.publishScreenAudio = () => new Promise<string>((resolve) => (land = resolve));
+    const publishing = room.localParticipant.publishTrack(audioTrack, audioOptions);
+    await vi.waitFor(() => expect(names()).toContain("publishScreenAudio"));
+    await room.disconnect();
+    land("TR_late");
+    await expect(publishing).rejects.toThrow(
+      "native room disconnected during screen audio publish",
+    );
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")).toBeUndefined();
+    expect(names()).not.toContain("unpublishScreenAudio");
+  });
+
+  it("refuses a screen-audio publish while no share is running", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const orphan = new NativeScreenAudioTrack(() => {});
+    await expect(room.localParticipant.publishTrack(orphan, audioOptions)).rejects.toThrow(
+      "screen share is not running",
+    );
+    expect(names()).not.toContain("publishScreenAudio");
+  });
+
+  it("a stale screen track's late stop leaves the live share's audio", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const first = await shareWithAudio(room);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    const second = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(second.screen, screenOptions);
+    await room.localParticipant.publishTrack(second.audioTrack, audioOptions);
+    first.screen.stop();
+    expect(second.audioTrack.isStopped).toBe(false);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")!.track).toBe(
+      second.audioTrack,
+    );
+  });
+
+  it("refuses a stale audio track's publish so it cannot replace a newer share's", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const first = await shareWithAudio(room);
+    await shareWithAudio(room);
+    host.calls.length = 0;
+    await expect(
+      room.localParticipant.publishTrack(first.audioTrack, audioOptions),
+    ).rejects.toThrow("stale");
+    expect(names()).not.toContain("publishScreenAudio");
+  });
+
+  it("disconnect stops the audio track", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    await room.disconnect();
+    expect(audioTrack.isStopped).toBe(true);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")).toBeUndefined();
+  });
+
+  it("a Change source keeps the screen_share_audio publication", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    host.calls.length = 0;
+    await screen.changeSource();
+    expect(screen.capture).toBe(6);
+    expect(names()).toEqual(["changeScreen"]);
+    expect(audioTrack.isStopped).toBe(false);
+    expect(room.localParticipant.getTrackPublication("screen_share_audio")!.track).toBe(audioTrack);
   });
 });

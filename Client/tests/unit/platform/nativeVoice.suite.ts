@@ -48,6 +48,8 @@ export interface NativeControl {
   refusesCameraChange(reason: string): void;
   /** The host refuses the next screen source change with this reason. */
   refusesScreenChange(reason: string): void;
+  /** The host refuses the next screen audio publish with this reason. */
+  refusesScreenAudio(reason: string): void;
   /** The host answers the next mic test start with this test id. */
   startsMicTestAs(test: number): void;
   /** The host refuses the next mic test start with this reason. */
@@ -221,6 +223,7 @@ export function describeNativeVoiceSuite(
       const sources: NativeVoiceScreenSources = {
         portal: false,
         sources: [{ id: "screen:1", kind: "screen", title: "DP-1", thumbnail: null }],
+        audio: true,
       };
       const capture = { fps: 30, maxWidth: 1920, maxHeight: 1080 };
       const publish = {
@@ -265,10 +268,32 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
+    check(
+      "publishes and unpublishes the share's audio and reports a refusal as an Error",
+      async () => {
+        ctx.native.sharesScreenAs(
+          { portal: false, sources: [], audio: true },
+          { capture: 2, width: 1920, height: 1080 },
+          "TR_screen_audio",
+        );
+        await expect(ctx.subject.publishScreenAudio(7, 2)).resolves.toBe("TR_screen_audio");
+        await ctx.subject.unpublishScreenAudio(7, "TR_screen_audio");
+        ctx.native.refusesScreenAudio("screen capture 9 is not running");
+        const refused = ctx.subject.publishScreenAudio(7, 9);
+        await expect(refused).rejects.toBeInstanceOf(Error);
+        await expect(refused).rejects.toThrow("screen capture 9 is not running");
+        expect(ctx.native.commands()).toEqual([
+          ["native_voice_publish_screen_audio", { session: 7, capture: 2 }],
+          ["native_voice_unpublish_screen_audio", { session: 7, sid: "TR_screen_audio" }],
+          ["native_voice_publish_screen_audio", { session: 7, capture: 9 }],
+        ]);
+      },
+    );
+
     check("changes a live share's source and reports a refusal as an Error", async () => {
       const capture = { fps: 30, maxWidth: 0, maxHeight: 0 };
       ctx.native.sharesScreenAs(
-        { portal: true, sources: [] },
+        { portal: true, sources: [], audio: false },
         { capture: 3, width: 1280, height: 720 },
         "TR_screen",
       );

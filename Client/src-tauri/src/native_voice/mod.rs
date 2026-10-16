@@ -28,6 +28,7 @@ pub mod mic_test;
 pub mod playout;
 pub mod screen;
 pub mod session;
+pub mod share_audio;
 pub mod stats;
 pub mod stream_format;
 pub mod video;
@@ -960,6 +961,40 @@ pub async fn native_voice_publish_screen(
         .await
 }
 
+/// Publish the other applications' sound as capture `capture`'s audio; the
+/// capture lives as long as the publication. Returns the sid.
+#[tauri::command]
+pub async fn native_voice_publish_screen_audio(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+) -> Result<String, String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .publish_screen_audio(capture)
+        .await
+}
+
+/// Unpublish screen audio `sid` and end its capture; a stale sid is a no-op.
+#[tauri::command]
+pub async fn native_voice_unpublish_screen_audio(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    sid: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .unpublish_screen_audio(&sid)
+        .await;
+    Ok(())
+}
+
 /// Unpublish and stop capture `capture`, releasing the capturer and any
 /// portal session; a stale id is a no-op.
 #[tauri::command]
@@ -1138,7 +1173,7 @@ mod tests {
     #[test]
     fn build_info_reports_sdk_and_libwebrtc() {
         let info = native_voice_build_info();
-        assert!(info.contains("livekit 0.9.3"), "unexpected: {info}");
+        assert!(info.contains("livekit 0.9.5"), "unexpected: {info}");
         assert!(info.contains("libwebrtc-ok"), "unexpected: {info}");
     }
 

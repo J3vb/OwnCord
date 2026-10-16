@@ -122,6 +122,21 @@ export const nativeVoice: NativeVoice = {
       throw err instanceof Error ? err : new Error(String(err));
     }
   },
+  async publishScreenAudio(session, capture) {
+    try {
+      return await invoke<string>("native_voice_publish_screen_audio", { session, capture });
+    } catch (err) {
+      // The host rejects with its reason as a string; callers classify it.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+  async unpublishScreenAudio(session, sid) {
+    try {
+      await invoke<void>("native_voice_unpublish_screen_audio", { session, sid });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
   async changeCamera(session, source, capture) {
     try {

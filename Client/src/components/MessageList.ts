@@ -42,6 +42,8 @@ import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
 import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
 import { withMessageMenu } from "./message-list/message-menu-loader";
+import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
+import type { InlineEditSession } from "../features/messaging/inlineEdit";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
@@ -101,6 +103,15 @@ export interface MessageListOptions {
   readonly onScrollBottom?: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
+  /**
+   * Save the inline editor's text (cleaned, non-empty, within the limit).
+   * True closes the editor; false keeps it open with the text (offline).
+   */
+  readonly onEditSave: (messageId: number, content: string) => boolean;
+  /** Save with the text cleared: the host offers to delete the message. */
+  readonly onEmptyEdit: (messageId: number) => void;
+  /** The inline editor closed while it held focus: hand focus back (the composer). */
+  readonly onEditEnd?: () => void;
   readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
@@ -218,6 +229,52 @@ function estimateItemHeight(item: VirtualItem): number {
   return height;
 }
 
+/**
+ * What the list draws: the store keeps a deleted message as a tombstone (reply
+ * checks and the echo reconcile need to know it was deleted), the view leaves it
+ * out. Returns `list` itself when nothing is deleted.
+ */
+function visibleMessages(list: readonly Message[]): readonly Message[] {
+  return list.some((m) => m.deleted) ? list.filter((m) => !m.deleted) : list;
+}
+
+/**
+ * Focus the first control of the nearest row that survived a patch: the next
+ * one below the removed row, else the one above. `rows` are the rendered rows
+ * of the new window, from item index `start`.
+ */
+function focusSurvivingRow(
+  prevKeys: readonly string[],
+  nextIndex: ReadonlyMap<string, number>,
+  rows: readonly HTMLElement[],
+  start: number,
+  prevStart: number,
+  prevEnd: number,
+  removedKey: string,
+): void {
+  const from = prevKeys.indexOf(removedKey);
+  const survivor = (i: number): HTMLElement | undefined => {
+    const j = nextIndex.get(prevKeys[i]!);
+    if (j === undefined) return undefined;
+    const el = rows[j - start];
+    return el !== undefined && el.querySelector(ROW_FOCUSABLE_SELECTOR) !== null ? el : undefined;
+  };
+  for (let i = from + 1; i < prevEnd; i++) {
+    const el = survivor(i);
+    if (el !== undefined) {
+      el.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR)?.focus({ preventScroll: true });
+      return;
+    }
+  }
+  for (let i = from - 1; i >= prevStart; i--) {
+    const el = survivor(i);
+    if (el !== undefined) {
+      el.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR)?.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
 // -- Pre-process messages into virtual items ----------------------------------
 
 /** Build virtual items for `messages`, with the NEW divider above index
@@ -331,6 +388,18 @@ export type MessageListComponent = MountableComponent & {
   markReadAndJumpToPresent(): void;
   /** PageUp/PageDown from the message box: scroll one page; 1 is down. */
   scrollPage(direction: 1 | -1): void;
+  /**
+   * Open the inline editor in your own sent message's row, with `text` (default
+   * the message's current content). False when the message is not loaded, not
+   * yours or not sent. The editor itself arrives a moment later (lazy chunk).
+   */
+  /** Open the inline editor on one of your sent messages. `focus: false`
+   *  restores it quietly (no focus, no scrolling) for a late failed save. */
+  startEdit(messageId: number, text?: string, opts?: { readonly focus?: boolean }): boolean;
+  /** Close the open inline editor, discarding its text. */
+  cancelEdit(): void;
+  /** True while an inline editor is open (or loading) in this list. */
+  isEditing(): boolean;
 };
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
@@ -346,6 +415,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * per rebuild (OC-0286). destroy() releases the rest.
    */
   const rowOwners = new Map<HTMLElement, Disposable>();
+  /**
+   * The open inline editor (WP 3A-8): at most one per list. `session` is null
+   * while the lazy chunk loads; `gen` tells a late load that it was superseded.
+   */
+  let edit: { readonly messageId: number; session: InlineEditSession | null; gen: number } | null =
+    null;
+  let editGen = 0;
+  // The editor held focus when its row was released by a window slide; it is
+  // focused again when the row comes back.
+  let editRefocus = false;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -357,6 +436,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Virtual scroll state
   let virtualItems: readonly VirtualItem[] = [];
   let allMessages: readonly Message[] = [];
+  /** Every loaded message, tombstones included: a reply resolves its parent
+   *  here, so a parent deleted live reads as deleted, not as unknown. Only
+   *  `allMessages` (the rows drawn) leaves tombstones out. */
+  let replyParents: readonly Message[] = [];
   const heightCache = new Map<string, number>(); // itemKey -> measured px
   let tree: FenwickTree | null = null;
   let topSpacer: HTMLDivElement | null = null;
@@ -454,6 +537,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
       const at = messages.findIndex((m) => m.id === newDividerAnchorId);
+      if (at === -1) {
+        // The anchor was deleted (the store keeps it as a tombstone): the line
+        // moves to the first message after it, or waits when there is none.
+        const anchorId = newDividerAnchorId;
+        const tombstone = getChannelMessages(options.channelId).some(
+          (m) => m.id === anchorId && m.deleted,
+        );
+        if (tombstone) {
+          const nextAt = messages.findIndex((m) => m.id > anchorId);
+          if (nextAt === -1) return -1;
+          newDividerAnchorId = messages[nextAt]!.id;
+          return nextAt;
+        }
+      }
       if (at !== -1 || linePointer === undefined) return at;
       // The anchor left the window (a jump): place the line again by pointer.
       newDividerAnchorId = null;
@@ -504,13 +601,27 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
-    const el = renderMessage(item.message, item.isGrouped, allMessages, options, owner.signal);
+    // The one editor node is re-hosted by every build of its row.
+    const editor =
+      edit !== null && edit.session !== null && edit.messageId === item.message.id
+        ? edit.session.element
+        : undefined;
+    const el = renderMessage(
+      item.message,
+      item.isGrouped,
+      replyParents,
+      options,
+      owner.signal,
+      editor,
+    );
     rowOwners.set(el, owner);
     return el;
   }
 
   /** Discard one rendered row: stop tracking its media and abort its listeners. */
   function releaseRow(el: HTMLElement): void {
+    const editorEl = edit?.session?.element;
+    if (editorEl !== undefined && el.contains(editorEl) && editHoldsFocus()) editRefocus = true;
     for (const img of el.querySelectorAll("img")) discardMedia(img);
     rowOwners.get(el)?.destroy();
     rowOwners.delete(el);
@@ -969,23 +1080,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
   }
 
+  /** Put focus back on the captured control's replacement; false when it has none. */
   function restoreRowFocus(
     captured: { own: string | null; row: string | null; index: number } | null,
-  ): void {
-    if (captured === null || contentContainer === null) return;
+  ): boolean {
+    if (captured === null || contentContainer === null) return false;
+    let target: HTMLElement | null | undefined = null;
     if (captured.own !== null) {
-      contentContainer
-        .querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)
-        ?.focus({ preventScroll: true });
-      return;
-    }
-    if (captured.row !== null && captured.index >= 0) {
-      contentContainer
+      target = contentContainer.querySelector<HTMLElement>(`[data-testid="${captured.own}"]`);
+    } else if (captured.row !== null && captured.index >= 0) {
+      target = contentContainer
         .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
         ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
-        .item(captured.index)
-        ?.focus({ preventScroll: true });
+        .item(captured.index);
     }
+    target?.focus({ preventScroll: true });
+    return target !== null && target !== undefined;
   }
 
   /** Abort every rendered row's listeners before a rebuild discards the rows,
@@ -1057,6 +1167,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     measureRendered();
     updateSpacers();
     if (hold && kept.isConnected) holdRow(kept, keptEdge);
+    refocusEditor();
+  }
+
+  /** The row that held the focused editor is back: give the editor focus again,
+   *  unless the reader has put it somewhere else meanwhile. */
+  function refocusEditor(): void {
+    const el = edit?.session?.element;
+    if (!editRefocus || el === undefined || !el.isConnected) return;
+    const active = document.activeElement;
+    editRefocus = false;
+    if (active !== null && active !== document.body) return;
+    el.querySelector("textarea")?.focus({ preventScroll: true });
   }
 
   function renderWindow(): void {
@@ -1074,14 +1196,31 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // placeholder, an inline error + Retry, or the welcome/empty state once
       // the channel is actually loaded and empty (UX spec §1/§2).
       const loadState = getHistoryLoadState(options.channelId);
-      if (loadState === "loading") {
+      // Every loaded row was deleted but the server has older ones: not an
+      // empty channel, so load the page before them instead of welcoming.
+      const allDeleted =
+        loadState === null &&
+        getChannelMessages(options.channelId).length > 0 &&
+        hasMoreMessages(options.channelId);
+      // The page before them just failed to load: say so, with a retry,
+      // instead of a placeholder that never ends.
+      const olderFailed = allDeleted && !loadingOlder && performance.now() < olderRetryAt;
+      if (olderFailed) {
+        contentContainer.appendChild(
+          renderLoadErrorState(() => {
+            olderRetryAt = 0;
+            renderWindow();
+          }),
+        );
+      } else if (loadState === "loading" || allDeleted) {
         contentContainer.appendChild(renderLoadingState());
       } else if (loadState === "error") {
         contentContainer.appendChild(renderLoadErrorState(options.onRetryLoad));
       } else {
         contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       }
-      loadedEmptyShown = loadState === null;
+      loadedEmptyShown = loadState === null && !allDeleted;
+      if (allDeleted && !loadingOlder && !olderFailed) fireOlderLoad();
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -1158,6 +1297,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // clearChildren; capture its identity so it can be restored on its
       // replacement row (Q1: focus stays put through a virtualized rebuild).
       const focusedRow = captureRowFocus();
+      if (editHoldsFocus()) editRefocus = true;
       releaseTrackedMedia();
       beginRowRender();
       clearChildren(contentContainer);
@@ -1171,6 +1311,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       measureRendered();
       updateSpacers();
       restoreRowFocus(focusedRow);
+      refocusEditor();
     } else {
       // Target range already fully rendered: no-op. The ResizeObserver
       // handles measurement and spacer updates when element sizes change.
@@ -1186,7 +1327,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function rebuildItems(): void {
-    allMessages = getChannelMessages(options.channelId);
+    replyParents = getChannelMessages(options.channelId);
+    allMessages = visibleMessages(replyParents);
     virtualItems = buildVirtualItems(allMessages, resolveNewDividerIndex(allMessages));
 
     seedTree();
@@ -1229,7 +1371,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function patchRows(): boolean {
     if (root === null || contentContainer === null || tree === null) return false;
     if (renderAllRunning || renderedStart < 0 || allMessages.length === 0) return false;
-    const next = getChannelMessages(options.channelId);
+    const nextParents = getChannelMessages(options.channelId);
+    const next = visibleMessages(nextParents);
     if (next.length === 0) return false;
     const prevItems = virtualItems;
     const nextItems = buildVirtualItems(next, resolveNewDividerIndex(next));
@@ -1288,10 +1431,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
 
     // A reply re-renders its quote when its parent left, arrived, or changed
-    // what the quote draws (renderReplyRef reads the parent from allMessages);
+    // what the quote draws (renderReplyRef reads the parent from replyParents);
     // a reaction or pin on the parent leaves the reply alone.
-    const prevById = new Map(allMessages.map((m) => [m.id, m]));
-    const nextById = new Map(next.map((m) => [m.id, m]));
+    const prevById = new Map(replyParents.map((m) => [m.id, m]));
+    const nextById = new Map(nextParents.map((m) => [m.id, m]));
     const quoteChanged = (id: number | null): boolean => {
       if (id === null) return false;
       const a = prevById.get(id);
@@ -1300,9 +1443,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     };
 
     const focused = captureRowFocus();
+    const editHadFocus = editHoldsFocus();
+    const prevStart = renderedStart;
+    const prevEnd = renderedEnd;
     const shown = [...contentContainer.children] as HTMLElement[];
+    // The row holding focus, so focus can move on if that row is removed.
+    const focusedAt = shown.findIndex((el) => el.contains(document.activeElement));
+    const focusedKey = focusedAt === -1 ? undefined : prevKeys[prevStart + focusedAt];
     const shownByKey = new Map(shown.map((el, i) => [prevKeys[renderedStart + i]!, el]));
     allMessages = next;
+    replyParents = nextParents;
     virtualItems = nextItems;
 
     const rows: HTMLElement[] = [];
@@ -1342,7 +1492,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     measureRendered();
     updateSpacers();
     if (focused !== null && !contentContainer.contains(document.activeElement)) {
-      restoreRowFocus(focused);
+      if (!restoreRowFocus(focused) && focusedKey !== undefined && !nextIndex.has(focusedKey)) {
+        // The focused row was removed (deleted): focus the next surviving row,
+        // or the one before it, rather than dropping to <body>.
+        focusSurvivingRow(prevKeys, nextIndex, rows, start, prevStart, prevEnd, focusedKey);
+      }
     }
 
     if (atBottom) {
@@ -1351,6 +1505,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     } else if (anchorKey !== undefined) {
       root.scrollTop = Math.max(0, offsetBefore(nextIndex.get(anchorKey)!) + anchorOffset);
     }
+    dropGoneEdit(editHadFocus);
     return true;
   }
 
@@ -1413,6 +1568,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
 
     renderAllRunning = true;
+    const editHadFocus = editHoldsFocus();
     try {
       log.debug("renderAll START", { count: renderAllCount });
       wasAtBottom = keepBottom();
@@ -1501,6 +1657,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
         }
       }
+      dropGoneEdit(editHadFocus);
       log.debug("renderAll END");
     } finally {
       renderAllRunning = false;
@@ -1584,6 +1741,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
         olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
       }
+      // With every loaded row deleted there is nothing else to redraw the
+      // region: show the outcome (the next page, or the failure and Retry).
+      if (virtualItems.length === 0 && !disposable.signal.aborted) renderWindow();
     });
   }
 
@@ -1967,6 +2127,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         } else {
           root.scrollTop = offsetBefore(anchorIdx) + anchorOffset;
         }
+        keepEditorCaretInView();
       });
     });
     resizeObserver.observe(contentContainer);
@@ -1975,6 +2136,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     openAtDividerPending = unreadOnOpen > 0;
     renderAll();
+    // Fetch the inline editor chunk once the list is up, so ArrowUp opens at once.
+    setOwnedTimeout(disposable.signal, preloadInlineEdit, 0);
     updateJumpToPresentPill();
     const openedAtDivider = openAtDividerIfReady();
     updateUnreadBar();
@@ -2261,8 +2424,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function repaintReplyRefAuthors(row: HTMLElement): void {
     for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
-      const parent = allMessages.find((m) => m.id === replyTo);
-      if (parent === undefined) continue;
+      const parent = replyParents.find((m) => m.id === replyTo);
+      if (parent === undefined || parent.deleted) continue;
       const roleColor = roleColorVar(getUserRole(parent.user.id));
       const author = resolveAuthor(parent.user);
       const key = authorAvatarKey(author, roleColor);
@@ -2315,6 +2478,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver = null;
     }
     disposable.destroy();
+    // A channel switch discards an open edit, as it always has.
+    edit?.session?.destroy();
+    edit = null;
+    editGen++;
     setLiveTailInView(options.channelId, true);
     beginRowRender();
     if (scrollRafId !== 0) {
@@ -2390,7 +2557,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       (item) => item.kind === "message" && item.message.id === messageId,
     );
     if (idx === -1) return false;
+    return revealIndex(idx, true);
+  }
 
+  /** Centre row `idx` in the view, rendering it; with `flash`, highlight it too. */
+  function revealIndex(idx: number, flash: boolean, recentre = true): boolean {
+    if (root === null) return false;
+    const item = virtualItems[idx];
+    if (item?.kind !== "message") return false;
+    const messageId = item.message.id;
     root.scrollTop = offsetBefore(idx);
     // Force the rebuild path: a scroll-driven renderWindow only moves spacers,
     // so without this the target row can sit outside the rendered window and
@@ -2416,10 +2591,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // Late-sizing content (previews, images) above the target keeps it
     // centred until the highlight flash ends.
-    jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
+    // The editor is not a jump: resizes must not pull it back to the centre.
+    if (recentre) jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
 
     // Briefly highlight the target message element
-    if (contentContainer !== null) {
+    if (flash && contentContainer !== null) {
       const localIdx = idx - renderedStart;
       const el = contentContainer.children[localIdx] as HTMLElement | undefined;
       if (el !== undefined) {
@@ -2442,5 +2618,142 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return true;
   }
 
-  return { mount, destroy, scrollToMessage, markReadAndJumpToPresent, scrollPage };
+  // ---------------------------------------------------------------------------
+  // Inline edit (WP 3A-8)
+  // ---------------------------------------------------------------------------
+
+  /** True while the open editor's textarea (or its links) holds focus. */
+  function editHoldsFocus(): boolean {
+    const el = edit?.session?.element;
+    return el !== undefined && el.contains(document.activeElement);
+  }
+
+  /**
+   * Draw message `id`'s row again in place and release the old one. Used when
+   * editing starts or stops: the message object did not change, so patchRows
+   * would keep the row. A row outside the rendered window is left to the next
+   * build, which reads `edit`.
+   */
+  function replaceRenderedRow(id: number): void {
+    if (contentContainer === null) return;
+    const idx = virtualItems.findIndex((it) => it.kind === "message" && it.message.id === id);
+    const old = idx === -1 ? undefined : renderedRowAt(idx);
+    if (old === undefined || !(old instanceof HTMLElement)) return;
+    const edge = edgeOf(old);
+    const fresh = renderVirtualItem(virtualItems[idx]!);
+    contentContainer.replaceChild(fresh, old);
+    releaseRow(old);
+    measureRendered();
+    updateSpacers();
+    holdRow(fresh, edge);
+  }
+
+  /** Close the open editor. With `notify`, an editor that held focus hands it back. */
+  function closeEdit(notify: boolean): void {
+    if (edit === null) return;
+    const { messageId, session } = edit;
+    const hadFocus = notify && editHoldsFocus();
+    edit = null;
+    editGen++;
+    editRefocus = false;
+    session?.destroy();
+    replaceRenderedRow(messageId);
+    if (hadFocus) options.onEditEnd?.();
+  }
+
+  /** An editor whose message left the list (deleted, or a window swap) closes. */
+  function dropGoneEdit(hadFocus: boolean): void {
+    if (edit === null || allMessages.some((m) => m.id === edit?.messageId)) return;
+    const { session } = edit;
+    edit = null;
+    editRefocus = false;
+    editGen++;
+    session?.destroy();
+    if (hadFocus) options.onEditEnd?.();
+  }
+
+  /** After the editor grew, keep its bottom (where the caret is) inside the view. */
+  function keepEditorCaretInView(): void {
+    if (root === null || !editHoldsFocus()) return;
+    const box = edit?.session?.element;
+    if (box === undefined) return;
+    const over = box.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom;
+    if (over > 0) root.scrollTop += over;
+  }
+
+  function startEdit(
+    messageId: number,
+    text?: string,
+    opts?: { readonly focus?: boolean },
+  ): boolean {
+    const takeFocus = opts?.focus !== false;
+    if (root === null) return false;
+    const msg = allMessages.find((m) => m.id === messageId);
+    if (msg === undefined || msg.user.id !== options.currentUserId || msg.status !== "sent") {
+      return false;
+    }
+    if (edit?.messageId === messageId) {
+      if (takeFocus) edit.session?.focusEnd();
+      return true;
+    }
+    closeEdit(false);
+    editRefocus = false;
+    const gen = ++editGen;
+    edit = { messageId, session: null, gen };
+    const startText = text ?? msg.content;
+    withInlineEdit(
+      (m) => {
+        if (edit === null || edit.gen !== gen || disposable.signal.aborted) return;
+        const session = m.createInlineEdit({
+          messageId,
+          text: startText,
+          onSave: (content) => {
+            if (options.onEditSave(messageId, content)) closeEdit(true);
+          },
+          onCancel: () => closeEdit(true),
+          onEmpty: () => options.onEmptyEdit(messageId),
+        });
+        edit.session = session;
+        replaceRenderedRow(messageId);
+        const idx = virtualItems.findIndex(
+          (it) => it.kind === "message" && it.message.id === messageId,
+        );
+        const row = idx === -1 ? undefined : renderedRowAt(idx);
+        const visible =
+          row !== undefined &&
+          root !== null &&
+          edgeOf(row) >= 0 &&
+          edgeOf(row) + row.getBoundingClientRect().height <= root.clientHeight;
+        // Already on screen: leave the view alone. Otherwise bring the row in.
+        // A quiet restore never moves the view or the focus.
+        if (!takeFocus) return;
+        if (!visible && idx !== -1) revealIndex(idx, false, false);
+        session.focusEnd();
+      },
+      () => {
+        // The editor chunk failed to load: nothing is open, so nothing is "editing".
+        if (edit !== null && edit.gen === gen && edit.session === null) edit = null;
+      },
+    );
+    return true;
+  }
+
+  function cancelEdit(): void {
+    closeEdit(true);
+  }
+
+  function isEditing(): boolean {
+    return edit !== null;
+  }
+
+  return {
+    mount,
+    destroy,
+    scrollToMessage,
+    markReadAndJumpToPresent,
+    scrollPage,
+    startEdit,
+    cancelEdit,
+    isEditing,
+  };
 }

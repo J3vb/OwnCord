@@ -100,6 +100,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -125,6 +127,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -157,6 +161,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -188,6 +194,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -216,6 +224,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -246,6 +256,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -282,6 +294,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -309,6 +323,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -334,6 +350,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -347,7 +365,7 @@ describe("MessageList", () => {
   });
 
   describe("deleted and edited messages", () => {
-    it("shows [message deleted] for deleted messages", () => {
+    it("renders no row for a deleted message", () => {
       setMessages(
         1,
         [makeMessage(1, 10, "Alice", "secret", "2026-03-15T10:00:00Z", { deleted: true })],
@@ -361,14 +379,18 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
       });
       list.mount(container);
 
-      const deleted = container.querySelector(".msg-text");
-      expect(deleted?.textContent).toBe("[message deleted]");
+      // The store keeps a tombstone; the list draws no row for it (WP 3A-8).
+      expect(container.querySelector("[data-testid='message-1']")).toBeNull();
+      expect(container.textContent).not.toContain("secret");
+      expect(container.textContent).not.toContain("[message deleted]");
       list.destroy?.();
     });
 
@@ -390,6 +412,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -413,6 +437,8 @@ describe("MessageList", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -433,6 +459,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -465,6 +493,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -619,7 +649,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -635,7 +664,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -653,7 +681,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -670,7 +697,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -687,7 +713,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -704,7 +729,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 
@@ -712,27 +736,6 @@ describe("MessageInput", () => {
     input.clearReply();
     const replyBar = container.querySelector(".reply-bar");
     expect(replyBar?.classList.contains("visible")).toBe(false);
-    input.destroy?.();
-  });
-
-  it("enters edit mode and calls onEditMessage", () => {
-    const onEditMessage = vi.fn();
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend: vi.fn(),
-      onTyping: vi.fn(),
-      onEditMessage,
-    });
-    input.mount(container);
-
-    input.startEdit(42, "original text");
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("original text");
-
-    textarea.value = "updated text";
-    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
-    expect(onEditMessage).toHaveBeenCalledWith(42, "updated text");
     input.destroy?.();
   });
 
@@ -744,7 +747,6 @@ describe("MessageInput", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping,
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
 

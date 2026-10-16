@@ -164,7 +164,21 @@ async function joinBrowserPeer(
         .LivekitClient;
       const meters = new Map<string, { sumSq: number; samples: number }>();
       const videos = new Map<string, { frames: number; width: number; height: number }>();
-      const state = { encErrors: 0, reconnects: 0, subscribed: [] as string[], meters, videos };
+      // The screen-share audio's own readings, keyed `<identity>#screenaudio`:
+      // its sid, how often it was subscribed, the channel count the browser
+      // reports for it, and the left and right levels.
+      const shareAudio = new Map<
+        string,
+        { sid: string; subscriptions: number; channels: number; left: number; right: number }
+      >();
+      const state = {
+        encErrors: 0,
+        reconnects: 0,
+        subscribed: [] as string[],
+        meters,
+        videos,
+        shareAudio,
+      };
       (window as unknown as { __interop: typeof state }).__interop = state;
       const keyProvider = new lk.ExternalE2EEKeyProvider();
       await keyProvider.setKey(keyBase64);
@@ -212,14 +226,43 @@ async function joinBrowserPeer(
           return;
         }
         if (track.kind !== lk.Track.Kind.Audio) return;
-        state.subscribed.push(participant.identity);
+        const isShareAudio = pub.source === lk.Track.Source.ScreenShareAudio;
+        const key = isShareAudio ? `${participant.identity}#screenaudio` : participant.identity;
+        state.subscribed.push(key);
         // Chromium only decodes a remote track that is attached somewhere.
         const el = track.attach() as HTMLAudioElement;
         el.volume = 0;
         document.body.appendChild(el);
         const meter = { sumSq: 0, samples: 0 };
-        meters.set(participant.identity, meter);
+        meters.set(key, meter);
         const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+        if (isShareAudio) {
+          const reading = shareAudio.get(key) ?? {
+            sid: pub.trackSid,
+            subscriptions: 0,
+            channels: 0,
+            left: 0,
+            right: 0,
+          };
+          reading.sid = pub.trackSid;
+          reading.subscriptions++;
+          reading.channels = track.mediaStreamTrack.getSettings().channelCount ?? 0;
+          shareAudio.set(key, reading);
+          const splitter = ctx.createChannelSplitter(2);
+          source.connect(splitter);
+          const [left, right] = [ctx.createAnalyser(), ctx.createAnalyser()];
+          splitter.connect(left, 0);
+          splitter.connect(right, 1);
+          const sides = new Float32Array(left.fftSize);
+          const peak = (a: AnalyserNode) => {
+            a.getFloatTimeDomainData(sides);
+            return sides.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+          };
+          setInterval(() => {
+            reading.left = Math.max(reading.left, peak(left));
+            reading.right = Math.max(reading.right, peak(right));
+          }, 100);
+        }
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 2048;
         source.connect(analyser);
@@ -248,10 +291,15 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
           subscribed: string[];
           meters: Map<string, { sumSq: number; samples: number }>;
           videos: Map<string, { frames: number; width: number; height: number }>;
+          shareAudio: Map<
+            string,
+            { sid: string; subscriptions: number; channels: number; left: number; right: number }
+          >;
         };
       }
     ).__interop;
     const m = state.meters.get(identity);
+    const a = state.shareAudio.get(identity);
     const v = state.videos.get(identity);
     return {
       encErrors: state.encErrors,
@@ -263,6 +311,7 @@ async function readBrowserPeer(page: import("@playwright/test").Page, identity: 
       videoFrames: v?.frames ?? 0,
       videoWidth: v?.width ?? 0,
       videoHeight: v?.height ?? 0,
+      shareAudio: a ?? null,
     };
   }, identity);
 }
@@ -788,6 +837,136 @@ test("a native screen share decodes in the browser with the same key", async ({ 
   expect(after.count - before.count).toBeLessThanOrEqual(5 * 5 + 2);
   expect(closed.threads as number).toBeLessThan(after.count);
   expect(after.fds - before.fds).toBeLessThanOrEqual(2);
+});
+
+// WP LP-8b: the share's audio, from a synthetic stereo source (CI has no
+// sound server; the capture module has its own tests), published through the
+// same options as the app. The browser decodes it with the right key, and the
+// video republish a codec change causes leaves it published and decoding.
+test("a native screen share's audio decodes in the browser and survives a video republish", async ({
+  page,
+}) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const events: Array<Record<string, unknown> & { type: string }> = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "30",
+      "--screen",
+      "1280x720",
+      "--screen-audio",
+      "--screen-audio-cycles",
+      "3",
+      "--republish-screen",
+    ],
+    ({ event }) => {
+      events.push(event);
+    },
+  );
+  const audio = "user-2#screenaudio";
+  await expect
+    .poll(async () => (await readBrowserPeer(page, audio)).samples, { timeout: 60_000 })
+    .toBeGreaterThan(0);
+  const published = () => events.find((e) => e.type === "screenAudio" && e.phase === "published");
+  await expect.poll(() => published() !== undefined, { timeout: 30_000 }).toBe(true);
+  await page.waitForTimeout(2_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(3_000);
+  const before = await readBrowserPeer(page, audio);
+  expect(before.rms, "the audio decodes with the right key before the republish").toBeGreaterThan(
+    0.01,
+  );
+  // LP-8d: the Rust SDK cannot signal stereo, so viewers may decode mono.
+  // Assert that audio decoded, log what channel count did.
+  console.log(
+    `browser decoded native screen-share audio: rms ${before.rms.toFixed(3)}, ` +
+      `channelCount ${before.shareAudio?.channels}, peak left ${before.shareAudio?.left.toFixed(3)} ` +
+      `right ${before.shareAudio?.right.toFixed(3)}`,
+  );
+
+  // The video republish (about 6 s after the audio published) keeps the same
+  // audio publication: same sid, one subscription, still decoding.
+  await expect
+    .poll(() => events.some((e) => e.type === "screenAudio" && e.phase === "after-republish"), {
+      timeout: 30_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(2_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(3_000);
+  const after = await readBrowserPeer(page, audio);
+  await peer.done;
+  expect(after.shareAudio?.sid).toBe(before.shareAudio?.sid);
+  expect(after.shareAudio?.sid).toBe(published()?.sid);
+  // The cycles before it subscribed earlier publications; the republish adds none.
+  expect(after.shareAudio?.subscriptions).toBe(before.shareAudio?.subscriptions);
+  expect(after.rms, "the audio still decodes after the video republish").toBeGreaterThan(0.01);
+  expect(after.encErrors).toBe(0);
+
+  // Each capture-fed publish cycle starts and joins the capture thread, and
+  // adds a sender: libwebrtc keeps two per-sender threads (AudioEncoderQueue
+  // and FrameCryptorTransformer) until the room closes. So the ceiling is per
+  // cycle, not flat.
+  const threads = events.filter((e) => e.type === "threads");
+  const t0 = threads.find((t) => t.phase === "screen-audio-before")!;
+  const t1 = threads.find((t) => t.phase === "screen-audio-after")!;
+  console.log(`native peer threads: before=${t0.count} after 3 share-audio cycles=${t1.count}`);
+  expect((t1.count as number) - (t0.count as number)).toBeLessThanOrEqual(3 * 3 + 2);
+  expect((t1.fds as number) - (t0.fds as number)).toBeLessThanOrEqual(2);
+
+  // Stopping the share releases the video and its audio together: the
+  // session held mic + video + audio (3) and now holds the mic only, and no
+  // capture is left running.
+  const stopped = events.find((e) => e.type === "screenStopped")!;
+  const held = stopped.before as Record<string, number>;
+  const left = stopped.after as Record<string, number>;
+  expect(held.localTracks, "mic, screen video and its audio before the stop").toBe(3);
+  expect(left.localTracks).toBe(1);
+  expect(left.screenCaptures).toBe(0);
+});
+
+test("a native screen share's audio with the wrong key is decoded as silence", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const wrongKey = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    wrongKey,
+    "--secs",
+    "14",
+    "--screen",
+    "1280x720",
+    "--screen-audio",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
+      timeout: 60_000,
+    })
+    .toBeGreaterThan(0);
+  await page.waitForTimeout(3_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screenaudio");
+  await peer.done;
+  // `encErrors` also counts the video's errors, so it proves nothing about
+  // the audio; the audio-specific assertion is the silence below.
+  expect(browser.rms).toBeLessThan(0.001);
+  expect(browser.encErrors).toBeGreaterThan(0);
 });
 
 test("a native screen share with the wrong key is decoded by no one", async ({ page }) => {

@@ -233,6 +233,58 @@
   line-height: 1.45;
   word-break: break-word;
 }
+/* Inline editor (WP 3A-8): replaces the body of the row being edited. */
+.message.editing,
+.message.editing:hover {
+  background: var(--bg-modifier-hover);
+}
+.msg-inline-edit {
+  margin-top: 2px;
+}
+.msg-inline-edit-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  color: var(--text-normal);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  line-height: 1.4;
+  padding: 8px 10px;
+  resize: none;
+  min-height: 2.25rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.msg-inline-edit-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.msg-inline-edit-hint {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-inline-edit-link {
+  color: var(--text-link);
+  font-size: inherit;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.msg-inline-edit-link:hover {
+  text-decoration: underline;
+}
+.msg-inline-edit-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.msg-inline-edit-error {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
+}
 .message .msg-text code {
   font-family: var(--font-mono);
   background: var(--bg-tertiary);
@@ -424,8 +476,9 @@
 }
 .msg-reply-ref--deleted {
   cursor: default;
+  font-style: italic;
 }
-.msg-reply-ref--deleted:hover .rr-text {
+.msg-reply-ref--deleted:hover {
   color: inherit;
 }
 /* The bar is a jump control, so it needs a visible keyboard focus ring. */

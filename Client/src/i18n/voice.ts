@@ -178,7 +178,9 @@ export const voiceText = defineCatalog("voice", {
     "Your browser will now ask which screen or window to share. OwnCord only sets the quality below.",
   "picker.audio": "Audio",
   "picker.audioUnavailable":
-    "Audio sharing is not available on Linux yet; only the picture is shared.",
+    "Audio sharing needs a PulseAudio or PipeWire sound server, and none answered; only the picture is shared.",
+  "picker.shareAudio": "Share audio",
+  "picker.shareAudioHint": "All sound playing on this computer, except OwnCord's own.",
   "picker.quality": "Stream quality",
   "picker.qualityHint": "Defaults from Settings → Voice & Video; applies to this share only.",
   "picker.frameRate": "Frame rate",

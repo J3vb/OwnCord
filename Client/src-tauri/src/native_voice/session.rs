@@ -33,6 +33,7 @@ use super::camera::{
 use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
+use super::share_audio::ShareAudio;
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
@@ -53,7 +54,9 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
 }
 
 /// The `RoomOptions` every native session connects with: dynacast on, so a
-/// video layer nobody subscribes to is paused, and GCM e2ee.
+/// video layer nobody subscribes to is paused (the SDK re-applies the
+/// paused layers after every publisher renegotiation, so starting or stopping
+/// another track does not resume them), and GCM e2ee.
 fn room_options(key_provider: KeyProvider) -> RoomOptions {
     let mut options = RoomOptions::default();
     options.dynacast = true;
@@ -96,7 +99,7 @@ pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
 /// Layer control for one remote video (P3-07, the web path's
 /// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
 /// comes at `quality`. The webview maps a tile's size to a quality
-/// (`video_quality`) by choice; livekit 0.9.3's `update_video_dimensions` is
+/// (`video_quality`) by choice; livekit 0.9.5's `update_video_dimensions` is
 /// not used. Runs without the session lock;
 /// the webview sends a publication's next view only once this returns.
 pub async fn set_video_view(
@@ -624,6 +627,26 @@ pub fn process_threads() -> usize {
         .unwrap_or(0)
 }
 
+/// The screen share's audio publish options, the web path's
+/// `SCREENSHARE_AUDIO_PUBLISH` (screenShare.ts): no DTX, 128 kbps
+/// (`musicHighQualityStereo`) and no RED, which livekit-client leaves off for
+/// a stereo track and the Rust SDK forces off under E2EE anyway.
+fn screen_audio_publish_options() -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::ScreenshareAudio,
+        dtx: false,
+        red: false,
+        audio_encoding: Some(livekit::options::audio::MUSIC_HIGH_QUALITY_STEREO.encoding),
+        ..Default::default()
+    }
+}
+
+/// The source the share audio feeds: 48 kHz stereo, unbuffered (the capture
+/// thread paces it).
+pub fn screen_audio_source() -> NativeAudioSource {
+    NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 2, 0)
+}
+
 /// A published camera or screen share. `issued` is the sid the webview was
 /// handed and must name to unpublish; `live` follows the SDK's republish
 /// after a full reconnect, which re-issues the sid of the same track.
@@ -711,6 +734,16 @@ pub struct NativeSession {
     /// (`finish_screen_change`), until then the live share is untouched.
     screen_change: Option<ScreenShare>,
     screen_publication: VideoSlot,
+    /// The screen share's audio publication. Its `capture` is the screen
+    /// capture it belongs to, like the video slot's.
+    ///
+    /// Lock order: the session's tokio `inner` mutex is outermost. Below it
+    /// the slots (camera, screen, screen audio) are each locked alone, never
+    /// two at once, by the session and by `forward_events`.
+    screen_audio: VideoSlot,
+    /// The capture feeding the published screen audio (none for the interop
+    /// example's synthetic source). Lives and dies with `screen_audio`.
+    share_audio: Option<ShareAudio>,
     next_capture: u64,
     next_camera: u64,
     on_event: EventSink,
@@ -795,6 +828,7 @@ impl NativeSession {
         }
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
+        let screen_audio = VideoSlot::default();
         let playout = Playout::default();
         let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
@@ -802,7 +836,11 @@ impl NativeSession {
             on_event.clone(),
             frames.observer(),
             playout.listener(),
-            [camera.clone(), screen_publication.clone()],
+            [
+                camera.clone(),
+                screen_publication.clone(),
+                screen_audio.clone(),
+            ],
             mic_withdrawn.clone(),
         ));
         Ok(Self {
@@ -820,6 +858,8 @@ impl NativeSession {
             camera_change: None,
             screen_change: None,
             screen_publication,
+            screen_audio,
+            share_audio: None,
             next_capture: 0,
             next_camera: 0,
             on_event,
@@ -1282,6 +1322,93 @@ impl NativeSession {
         Ok(sid.to_string())
     }
 
+    /// Publish the other applications' sound as the screen share's audio,
+    /// alongside running capture `capture` (replacing an earlier one). The
+    /// capture (`share_audio.rs`) starts here and ends with the publication.
+    /// Returns the publication's sid.
+    pub async fn publish_screen_audio(&mut self, capture: u64) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        let source = screen_audio_source();
+        self.publish_screen_audio_from(capture, source.clone(), Some(ShareAudio::start(source)))
+            .await
+    }
+
+    /// As `publish_screen_audio`, but fed by the caller: the interop example's
+    /// synthetic stereo tone (CI has no sound server).
+    pub async fn publish_screen_audio_source(
+        &mut self,
+        capture: u64,
+        source: NativeAudioSource,
+    ) -> Result<String, String> {
+        self.publish_screen_audio_from(capture, source, None).await
+    }
+
+    async fn publish_screen_audio_from(
+        &mut self,
+        capture: u64,
+        source: NativeAudioSource,
+        feed: Option<ShareAudio>,
+    ) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        // Replace semantics. On any error below `feed` drops with this frame,
+        // leaving the slot empty and no capture thread behind.
+        self.release_screen_audio().await;
+        let track = LocalAudioTrack::create_audio_track(
+            "screen_share_audio",
+            RtcAudioSource::Native(source),
+        );
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
+            .await
+            .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
+        let sid = publication.sid();
+        *self.screen_audio.lock().unwrap() =
+            Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
+        self.share_audio = feed;
+        Ok(sid.to_string())
+    }
+
+    /// Unpublish screen audio `sid` if it is still the published one; a stale
+    /// sid, one a later publish replaced, is a no-op.
+    pub async fn unpublish_screen_audio(&mut self, sid: &str) {
+        let issued = self
+            .screen_audio
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|a| a.issued == sid);
+        if issued {
+            self.release_screen_audio().await;
+        }
+    }
+
+    /// Unpublish the screen audio and stop its capture thread (joined on
+    /// drop). Called by `release_screen` (stop, close, a new share) and not by
+    /// `unpublish_screen`, so a codec republish keeps the audio, as the web
+    /// path does (screenShare.ts: "Screen audio stays published"); the
+    /// interop example's `--republish-screen` and stop cover both.
+    async fn release_screen_audio(&mut self) {
+        let publication = self.screen_audio.lock().unwrap().take();
+        self.share_audio.take();
+        if let Some(publication) = publication {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.live)
+                .await
+            {
+                log::warn!("[native_voice] screen audio unpublish: {e}");
+            }
+        }
+    }
+
     /// Start capturing `target` to replace the published share's source,
     /// leaving the live capture and its publication running. Returns the
     /// new capture's id and its first-frame receiver, as `start_screen`;
@@ -1330,6 +1457,15 @@ impl NativeSession {
             // (as on the web path's replaceTrack).
             next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
+        }
+        {
+            // The share audio follows the capture that is live, so a
+            // withdrawal ends that one. A short lock of its own, taken after
+            // the video slot's guard is released.
+            let mut slot = self.screen_audio.lock().unwrap();
+            if let Some(audio) = slot.as_mut().filter(|a| a.capture == Some(live.id)) {
+                audio.capture = Some(next.id);
+            }
         }
         // Dropping the old share joins its capture thread (and, on Wayland,
         // closes its portal session); the preview lives on in `next`.
@@ -1389,6 +1525,7 @@ impl NativeSession {
 
     async fn release_screen(&mut self) {
         self.screen_change.take();
+        self.release_screen_audio().await;
         self.unpublish_screen().await;
         self.frames.set_screen(None);
         // Dropping joins the capture thread.
@@ -1490,11 +1627,13 @@ impl NativeSession {
     }
 
     pub fn resources(&self) -> Resources {
+        // One slot lock at a time (see the lock order at `screen_audio`).
+        let camera = usize::from(self.camera.lock().unwrap().is_some());
+        let screen = usize::from(self.screen_publication.lock().unwrap().is_some());
+        let screen_audio = usize::from(self.screen_audio.lock().unwrap().is_some());
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some())
-                + usize::from(self.camera.lock().unwrap().is_some())
-                + usize::from(self.screen_publication.lock().unwrap().is_some()),
+            local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
             capture_streams: self.capture.streams(),
             audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
@@ -1534,7 +1673,7 @@ async fn forward_events(
     on_event: EventSink,
     frames: Observer,
     playout: playout::Listener,
-    published: [VideoSlot; 2],
+    published: [VideoSlot; 3],
     mic_withdrawn: MicWithdrawn,
 ) {
     while let Some(ev) = events.recv().await {
@@ -1549,6 +1688,7 @@ async fn forward_events(
             let slot = match source {
                 TrackSource::Camera => Some(&published[0]),
                 TrackSource::Screenshare => Some(&published[1]),
+                TrackSource::ScreenshareAudio => Some(&published[2]),
                 _ => None,
             };
             let orphan = slot.and_then(|slot| {
@@ -1596,6 +1736,12 @@ async fn forward_events(
                         .map(|capture| Event::CameraCaptureEnded { capture }),
                     TrackSource::Screenshare => {
                         release_slot(&mut published[1].lock().unwrap(), &sid)
+                            .map(|capture| Event::ScreenCaptureEnded { capture })
+                    }
+                    // The share ends the way a stopped capture does; the
+                    // webview's stop releases the capture thread.
+                    TrackSource::ScreenshareAudio => {
+                        release_slot(&mut published[2].lock().unwrap(), &sid)
                             .map(|capture| Event::ScreenCaptureEnded { capture })
                     }
                     _ => None,
@@ -1705,7 +1851,7 @@ impl MicWithdrawn {
     }
 }
 
-/// A video slot's (camera or screen share) response to a local track's
+/// A video slot's (camera, screen share or its audio) response to a local track's
 /// `LocalTrackRepublished`: adopt the new sid when the event continues the
 /// slot's live publication, or return the sid to unpublish when it does not —
 /// the video was stopped (slot emptied) or a newer one replaced it while the
@@ -1718,7 +1864,10 @@ fn apply_republish(
     previous_sid: &TrackSid,
     sid: &TrackSid,
 ) -> Option<TrackSid> {
-    if !matches!(source, TrackSource::Camera | TrackSource::Screenshare) {
+    if !matches!(
+        source,
+        TrackSource::Camera | TrackSource::Screenshare | TrackSource::ScreenshareAudio
+    ) {
         return None;
     }
     match slot.as_mut() {
@@ -2157,6 +2306,62 @@ mod tests {
             Some(sid("TR_old2"))
         );
         assert_eq!(slot.unwrap().live, sid("TR_new"));
+    }
+
+    #[test]
+    fn screen_audio_publish_options_match_the_web_path() {
+        let opts = screen_audio_publish_options();
+        assert_eq!(opts.source, TrackSource::ScreenshareAudio);
+        assert!(!opts.dtx);
+        assert!(!opts.red);
+        assert_eq!(
+            opts.audio_encoding.map(|e| e.max_bitrate),
+            Some(128_000),
+            "musicHighQualityStereo"
+        );
+    }
+
+    #[test]
+    fn a_republished_share_audio_follows_its_new_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(3)));
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::ScreenshareAudio,
+                &sid("TR_a"),
+                &sid("TR_b")
+            ),
+            None
+        );
+        let audio = slot.expect("still published");
+        assert_eq!(audio.live, sid("TR_b"));
+        assert_eq!(audio.issued, "TR_a", "the webview still names TR_a");
+        assert_eq!(audio.capture, Some(3));
+    }
+
+    #[test]
+    fn a_share_audio_republished_after_a_stop_is_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot: Option<VideoPublication> = None;
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::ScreenshareAudio,
+                &sid("TR_a"),
+                &sid("TR_b")
+            ),
+            Some(sid("TR_b"))
+        );
+        assert!(slot.is_none(), "the orphan must not occupy the slot");
+    }
+
+    #[test]
+    fn an_unencrypted_share_audio_republish_ends_the_share() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(9)));
+        assert_eq!(release_slot(&mut slot, &sid("TR_a")), Some(9));
+        assert!(slot.is_none());
     }
 
     #[test]

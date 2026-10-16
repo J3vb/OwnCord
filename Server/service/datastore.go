@@ -417,6 +417,13 @@ type Store interface {
 	// falls back to the fixed phrase "message removed" (P2-10).
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
+	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban
+	// purge's author-and-window-scoped counterparts of
+	// PurgeChannelMessagesWithAction; RecordRemovalAction writes the one
+	// removal ledger row (targeting the author) for the whole purge.
+	PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error)
+	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
+	RecordRemovalAction(ctx context.Context, targetID, actorID int64, reason string) error
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
 	// GetModerationAction is B5-10's appeal submission and decision both
 	// needing the appealed action's own kind, target and actor.

@@ -3,7 +3,7 @@
 # Carried to main with the v2.3.0-beta.1 release, so GitHub now registers it.
 # The schedule runs main's copy of this file; `gh workflow run
 # nightly-test-depth.yml --ref dev` runs dev's copy. Either way every job
-# checks out dev. Until a release carries the 26-shard matrix to main, the
+# checks out dev. Until a release carries the 29-shard matrix to main, the
 # schedule still asks for the six old shard names, which
 # Client/stryker.shard.config.mjs keeps accepting.
 # Do NOT add a substitute trigger (e.g. a schedule on ci.yml): see
@@ -65,6 +65,7 @@ jobs:
           - livekit-6
           - audio-media-1
           - audio-media-2
+          - audio-media-3
           - transport-auth-1
           - transport-auth-2
           - transport-auth-3
@@ -75,6 +76,8 @@ jobs:
           - lib-rest-4
           - lib-rest-5
           - lib-rest-6
+          - lib-rest-7
+          - lib-rest-8
           - stores-1
           - stores-2
           - stores-3
