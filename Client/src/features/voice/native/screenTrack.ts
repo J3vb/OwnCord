@@ -111,7 +111,7 @@ export class NativeScreenTrack {
    *  instead of an empty readout. */
   async getSenderStats(): Promise<readonly NativeVoiceSenderLayer[]> {
     const layers = (await this.senderStats())?.localVideo.screen_share;
-    if (this.stopped || layers === undefined) {
+    if (this.stopped || layers === undefined || layers.length === 0) {
       // i18n-exempt: internal, caught by VideoGrid's poll
       throw new Error("native share stats unavailable");
     }

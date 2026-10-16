@@ -203,6 +203,22 @@ mod tests {
     use super::*;
     use serde_json::{json, Value};
 
+    /// libwebrtc parses each stats report with an `unwrap()` inside a cxx
+    /// callback, so a report type or enum value its `RtcStats` does not know
+    /// aborts the app. The parse was checked against this exact pair; a bump
+    /// must re-check `RtcStats` against the new WebRTC stats before landing.
+    #[test]
+    fn the_stats_parser_is_the_reviewed_libwebrtc() {
+        let lock = include_str!("../../Cargo.lock");
+        for (name, version) in [("libwebrtc", "0.3.50"), ("webrtc-sys", "0.3.47")] {
+            let entry = format!("name = \"{name}\"\nversion = \"{version}\"\n");
+            assert!(
+                lock.contains(&entry),
+                "{name} moved off {version}: re-check its stats parsing, then update this test"
+            );
+        }
+    }
+
     fn parse(items: Vec<Value>) -> Vec<RtcStats> {
         items
             .into_iter()
