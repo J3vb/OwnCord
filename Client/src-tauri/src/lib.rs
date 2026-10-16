@@ -259,6 +259,7 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            tray::open_log_folder,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]

@@ -89,18 +89,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 26    |
-| Distinct `invoke` command names called from `Client/src/`  | 86    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 89    |
+| Distinct `invoke` command names called from `Client/src/`  | 87    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 90    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 52    |
 
-The handler count covers the 89 distinct registrations
+The handler count covers the 90 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-two `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 88 on Linux
-and 46 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 89 on Linux
+and 47 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -184,6 +184,7 @@ native_voice_video_codecs
 native_voice_watch_devices
 notify_message
 open_devtools
+open_log_folder
 ptt_listen_for_key
 ptt_polling_supported
 ptt_set_key

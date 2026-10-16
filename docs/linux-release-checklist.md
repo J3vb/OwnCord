@@ -44,6 +44,10 @@ Tester: ______________ Date: ______________
 | 15  | Close with no tray                |      |      |       |
 | 16  | In-app update (AppImage)          |      |      |       |
 | 17  | In-app update (.deb)              |      |      |       |
+| 18  | Push to talk on F13 to F24 (X11)  |      |      |       |
+| 19  | Mic level bar outside a call      |      |      |       |
+| 20  | Diagnostics microphone check      |      |      |       |
+| 21  | Open Log Folder with no tray      |      |      |       |
 
 ## 1. Install the .deb and first launch
 
@@ -262,10 +266,6 @@ You should see:
 
 ## 17. In-app update (.deb)
 
-**Only run this once the .deb updater has shipped.** Until then, mark it
-**Not applicable** and do not count it as a fail. Today the .deb says it cannot
-update itself. That is expected.
-
 Do: install an older .deb build. Point it at a server that offers the new release.
 Click Update Now. Give your password when the system asks.
 
@@ -274,3 +274,60 @@ You should see:
 - The update downloads.
 - The system asks for your password once.
 - OwnCord restarts on the new version.
+
+On Ubuntu 24.04, also run it from one release to the next: install the
+previous release's .deb, then update to this release candidate.
+
+- Cancel the password prompt once. OwnCord stays on the old version and the
+  banner says "Update cancelled." with Retry. It does not hang or crash.
+- Give your password the second time. The update then finishes as above.
+
+## 18. Push to talk on F13 to F24 (X11)
+
+Run this on X11 only. Mark it **Not applicable** on the Wayland sessions.
+
+Do: Settings, Voice & Video, set Input Mode to Push to Talk. In Keybinds, bind
+F13. Join voice. Put another app in front. Repeat with F24 and one key between
+them. If your keyboard has no such keys, use a remapping tool to send them.
+
+You should see:
+
+- The key is accepted in Keybinds and shown by name.
+- Hold the key: the other person hears you.
+- Let go: they stop hearing you.
+- Close OwnCord and open it again. The key is remembered.
+
+## 19. Mic level bar outside a call
+
+Do: open Settings, Voice & Video. Do not be in a call. Talk. Then join a voice
+channel, leave it, and look at the bar again.
+
+You should see:
+
+- The level bar moves with your voice with no call running.
+- In the call, the bar still moves.
+- After you leave the call, the bar moves again. It does not stay frozen.
+
+## 20. Diagnostics microphone check
+
+Do: open Settings, Diagnostics & logs. Run the connection diagnostics with
+**Include a brief microphone permission check** on.
+
+You should see:
+
+- The Microphone row finishes with a result. It does not stay on a spinner.
+- With a working microphone it passes.
+- Unplug the microphone or block it in the system sound settings, and run it
+  again. The row fails with a message that says why.
+
+## 21. Open Log Folder with no tray
+
+Do: use stock GNOME with no AppIndicator extension, so there is no tray. Open
+Settings, Diagnostics & logs. In **Get help**, click **Open Log Folder**.
+
+You should see:
+
+- The file manager opens the OwnCord log folder. It contains
+  `owncord-client.log`.
+- Nothing else changes. No error shows under the button.
+- On KDE and X11, the button does the same.

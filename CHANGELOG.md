@@ -66,6 +66,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 - Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
+- Settings → Diagnostics & logs has an **Open Log Folder** button that opens OwnCord's log folder in your file manager, so you can find the logs without a tray icon (stock GNOME has none). If the folder cannot be opened, the reason shows under the button.
 
 **Voice**
 

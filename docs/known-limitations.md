@@ -108,15 +108,17 @@ says exactly what the beta does and does not claim about who can read what.
   does nothing: closing the window quits OwnCord. The tray's red dot for
   unread mentions needs the extension too. With the extension, left-click on
   the icon may not reach OwnCord on some desktops; use **Show/Hide** in the tray
-  menu.
+  menu. Setup steps:
+  [docs/linux-install.md](linux-install.md#recommended-extras).
 - **On Linux with Wayland, global keys need a recent desktop.** Global push to
   talk, mute and deafen use the desktop's GlobalShortcuts portal. That
   exists on GNOME 48 and newer and on KDE Plasma. GNOME 47 and older, and
   wlroots desktops such as Sway, have no portal for it, so there are no global
   keys there; the tray menu's Mute and Deafen still work. On the portal,
   push to talk takes function keys (F1 to F24) only, and the desktop owns the
-  keys while they are bound: the focused app no longer receives them. X11 is
-  not affected.
+  keys while they are bound: the focused app no longer receives them. On X11 the
+  app reads the keys itself and is not affected. See
+  [Wayland notes](linux-install.md#wayland-notes).
 - **On Linux, screen-share audio is probably heard in mono for now.** Viewers
   most likely hear the shared sound in mono. This needs PulseAudio or
   pipewire-pulse to be running.
@@ -127,12 +129,18 @@ says exactly what the beta does and does not claim about who can read what.
   - A camera that only works through PipeWire needs `gstreamer1.0-pipewire`.
 
   The `.deb` recommends all four, so apt installs them by default. It does
-  not if you use `--no-install-recommends`.
+  not if you use `--no-install-recommends`. To add them by hand, see
+  [Recommended extras](linux-install.md#recommended-extras).
 
   The AppImage only uses the host's fonts. It uses its own bundled GStreamer
   plugins, so installing GStreamer packages on the host does not help it.
   H264/AAC playback and PipeWire cameras do not work in the AppImage until the
   release build bundles them.
+
+- **On Linux, updating and removing depend on how you installed.** The AppImage
+  and the `.deb` update differently; see
+  [Updating](linux-install.md#updating). Removing the app leaves your data
+  behind; see [Uninstall](linux-install.md#uninstall).
 
 ## Voice and video
 
