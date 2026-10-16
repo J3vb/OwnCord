@@ -479,7 +479,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -497,6 +497,18 @@ different things. `nsfw` is a label the server enforces (see below);
 means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
+
+`private` (3D-6) is the channel-level lock flag, always present on every guild
+channel object (`ready` `channels[]`, `channel_create`, `channel_update`; never
+on a DM, voice channels included) so a client can draw a lock icon. A channel is
+private when the default role (the `is_default` role, never a hard-coded id)
+cannot `READ_MESSAGES` there once that channel's override for the default role
+is applied to the role's base permissions, using the same permission math as
+every other channel check; a default role with Administrator is never private,
+and neither is a channel when no default role exists. It is a property of the
+channel, not of the viewer: every recipient of a frame gets the same value, so
+the shared `channel_update` carries it. An older server omits it; treat an
+absent `private` as `false`. A per-member override never changes it.
 
 `can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
 voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
@@ -1304,6 +1316,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "position": 3,
     "slow_mode": 0,
     "nsfw": false,
+    "private": false,
     "voice_max_users": 0,
     "voice_max_video": 0,
     "can_send": true,
@@ -1365,6 +1378,10 @@ server-side gate and receives no content to render, on any device or client
 that ignores this UI — the row is per-user, not per-session or per-device, so
 a second device or a client that skips the gating UI inherits whatever the
 account has already acknowledged rather than bypassing consent.
+
+`private` follows the channel's override for the default role: an override edit
+re-sends it on the `channel_create` that `RefreshChannelVisibility` addresses
+to each still-visible client, and on the next `channel_update`.
 
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
