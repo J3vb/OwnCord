@@ -223,6 +223,13 @@ profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
 
+`display_name` (max 32), `custom_status` (max 128) and a group DM name (max 100) are single-line text: runs of spaces collapse to one, and the server
+refuses control characters (so no line breaks or tabs), invisible characters
+(zero-width, bidi overrides; a zero-width joiner is allowed only between two
+emoji symbols) and more than 2 combining marks in a row. The length cap counts
+what is left after collapsing. Names and statuses stored before this rule stay
+as they are.
+
 `custom_status_expires_at` (RFC 3339 UTC, or `null` when the custom status has
 no expiry or there is none) is the instant the signed-in user's own custom
 status clears itself, so a client can show a countdown. It is **only** in the
@@ -1010,7 +1017,8 @@ Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 1 per 10 seconds.
 
 `custom_status` is optional and max 128 characters, HTML-sanitized and trimmed
-server-side. **Omitting the field leaves the stored text alone**; sending `""`
+server-side, and checked as single-line text (no line breaks, control or
+invisible characters). **Omitting the field leaves the stored text alone**; sending `""`
 clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
 typed. While the user is timed out a non-empty `custom_status` is refused with

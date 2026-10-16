@@ -312,11 +312,11 @@ its former `registration_open` choice as `invite` (1) or `closed` (0), never
 }
 ```
 
-| Field         | Type   | Required         | Notes                                                                                                        |
-| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `username`    | string | Yes              | HTML-stripped, trimmed. Must be non-empty.                                                                   |
-| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                             |
-| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode. |
+| Field         | Type   | Required         | Notes                                                                                                                                                                                                                                                                                                                     |
+| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`    | string | Yes              | HTML-stripped, trimmed, 2–32 characters. Letters (any script), digits, `_`, `.` and `-` only; a combining accent may follow a letter (at most 2 in a row). No spaces, must start with a letter or digit; `everyone` and `here` are reserved. Login and recovery do not apply these rules, so older accounts keep working. |
+| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                                                                                                                                                                                                                                          |
+| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode.                                                                                                                                                                                                              |
 
 #### Response 201 Created
 
@@ -563,19 +563,19 @@ Get the current authenticated user's profile.
 This is the canonical **user object**, also returned as `user` by register,
 login and the TOTP challenge.
 
-| Field                      | Type         | Description                                                                                                                                                                                                   |
-| -------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                       | int64        | User ID                                                                                                                                                                                                       |
-| `username`                 | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
-| `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
-| `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
-| `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
-| `custom_status`            | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
-| `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                          |
-| `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
-| `role_id`                  | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
-| `totp_enabled`             | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
-| `created_at`               | string       | ISO 8601 timestamp                                                                                                                                                                                            |
+| Field                      | Type         | Description                                                                                                                                                                                                       |
+| -------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | int64        | User ID                                                                                                                                                                                                           |
+| `username`                 | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                               |
+| `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                          |
+| `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                          |
+| `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                                  |
+| `custom_status`            | string\|null | Free-text status line, max 128 characters, one line (no control characters, line breaks, invisible characters or stacked combining marks); null when unset. Set over WebSocket (`presence_update`), not over REST |
+| `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                              |
+| `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead     |
+| `role_id`                  | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                         |
+| `totp_enabled`             | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                      |
+| `created_at`               | string       | ISO 8601 timestamp                                                                                                                                                                                                |
 
 ---
 
@@ -807,13 +807,13 @@ event replaces the client's copy rather than patching it).
 }
 ```
 
-| Field                 | Rules                                                                                                                                                                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                                                                                       |
-| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`. |
-| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters.                                                         |
-| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                      |
-| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                              |
+| Field                 | Rules                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`            | Required. The unique handle; `@mentions` resolve against it. A changed name must follow the registration rules (2–32 characters; letters, digits, `_`, `.`, `-`; no spaces; starts with a letter or digit; `everyone` and `here` reserved). Resending your current name is not a rename.                                   |
+| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                                         |
+| `display_name`        | Optional, 1–32 characters, counted after runs of spaces are collapsed to one. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control characters or line breaks, invisible (bidi-override, zero-width) characters, or more than 2 combining marks in a row. |
+| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                                                                                              |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                                                                                                      |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
