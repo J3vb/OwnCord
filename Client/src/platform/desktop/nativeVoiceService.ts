@@ -10,6 +10,7 @@ import type {
   NativeVoiceCameraPreview,
   NativeVoiceCameraStarted,
   NativeVoiceCameraSupport,
+  NativeToneNote,
   NativeVoiceConnected,
   NativeVoiceDevices,
   NativeMicTestEnvelope,
@@ -165,6 +166,21 @@ export const nativeVoice: NativeVoice = {
       }
     })();
     return stop;
+  },
+  async playSound(notes: readonly NativeToneNote[], deviceId: string, gain: number) {
+    try {
+      return await invoke<number>("native_voice_play_sound", { notes, deviceId, gain });
+    } catch (err) {
+      log.debug("native app sound unavailable", err);
+      return null;
+    }
+  },
+  async stopSound(id: number) {
+    try {
+      await invoke<void>("native_voice_stop_sound", { id });
+    } catch (err) {
+      log.debug("native app sound stop failed", err);
+    }
   },
   onEvent: (handler) => listenLate<NativeVoiceEnvelope>(NATIVE_VOICE_EVENT, handler),
 };
