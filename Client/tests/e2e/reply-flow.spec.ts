@@ -15,7 +15,10 @@ test.describe("Reply Flow", () => {
   test("clicking Reply shows reply bar", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
+    // Reply on your own message shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-reply-101']").click();
+    await page.keyboard.up("Shift");
 
     const replyBar = page.locator(".reply-bar.visible");
     await expect(replyBar).toBeVisible({ timeout: 3000 });
@@ -24,7 +27,10 @@ test.describe("Reply Flow", () => {
   test("reply bar shows the referenced author name", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
+    // Reply on your own message shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-reply-101']").click();
+    await page.keyboard.up("Shift");
 
     const replyBar = page.locator(".reply-bar.visible");
     await expect(replyBar).toContainText("testuser");
@@ -33,7 +39,10 @@ test.describe("Reply Flow", () => {
   test("sending a reply clears the reply bar", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
+    // Reply on your own message shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-reply-101']").click();
+    await page.keyboard.up("Shift");
 
     // Verify reply bar is shown
     const replyBar = page.locator(".reply-bar.visible");
@@ -51,7 +60,10 @@ test.describe("Reply Flow", () => {
   test("reply message appears with reply reference", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
+    // Reply on your own message shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-reply-101']").click();
+    await page.keyboard.up("Shift");
 
     const textarea = page.locator("[data-testid='msg-textarea']");
     await textarea.fill("Replying to you!");
@@ -74,7 +86,10 @@ test.describe("Reply Flow", () => {
   test("cancel button on reply bar dismisses it", async ({ page }) => {
     const firstMessage = page.locator("[data-testid='message-101']");
     await firstMessage.hover();
+    // Reply on your own message shows only while Shift is held (WP 3A-7).
+    await page.keyboard.down("Shift");
     await page.locator("[data-testid='msg-reply-101']").click();
+    await page.keyboard.up("Shift");
 
     const replyBar = page.locator(".reply-bar.visible");
     await expect(replyBar).toBeVisible();

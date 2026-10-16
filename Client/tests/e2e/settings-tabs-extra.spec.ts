@@ -441,14 +441,22 @@ test.describe("Settings — Advanced Tab", () => {
 
     await closeSettings(page);
     await emitChat(page, 9501, "dev mode on");
-    await expect(page.locator("[data-testid='msg-copy-id-9501']")).toBeAttached();
+    // Copy Message ID lives in the "..." menu now (WP 3A-7).
+    await page.locator("[data-testid='message-9501']").hover();
+    await page.locator("[data-testid='msg-more-9501']").click();
+    await expect(page.locator("[data-testid='msg-menu-copy-id']")).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await openSettings(page);
     await switchSettingsTab(page, "Advanced");
     await toggleFor(page, "Developer Mode").click();
     await closeSettings(page);
     await emitChat(page, 9502, "dev mode off");
-    await expect(page.locator("[data-testid='msg-copy-id-9502']")).toHaveCount(0);
+    await page.locator("[data-testid='message-9502']").hover();
+    await page.locator("[data-testid='msg-more-9502']").click();
+    await expect(page.locator(".message-context-menu")).toBeVisible();
+    await expect(page.locator("[data-testid='msg-menu-copy-id']")).toHaveCount(0);
+    await page.keyboard.press("Escape");
   });
 
   test("Clear Image Cache deletes the IndexedDB image cache", async ({ page }) => {
