@@ -782,6 +782,9 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		{`{"seq":9,"type":"roles_update","payload":{"roles":[]}}`, false},
 		{fmt.Sprintf(`{"seq":10,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"},{"user_id":%d,"status":"idle"}]}}`, other, uid), true},
 		{fmt.Sprintf(`{"seq":11,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"}]}}`, other), false},
+		// A call log row names its participants.
+		{fmt.Sprintf(`{"seq":12,"type":"chat_message","payload":{"id":11,"user":{"id":%d},"kind":"call","call":{"started_at":"x","ended_at":null,"participants":[%d,%d]}}}`, other, other, uid), true},
+		{fmt.Sprintf(`{"seq":13,"type":"chat_edited","payload":{"message_id":11,"kind":"call","call":{"started_at":"x","ended_at":"y","participants":[%d]}}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -792,19 +795,19 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if before != 6 {
-		t.Errorf("predicate matched %d rows, want 6", before)
+	if before != 7 {
+		t.Errorf("predicate matched %d rows, want 7", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	if err != nil {
 		t.Fatalf("DeleteEventsForUser: %v", err)
 	}
-	if n != 6 {
-		t.Errorf("deleted %d rows, want 6", n)
+	if n != 7 {
+		t.Errorf("deleted %d rows, want 7", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 5 {
-		t.Errorf("rows left = %d (%v), want the 5 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 6 {
+		t.Errorf("rows left = %d (%v), want the 6 naming nobody or someone else", left, err)
 	}
 }
 

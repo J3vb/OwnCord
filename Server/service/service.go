@@ -94,6 +94,9 @@ type Services struct {
 	// root installs its notifier and runs it; ChannelService wakes it when a
 	// status with an expiry is set.
 	StatusExpiry *CustomStatusExpirer
+	// CallLog writes the call log rows of DM calls from voice presence (WP
+	// 3B-9). The hub installs its sink; the composition root starts it.
+	CallLog *CallLogService
 }
 
 // New creates all domain services wired together.
@@ -120,7 +123,12 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	channels := NewChannelService(st, permSvc)
 	statusExpiry := NewCustomStatusExpirer(st)
 	channels.SetExpiryWake(statusExpiry.Wake)
+	dms := NewDMService(st, permSvc)
+	voice := NewVoiceService(st)
+	callLog := NewCallLogService(st, dms)
+	voice.SetCallLog(callLog)
 	return &Services{
+		CallLog:         callLog,
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),
 		Messages:        messages,
@@ -128,7 +136,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		StatusExpiry:    statusExpiry,
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
-		DMs:             NewDMService(st, permSvc),
+		DMs:             dms,
 		Invites:         NewInviteService(st),
 		Blocks:          blocks,
 		Moderation:      moderation,
@@ -136,7 +144,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Emoji:           NewEmojiService(st, permSvc),
 		Settings:        NewSettingsService(st),
 		Uploads:         uploads,
-		Voice:           NewVoiceService(st),
+		Voice:           voice,
 		ChannelPrivacy:  NewChannelPrivacyService(st),
 		Tokens:          NewTokenService(st),
 		Sessions:        NewSessionService(st),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -34,11 +35,25 @@ var ErrVoiceChannelFull = errors.New("voice channel is full")
 //     also abort them.
 type VoiceService struct {
 	st Store
+	// callLog is told about completed DM joins and voice row deletes so it can
+	// keep the call log (WP 3B-9). Set once by service.New; nil in a service
+	// built on its own, where the notes do nothing.
+	callLog *CallLogService
 }
 
 // NewVoiceService creates a VoiceService.
 func NewVoiceService(st Store) *VoiceService {
 	return &VoiceService{st: st}
+}
+
+// SetCallLog installs the call log that join and leave notes go to.
+func (s *VoiceService) SetCallLog(c *CallLogService) { s.callLog = c }
+
+// NoteJoinCompleted tells the call log that userID finished joining
+// channelID. The hub calls it only after voiceJoinComplete succeeds, so a join
+// that rolled back is never a participant. It never blocks.
+func (s *VoiceService) NoteJoinCompleted(channelID, userID int64) {
+	s.callLog.NoteJoin(channelID, userID, time.Now().UTC())
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -104,7 +119,11 @@ func (s *VoiceService) Join(ctx context.Context, userID, channelID int64, maxUse
 // between the snapshot and the delete has a NEWER row, and an unconditional
 // delete by user id would destroy it.
 func (s *VoiceService) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
-	return s.st.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinedAt)
+	deleted, err := s.st.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinedAt)
+	if deleted {
+		s.callLog.NoteLeave(channelID, time.Now().UTC())
+	}
+	return deleted, err
 }
 
 // ── Self flags ──────────────────────────────────────────────────────────────

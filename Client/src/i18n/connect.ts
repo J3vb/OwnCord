@@ -24,6 +24,8 @@ export const connectText = defineCatalog("connect", {
   "update.downloading": "Downloading update…",
   "update.unavailable":
     "This install cannot update itself. Ask your server administrator for the new version.",
+  "update.unconfirmed":
+    "The server offered no update for this install. If one exists, ask your server administrator.",
   "update.dismiss": "Dismiss",
   "update.available": "Update v{version} available",
   "update.ready": "OwnCord {version} is ready to install",
@@ -36,6 +38,10 @@ export const connectText = defineCatalog("connect", {
   "update.installedRestarting": "Update installed. Restarting…",
   "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
   "update.failed": "Update failed. Please try again later.",
+  "update.installing": "Installing update… Enter your password to continue.",
+  "update.cancelled": "Update cancelled.",
+  "update.notAuthorized":
+    "OwnCord could not get permission to install the update. Install the new .deb by hand.",
   "update.retry": "Retry",
 
   "voice.disconnected": "You were disconnected from voice",

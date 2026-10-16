@@ -126,7 +126,9 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    the lookups are `$.payload.user_id`, `$.payload.user.id`,
    `$.payload.from_user_id`, `$.payload.referenced_message.user.id` (a
    reply's embedded parent snippet; the stored copy carries `null`, so this is
-   a backstop) and `$.payload.mentions` — HP-4 decision 1);
+   a backstop), `$.payload.mentions` and `$.payload.call.participants` (a DM
+   call log row lists the users who joined the call, WP 3B-9) — HP-4
+   decision 1);
 7. `emoji.uploaded_by` — a server-wide asset — moves to the oldest remaining
    admin-class account, else to the oldest remaining account, else the rows
    are deleted and their files join the job;
@@ -752,15 +754,17 @@ SELECT COUNT(*) FROM voice_states WHERE user_id = :uid;
 --    sent ({"seq":…,"type":…,"payload":{…}}), so every id sits under
 --    payload — "user_id" on state frames, "user":{"id":…} on message
 --    frames, "user":{"id":…} under "referenced_message" on a reply's parent
---    snippet, "mentions" on chat frames, "from_user_id" on a relayed E2EE
---    offer (docs/protocol.md). db.EventNamesUserPredicate is this test as
+--    snippet, "mentions" on chat frames, "call":{"participants":[…]} on a
+--    DM call log row, "from_user_id" on a relayed E2EE offer
+--    (docs/protocol.md). db.EventNamesUserPredicate is this test as
 --    code; json_extract is SQLite's built-in JSON1.
 SELECT COUNT(*) FROM events
  WHERE json_extract(payload, '$.payload.user_id') = :uid
     OR json_extract(payload, '$.payload.user.id') = :uid
     OR json_extract(payload, '$.payload.from_user_id') = :uid
     OR json_extract(payload, '$.payload.referenced_message.user.id') = :uid
-    OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE value = :uid);
+    OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE value = :uid)
+    OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE value = :uid);
 -- 21 audit rows still naming the subject by id (0 after B4-10's unlinking;
 --    the rows survive with subject_token or actor_token = HMAC(erasure.key, :uid))
 SELECT COUNT(*) FROM audit_log WHERE actor_id = :uid OR (target_type = 'user' AND target_id = :uid);

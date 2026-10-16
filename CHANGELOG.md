@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings now lists its tabs in Discord's order (Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds, then Advanced, Diagnostics & logs and About), and shows the app version in small text under Log Out.
 - Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
+- Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
 
 **Voice**
 
@@ -130,6 +131,7 @@ and only when it changes something a contributor or fork holder must do
 - Editing a message now happens inside the message itself, as in Discord: press ↑ in an empty message box or choose Edit, change the text in place, then Enter saves, Shift+Enter adds a line and Esc cancels. Saving an empty edit asks to delete the message. A save that fails reopens the editor with your text.
 - Deleted messages now disappear from the channel instead of leaving a "[message deleted]" row, and a reply to a deleted message says "Original message was deleted".
 - You can press Enter while files are still uploading: the message box clears at once and the message shows in the chat with a progress bar per file and a **Cancel upload** button, then posts by itself when the files are in, also if you have switched channels. Messages you send meanwhile are not held back. If an upload fails or you cancel, the message shows **Retry** (uploads again) and **Delete**; closing the app drops a message that is still uploading.
+- A DM now keeps a record of its calls. The server adds one call row per call, from voice presence, to the DM, with who started it, who joined and how long it lasted, and everyone in the DM gets it live and on reconnect. A call ends 10 seconds after the last person leaves, so a quick rejoin is the same call, and a call cut short by a server restart ends at the last moment anyone was seen in it. In a one-to-one DM the call is logged once both sides have accepted the DM. Call rows cannot be edited, deleted, pinned, reacted to or replied to, and search skips them. `chat_message` gains `kind` and `call` and the end of a call is a `chat_edited` with `edited_at: null` (see docs/protocol.md). Needs a client that draws call rows; older clients show the row as a plain line of text.
 
 **Voice and video**
 

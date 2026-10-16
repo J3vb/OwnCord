@@ -97,6 +97,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	tokenDone := time.Now()
 
 	if h.voiceJoinComplete(ctx, c, ch, channelID, state, reqID) {
+		h.voice.NoteJoinCompleted(channelID, c.userID)
 		h.latency.voiceJoin.observe(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
 	}
 }

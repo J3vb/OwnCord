@@ -2111,8 +2111,15 @@ The desktop client also updates itself. The server passes on client update
 files from GitHub Releases:
 
 - **Windows:** NSIS installer updates.
-- **Linux:** AppImage updates. A client installed from the `.deb` package does
-  not update itself; install the new `.deb` by hand.
+- **Linux:** AppImage updates, and `.deb` updates. A `.deb` install asks for
+  the administrator password once per update (a system dialog) and installs
+  the signed package through apt. It needs `pkexec` (the `pkexec` package, or
+  `policykit-1` on older releases; the `.deb` recommends it) and a running
+  polkit agent, which every desktop session has. Without either, the client
+  keeps the old banner and the new `.deb` is installed by hand. A release that
+  adds a hard dependency makes the in-app update need the network. The first
+  update onto a version that carries this feature is manual; an RPM install
+  still updates by hand.
 
 Each update is checked with an Ed25519 signature before it is applied.
 
