@@ -55,9 +55,9 @@ fn linux_badge_plan(count: u32) -> LinuxBadgePlan {
 /// The `.desktop` ids the launcher count is sent to. The installed packages
 /// ship `<product name>.desktop`. An AppImage is not installed: once an
 /// integrator (AppImageLauncher, appimaged) adds its launcher entry, it is
-/// named `appimagekit_<md5 of the AppImage's file URI>-<product name>`, with
-/// the URI taken as `file://` plus the `$APPIMAGE` path (from memory of the
-/// AppImage desktop-integration naming; unverified on a real integrator).
+/// named `appimagekit_<md5 of the AppImage's file URI>-<product name>`, the
+/// URI built the way GLib's `g_filename_to_uri` escapes a path (unverified on
+/// a real integrator).
 /// `appimage` is that variable's value; only an absolute path counts.
 #[cfg(target_os = "linux")]
 fn launcher_desktop_ids(product_name: &str, appimage: Option<&str>) -> Vec<String> {
@@ -65,11 +65,26 @@ fn launcher_desktop_ids(product_name: &str, appimage: Option<&str>) -> Vec<Strin
 
     let mut ids = vec![product_name.to_string()];
     if let Some(path) = appimage.filter(|p| p.starts_with('/')) {
-        let digest = Md5::digest(format!("file://{path}").as_bytes());
+        let digest = Md5::digest(format!("file://{}", escape_uri_path(path)).as_bytes());
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         ids.push(format!("appimagekit_{hex}-{product_name}"));
     }
     ids
+}
+
+/// `path` percent-encoded with GLib's path rule: every byte except ASCII
+/// alphanumerics and `!$&'()*+,-./:=@_~` becomes `%XX` (upper-case hex).
+#[cfg(target_os = "linux")]
+fn escape_uri_path(path: &str) -> String {
+    path.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"!$&'()*+,-./:=@_~".contains(&b) {
+                char::from(b).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 /// Tray dot radius as a share of the icon's shorter edge.
@@ -376,6 +391,11 @@ mod tests {
                 "OwnCord",
                 "appimagekit_ccf4709ec530cf6c5277db1389fb46f9-OwnCord"
             ]
+        );
+        // printf %s 'file:///home/u/My%20Apps/Own%23Cord%20%C3%A9.AppImage' | md5sum
+        assert_eq!(
+            launcher_desktop_ids("OwnCord", Some("/home/u/My Apps/Own#Cord é.AppImage"))[1],
+            "appimagekit_3cae89ec6bba86f93273c18442c0d226-OwnCord"
         );
     }
 
