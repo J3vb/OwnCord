@@ -28,7 +28,10 @@ describe("applySlashCommand", () => {
 
   it("sends nothing for a bare /spoiler or /me", () => {
     for (const input of ["/spoiler", "/spoiler   ", "/me", "/ME"]) {
-      expect(applySlashCommand(input)).toEqual({ empty: true });
+      expect(applySlashCommand(input)).toMatchObject({
+        empty: true,
+        name: input.trim().slice(1).toLowerCase(),
+      });
     }
   });
 
@@ -50,9 +53,11 @@ describe("applySlashCommand", () => {
     }
   });
 
-  it("tolerates leading spaces and trims the text", () => {
-    expect(applySlashCommand("   /me  waves  ")).toEqual({ text: "_waves_" });
-    expect(applySlashCommand(" /shrug")).toEqual({ text: SHRUG });
+  it("needs the command at position 0 and trims the text after it", () => {
+    expect(applySlashCommand("/me  waves  ")).toEqual({ text: "_waves_" });
+    for (const input of [" /shrug", "   /me waves", "\n/spoiler x"]) {
+      expect(applySlashCommand(input)).toBeNull();
+    }
   });
 
   it("keeps multiline text after /spoiler", () => {
@@ -71,8 +76,60 @@ describe("applySlashCommand", () => {
       return host.textContent ?? "";
     };
     expect(shown("/shrug hi")).toBe("hi ¯\\_(ツ)_/¯");
-    expect(shown("/unflip")).toBe("┬─┬ノ( º _ ºノ)");
+    expect(shown("/unflip _x")).toBe("_x ┬─┬ノ( º _ ºノ)");
     expect(shown("/tableflip")).toBe("(╯°□°)╯︵ ┻━┻");
+  });
+});
+
+function render(cmd: string): HTMLDivElement {
+  const out = applySlashCommand(cmd) as { text: string };
+  const host = document.createElement("div");
+  host.appendChild(renderMessageContent(out.text));
+  return host;
+}
+
+describe("/spoiler hides everything it was given", () => {
+  const hidden = (cmd: string, expected: string): void => {
+    const host = render(cmd);
+    const spoilers = host.querySelectorAll(".msg-spoiler");
+    expect(spoilers).toHaveLength(1);
+    // Nothing renders outside the spoiler element, and no marker shows raw.
+    expect(host.textContent).toBe(spoilers[0]!.textContent);
+    expect(host.textContent).toBe(expected);
+  };
+
+  it("keeps a pipe pair inside the spoiler", () => {
+    hidden("/spoiler a||b", "a||b");
+    hidden("/spoiler a|b|c", "a|b|c");
+  });
+
+  it("keeps a trailing backslash from escaping the closer", () => {
+    hidden("/spoiler end\\", "end\\");
+  });
+
+  it("keeps multiline text with block openers in one spoiler", () => {
+    hidden(
+      "/spoiler one\n- two\n> three\n# four\n1. five\n2) six",
+      "one\n- two\n> three\n# four\n1. five\n2) six",
+    );
+    hidden("/spoiler one\n\ntwo", "one\n\ntwo");
+  });
+
+  it("keeps a code fence inside the spoiler", () => {
+    const host = render("/spoiler look\n```\nsecret\n```");
+    expect(host.querySelector("pre")).toBeNull();
+    expect(host.querySelectorAll(".msg-spoiler")).toHaveLength(1);
+    expect(host.textContent).toBe(host.querySelector(".msg-spoiler")!.textContent);
+  });
+});
+
+describe("/me renders as one italic run", () => {
+  it.each(["does _this_", "x_", "_x", "__init__ ran", "snake_case here", "a_b_c"])("%s", (text) => {
+    const host = render(`/me ${text}`);
+    const ems = host.querySelectorAll("em");
+    expect(ems).toHaveLength(1);
+    expect(ems[0]!.textContent).toBe(text);
+    expect(host.textContent).toBe(text);
   });
 });
 

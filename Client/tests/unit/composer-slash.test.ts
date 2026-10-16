@@ -80,10 +80,53 @@ describe("composer slash commands (3A-10a)", () => {
       expect(textarea().value).toBe("/spoiler ");
     });
 
-    it("sends an unknown /word unchanged", () => {
+    it("sends an unknown /word unchanged but rewrites a known command", () => {
       type("/foo bar");
       press("Enter");
       expect(onSend.mock.calls[0]![0]).toBe("/foo bar");
+    });
+
+    it("rewrites a known command where an unknown one is left alone", () => {
+      type("/me bar");
+      press("Enter");
+      expect(onSend.mock.calls[0]![0]).toBe("_bar_");
+    });
+
+    it("hints when a bare /me or /spoiler has nothing to send", () => {
+      type("/spoiler ");
+      press("Enter");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(container.querySelector(".attachment-upload-error-text")!.textContent).toBe(
+        "/spoiler needs some text",
+      );
+    });
+
+    it("sends nothing and hints for a bare /me with an attachment staged", async () => {
+      input.destroy?.();
+      container.replaceChildren();
+      input = createMessageInput({
+        channelId: 1,
+        channelName: "general",
+        onSend,
+        onTyping: vi.fn(),
+        onUploadFile: vi.fn(async (f: File) => ({ id: f.name, url: "http://x", filename: f.name })),
+      });
+      input.mount(container);
+      const file = new File(["x"], "a.txt", { type: "text/plain" });
+      const fileInput = container.querySelector("input[type=file]") as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", { value: [file], configurable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(
+        container.querySelector(".attachment-preview-item, .attachment-preview"),
+      ).not.toBeNull();
+      type("/me");
+      press("Escape");
+      press("Enter");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(container.querySelector(".attachment-upload-error-text")!.textContent).toBe(
+        "/me needs some text",
+      );
     });
   });
 
@@ -94,6 +137,7 @@ describe("composer slash commands (3A-10a)", () => {
       expect(names()).toEqual(["/shrug", "/tableflip", "/unflip", "/spoiler", "/me"]);
       expect(popup()!.querySelector(".ma-detail")!.textContent).toContain("to your message");
       expect(popup()!.getAttribute("role")).toBe("listbox");
+      expect(popup()!.getAttribute("aria-label")).toBe("Commands");
       expect(popup()!.querySelector("[role=option]")).not.toBeNull();
       expect(textarea().getAttribute("aria-activedescendant")).toBe("slash-autocomplete-option-0");
     });
@@ -118,6 +162,19 @@ describe("composer slash commands (3A-10a)", () => {
       press("Enter");
       expect(textarea().value).toBe("/unflip ");
       expect(popup()).toBeNull();
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it("ignores keys while an IME is composing", () => {
+      type("/");
+      textarea().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }),
+      );
+      textarea().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true }),
+      );
+      expect(textarea().value).toBe("/");
+      expect(popup()).not.toBeNull();
       expect(onSend).not.toHaveBeenCalled();
     });
 

@@ -787,6 +787,8 @@ test.describe("Composer — slash commands (3A-10a)", () => {
     await textarea(page).fill("/sp");
     const popup = page.locator("[data-testid='slash-autocomplete']");
     await expect(popup).toBeVisible();
+    await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
+    await expect(textarea(page)).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("[data-testid='slash-option-spoiler']")).toBeVisible();
     await textarea(page).press("Enter");
     await expect(textarea(page)).toHaveValue("/spoiler ");

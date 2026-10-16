@@ -859,7 +859,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // send-while-uploading paths below carry the rewritten message too. A bare
     // /spoiler or /me has nothing to send and leaves the draft as typed.
     const slash = applySlashCommand(textarea.value);
-    if (slash !== null && "empty" in slash) return;
+    if (slash !== null && "empty" in slash) {
+      showUploadError(messagingText("slash.needsText", { name: slash.name }));
+      return;
+    }
     const content = replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text);
     const hasAttachments = pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;

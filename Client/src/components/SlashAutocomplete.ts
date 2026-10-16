@@ -43,6 +43,7 @@ export function createSlashAutocomplete(
     valueOf: (c) => c.name,
     rowTestId: (c) => `slash-option-${c.name}`,
     renderRow: renderSlashRow,
+    ariaLabel: messagingText("slash.listLabel"),
     primeOnCreate: true,
     onSelect: options.onSelect,
     onClose: options.onClose,
