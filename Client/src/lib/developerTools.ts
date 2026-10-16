@@ -1,0 +1,32 @@
+/**
+ * Developer Mode helpers shared by the context menus (message, member,
+ * channel): whether the preference is on, and a copy that reports its outcome.
+ */
+
+import { loadPref } from "@lib/preferences";
+import { showToast } from "@lib/toast";
+import { messagingText } from "../i18n/messaging";
+
+/** Cached value of the developerMode preference. Invalidated on pref change. */
+let developerModeEnabled = loadPref<boolean>("developerMode", false);
+window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+  if (e.detail.key === "developerMode") {
+    developerModeEnabled = loadPref<boolean>("developerMode", false);
+  }
+}) as EventListener);
+
+/** Whether Developer Mode is on: the copy-ID entries on the context menus. */
+export function isDeveloperMode(): boolean {
+  return developerModeEnabled;
+}
+
+type MessagingKey = Parameters<typeof messagingText>[0];
+
+/** Copy `text`, then say whether it worked: a copy with no feedback is
+ *  indistinguishable from a clipboard that refused. */
+export function copyWithToast(text: string, done: MessagingKey, failed: MessagingKey): void {
+  void navigator.clipboard.writeText(text).then(
+    () => showToast(messagingText(done), "success"),
+    () => showToast(messagingText(failed), "error"),
+  );
+}

@@ -502,7 +502,7 @@ describe("AppearanceTab — Accessibility", () => {
   });
 });
 
-describe("AppearanceTab - zoom and system theme", () => {
+describe("AppearanceTab - system theme", () => {
   let container: HTMLDivElement;
   let ac: AbortController;
 
@@ -528,25 +528,6 @@ describe("AppearanceTab - zoom and system theme", () => {
     container.remove();
     vi.unstubAllGlobals();
     document.documentElement.removeAttribute("style");
-  });
-
-  const zoomSlider = (): HTMLInputElement =>
-    container.querySelector<HTMLInputElement>('input[aria-label="Zoom"]')!;
-
-  it("renders a 50-200 zoom slider at 100% by default", () => {
-    container.appendChild(buildAppearanceTab(ac.signal));
-    const slider = zoomSlider();
-    expect([slider.min, slider.max, slider.step, slider.value]).toEqual(["50", "200", "10", "100"]);
-  });
-
-  it("moving the slider stores and applies the zoom and updates its label", () => {
-    container.appendChild(buildAppearanceTab(ac.signal));
-    const slider = zoomSlider();
-    slider.value = "150";
-    slider.dispatchEvent(new Event("input"));
-    expect(localStorage.getItem("owncord:settings:zoomLevel")).toBe("150");
-    expect(document.documentElement.style.getPropertyValue("zoom")).toBe("150%");
-    expect(slider.nextElementSibling?.textContent).toBe("150%");
   });
 
   it("adds a Sync with computer tile that stores the system choice", () => {

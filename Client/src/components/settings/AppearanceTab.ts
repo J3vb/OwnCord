@@ -18,11 +18,6 @@ import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import {
   applyFontSize,
   effectiveFontSize,
-  MIN_ZOOM_PCT,
-  MAX_ZOOM_PCT,
-  ZOOM_STEP_PCT,
-  setZoom,
-  storedZoom,
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
@@ -145,34 +140,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
   appendChildren(fontRow, fontSlider, fontLabel);
   appendChildren(section, fontHeader, fontRow);
-
-  // Zoom slider: the whole UI, in whole steps, applied as the thumb moves.
-  const zoomHeader = createElement("h3", {}, t("appearance.zoom"));
-  const zoomRow = createElement("div", { class: "slider-row" });
-  const zoomSlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: String(MIN_ZOOM_PCT),
-    max: String(MAX_ZOOM_PCT),
-    step: String(ZOOM_STEP_PCT),
-    value: String(storedZoom()),
-    "aria-label": t("appearance.zoom"),
-  });
-  const zoomLabel = createElement(
-    "span",
-    { class: "slider-val" },
-    t("appearance.zoom.value", { pct: storedZoom() }),
-  );
-  zoomSlider.addEventListener(
-    "input",
-    () => {
-      const pct = setZoom(Number(zoomSlider.value));
-      setText(zoomLabel, t("appearance.zoom.value", { pct }));
-    },
-    { signal },
-  );
-  appendChildren(zoomRow, zoomSlider, zoomLabel);
-  appendChildren(section, zoomHeader, zoomRow);
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });

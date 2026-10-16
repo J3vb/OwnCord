@@ -24,7 +24,7 @@ import {
   clampMenuToViewport,
 } from "@lib/context-menu";
 import { appendPurgeSection } from "@components/purge-prompt";
-import { copyWithToast, isDeveloperMode } from "@components/message-list/message-actions";
+import { copyWithToast, isDeveloperMode } from "@lib/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 
@@ -266,11 +266,5 @@ export function attachChannelContextMenu(
   );
 
   // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused row.
-  openMenuOnKeyboard(
-    el,
-    (x, y) => {
-      if (hasEntries || isDeveloperMode()) openMenu(x, y);
-    },
-    signal,
-  );
+  openMenuOnKeyboard(el, openMenu, signal, () => hasEntries || isDeveloperMode());
 }

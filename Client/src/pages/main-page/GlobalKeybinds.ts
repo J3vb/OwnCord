@@ -48,8 +48,6 @@ export interface GlobalKeybindHandlers {
   /** Alt+↑/↓ — step to the previous/next channel; with Shift, the previous/
    *  next unread one (DP-35). `direction` is 1 for down/next, -1 for up. */
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
-  /** Ctrl+= / Ctrl++ (1), Ctrl+- (-1) and Ctrl+0 (0) — zoom in, out, or reset. */
-  readonly onZoom: (direction: 1 | -1 | 0) => void;
   /** Whether shortcuts should be ignored right now (e.g. settings overlay open). */
   readonly isSuspended?: () => boolean;
   /** The mute/deafen keys of the global shortcut, read on every press so a
@@ -109,14 +107,6 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     const key = e.key.toLowerCase();
 
     const run = (label: string, action: () => void): void => runGlobal(e, label, action);
-
-    // Zoom works from any focus, text fields included (like Ctrl+F). "+" is
-    // Shift+= on most layouts, so Shift is allowed for the zoom-in key only.
-    const zoom = zoomDirection(key, e.shiftKey);
-    if (zoom !== null) {
-      if (!e.repeat || zoom !== 0) run("zoom", () => handlers.onZoom(zoom));
-      return;
-    }
 
     if (e.shiftKey) {
       if (key === "v") {
@@ -217,15 +207,6 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
   return () => owner.destroy();
-}
-
-/** The zoom a Ctrl+key press asks for, or null when the key is not a zoom key. */
-function zoomDirection(key: string, shift: boolean): 1 | -1 | 0 | null {
-  if (key === "=" || key === "+") return 1;
-  if (shift) return null;
-  if (key === "-") return -1;
-  if (key === "0") return 0;
-  return null;
 }
 
 /** Controls that take keys of their own; typing on one of them stays there. */

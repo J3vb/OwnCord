@@ -7,12 +7,8 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import {
-  connectionLockReason,
-  copyMessageLink,
-  copyWithToast,
-  messageActionGates,
-} from "./message-actions";
+import { copyWithToast } from "@lib/developerTools";
+import { connectionLockReason, copyMessageLink, messageActionGates } from "./message-actions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -389,7 +385,14 @@ export function renderMessage(
     { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
-  appendChildren(header, authorEl, time);
+  // Compact mode shows this short clock time ahead of the name; CSS hides it
+  // otherwise. The clock time never changes, so relabelRenderedTimes skips it.
+  const compactTime = createElement(
+    "span",
+    { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatClockTime(msg.timestamp),
+  );
+  appendChildren(header, compactTime, authorEl, time);
   el.appendChild(header);
 
   if (msg.deleted) {

@@ -76,7 +76,6 @@ import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
-import { stepZoom } from "@lib/appearance";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
 import { createMessageController } from "./main-page/MessageController";
@@ -1065,9 +1064,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onStepChannel: (direction, unreadOnly) => {
           if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
           stepChannel(direction, unreadOnly);
-        },
-        onZoom: (direction) => {
-          stepZoom(direction);
         },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,

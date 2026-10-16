@@ -28,6 +28,7 @@ import type { MessageListOptions } from "../MessageList";
 import { connectText } from "../../i18n/connect";
 import { imageMenuText } from "../../i18n/imageMenu";
 import { messageMenuText } from "../../i18n/messageMenu";
+import { copyWithToast } from "@lib/developerTools";
 import { messagingText } from "../../i18n/messaging";
 import { buildCustomEmojiNode } from "./custom-emoji";
 import {
@@ -35,7 +36,6 @@ import {
   deleteLockReason,
   findMessage,
   copyMessageLink,
-  copyWithToast,
   isActionableMessage,
   messageActionGates,
 } from "./message-actions";

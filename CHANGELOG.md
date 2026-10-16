@@ -55,7 +55,6 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
-- Settings → Appearance has a **Zoom** slider (50 % to 200 %), and Ctrl+= / Ctrl++ zoom in, Ctrl+- zooms out and Ctrl+0 resets, from anywhere in the app. Your zoom is remembered.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
 - With Developer Mode on, right-clicking a member adds **Copy User ID** and right-clicking a channel adds **Copy Channel ID**, next to the existing Copy Message ID.
 

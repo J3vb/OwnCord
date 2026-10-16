@@ -145,4 +145,37 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
     open(voice);
     expect(item()).not.toBeNull();
   });
+
+  it("leaves Shift+F10 and the Menu key alone on a row with no menu", () => {
+    authStore.setState((s) => ({
+      ...s,
+      user: { id: 1, username: "t", avatar: null, role: "member" },
+    }));
+    setDeveloperMode(false);
+    const el = document.createElement("div");
+    container.appendChild(el);
+    attachChannelContextMenu(
+      el,
+      { ...channel(7, 0), type: "voice" as const },
+      ac.signal,
+      ac.signal,
+    );
+    const keys = [
+      new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true }),
+    ];
+    for (const key of keys) el.dispatchEvent(key);
+    expect(keys.map((k) => k.defaultPrevented)).toEqual([false, false]);
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+
+    setDeveloperMode(true);
+    const again = new KeyboardEvent("keydown", {
+      key: "ContextMenu",
+      bubbles: true,
+      cancelable: true,
+    });
+    el.dispatchEvent(again);
+    expect(again.defaultPrevented).toBe(true);
+    expect(item()).not.toBeNull();
+  });
 });

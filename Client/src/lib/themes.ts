@@ -141,6 +141,7 @@ export function applyThemeChoice(choice: string): void {
   const mq = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;
   const paint = (): void => {
     paintTheme(osPrefersDark(mq) ? SYSTEM_DARK_THEME : SYSTEM_LIGHT_THEME);
+    // paintTheme persists the palette name; this second write puts "system" back.
     localStorage.setItem(STORAGE_KEY_ACTIVE, SYSTEM_THEME);
   };
   paint();

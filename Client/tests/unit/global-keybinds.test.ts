@@ -31,7 +31,6 @@ function makeHandlers(): {
   onMarkChannelRead: Mock<() => void>;
   onMarkServerRead: Mock<() => void>;
   onScrollMessages: Mock<(direction: 1 | -1) => void>;
-  onZoom: Mock<(direction: 1 | -1 | 0) => void>;
 } {
   return {
     onSearch: vi.fn<() => void>(),
@@ -44,7 +43,6 @@ function makeHandlers(): {
     onMarkChannelRead: vi.fn<() => void>(),
     onMarkServerRead: vi.fn<() => void>(),
     onScrollMessages: vi.fn<(direction: 1 | -1) => void>(),
-    onZoom: vi.fn<(direction: 1 | -1 | 0) => void>(),
   };
 }
 
@@ -733,52 +731,6 @@ describe("global keybinds", () => {
       keyOn(search, "g", { ctrlKey: true });
 
       expect(h.onTogglePicker).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("zoom", () => {
-    it("Ctrl+= and Ctrl++ zoom in, Ctrl+- out, Ctrl+0 resets, and each swallows the default", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      const events = [press("="), press("+", { shiftKey: true }), press("-"), press("0")];
-
-      expect(h.onZoom.mock.calls).toEqual([[1], [1], [-1], [0]]);
-      expect(events.every((e) => e.defaultPrevented)).toBe(true);
-    });
-
-    it("works from a text field, like Ctrl+F", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-      const input = document.createElement("input");
-      document.body.appendChild(input);
-      onTestFinished(() => input.remove());
-
-      input.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "-", ctrlKey: true, bubbles: true, cancelable: true }),
-      );
-
-      expect(h.onZoom).toHaveBeenCalledWith(-1);
-    });
-
-    it("ignores Ctrl+Shift+- and Ctrl+Shift+0, and a held reset", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      press("-", { shiftKey: true });
-      press("0", { shiftKey: true });
-      press("0", { repeat: true });
-
-      expect(h.onZoom).not.toHaveBeenCalled();
-    });
-
-    it("stays quiet while suspended", () => {
-      const h = { ...makeHandlers(), isSuspended: () => true };
-      detach = attachGlobalKeybinds(h);
-
-      press("=");
-
-      expect(h.onZoom).not.toHaveBeenCalled();
     });
   });
 });

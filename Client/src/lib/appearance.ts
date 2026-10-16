@@ -6,7 +6,7 @@
  * settings overlay (whose tabs statically import the LiveKit stack).
  */
 
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref } from "@lib/preferences";
 import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/themes";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 
@@ -55,43 +55,6 @@ export function applyFontSize(): void {
   document.documentElement.style.setProperty("--font-size", `${effectiveFontSize()}px`);
 }
 
-/** The zoom range in percent, the step of the slider and the keys, and the default. */
-export const MIN_ZOOM_PCT = 50;
-export const MAX_ZOOM_PCT = 200;
-export const ZOOM_STEP_PCT = 10;
-export const DEFAULT_ZOOM_PCT = 100;
-
-/** Clamp to the range and snap to a step; anything that is not a number is 100. */
-export function clampZoom(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_ZOOM_PCT;
-  const snapped = Math.round(value / ZOOM_STEP_PCT) * ZOOM_STEP_PCT;
-  return Math.min(Math.max(snapped, MIN_ZOOM_PCT), MAX_ZOOM_PCT);
-}
-
-/** The stored zoom, read back through the same trust boundary as the font size. */
-export function storedZoom(): number {
-  return clampZoom(loadPref<number>("zoomLevel", DEFAULT_ZOOM_PCT));
-}
-
-/** Write the stored zoom as CSS `zoom` on documentElement (Chromium/WebView2). */
-export function applyZoom(): void {
-  const pct = storedZoom();
-  document.documentElement.style.setProperty("zoom", pct === DEFAULT_ZOOM_PCT ? "" : `${pct}%`);
-}
-
-/** Save a zoom level (clamped) and apply it; returns the level now in effect. */
-export function setZoom(pct: number): number {
-  const next = clampZoom(pct);
-  savePref("zoomLevel", next);
-  applyZoom();
-  return next;
-}
-
-/** Step the zoom one notch (+1 in, -1 out), or reset it with 0. */
-export function stepZoom(direction: 1 | -1 | 0): number {
-  return setZoom(direction === 0 ? DEFAULT_ZOOM_PCT : storedZoom() + direction * ZOOM_STEP_PCT);
-}
-
 /**
  * Apply stored appearance preferences (theme, font size, compact mode).
  * Call at app startup so the UI doesn't flash default styles.
@@ -100,7 +63,6 @@ export function applyStoredAppearance(): void {
   applyThemeChoice(getActiveThemeName());
   restoreAccent();
   applyFontSize();
-  applyZoom();
   document.documentElement.classList.toggle(
     "compact-mode",
     loadPref<boolean>("compactMode", false),
