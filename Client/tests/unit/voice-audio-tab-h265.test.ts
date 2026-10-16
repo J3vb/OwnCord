@@ -132,3 +132,22 @@ describe("VoiceAudioTab H.265 entry (WP M-6)", () => {
     ac.abort();
   });
 });
+
+describe("VoiceAudioTab screen share fps note (WP M-3)", () => {
+  it("tells Linux users that Wayland caps a share at 60 fps", () => {
+    isLinuxDesktop.mockReturnValue(true);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    expect(el.querySelector("[data-testid='screen-fps-wayland-note']")?.textContent).toBe(
+      "On a Wayland desktop, screen sharing is limited to 60 FPS.",
+    );
+    ac.abort();
+  });
+
+  it("has no Wayland note off Linux", () => {
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    expect(el.querySelector("[data-testid='screen-fps-wayland-note']")).toBeNull();
+    ac.abort();
+  });
+});
