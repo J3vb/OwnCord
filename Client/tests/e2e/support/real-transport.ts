@@ -208,6 +208,13 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "voice_shortcuts_supported":
         case "plugin:autostart|is_enabled":
           return false;
+        case "global_keys_status":
+          return {
+            backend: "none",
+            portalVersion: 0,
+            triggers: { ptt: null, mute: null, deafen: null },
+            canConfigure: false,
+          };
         case "plugin:app|version":
           return "e2e";
         case "plugin:deep-link|get_current":
