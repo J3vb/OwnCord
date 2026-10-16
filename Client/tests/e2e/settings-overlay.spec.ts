@@ -311,7 +311,7 @@ test.describe("Settings — Keybinds Tab", () => {
     // disclose the gap rather than promise a global shortcut it cannot deliver.
     const hint = page.getByTestId("keybinds-global-hint");
     await expect(hint).toContainText("tray menu");
-    await expect(hint).toContainText("does not support global mute/deafen shortcuts");
+    await expect(hint).toContainText("global mute/deafen shortcuts are not available");
   });
 });
 

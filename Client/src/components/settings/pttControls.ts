@@ -269,6 +269,8 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
   // control binds through its dialog and follows what it reports.
   const enterPortalMode = (status: GlobalKeysStatus): void => {
     portal = status;
+    pttValue.disabled = false;
+    delaySlider.disabled = false;
     pttValue.title = t("keybinds.portalClickToSet");
     setText(pttHint, t("keybinds.pttPortalHint"));
     pttClear.style.display = currentVk !== 0 ? "" : "none";
@@ -285,7 +287,16 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       }
       return;
     }
-    if (portal !== null || legacyChecked) return;
+    if (portal !== null) {
+      // The portal went away: back to the legacy check, which disables the
+      // control where nothing can deliver the key.
+      portal = null;
+      pttValue.title = t("keybinds.clickToSet");
+      setText(pttHint, t("keybinds.pttHint"));
+      if (!capturing) setText(pttValue, restingKeyText());
+      legacyChecked = false;
+    }
+    if (legacyChecked) return;
     legacyChecked = true;
     // voice #12: where the desktop cannot observe global key state (macOS, or
     // Linux without a global shortcut service), a bound PTT key can never gate

@@ -309,10 +309,12 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     portalNote.style.display = text === null ? "none" : "";
     setText(portalNote, text ?? "");
   };
+  let portalHeading = false;
   const renderPortal = (status: GlobalKeysStatus): void => {
     // The heading is built on first use so a polling or unsupported desktop
     // carries no empty section.
-    if (portalSection.style.display === "none") {
+    if (!portalHeading) {
+      portalHeading = true;
       portalSection.prepend(
         createElement("div", { class: "settings-separator" }),
         createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
@@ -387,7 +389,17 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       renderPortal(status);
       return;
     }
-    if (inPortalMode || polled) return;
+    if (inPortalMode) {
+      // The portal went away (thread failure, a portal without the
+      // interface): drop its controls and say global keys are off.
+      inPortalMode = false;
+      portalSection.style.display = "none";
+      if (commKbd.mute !== undefined) setText(commKbd.mute, comboText("mute"));
+      if (commKbd.deafen !== undefined) setText(commKbd.deafen, comboText("deafen"));
+      globalHint.style.display = "";
+      polled = false;
+    }
+    if (polled) return;
     polled = true;
     void desktop.globalShortcuts
       .supported()

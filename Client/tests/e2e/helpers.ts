@@ -888,6 +888,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
         if (cmd === "voice_shortcuts_supported") return false;
+        // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
+        if (cmd === "global_keys_status")
+          return { backend: "none", portalVersion: 0, triggers: { ptt: null, mute: null, deafen: null }, canConfigure: false };
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
         // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };

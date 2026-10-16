@@ -772,6 +772,33 @@ describe("KeybindsTab", () => {
       expect(statusHandlers.size).toBe(0);
     });
 
+    it("drops the portal controls when the portal goes away, and takes them back", async () => {
+      mockStatus.mockResolvedValue(portal(bound));
+      mockSupported.mockResolvedValue(false);
+      mockPttSupported.mockResolvedValue(false);
+      const el = buildKeybindsTab(new AbortController().signal);
+      await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+      const ptt = el.querySelector(
+        '[aria-label="Push to Talk keybind — click to capture"]',
+      ) as HTMLButtonElement;
+      expect(ptt.disabled).toBe(false);
+
+      for (const handler of statusHandlers)
+        handler({ backend: "none", portalVersion: 0, triggers: unbound, canConfigure: false });
+      expect(testId(el, "keybinds-portal").style.display).toBe("none");
+      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      await vi.waitFor(() => expect(ptt.disabled).toBe(true));
+      expect(testId(el, "keybinds-global-hint").style.display).toBe("");
+      expect(el.textContent).toContain("Push to Talk needs a global key service");
+
+      for (const handler of statusHandlers) handler(portal(bound));
+      expect(testId(el, "keybinds-portal").style.display).toBe("");
+      expect(ptt.disabled).toBe(false);
+      expect(testId(el, "keybinds-portal").querySelectorAll(".keybind-section-header").length).toBe(
+        1,
+      );
+    });
+
     describe("push to talk", () => {
       const pttButton = (el: HTMLElement): HTMLButtonElement =>
         el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
