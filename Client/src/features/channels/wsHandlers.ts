@@ -184,8 +184,14 @@ export function handleReadState(payload: Payload<"read_state">): void {
  * alone. Returns true when it consumed the frame.
  */
 export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
-  if (payload.code !== "RATE_LIMITED" && payload.code !== "NOT_FOUND") return false;
-  return failMarkUnread(id, payload.code === "RATE_LIMITED" ? "rateLimited" : "notFound");
+  // Any refusal of this frame ends the request; only two have copy of their own.
+  const notice =
+    payload.code === "RATE_LIMITED"
+      ? "rateLimited"
+      : payload.code === "NOT_FOUND"
+        ? "notFound"
+        : "failed";
+  return failMarkUnread(id, notice);
 }
 
 /** The custom-emoji slice of `ready`. */

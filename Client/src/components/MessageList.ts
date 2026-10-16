@@ -68,6 +68,7 @@ import {
   markChannelRead,
   markChannelReadSeen,
   hasUnread,
+  isHeldUnread,
   isChannelAway,
   isChannelCovered,
   noteLiveMessageSeen,
@@ -689,8 +690,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function markReadAndJumpToPresent(): void {
     if (root === null) return;
     dismissUnreadBar();
-    // The gate keeps a held or repeated Escape off the 5/s mark_read budget.
-    if (hasUnread(options.channelId) || readPointerEnabled()) {
+    // Just marked unread: Escape is the reader asking for it read, so mark at
+    // latest (which also ends the hold). Otherwise what was seen. The gate
+    // keeps a held or repeated Escape off the 5/s mark_read budget.
+    if (readPointerEnabled() && isHeldUnread(options.channelId)) {
+      markChannelRead(options.channelId);
+    } else if (hasUnread(options.channelId) || readPointerEnabled()) {
       markChannelReadSeen(options.channelId);
     }
     if (isWindowDetached(options.channelId)) {
@@ -739,7 +744,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // pointer (nothing is sent unless the newest seen id is above it); without
     // one, the local unread count gates it, as before.
     if (readPointerEnabled()) {
-      noteMessageSeen(options.channelId, newestLoadedId());
+      if (!isChannelCovered()) noteMessageSeen(options.channelId, newestLoadedId());
       // Every append auto-scrolls and lands here: send on reaching the bottom
       // only. Arrivals watched at the bottom go by the throttled live path.
       if (bottomMarked) return;

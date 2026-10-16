@@ -498,6 +498,39 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       expect(marks).toHaveLength(1);
     });
 
+    it("Escape on a channel just marked unread marks it read at latest and ends the hold", async () => {
+      setMessages([1, 2, 3, 4, 5].map(msg));
+      openChannel(0, 5);
+      mount();
+      scrollToEnd();
+      row(3)
+        .querySelector(".msg-text")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+      await vi.waitFor(() => expect(unreads).toEqual([[CHANNEL_ID, 3]]));
+      list!.markReadAndJumpToPresent();
+      expect(marks).toEqual([[CHANNEL_ID, undefined]]);
+      expect(channelsStore.getState().channels.get(CHANNEL_ID)?.unreadCount).toBe(0);
+      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      messagesStore.flush();
+      await vi.waitFor(() => expect(marks).toContainEqual([CHANNEL_ID, 6]), { timeout: 3000 });
+    });
+
+    it("a live arrival that releases the hold at the bottom is marked read", async () => {
+      setMessages([1, 2, 3, 4, 5].map(msg));
+      openChannel(0, 5);
+      mount();
+      scrollToEnd();
+      row(3)
+        .querySelector(".msg-text")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+      await vi.waitFor(() => expect(unreads).toEqual([[CHANNEL_ID, 3]]));
+      scrollUp();
+      scrollToEnd();
+      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      messagesStore.flush();
+      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 6]]), { timeout: 3000 });
+    });
+
     it("Mark Unread is not undone by reaching the bottom or by a live arrival", async () => {
       setMessages([1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);

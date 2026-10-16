@@ -18,6 +18,7 @@ import {
   resetReadPointerState,
   failMarkUnread,
   setLiveTailInView,
+  noteAwayUnread,
   setMarkReadSender,
   writeReadPointer,
 } from "@lib/read-state";
@@ -346,6 +347,35 @@ describe("Mark Unread", () => {
     expect(failMarkUnread("something-else", "failed")).toBe(false);
     expect(failMarkUnread(undefined, "failed")).toBe(false);
     expect(pointer(1)).toBe(9);
+  });
+
+  it("keeps two requests apart: the first one's refusal rolls back only its own", () => {
+    setChannels([channel(1, 0, 10), channel(2, 0, 20)]);
+    setMessages(2, [msg(18), msg(19), msg(20)], false);
+    markMessageUnread(1, 10);
+    markMessageUnread(2, 20);
+    expect(pointer(1)).toBe(9);
+    expect(pointer(2)).toBe(19);
+    expect(failMarkUnread("u-1", "failed")).toBe(true);
+    expect(pointer(1)).toBe(10);
+    expect(pointer(2)).toBe(19);
+    expect(failMarkUnread("u-2", "failed")).toBe(true);
+    expect(pointer(2)).toBe(20);
+  });
+
+  it("is released by a live arrival once the reader was away at an unread arrival", () => {
+    markMessageUnread(1, 10);
+    noteAwayUnread(1);
+    noteMessageSeen(1, 12, true);
+    leaveChannel(1);
+    expect(reads).toEqual([[1, 12]]);
+  });
+
+  it("stays held when no arrival found the reader away", () => {
+    markMessageUnread(1, 10);
+    noteMessageSeen(1, 12, true);
+    leaveChannel(1);
+    expect(reads).toEqual([]);
   });
 
   it("a refusal is answered once", () => {

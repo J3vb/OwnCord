@@ -16,7 +16,12 @@ import {
 import { dmStore, addDmToChannelsStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { messagesStore } from "../../src/stores/messages.store";
-import { leaveChannel, setLiveTailInView, setMarkReadSender } from "../../src/lib/read-state";
+import {
+  leaveChannel,
+  noteMessageSeen,
+  setLiveTailInView,
+  setMarkReadSender,
+} from "../../src/lib/read-state";
 import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
@@ -137,6 +142,7 @@ describe("read pointer through the dispatcher", () => {
   let cleanup: () => void;
   let hasFocus: ReturnType<typeof vi.spyOn>;
   let unreads: Array<[number, number]>;
+  let reads: Array<[number, number | undefined]>;
 
   beforeEach(() => {
     mockShowToast.mockClear();
@@ -153,7 +159,8 @@ describe("read pointer through the dispatcher", () => {
     }));
     setLiveTailInView(1, true);
     unreads = [];
-    setMarkReadSender(() => {});
+    reads = [];
+    setMarkReadSender((c, m) => reads.push([c, m]));
     setMarkUnreadSender((c, m) => {
       unreads.push([c, m]);
       return `req-${unreads.length}`;
@@ -379,11 +386,12 @@ describe("read pointer through the dispatcher", () => {
       );
     });
 
-    it("leaves it alone for a code that is not a refusal of the click", () => {
+    it("ends the request on any other code too, with the general notice", () => {
       pending();
       mock.simulateMessage("error", { code: "FORBIDDEN", message: "access denied" }, "req-1");
       expectConsole("error", /Server error/);
-      expect(chan(1)?.lastReadMessageId).toBe(9);
+      expect(chan(1)?.lastReadMessageId).toBe(10);
+      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
     });
 
     it("does nothing against a new ready: its pointer wins and no restore or toast fires", () => {
@@ -437,6 +445,24 @@ describe("read pointer through the dispatcher", () => {
       // Answered: a later frame is applied as usual.
       mock.simulateMessage("read_state", { ...answer, last_read_message_id: 11, unread_count: 0 });
       expect(chan(1)?.lastReadMessageId).toBe(11);
+    });
+
+    it("a message counted unread while the window is blurred lets a later arrival release the hold", () => {
+      pending();
+      hasFocus.mockReturnValue(false);
+      mock.simulateMessage("chat_message", {
+        id: 12,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "while away",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      hasFocus.mockReturnValue(true);
+      noteMessageSeen(1, 13, true);
+      leaveChannel(1);
+      expect(reads).toEqual([[1, 13]]);
     });
 
     it("puts the pointer back and says so when the frame never left", () => {
