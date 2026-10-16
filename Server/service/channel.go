@@ -207,7 +207,7 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		// reachable over the WS presence_update frame, whose read limit is
 		// config.MaxMessageBytes (1 MiB), far larger than any REST body that
 		// reaches the equivalent guard on SetCustomStatus/UpdateProfile.
-		text, err := cleanTextBounded(*customStatus, MaxCustomStatusLen, "custom_status")
+		text, err := cleanVisibleBounded(*customStatus, MaxCustomStatusLen, "custom_status")
 		if err != nil {
 			return PresenceResult{}, err
 		}

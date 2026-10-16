@@ -1114,6 +1114,10 @@ func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
 // HTML-escapes survivors (' -> &#39;, & -> &amp;, " -> &#34;), so a name like
 // "O'Brien" would be stored as "O&#39;Brien" — different from what the user
 // typed and from what handleLogin looks up (which only trims).
+//
+// WP 3C-9: an apostrophe is no longer a legal character in a name being
+// chosen, so register now refuses "O'Brien" outright. The OC-0099 invariant
+// that remains is that nothing is stored for it, escaped or not.
 func TestRegister_UsernameNotHTMLEscaped(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
@@ -1127,51 +1131,39 @@ func TestRegister_UsernameNotHTMLEscaped(t *testing.T) {
 		"password":    "securePass1",
 		"invite_code": code,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("Register status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("Register status = %d, want 400 (apostrophe is not a legal username character); body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	user, _ := resp["user"].(map[string]any)
-	if got, want := user["username"], "O'Brien"; got != want {
-		t.Errorf("registered username = %q, want %q (must not be HTML-escaped)", got, want)
-	}
-
-	stored, err := database.GetUserByUsername(context.Background(), "O'Brien")
-	if err != nil || stored == nil {
-		t.Fatalf("GetUserByUsername(%q) = (%v, %v), want a match", "O'Brien", stored, err)
+	for _, name := range []string{"O'Brien", "O&#39;Brien"} {
+		stored, err := database.GetUserByUsername(context.Background(), name)
+		if err == nil && stored != nil {
+			t.Errorf("a row exists for %q after a refused registration", name)
+		}
 	}
 }
 
-// TestLogin_UsernameWithApostropheSucceeds pins OC-0099 end-to-end: a user
-// who registers with an apostrophe/quote/ampersand in their name must be able
-// to log back in with the exact same name. Before the fix, handleRegister
-// stored the HTML-escaped form while handleLogin looked up the raw form, so
-// this login permanently 401s for any such account.
+// TestLogin_UsernameWithApostropheSucceeds pins OC-0099 end-to-end: an account
+// whose name holds an apostrophe must be able to log in with the exact same
+// name. Before the fix, handleRegister stored the HTML-escaped form while
+// handleLogin looked up the raw form, so this login permanently 401ed.
+//
+// WP 3C-9: register no longer admits such a name, but accounts made before
+// the strict rules still hold one (login keeps the loose check), so the row is
+// inserted directly.
 func TestLogin_UsernameWithApostropheSucceeds(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	ownerID, _ := database.CreateUser(context.Background(), "owner3", "hash", 1)
-	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
-
-	regRR := postJSON(t, router, "/api/v1/auth/register", map[string]string{
-		"username":    "O'Brien",
-		"password":    "securePass1",
-		"invite_code": code,
-	})
-	if regRR.Code != http.StatusCreated {
-		t.Fatalf("Register status = %d, want 201; body = %s", regRR.Code, regRR.Body.String())
-	}
+	seedUser(t, database, "O'Brien", "securePass1", 4)
 
 	loginRR := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "O'Brien",
 		"password": "securePass1",
 	})
 	if loginRR.Code != http.StatusOK {
-		t.Fatalf("Login with registered username status = %d, want 200; body = %s", loginRR.Code, loginRR.Body.String())
+		t.Fatalf("Login with a legacy apostrophe username status = %d, want 200; body = %s", loginRR.Code, loginRR.Body.String())
 	}
 	var resp map[string]any
 	_ = json.NewDecoder(loginRR.Body).Decode(&resp)

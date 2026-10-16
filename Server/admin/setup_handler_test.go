@@ -110,29 +110,22 @@ func TestSetup_UsernameNotHTMLEscaped(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
+	// WP 3C-9: an apostrophe is not a legal character in a name being chosen,
+	// so setup refuses it; what OC-0153 pins that survives is that no owner
+	// row is stored for it, escaped or not, so the owner is never locked out
+	// of an account whose name differs from what they typed.
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "O'Brien",
 		"password": "SecurePass123!",
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("POST /setup = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
-
-	var resp struct {
-		Username string `json:"username"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.Username != "O'Brien" {
-		t.Errorf("setup response username = %q, want %q (must not be HTML-escaped)", resp.Username, "O'Brien")
-	}
-
-	// The username handleLogin will look up (raw, only trimmed) must match
-	// what setup stored, or the owner is locked out of their own account.
-	stored, err := database.GetUserByUsername(context.Background(), "O'Brien")
-	if err != nil || stored == nil {
-		t.Fatalf("GetUserByUsername(%q) = (%v, %v), want a match", "O'Brien", stored, err)
+	for _, name := range []string{"O'Brien", "O&#39;Brien"} {
+		stored, err := database.GetUserByUsername(context.Background(), name)
+		if err == nil && stored != nil {
+			t.Errorf("a row exists for %q after a refused setup", name)
+		}
 	}
 }
 

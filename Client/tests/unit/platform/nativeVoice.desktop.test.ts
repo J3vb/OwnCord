@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   stats: null as unknown,
   statsFails: false,
   watchFails: false,
+  soundId: 1,
+  soundFails: false,
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
 }));
 
@@ -43,6 +45,10 @@ vi.mock("@tauri-apps/api/core", () => ({
       return state.statsFails
         ? Promise.reject("native voice stats timed out")
         : Promise.resolve(state.stats);
+    }
+    if (cmd === "native_voice_play_sound" || cmd === "native_voice_stop_sound") {
+      if (state.soundFails) return Promise.reject("no playout device");
+      return Promise.resolve(cmd === "native_voice_play_sound" ? state.soundId : undefined);
     }
     if (cmd === "native_voice_watch_devices") {
       return state.watchFails ? Promise.reject("no sound server") : Promise.resolve();
@@ -76,6 +82,8 @@ describeNativeVoiceSuite(async () => {
   state.stats = null;
   state.statsFails = false;
   state.watchFails = false;
+  state.soundId = 1;
+  state.soundFails = false;
   const mod = await import("../../../src/platform/desktop/nativeVoice");
   const desktopBinding: NativeVoice = mod.nativeVoice;
   return {
@@ -113,6 +121,12 @@ describeNativeVoiceSuite(async () => {
       },
       failsStats() {
         state.statsFails = true;
+      },
+      startsSoundAs(id) {
+        state.soundId = id;
+      },
+      failsSound() {
+        state.soundFails = true;
       },
       refusesDeviceWatch() {
         state.watchFails = true;

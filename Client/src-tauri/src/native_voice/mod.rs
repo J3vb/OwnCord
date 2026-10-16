@@ -20,6 +20,7 @@
 //! the desktop portal on Wayland, and sees the capture only as a preview on
 //! the frame socket. Key material and the frame-socket token are never
 //! logged.
+pub mod app_sound;
 pub mod camera;
 pub mod capture;
 mod hotplug;
@@ -421,6 +422,32 @@ pub async fn native_voice_watch_devices<R: Runtime>(
             },
         )
     });
+    Ok(())
+}
+
+/// Play an app sound (WP LP-6b): synthesize `notes` at `gain` and play them
+/// once on output `device_id` (empty or unknown: the default), in or out of a
+/// call. Resolves with an id `native_voice_stop_sound` takes; a host failure
+/// (no device, open failed) rejects and the webview falls back to Web Audio.
+/// The registry is its own managed state, never held with `inner`.
+#[tauri::command]
+pub async fn native_voice_play_sound(
+    sounds: tauri::State<'_, app_sound::AppSounds>,
+    notes: Vec<app_sound::ToneNote>,
+    device_id: String,
+    gain: f32,
+) -> Result<u64, String> {
+    let sounds = sounds.inner().clone();
+    app_sound::play(&sounds, notes, device_id, gain).await
+}
+
+/// Cut app sound `id` (a ring burst); an unknown or finished id is a no-op.
+#[tauri::command]
+pub async fn native_voice_stop_sound(
+    sounds: tauri::State<'_, app_sound::AppSounds>,
+    id: u64,
+) -> Result<(), String> {
+    app_sound::stop(&sounds, id);
     Ok(())
 }
 

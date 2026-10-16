@@ -54,6 +54,10 @@ export interface NativeControl {
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
   emits(envelope: NativeVoiceEnvelope): Promise<void>;
+  /** The host answers the next app-sound play with this id. */
+  startsSoundAs(id: number): void;
+  /** The host refuses app-sound commands (no device, the stream failed). */
+  failsSound(): void;
   /** The host delivers a device change. Resolves once it has been delivered. */
   emitsDevices(devices: NativeVoiceDevices): Promise<void>;
   /** The host refuses the next device watch start. */
@@ -302,6 +306,25 @@ export function describeNativeVoiceSuite(
       ctx.native.reportsStats(reply);
       await expect(ctx.subject.getStats(7)).resolves.toEqual(reply);
       expect(ctx.native.commands()).toEqual([["native_voice_get_stats", { session: 7 }]]);
+    });
+
+    check("playSound resolves the host's id and stopSound cuts it by id", async () => {
+      ctx.native.startsSoundAs(11);
+      const notes = [
+        { at: 0, duration: 0.2, gain: 0.3, endGain: 0.01, freqs: [[0, 800]] },
+      ] as const;
+      await expect(ctx.subject.playSound(notes, "guid-spk", 0.5)).resolves.toBe(11);
+      await expect(ctx.subject.stopSound(11)).resolves.toBeUndefined();
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_play_sound", { notes, deviceId: "guid-spk", gain: 0.5 }],
+        ["native_voice_stop_sound", { id: 11 }],
+      ]);
+    });
+
+    check("playSound reads a host failure as null and stopSound never rejects", async () => {
+      ctx.native.failsSound();
+      await expect(ctx.subject.playSound([], "", 1)).resolves.toBeNull();
+      await expect(ctx.subject.stopSound(3)).resolves.toBeUndefined();
     });
 
     check("getStats reads a host failure as null", async () => {

@@ -185,8 +185,8 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 		return req, false
 	}
 
-	// Validate username format (length, no control/invisible chars).
-	if err := auth.ValidateUsername(req.Username); err != nil {
+	// Validate username format (strict rules for a name being chosen).
+	if err := auth.ValidateNewUsername(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}

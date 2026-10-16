@@ -179,8 +179,15 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
 	}
 
-	if patch.DisplayName != nil && utf8.RuneCountInString(cleanText(*patch.DisplayName)) > MaxDisplayNameLen {
-		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
+	// Display name is single-line visible text: collapse, character-check and
+	// cap it the same way the custom status is (cleanVisibleBounded).
+	var cleanDisplayName *string
+	if patch.DisplayName != nil {
+		cleaned, err := cleanVisibleBounded(*patch.DisplayName, MaxDisplayNameLen, "display_name")
+		if err != nil {
+			return nil, err
+		}
+		cleanDisplayName = &cleaned
 	}
 	if patch.About != nil && utf8.RuneCountInString(cleanText(*patch.About)) > MaxAboutLen {
 		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
@@ -216,7 +223,10 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if patch.Avatar != nil {
 		avatar = nullable(*patch.Avatar)
 	}
-	displayName := resolveOptional(patch.DisplayName, current.DisplayName)
+	displayName := current.DisplayName
+	if cleanDisplayName != nil {
+		displayName = nullable(*cleanDisplayName)
+	}
 	about := resolveOptional(patch.About, current.About)
 
 	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about); err != nil {
@@ -266,7 +276,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 // value persists across reconnects and is cleared explicitly on logout, which
 // is why it is stored rather than held on the connection.
 func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
-	cleaned, err := cleanTextBounded(text, MaxCustomStatusLen, "custom_status")
+	cleaned, err := cleanVisibleBounded(text, MaxCustomStatusLen, "custom_status")
 	if err != nil {
 		return err
 	}

@@ -109,6 +109,19 @@ export interface NativeVoiceDevices {
   outputs: NativeVoiceDevice[];
 }
 
+/** One note of an app sound's tone spec (WP LP-6b): a sine whose frequency
+ *  steps at the given offsets, fading exponentially from `gain` to `endGain`
+ *  over `duration`. Times are seconds, `freqs` entries are `[offset from the
+ *  note's start, hertz]`. The host synthesizes it; the same table drives the
+ *  Web Audio renderer, so the two cannot drift. */
+export interface NativeToneNote {
+  at: number;
+  duration: number;
+  gain: number;
+  endGain: number;
+  freqs: ReadonlyArray<readonly [number, number]>;
+}
+
 export interface NativeVoiceConnected {
   session: number;
   /** Our LiveKit identity in the room (`user-<id>…`). */
@@ -465,6 +478,18 @@ export interface NativeVoice {
    *  synchronous unsubscribe that is safe to call before the host subscription
    *  has finished registering, as `onEvent`'s is. */
   watchDevices(handler: (devices: NativeVoiceDevices) => void): () => void;
+  /** Play an app sound on output `deviceId` (empty: the default) at the
+   *  app-sounds volume `gain`, in or out of a call. Resolves with an id for
+   *  `stopSound`, or null when the host could not play it (no device, the
+   *  stream failed to open), so the caller can fall back. Never rejects. */
+  playSound(
+    notes: readonly NativeToneNote[],
+    deviceId: string,
+    gain: number,
+  ): Promise<number | null>;
+  /** Cut sound `id` (a ring burst); an unknown or finished id is a no-op.
+   *  Never rejects. */
+  stopSound(id: number): Promise<void>;
   /** Room events for every session. Returns a synchronous unsubscribe that
    *  is safe to call before the host subscription has finished registering. */
   onEvent(handler: (envelope: NativeVoiceEnvelope) => void): () => void;
