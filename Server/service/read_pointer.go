@@ -2,9 +2,24 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db"
+)
+
+// ReadPointer and ReadPointerOp re-export the db shapes so ws callers stay off
+// the db package.
+type (
+	ReadPointer   = db.ReadPointer
+	ReadPointerOp = db.ReadPointerOp
+)
+
+// The read-pointer moves MoveReadPointer accepts.
+const (
+	ReadAtLatest = db.ReadAtLatest
+	ReadUpTo     = db.ReadUpTo
+	MarkUnread   = db.MarkUnread
 )
 
 // ReadStateNotifier delivers a read_state frame to the one reader whose read
@@ -25,7 +40,7 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 // is ErrNotFound, lost access or an archived channel ErrForbidden. messageID
 // must be positive for db.ReadUpTo and db.MarkUnread (ErrBadRequest otherwise);
 // db.ReadAtLatest ignores it. A message that is not a live message of the
-// channel is a db.ErrNotFound wrapped in the returned error for db.MarkUnread.
+// channel is ErrNotFound (still wrapping db.ErrNotFound) for db.MarkUnread.
 //
 // Lock order: mentionEmitMu, then the database writer, then the hub's
 // per-client send. It is the order reverseMentionCounts already uses. The lock
@@ -66,6 +81,9 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 	}
 
 	rs, err := s.st.MoveReadPointer(ctx, userID, channelID, op, messageID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w: %w", ErrNotFound, err)
+	}
 	if err != nil {
 		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w", err)
 	}
@@ -85,6 +103,11 @@ func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, chan
 	}
 	lastRead, mentions, found, err := s.st.GetReadState(ctx, userID, channelID)
 	if err != nil || !found || lastRead != latestID || mentions != 0 {
+		return db.ReadPointer{}, false
+	}
+	// A message that committed between the two reads would make the stale
+	// latestID look current; re-read it and fall through to the write if it moved.
+	if again, err := s.st.GetLatestMessageID(ctx, channelID); err != nil || again != latestID {
 		return db.ReadPointer{}, false
 	}
 	return db.ReadPointer{LastReadMessageID: lastRead}, true

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -203,9 +202,9 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return Result{Events: []Event{channelReadEvt(info.UserID, markCmd.ChannelID, readThroughNoted)}}
 	}
 
-	op := db.ReadAtLatest
+	op := service.ReadAtLatest
 	if markCmd.MessageID > 0 {
-		op = db.ReadUpTo
+		op = service.ReadUpTo
 	}
 	rs, err := d.MessageSvc.MoveReadPointer(ctx, info.UserID, markCmd.ChannelID, op, markCmd.MessageID)
 	if err != nil {
@@ -234,12 +233,12 @@ func handleMarkUnreadV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "internal error"}}
 	}
 
-	rs, err := d.MessageSvc.MoveReadPointer(ctx, info.UserID, unreadCmd.ChannelID, db.MarkUnread, unreadCmd.MessageID)
+	rs, err := d.MessageSvc.MoveReadPointer(ctx, info.UserID, unreadCmd.ChannelID, service.MarkUnread, unreadCmd.MessageID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
 			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
-		case errors.Is(err, service.ErrNotFound), errors.Is(err, db.ErrNotFound):
+		case errors.Is(err, service.ErrNotFound):
 			return Result{Error: ClientError{Code: ErrCodeNotFound, Message: "message not found"}}
 		case errors.Is(err, service.ErrBadRequest):
 			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "invalid request"}}

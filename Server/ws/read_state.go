@@ -1,6 +1,6 @@
 package ws
 
-import "github.com/J3vb/OwnCord/Server/db"
+import "github.com/J3vb/OwnCord/Server/service"
 
 // readStatePayload is the read_state frame's payload (WP 3D-5c): targeted at
 // the caller, unsequenced, not replayed. It carries the caller's read pointer
@@ -13,7 +13,7 @@ type readStatePayload struct {
 	MentionCount      int64 `json:"mention_count"`
 }
 
-func buildReadState(channelID int64, rs db.ReadPointer) []byte {
+func buildReadState(channelID int64, rs service.ReadPointer) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeReadState, Payload: readStatePayload{
 		ChannelID:         channelID,
 		LastReadMessageID: rs.LastReadMessageID,
@@ -29,7 +29,7 @@ func buildReadState(channelID int64, rs db.ReadPointer) []byte {
 // the latest committed state. The hub keeps one live connection per user, so
 // only that connection hears it. A reader with no live connection recovers the
 // pointer from the next ready; nothing is replayed.
-func (h *Hub) NotifyReadState(userID, channelID int64, rs db.ReadPointer) {
+func (h *Hub) NotifyReadState(userID, channelID int64, rs service.ReadPointer) {
 	if h.GetClient(userID) == nil {
 		return
 	}
