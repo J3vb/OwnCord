@@ -325,6 +325,10 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_unpublish_screen,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_publish_screen_audio,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_unpublish_screen_audio,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_stop_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_change_camera,
