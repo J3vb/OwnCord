@@ -24,6 +24,8 @@ async function bobId(server: TestServer): Promise<number> {
 async function relogin(page: Page, server: TestServer): Promise<void> {
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator(".settings-nav-item.danger").click();
+  // Log Out asks first.
+  await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, "bob");
 }

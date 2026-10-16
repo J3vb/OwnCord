@@ -58,6 +58,9 @@ and only when it changes something a contributor or fork holder must do
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
 - With Developer Mode on, right-clicking a member adds **Copy User ID** and right-clicking a channel adds **Copy Channel ID**, next to the existing Copy Message ID.
+- Log Out in Settings now asks "Are you sure you want to log out?" first, so a stray click no longer signs you out.
+- Settings now lists its tabs in Discord's order (Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds, then Advanced, Diagnostics & logs and About), and shows the app version in small text under Log Out.
+- Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 
 **Voice**

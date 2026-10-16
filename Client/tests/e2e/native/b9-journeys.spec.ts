@@ -178,6 +178,8 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await page.locator("button[aria-label='Settings']").click();
         await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
         await page.locator(".settings-nav-item.danger").click();
+        // Log Out asks first.
+        await page.locator("[data-testid='logout-confirm']").click();
         await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(1_500);
         const afterLogout = await state(page);

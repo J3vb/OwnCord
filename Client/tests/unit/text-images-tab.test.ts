@@ -15,12 +15,12 @@ describe("TextImagesTab", () => {
     container.remove();
   });
 
-  it("renders exactly 4 toggles (no dead animateEmoji or showSpoilers)", () => {
+  it("renders exactly 5 toggles (no dead showSpoilers)", () => {
     const section = buildTextImagesTab(ac.signal);
     container.appendChild(section);
 
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(4);
+    expect(toggles.length).toBe(5);
 
     const labels = container.querySelectorAll(".setting-label");
     const labelTexts = Array.from(labels).map((l) => l.textContent);
@@ -29,10 +29,21 @@ describe("TextImagesTab", () => {
     expect(labelTexts).toContain("Show Embeds");
     expect(labelTexts).toContain("Inline Attachment Preview");
     expect(labelTexts).toContain("Animate GIFs");
+    expect(labelTexts).toContain("Animate emoji");
 
     // Dead toggles should NOT be present
-    expect(labelTexts).not.toContain("Animate Emoji");
     expect(labelTexts).not.toContain("Show Spoiler Content");
+  });
+
+  it("Animate emoji is on by default and writes its pref when switched", () => {
+    const section = buildTextImagesTab(ac.signal);
+    container.appendChild(section);
+    const toggle = container.querySelector<HTMLElement>('.toggle[aria-label="Animate emoji"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:animateEmoji")).toBe("false");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:animateEmoji")).toBe("true");
   });
 
   it("persists toggle state to localStorage", () => {

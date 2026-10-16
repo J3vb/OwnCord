@@ -36,6 +36,12 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
       desc: t("images.animateGifs.desc"),
       fallback: true,
     },
+    {
+      key: "animateEmoji",
+      label: t("images.animateEmoji.label"),
+      desc: t("images.animateEmoji.desc"),
+      fallback: true,
+    },
   ];
 
   appendToggleRows(section, toggles, signal);

@@ -26,6 +26,7 @@ import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
 import { messageStatusText } from "../../i18n/messageStatus";
+import { clearStillCache } from "../../features/messaging/emojiStill";
 import type { ImageMenuTarget } from "./image-menu";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
@@ -283,6 +284,7 @@ export function clearAttachmentCaches(): void {
   mediaCache.clear();
   mediaInFlight.clear();
   videoDims.clear();
+  clearStillCache();
 }
 
 /** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */

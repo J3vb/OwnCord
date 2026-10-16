@@ -14,6 +14,7 @@
 
 import { createElement } from "@lib/dom";
 import { resolveEmoji, type CustomEmoji } from "@stores/emoji.store";
+import { animateEmojiEnabled, showStillFrame } from "../../features/messaging/emojiStill";
 import { fetchImageAsObjectUrl, recoverEvictedImage, resolveServerUrl } from "./attachments";
 
 /**
@@ -101,7 +102,10 @@ export function buildCustomEmojiImage(emoji: CustomEmoji): HTMLImageElement {
   const url = resolveServerUrl(emoji.url);
   recoverEvictedImage(img, { url });
   void fetchImageAsObjectUrl(url).then((objectUrl) => {
-    if (objectUrl !== null) img.src = objectUrl;
+    if (objectUrl === null) return;
+    // "Animate emoji" off: the first frame, whatever the emoji is.
+    if (animateEmojiEnabled()) img.src = objectUrl;
+    else showStillFrame(img, objectUrl);
   });
   return img;
 }

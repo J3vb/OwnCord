@@ -41,7 +41,7 @@ function clickToggle(container: HTMLElement, index: number): HTMLElement {
 
 /** The rows that hold a switch (the text-size readout has none). */
 const toggleRows = (container: HTMLElement) =>
-  container.querySelectorAll(".setting-row:not(.setting-readout)");
+  container.querySelectorAll(".setting-row:has(.toggle)");
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -77,15 +77,15 @@ describe("AccessibilityTab", () => {
       expect(section.classList.contains("active")).toBe(true);
     });
 
-    it("renders exactly 5 toggles", () => {
+    it("renders exactly 6 toggles", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
       const toggles = container.querySelectorAll(".toggle");
-      expect(toggles.length).toBe(5);
+      expect(toggles.length).toBe(6);
     });
 
-    it("renders all 5 setting labels", () => {
+    it("renders all 6 setting labels", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
@@ -99,6 +99,7 @@ describe("AccessibilityTab", () => {
         "Sync with OS",
         "High Contrast",
         "Large Font",
+        "Always underline links",
         "Role Colors",
       ]);
     });
@@ -127,7 +128,7 @@ describe("AccessibilityTab", () => {
       container.appendChild(section);
 
       const rows = toggleRows(container);
-      expect(rows.length).toBe(5);
+      expect(rows.length).toBe(6);
     });
 
     it("groups the toggles under Motion, Readability and Chat headings", () => {
@@ -137,7 +138,7 @@ describe("AccessibilityTab", () => {
       const titles = Array.from(container.querySelectorAll("h3.setting-group-title")).map(
         (h) => h.textContent,
       );
-      expect(titles).toEqual(["Motion", "Readability", "Chat"]);
+      expect(titles).toEqual(["Motion", "Readability", "Colors", "Chat"]);
       const groupOf = (label: string) => {
         const row = container
           .querySelector(`.toggle[aria-label="${label}"]`)!
@@ -148,6 +149,7 @@ describe("AccessibilityTab", () => {
       expect(groupOf("Sync with OS")).toBe("Motion");
       expect(groupOf("High Contrast")).toBe("Readability");
       expect(groupOf("Large Font")).toBe("Readability");
+      expect(groupOf("Always underline links")).toBe("Readability");
       expect(groupOf("Role Colors")).toBe("Chat");
     });
 
@@ -439,7 +441,7 @@ describe("AccessibilityTab", () => {
       container.appendChild(section);
 
       const rows = toggleRows(container);
-      expect(rows.length).toBe(5);
+      expect(rows.length).toBe(6);
       for (const row of rows) {
         const label = row.querySelector(".setting-label")?.textContent;
         expect(label).toBeTruthy();

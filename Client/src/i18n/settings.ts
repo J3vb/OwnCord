@@ -30,6 +30,10 @@ export const settingsText = defineCatalog("settings", {
   "shell.appSettings": "App Settings",
   "shell.editProfile": "Edit Profile",
   "shell.logOut": "Log Out",
+  "shell.version": "Version {version}",
+  "logout.confirm.title": "Log Out",
+  "logout.confirm.body": "Are you sure you want to log out?",
+  "logout.confirm.button": "Log Out",
   "shell.esc": "ESC",
 
   "accessibility.reducedMotion.label": "Reduce Motion",
@@ -46,6 +50,14 @@ export const settingsText = defineCatalog("settings", {
   "accessibility.group.motion": "Motion",
   "accessibility.group.readability": "Readability",
   "accessibility.group.chat": "Chat",
+  "accessibility.underlineLinks.label": "Always underline links",
+  "accessibility.underlineLinks.desc":
+    "Underline links in messages even when you are not pointing at them",
+  "accessibility.group.colors": "Colors",
+  "accessibility.saturation.label": "Saturation",
+  "accessibility.saturation.desc":
+    "Make colored names and primary buttons more or less vivid. Images and video are not changed",
+  "accessibility.saturation.value": "{percent}%",
   "accessibility.textSize.label": "Text size",
   "accessibility.textSize.desc": "Set in Appearance",
   "accessibility.largeFont.label": "Large Font",
@@ -136,6 +148,10 @@ export const settingsText = defineCatalog("settings", {
   "images.animateGifs.label": "Animate GIFs",
   "images.animateGifs.desc":
     "Play GIF animations automatically. When disabled, GIFs show as static images",
+
+  "images.animateEmoji.label": "Animate emoji",
+  "images.animateEmoji.desc":
+    "Play animated custom emoji. When disabled, they show their first frame",
 
   "keybinds.pushToTalk": "Push to Talk",
   "keybinds.clickToSet": "Click to set keybind",

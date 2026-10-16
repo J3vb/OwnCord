@@ -280,6 +280,9 @@
   align-items: center;
   gap: 12px;
 }
+.setting-row .slider-row {
+  flex: 0 0 220px;
+}
 .settings-slider {
   flex: 1;
   -webkit-appearance: none;
@@ -880,6 +883,16 @@ details.disclose[open] > summary .icon {
 .settings-sidebar-logout {
   margin-top: auto;
   padding-top: 8px;
+}
+/* The app version under Log Out: small, muted, not a nav item. */
+.settings-sidebar-version {
+  padding: 4px 10px 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  user-select: text;
+}
+.settings-sidebar-version.solo {
+  margin-top: auto;
 }
 .theme-options {
   display: flex;
