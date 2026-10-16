@@ -19,7 +19,6 @@ function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInput
     channelName: "general",
     onSend: vi.fn(),
     onTyping: vi.fn(),
-    onEditMessage: vi.fn(),
     onUploadFile: vi.fn(async (file: File) => ({ id: "fresh", url: "/f/1", filename: file.name })),
     ...overrides,
   };

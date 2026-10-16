@@ -127,7 +127,6 @@ describe("composer: #channel autocomplete", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
   });
@@ -186,23 +185,6 @@ describe("composer: #channel autocomplete", () => {
     expect(popup()).toBeNull();
     press("Enter");
     expect(onSend).toHaveBeenCalledWith("#gen", null, [], [], false);
-  });
-
-  it("turns a typed :joy: into the emoji when sending an edit", () => {
-    const onEditMessage = vi.fn<MessageInputOptions["onEditMessage"]>();
-    input.destroy?.();
-    input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-      onEditMessage,
-    });
-    input.mount(container);
-    input.startEdit(7, "old");
-    type("new :joy:");
-    press("Enter");
-    expect(onEditMessage).toHaveBeenCalledWith(7, "new 😂");
   });
 
   it("turns a typed :joy: into the emoji when sending", () => {

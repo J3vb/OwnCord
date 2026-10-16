@@ -410,7 +410,6 @@ describe("composer :shortcode integration", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
   });

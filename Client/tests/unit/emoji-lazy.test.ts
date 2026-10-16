@@ -39,7 +39,6 @@ describe("lazy emoji data", () => {
       channelName: "general",
       onSend: vi.fn(),
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
     const ta = container.querySelector("textarea")!;

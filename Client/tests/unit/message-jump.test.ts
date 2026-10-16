@@ -44,7 +44,12 @@ import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import { renderMentionSegment } from "../../src/components/message-list/content-parser";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
-import { messagesStore, setAroundMessages, setMessages } from "@stores/messages.store";
+import {
+  deleteMessage,
+  messagesStore,
+  setAroundMessages,
+  setMessages,
+} from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { setDmChannels } from "@stores/dm.store";
@@ -129,6 +134,9 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
         destroy: vi.fn(),
         markReadAndJumpToPresent: vi.fn(),
         scrollPage: vi.fn(),
+        startEdit: vi.fn(),
+        cancelEdit: vi.fn(),
+        isEditing: vi.fn(),
       },
       mountChannel: vi.fn(),
       destroyChannel: vi.fn(),
@@ -263,6 +271,26 @@ describe("createMessageJumper", () => {
     expect(toastCalls.at(-1)?.msg).toMatch(/no longer exists/i);
     // A failed jump must not detach the channel from the live tail.
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
+  });
+
+  it("says a message the store knows is deleted is gone, without the around fetch (WP 3A-8)", async () => {
+    setMessages(1, [response(41), response(42)], false);
+    deleteMessage({ channel_id: 1, message_id: 42 });
+    const { ctrl, scrollToMessage } = fakeCtrl(1);
+    const getMessagesAround = vi.fn();
+    const jumper = createMessageJumper({
+      api: fakeApi(getMessagesAround),
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
+
+    expect(toastCalls.at(-1)?.msg).toMatch(/no longer exists/i);
+    expect(getMessagesAround).not.toHaveBeenCalled();
+    expect(scrollToMessage).not.toHaveBeenCalled();
+    // A live message in the same list is still jumpable.
+    await expect(jumper.jumpTo(1, 41)).resolves.toBe(true);
   });
 
   it("leaves a gated NSFW channel's refusal to its gate, without a toast", async () => {
@@ -483,6 +511,8 @@ describe("reply bar jump wiring", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -570,6 +600,8 @@ describe("Copy Message Link action", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -590,6 +622,8 @@ describe("Copy Message Link action", () => {
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),
@@ -724,6 +758,8 @@ describe("Jump to Present pill", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
