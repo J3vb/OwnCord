@@ -67,7 +67,6 @@ import { messagingText } from "../i18n/messaging";
 import {
   markChannelRead,
   markChannelReadSeen,
-  markMessageUnread,
   hasUnread,
   isChannelAway,
   isChannelCovered,
@@ -76,6 +75,7 @@ import {
   setLiveTailInView,
 } from "@lib/read-state";
 import { readPointerEnabled } from "@lib/serverCapabilities";
+import { markMessageUnread } from "./message-list/mark-unread";
 
 // -- Options ------------------------------------------------------------------
 
@@ -394,8 +394,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * window as older history is prepended and never latches to a count-derived
    * row that could leave real unread messages above it.
    */
-  const openedUnread = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
-  const unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+  let openedUnread = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
+  let unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+  /** True from the first Mark Unread here: the unread count the bar shows is the channel's now. */
+  let markedUnread = false;
+  /** The bottom was reached and marked since the reader last left it (or was away). */
+  let bottomMarked = false;
 
   /**
    * Message id the NEW divider is anchored to, once one has been picked.
@@ -723,8 +727,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function markReadIfSeen(): void {
     if (root === null) return;
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
-    if (!isAtBottom()) return;
-    if (isChannelAway(options.channelId)) return;
+    if (!isAtBottom() || isChannelAway(options.channelId)) {
+      bottomMarked = false;
+      return;
+    }
     // The cached bottom of a revisit predates what arrived while away; keep
     // the bar until the refetched tail places the divider.
     if (newDividerDeferred) return;
@@ -732,8 +738,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // With a read pointer the mark is what was seen, and what gates it is the
     // pointer (nothing is sent unless the newest seen id is above it); without
     // one, the local unread count gates it, as before.
-    if (readPointerEnabled()) noteMessageSeen(options.channelId, newestLoadedId());
-    else if (!hasUnread(options.channelId)) return;
+    if (readPointerEnabled()) {
+      noteMessageSeen(options.channelId, newestLoadedId());
+      // Every append auto-scrolls and lands here: send on reaching the bottom
+      // only. Arrivals watched at the bottom go by the throttled live path.
+      if (bottomMarked) return;
+      bottomMarked = true;
+    } else if (!hasUnread(options.channelId)) return;
     markChannelReadSeen(options.channelId);
   }
 
@@ -755,7 +766,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (pointer === null) return;
     linePointer = pointer;
     newDividerAnchorId = messageId;
+    markedUnread = true;
+    unreadBarDismissed = false;
+    refreshUnreadFromChannel(messageId);
     if (!patchRows()) renderAll();
+  }
+
+  /**
+   * After Mark Unread the top bar and the line count what is unread now: the
+   * channel's count once the server has answered (`read_state`), until then the
+   * loaded messages from the marked one on.
+   */
+  function refreshUnreadFromChannel(markedId: number): void {
+    const known = channelsStore.getState().channels.get(options.channelId)?.unreadCount ?? 0;
+    openedUnread = known > 0 ? known : allMessages.filter((m) => m.id >= markedId).length;
+    unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+    updateUnreadBar();
   }
 
   /**
@@ -1816,6 +1842,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }),
     );
 
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(options.channelId)?.unreadCount,
+        () => {
+          if (markedUnread && newDividerAnchorId !== null) {
+            refreshUnreadFromChannel(newDividerAnchorId);
+          }
+        },
+      ),
+    );
     unsubscribers.push(
       messagesStore.subscribeSelector(
         // Scoped to the mounted channel so updates to OTHER channels (their

@@ -13,15 +13,18 @@ import {
   markActiveChannelReadOnUnload,
   markChannelRead,
   markChannelReadSeen,
-  markMessageUnread,
   noteLiveMessageSeen,
   noteMessageSeen,
   resetReadPointerState,
-  rollbackMarkUnread,
+  failMarkUnread,
   setLiveTailInView,
   setMarkReadSender,
   writeReadPointer,
 } from "@lib/read-state";
+import {
+  markMessageUnread,
+  setMarkUnreadSender,
+} from "../../src/components/message-list/mark-unread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { markReadyActiveChannelRead } from "../../src/features/channels/wsHandlers";
 import { channelsStore, setActiveChannel, setChannels } from "@stores/channels.store";
@@ -83,13 +86,11 @@ beforeEach(() => {
   reads = [];
   unreads = [];
   hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-  setMarkReadSender(
-    (id, messageId) => reads.push([id, messageId]),
-    (id, messageId) => {
-      unreads.push([id, messageId]);
-      return `u-${unreads.length}`;
-    },
-  );
+  setMarkReadSender((id, messageId) => reads.push([id, messageId]));
+  setMarkUnreadSender((id, messageId) => {
+    unreads.push([id, messageId]);
+    return `u-${unreads.length}`;
+  });
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
   dmStore.setState(() => ({ channels: [] }));
   messagesStore.setState(() => ({
@@ -109,6 +110,7 @@ beforeEach(() => {
 afterEach(() => {
   hasFocus.mockRestore();
   setMarkReadSender(null);
+  setMarkUnreadSender(null);
   resetServerCapabilities();
   resetReadPointerState();
   vi.useRealTimers();
@@ -290,6 +292,16 @@ describe("Mark Unread", () => {
     expect(pointer(1)).toBe(0);
   });
 
+  it("keeps its badge when the reader reaches the bottom: nothing was seen since", () => {
+    markMessageUnread(1, 10);
+    writeReadPointer(1, 9, { unread: 2, mention: 1 });
+    markChannelReadSeen(1);
+    expect(channelsStore.getState().channels.get(1)).toMatchObject({
+      unreadCount: 2,
+      mentionCount: 1,
+    });
+  });
+
   it("is not re-marked read by what is on screen", () => {
     noteMessageSeen(1, 11);
     markMessageUnread(1, 10);
@@ -321,7 +333,7 @@ describe("Mark Unread", () => {
 
   it("puts the pointer back when the server refuses it", () => {
     markMessageUnread(1, 10);
-    expect(rollbackMarkUnread("u-1")).toBe(true);
+    expect(failMarkUnread("u-1", "failed")).toBe(true);
     expect(pointer(1)).toBe(10);
     // And the hold is gone with it.
     noteMessageSeen(1, 11);
@@ -331,21 +343,21 @@ describe("Mark Unread", () => {
 
   it("ignores a refusal for some other frame", () => {
     markMessageUnread(1, 10);
-    expect(rollbackMarkUnread("something-else")).toBe(false);
-    expect(rollbackMarkUnread(undefined)).toBe(false);
+    expect(failMarkUnread("something-else", "failed")).toBe(false);
+    expect(failMarkUnread(undefined, "failed")).toBe(false);
     expect(pointer(1)).toBe(9);
   });
 
   it("a refusal is answered once", () => {
     markMessageUnread(1, 10);
-    expect(rollbackMarkUnread("u-1")).toBe(true);
-    expect(rollbackMarkUnread("u-1")).toBe(false);
+    expect(failMarkUnread("u-1", "failed")).toBe(true);
+    expect(failMarkUnread("u-1", "failed")).toBe(false);
   });
 
   it("forgets a request a new ready has replaced", () => {
     markMessageUnread(1, 10);
     forgetPendingMarkUnread();
-    expect(rollbackMarkUnread("u-1")).toBe(false);
+    expect(failMarkUnread("u-1", "failed")).toBe(false);
     expect(pointer(1)).toBe(9);
   });
 });

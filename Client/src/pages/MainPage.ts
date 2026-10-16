@@ -70,6 +70,7 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
+import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
@@ -239,16 +240,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
-  setMarkReadSender(
-    (channelId, messageId) => {
-      const payload = { channel_id: channelId };
-      ws.send({
-        type: "mark_read",
-        payload: messageId === undefined ? payload : { ...payload, message_id: messageId },
-      });
-    },
-    (channelId, messageId) =>
-      ws.send({ type: "mark_unread", payload: { channel_id: channelId, message_id: messageId } }),
+  setMarkReadSender((channelId, messageId) => {
+    const payload = { channel_id: channelId };
+    ws.send({
+      type: "mark_read",
+      payload: messageId === undefined ? payload : { ...payload, message_id: messageId },
+    });
+  });
+  setMarkUnreadSender((channelId, messageId) =>
+    ws.send({ type: "mark_unread", payload: { channel_id: channelId, message_id: messageId } }),
   );
 
   // The native screen-share picker adapter is a lower layer and may not import
@@ -1778,6 +1778,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // that can silently mark an unrelated channel read on the NEXT
       // connection (OC-0418).
       setMarkReadSender(null);
+      setMarkUnreadSender(null);
       // The native screen-share picker is registered per page; drop it so a
       // torn-down connection cannot leave the next page's dialog pointed at a
       // dead one (a share with none registered resolves to cancelled).

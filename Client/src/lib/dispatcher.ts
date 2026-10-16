@@ -89,7 +89,7 @@ import {
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
-import { forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
+import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
 import { resetServerCapabilities } from "./serverCapabilities";
 import {
   applyReadySafety,
@@ -341,6 +341,8 @@ export function wireDispatcher(
   unsubs.push(ws.onStateChange(failPendingOnDisconnect));
 
   unsubs.push(ws.onSendFailure(handleSendFailure));
+  // A mark_unread that never left: put the pointer back and say so.
+  unsubs.push(ws.onSendFailure((id) => failMarkUnread(id, "failed")));
 
   unsubs.push(
     ws.on(S.ERROR, (payload, id) => {

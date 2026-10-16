@@ -32,6 +32,10 @@ import {
   setMarkReadSender,
   writeReadPointer,
 } from "@lib/read-state";
+import {
+  markMessageUnread,
+  setMarkUnreadSender,
+} from "../../src/components/message-list/mark-unread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
@@ -108,13 +112,11 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     marks = [];
     unreads = [];
-    setMarkReadSender(
-      (c, m) => marks.push([c, m]),
-      (c, m) => {
-        unreads.push([c, m]);
-        return `req-${unreads.length}`;
-      },
-    );
+    setMarkReadSender((c, m) => marks.push([c, m]));
+    setMarkUnreadSender((c, m) => {
+      unreads.push([c, m]);
+      return `req-${unreads.length}`;
+    });
     applyReadyCapabilities({ read_pointer: true });
     setLiveTailInView(CHANNEL_ID, true);
     container = document.createElement("div");
@@ -128,6 +130,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     container.remove();
     document.querySelectorAll(".context-menu").forEach((el) => el.remove());
     setMarkReadSender(null);
+    setMarkUnreadSender(null);
     resetServerCapabilities();
     resetReadPointerState();
     hasFocus.mockRestore();
@@ -213,6 +216,18 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
       expect(lineAbove()).toBe("message-3");
+    });
+  });
+
+  describe("a pointer line at the top of the window", () => {
+    it("moves when older history is prepended", () => {
+      setMessages([10, 11, 12].map(msg));
+      openChannel(5, 7);
+      mount();
+      expect(lineAbove()).toBe("message-10");
+      setMessages([5, 6, 7, 8, 9, 10, 11, 12].map(msg));
+      messagesStore.flush();
+      expect(lineAbove()).toBe("message-8");
     });
   });
 
@@ -327,6 +342,17 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       await settled();
       expect(unreads).toEqual([]);
       expect(lineAbove()).toBeNull();
+    });
+
+    it("the top bar follows the new count once the server answers", async () => {
+      messagesStore.flush();
+      mount();
+      altClick(row(3).querySelector(".msg-text")!);
+      const label = (): string =>
+        container.querySelector('[data-testid="unread-bar-label"]')?.textContent ?? "";
+      await vi.waitFor(() => expect(label()).toMatch(/^3 new messages since/));
+      writeReadPointer(CHANNEL_ID, 2, { unread: 7, mention: 0 });
+      await vi.waitFor(() => expect(label()).toMatch(/^7 new messages since/));
     });
 
     it("the message menu offers Mark Unread just above Copy Message Link", async () => {
@@ -454,6 +480,22 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       setMessages([1, 2, 3, 4].map(msg));
       messagesStore.flush();
       await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 4]]), { timeout: 3000 });
+    });
+
+    it("six live arrivals at the bottom within a second send at most one mark_read", async () => {
+      setMessages([1, 2, 3].map(msg));
+      openChannel(0, 3);
+      mount();
+      scrollToEnd();
+      for (let id = 4; id <= 9; id++) {
+        setMessages(Array.from({ length: id }, (_, i) => msg(i + 1)));
+        messagesStore.flush();
+        // The auto-scroll that follows an append reaches the scroll handler.
+        root().dispatchEvent(new Event("scroll"));
+      }
+      expect(marks.length).toBeLessThanOrEqual(0);
+      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 9]]), { timeout: 3000 });
+      expect(marks).toHaveLength(1);
     });
 
     it("Mark Unread is not undone by reaching the bottom or by a live arrival", async () => {

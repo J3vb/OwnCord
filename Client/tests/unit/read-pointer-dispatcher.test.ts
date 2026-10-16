@@ -7,12 +7,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
-import { channelsStore, setActiveChannel, setChannels } from "../../src/stores/channels.store";
+import {
+  channelsStore,
+  getUnreadOnOpen,
+  setActiveChannel,
+  setChannels,
+} from "../../src/stores/channels.store";
 import { dmStore, addDmToChannelsStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { messagesStore } from "../../src/stores/messages.store";
-import { markMessageUnread, setLiveTailInView, setMarkReadSender } from "../../src/lib/read-state";
+import { leaveChannel, setLiveTailInView, setMarkReadSender } from "../../src/lib/read-state";
 import type { WsClient } from "../../src/lib/ws";
+import {
+  markMessageUnread,
+  setMarkUnreadSender,
+} from "../../src/components/message-list/mark-unread";
 import { viewChannel } from "../../src/lib/last-channel";
 import { readPointerEnabled } from "../../src/lib/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
@@ -144,13 +153,11 @@ describe("read pointer through the dispatcher", () => {
     }));
     setLiveTailInView(1, true);
     unreads = [];
-    setMarkReadSender(
-      () => {},
-      (c, m) => {
-        unreads.push([c, m]);
-        return `req-${unreads.length}`;
-      },
-    );
+    setMarkReadSender(() => {});
+    setMarkUnreadSender((c, m) => {
+      unreads.push([c, m]);
+      return `req-${unreads.length}`;
+    });
     mock = createMockWsClient();
     cleanup = wireDispatcher(ws());
   });
@@ -158,6 +165,7 @@ describe("read pointer through the dispatcher", () => {
   afterEach(() => {
     cleanup();
     setMarkReadSender(null);
+    setMarkUnreadSender(null);
     hasFocus.mockRestore();
   });
 
@@ -396,6 +404,53 @@ describe("read pointer through the dispatcher", () => {
       mock.simulateMessage("error", { code: "NOT_FOUND", message: "gone" }, "req-1");
       expectConsole("error", /Server error/);
       expect(chan(1)?.lastReadMessageId).toBe(9);
+    });
+  });
+
+  describe("Mark Unread on the channel being read", () => {
+    function pending(): void {
+      mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
+      setActiveChannel(1);
+      setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
+      expect(markMessageUnread(1, 10)).toBe(9);
+    }
+    const answer = { channel_id: 1, last_read_message_id: 9, unread_count: 2, mention_count: 1 };
+
+    it("keeps the counts the server answers with, so a badge is left when the reader leaves", () => {
+      pending();
+      mock.simulateMessage("read_state", answer);
+      expect(chan(1)).toMatchObject({ lastReadMessageId: 9, unreadCount: 2, mentionCount: 1 });
+      leaveChannel(1);
+      expect(chan(1)).toMatchObject({ unreadCount: 2, mentionCount: 1 });
+      // And the next visit draws the line from that count.
+      setActiveChannel(null);
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(2);
+    });
+
+    it("drops an older read_state (a pointer at or above the message) while the answer is pending", () => {
+      pending();
+      mock.simulateMessage("read_state", { ...answer, last_read_message_id: 11, unread_count: 0 });
+      expect(chan(1)?.lastReadMessageId).toBe(9);
+      mock.simulateMessage("read_state", answer);
+      expect(chan(1)).toMatchObject({ lastReadMessageId: 9, unreadCount: 2 });
+      // Answered: a later frame is applied as usual.
+      mock.simulateMessage("read_state", { ...answer, last_read_message_id: 11, unread_count: 0 });
+      expect(chan(1)?.lastReadMessageId).toBe(11);
+    });
+
+    it("puts the pointer back and says so when the frame never left", () => {
+      pending();
+      mock.simulateSendFailure("req-1", "OFFLINE");
+      expect(chan(1)?.lastReadMessageId).toBe(10);
+      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Check your connection/);
+    });
+
+    it("ignores a send failure of some other frame", () => {
+      pending();
+      mock.simulateSendFailure("other", "NETWORK");
+      expect(chan(1)?.lastReadMessageId).toBe(9);
+      expect(mockShowToast).not.toHaveBeenCalled();
     });
   });
 });

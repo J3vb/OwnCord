@@ -31,11 +31,13 @@ import { getChannelMessages } from "../../stores/messages.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
+  acceptReadState,
+  failMarkUnread,
   forgetPendingMarkUnread,
   isChannelAway,
+  isHeldUnread,
   markChannelRead,
   markChannelReadSeen,
-  rollbackMarkUnread,
   writeReadPointer,
 } from "../../lib/read-state";
 import {
@@ -160,7 +162,11 @@ export function handleReadState(payload: Payload<"read_state">): void {
   const id = payload.channel_id;
   const ch = channelsStore.getState().channels.get(id);
   if (ch === undefined && !dmStore.getState().channels.some((c) => c.channelId === id)) return;
-  const watching = channelsStore.getState().activeChannelId === id && !isChannelAway(id);
+  if (!acceptReadState(id, payload.last_read_message_id)) return;
+  // Not a channel just marked unread: that one keeps its counts, or the click
+  // would leave no badge once the reader leaves.
+  const watching =
+    channelsStore.getState().activeChannelId === id && !isChannelAway(id) && !isHeldUnread(id);
   writeReadPointer(
     id,
     payload.last_read_message_id,
@@ -179,12 +185,7 @@ export function handleReadState(payload: Payload<"read_state">): void {
  */
 export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
   if (payload.code !== "RATE_LIMITED" && payload.code !== "NOT_FOUND") return false;
-  if (!rollbackMarkUnread(id)) return false;
-  showToast(
-    connectText(payload.code === "RATE_LIMITED" ? "markUnread.rateLimited" : "markUnread.notFound"),
-    "error",
-  );
-  return true;
+  return failMarkUnread(id, payload.code === "RATE_LIMITED" ? "rateLimited" : "notFound");
 }
 
 /** The custom-emoji slice of `ready`. */
