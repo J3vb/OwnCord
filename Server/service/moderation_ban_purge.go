@@ -100,13 +100,9 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 	if window <= 0 || window > banPurgeMaxWindow {
 		return BanPurgeResult{Err: fmt.Errorf("%w: invalid purge window", ErrBadRequest)}
 	}
-	target, err := s.authorizeBanPurge(ctx, actorID, targetID)
-	if err != nil {
-		return BanPurgeResult{Err: err}
-	}
-	if !auth.IsEffectivelyBanned(target) {
-		return BanPurgeResult{Err: fmt.Errorf("%w: user is not banned", ErrBadRequest)}
-	}
+	// The window is measured from the request, not from when the wait below
+	// ends.
+	since := time.Now().UTC().Add(-window).Format(searchTSLayout)
 	if s.messages == nil {
 		return BanPurgeResult{Err: fmt.Errorf("%w: message purge unavailable", ErrInternal)}
 	}
@@ -118,11 +114,19 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 		return BanPurgeResult{Err: fmt.Errorf("ban purge: %w", ctx.Err())}
 	}
 
+	// Checked after the wait, so a role change or unban while queued applies.
+	target, err := s.authorizeBanPurge(ctx, actorID, targetID)
+	if err != nil {
+		return BanPurgeResult{Err: err}
+	}
+	if !auth.IsEffectivelyBanned(target) {
+		return BanPurgeResult{Err: fmt.Errorf("%w: user is not banned", ErrBadRequest)}
+	}
+
 	maxRows := banPurgeMaxRows
 	if s.banPurgeRowCap > 0 {
 		maxRows = s.banPurgeRowCap
 	}
-	since := time.Now().UTC().Add(-window).Format(searchTSLayout)
 	batches, complete, purgeErr := s.messages.purgeUserMessagesSince(ctx, actorID, targetID, since, maxRows)
 
 	res := BanPurgeResult{Batches: batches, Complete: complete && purgeErr == nil, Err: purgeErr}
@@ -165,9 +169,7 @@ func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, us
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return batches, false, fmt.Errorf("ban purge: %w", ctxErr)
 		}
-		ok, permErr := s.perms.HasChannelPermChecked(ctx, actorID, chID, permissions.ReadMessages|permissions.ManageMessages)
-		if permErr != nil || !ok {
-			slog.Debug("ban purge: channel skipped", "channel_id", chID, "lookup_failed", permErr != nil)
+		if !s.canModerateDelete(ctx, actorID, chID) {
 			continue
 		}
 
@@ -202,4 +204,20 @@ func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, us
 		}
 	}
 	return batches, true, nil
+}
+
+// canModerateDelete reports whether actorID may delete others' messages in
+// chID under the message delete policy; a lookup error counts as no.
+func (s *MessageService) canModerateDelete(ctx context.Context, actorID, chID int64) bool {
+	subj, err := s.perms.Subject(ctx, actorID, chID)
+	if err != nil {
+		slog.Debug("ban purge: channel skipped", "channel_id", chID, "lookup_failed", true)
+		return false
+	}
+	asModerator, err := permissions.CanDeleteMessage(subj, false)
+	if err != nil || !asModerator {
+		slog.Debug("ban purge: channel skipped", "channel_id", chID, "lookup_failed", false)
+		return false
+	}
+	return true
 }

@@ -544,3 +544,26 @@ func TestPurgeAfterBan_SemaphoreWaitHonoursContext(t *testing.T) {
 		t.Fatalf("PurgeAfterBan behind a held semaphore = %+v, want the context error", res)
 	}
 }
+
+func TestPurgeAfterBan_ChecksAfterSemaphoreWait(t *testing.T) {
+	f := banPurgeFixture(t)
+	banPurgeBan(t, f, fixtureMember2)
+	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
+	f.mod.banPurgeSem <- struct{}{}
+
+	done := make(chan BanPurgeResult, 1)
+	go func() { done <- f.mod.PurgeAfterBan(context.Background(), fixtureMod, fixtureMember2, time.Hour) }()
+	time.Sleep(20 * time.Millisecond)
+	if err := f.database.UnbanUser(context.Background(), fixtureMember2); err != nil {
+		t.Fatalf("UnbanUser: %v", err)
+	}
+	<-f.mod.banPurgeSem
+
+	res := <-done
+	if !errors.Is(res.Err, ErrBadRequest) || res.Deleted != 0 {
+		t.Fatalf("PurgeAfterBan after an unban while queued = %+v, want a refusal", res)
+	}
+	if banPurgeDeleted(t, f.database, id) {
+		t.Error("a purge queued before an unban deleted a message")
+	}
+}
