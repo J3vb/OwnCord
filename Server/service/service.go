@@ -103,6 +103,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	erasure := NewErasureService(st)
 	moderation := NewModerationService(st, permSvc)
 	moderation.erasure = erasure
+	moderation.limiter = limiter
 	blocks := NewBlockService(st)
 	messages := NewMessageService(st, permSvc, limiter)
 	// The report-linked removal entry point (ActOnReport, kind="removal")
