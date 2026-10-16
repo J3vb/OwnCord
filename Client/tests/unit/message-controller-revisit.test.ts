@@ -339,6 +339,8 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
+        onEditSave: vi.fn(() => true),
+        onEmptyEdit: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
         onPinClick: vi.fn(),

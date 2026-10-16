@@ -176,7 +176,7 @@ export function refreshConnectionControls(root: ParentNode): void {
  * including when that message is outside the loaded window, which is why the
  * bar stays clickable even in the "unknown message" case: the id is known, and
  * the jump path can fetch the window around it. A deleted target has nothing
- * to jump to, so its bar is plain text.
+ * to jump to, so its bar is plain text: "Original message was deleted".
  */
 function renderReplyRef(
   replyToId: number,
@@ -187,38 +187,38 @@ function renderReplyRef(
 ): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
   const deleted = ref ? ref.deleted : referenced?.deleted === true;
-  const bar = deleted
-    ? createElement("div", {
-        class: "msg-reply-ref msg-reply-ref--deleted",
-        "data-reply-to": String(replyToId),
-      })
-    : createElement("div", {
-        class: "msg-reply-ref",
-        role: "button",
-        tabindex: "0",
-        "data-reply-to": String(replyToId),
-        title: messagingText("reply.jumpTitle"),
-      });
-  if (!deleted) {
-    const jump = (): void => opts.onJumpToMessage?.(replyToId);
-    bar.addEventListener("click", jump, { signal });
-    bar.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          jump();
-        }
-      },
-      { signal },
+  // A deleted parent has nothing to show or jump to: plain text, no avatar or
+  // author (the list no longer draws the parent at all).
+  if (deleted) {
+    return createElement(
+      "div",
+      { class: "msg-reply-ref msg-reply-ref--deleted", "data-reply-to": String(replyToId) },
+      messagingText("reply.originalDeleted"),
     );
   }
+  const bar = createElement("div", {
+    class: "msg-reply-ref",
+    role: "button",
+    tabindex: "0",
+    "data-reply-to": String(replyToId),
+    title: messagingText("reply.jumpTitle"),
+  });
+  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  bar.addEventListener("click", jump, { signal });
+  bar.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jump();
+      }
+    },
+    { signal },
+  );
   if (ref) {
-    const plain = ref.deleted
-      ? messagingText("message.deleted")
-      : Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
-          .slice(0, 100)
-          .join("");
+    const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+      .slice(0, 100)
+      .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
@@ -238,8 +238,6 @@ function renderReplyRef(
       createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement("span", { class: "rr-text" }, preview),
     );
-  } else if (referenced?.deleted) {
-    setText(bar, messagingText("message.deleted"));
   } else if (referenced?.user) {
     const author = resolveAuthor(referenced.user);
     const roleColor = roleColorVar(getUserRole(referenced.user.id));
@@ -306,6 +304,8 @@ export function renderMessage(
   allMessages: readonly Message[],
   opts: MessageListOptions,
   signal: AbortSignal,
+  /** The inline editor to host in place of the message body (WP 3A-8). */
+  editor?: HTMLElement,
 ): HTMLDivElement {
   // id 0 is the reserved sentinel for server-synthesized system rows (DB
   // user ids are AUTOINCREMENT starting at 1, so no real account can ever
@@ -324,7 +324,11 @@ export function renderMessage(
   const mentionedClass =
     !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";
   const el = createElement("div", {
-    class: (isGrouped ? "message grouped" : "message") + statusClass + mentionedClass,
+    class:
+      (isGrouped ? "message grouped" : "message") +
+      statusClass +
+      mentionedClass +
+      (editor === undefined ? "" : " editing"),
     "data-testid": `message-${msg.id}`,
   });
 
@@ -394,7 +398,16 @@ export function renderMessage(
   appendChildren(header, compactTime, authorEl, time);
   el.appendChild(header);
 
-  if (msg.deleted) {
+  if (editor !== undefined) {
+    // The editor takes the body's place; attachments and reactions stay.
+    el.appendChild(editor);
+    for (const att of msg.attachments) {
+      el.appendChild(renderAttachment(att));
+    }
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
+  } else if (msg.deleted) {
     const text = createElement("div", { class: "msg-text" });
     text.style.fontStyle = "italic";
     text.style.color = "var(--text-muted)";
@@ -463,7 +476,7 @@ export function renderMessage(
   // buttons are always rendered when their gate allows, `display:none` keeps
   // them out of the tab order otherwise). Copy Link, Report and Copy ID live
   // in the "..." menu.
-  if (!msg.deleted && msg.status === "sent") {
+  if (!msg.deleted && msg.status === "sent" && editor === undefined) {
     const gates = messageActionGates(msg, opts);
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 

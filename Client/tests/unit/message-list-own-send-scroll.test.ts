@@ -105,6 +105,8 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

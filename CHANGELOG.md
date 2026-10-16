@@ -113,6 +113,8 @@ and only when it changes something a contributor or fork holder must do
 - A link whose text hides its address (`[text](address)`) now asks before leaving OwnCord, showing the full address; tick "Trust this site's links from now on" to skip the question for that site. Plain links open as before.
 - Links from `m.youtube.com`, `music.youtube.com`, `youtube-nocookie.com` and YouTube `/live/` addresses now get a video player in chat, like other YouTube links.
 - Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
+- Editing a message now happens inside the message itself, as in Discord: press ↑ in an empty message box or choose Edit, change the text in place, then Enter saves, Shift+Enter adds a line and Esc cancels. Saving an empty edit asks to delete the message. A save that fails reopens the editor with your text.
+- Deleted messages now disappear from the channel instead of leaving a "[message deleted]" row, and a reply to a deleted message says "Original message was deleted".
 
 **Voice and video**
 

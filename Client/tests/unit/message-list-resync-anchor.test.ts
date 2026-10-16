@@ -73,6 +73,8 @@ describe("MessageList — a full-ready resync keeps the reading position (P2-T4)
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

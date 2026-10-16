@@ -108,16 +108,18 @@ test.describe("Message Actions Bar", () => {
     await expect(replyBar).toBeVisible({ timeout: 3000 });
   });
 
-  test("clicking Edit populates textarea with message content", async ({ page }) => {
+  test("clicking Edit opens the inline editor with the message content", async ({ page }) => {
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
 
     const editBtn = page.locator("[data-testid='msg-edit-101']");
     await editBtn.click();
 
-    // Textarea should contain the original message content
-    const textarea = page.locator("[data-testid='msg-textarea']");
-    await expect(textarea).toHaveValue("Hello world!");
+    // The editor sits in the message's own row and holds the original content;
+    // the composer is not involved (WP 3A-8).
+    const editor = ownMessage.locator("[data-testid='msg-edit-input-101']");
+    await expect(editor).toHaveValue("Hello world!");
+    await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue("");
   });
 
   test("clicking React opens the emoji picker", async ({ page }) => {
