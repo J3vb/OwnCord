@@ -97,9 +97,10 @@ update() {
 
   # apt-get rather than dpkg -i: it resolves a newly added Depends and fails
   # before unpacking when one cannot be met. --allow-downgrades because Debian
-  # version ordering and semver disagree on prereleases.
+  # version ordering and semver disagree on prereleases. --no-remove: the dialog
+  # promised an install, so a plan that removes packages fails instead.
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    --allow-downgrades -o DPkg::Lock::Timeout=120 "$copy" || return 14
+    --no-remove --allow-downgrades -o DPkg::Lock::Timeout=120 "$copy" || return 14
   return 0
 }
 

@@ -157,6 +157,9 @@ pub(crate) trait PrivilegedRunner: Send + 'static {
 pub(crate) fn pkexec_command(file: &Path, sha256: &str) -> Command {
     let mut command = Command::new(PKEXEC);
     command.arg(HELPER).arg(file).arg(sha256);
+    // pkexec refuses a SHELL missing from /etc/shells; without it, it uses the
+    // account's own shell.
+    command.env_remove("SHELL");
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -209,10 +212,9 @@ pub(crate) trait InstallHooks: Send + 'static {
 /// The webview event that says the password prompt is (about to be) open.
 const INSTALLING_EVENT: &str = "update-installing";
 
-/// The live hooks: tell the webview, and keep the restart bookkeeping the
-/// AppImage path keeps (the restart must show its window; the exit watch must
-/// read the next start as an update handoff). Neither sets
-/// `INSTALLER_LAUNCHING`, which covers the Windows installer launch gap.
+/// The live hooks: tell the webview, and make the restart show its window. The
+/// relaunch exits through tauri's restart, so the exit watch records a clean
+/// exit; `INSTALLER_LAUNCHING` covers only the Windows installer launch gap.
 pub(crate) struct LiveHooks {
     app: AppHandle,
 }
@@ -235,9 +237,7 @@ impl InstallHooks for LiveHooks {
         crate::window_prefs::set_show_next_launch(&self.app, false);
     }
 
-    fn succeeded(&self) {
-        crate::exit_watch::note_update_handoff();
-    }
+    fn succeeded(&self) {}
 }
 
 fn run_install<R: PrivilegedRunner, H: InstallHooks>(
@@ -388,6 +388,9 @@ mod tests {
                 "ab".repeat(32).as_str(),
             ]
         );
+        assert!(command
+            .get_envs()
+            .any(|(key, value)| key == "SHELL" && value.is_none()));
     }
 
     #[test]

@@ -205,7 +205,7 @@ test_happy_path_runs_apt_get_once_on_the_root_copy_with_exact_flags() {
   call=$(cat "$T/apt.log")
   copy=${call##* }
   eq "exact apt-get arguments" "${call% *}" \
-    "install -y --no-install-recommends --allow-downgrades -o DPkg::Lock::Timeout=120"
+    "install -y --no-install-recommends --no-remove --allow-downgrades -o DPkg::Lock::Timeout=120"
   case "$copy" in
     "$CACHE_ROOT"/update.*/owncord.deb) check "apt installs the copy under the work directory" 0 ;;
     *) check "apt installs the copy under the work directory" 1 "(got $copy)" ;;
