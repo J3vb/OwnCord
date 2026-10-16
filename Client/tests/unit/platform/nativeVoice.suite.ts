@@ -4,6 +4,7 @@
 // legacy binding — the capability is new with the Linux voice work.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
+  NativeMicTestEnvelope,
   NativeVoice,
   NativeVoiceCameraDevice,
   NativeVoiceCameraPreview,
@@ -13,6 +14,7 @@ import type {
   NativeVoiceScreenSources,
   NativeVoiceScreenStarted,
 } from "../../../src/platform/contracts/nativeVoice";
+import { NATIVE_MIC_TEST_IN_CALL } from "../../../src/platform/contracts/nativeVoice";
 
 export interface NativeControl {
   /** The host answers the next connect with this session, identity and
@@ -38,10 +40,16 @@ export interface NativeControl {
   ): void;
   /** The host refuses the next screen source change with this reason. */
   refusesScreenChange(reason: string): void;
+  /** The host answers the next mic test start with this test id. */
+  startsMicTestAs(test: number): void;
+  /** The host refuses the next mic test start with this reason. */
+  refusesMicTest(reason: string): void;
   /** Every host command issued so far, as `[name, payload]`. */
   commands(): Array<[string, unknown]>;
   /** The host delivers a room event. Resolves once it has been delivered. */
   emits(envelope: NativeVoiceEnvelope): Promise<void>;
+  /** The host delivers a mic test event. Resolves once it has been delivered. */
+  emitsMicTest(envelope: NativeMicTestEnvelope): Promise<void>;
 }
 
 export interface NativeVoiceSubject {
@@ -244,6 +252,73 @@ export function describeNativeVoiceSuite(
         ["native_voice_set_device", { session: 7, kind: "audiooutput", deviceId: "" }],
       ]);
     });
+
+    check("starts, updates and stops a mic test by id", async () => {
+      const options = {
+        input: "guid-mic",
+        output: "",
+        audio,
+        inputGain: 120,
+        outputGain: 0.5,
+        threshold: 0.03,
+      };
+      ctx.native.startsMicTestAs(5);
+      await expect(ctx.subject.startMicTest(options)).resolves.toBe(5);
+      await ctx.subject.updateMicTest(5, { kind: "inputGain", percent: 80 });
+      await ctx.subject.updateMicTest(5, { kind: "voiceGate", threshold: 0.02, retune: true });
+      await ctx.subject.stopMicTest(5);
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_start_mic_test", { options }],
+        ["native_voice_update_mic_test", { test: 5, update: { kind: "inputGain", percent: 80 } }],
+        [
+          "native_voice_update_mic_test",
+          { test: 5, update: { kind: "voiceGate", threshold: 0.02, retune: true } },
+        ],
+        ["native_voice_stop_mic_test", { test: 5 }],
+      ]);
+    });
+
+    check("a refused mic test start rejects with an Error carrying the host's reason", async () => {
+      ctx.native.refusesMicTest(NATIVE_MIC_TEST_IN_CALL);
+      const refused = ctx.subject.startMicTest({
+        input: "",
+        output: "",
+        audio,
+        inputGain: 100,
+        outputGain: 1,
+        threshold: 0,
+      });
+      await expect(refused).rejects.toBeInstanceOf(Error);
+      await expect(refused).rejects.toThrow(NATIVE_MIC_TEST_IN_CALL);
+    });
+
+    check(
+      "delivers mic-test events and releases a subscription that ends before it registers",
+      async () => {
+        const handler = vi.fn();
+        const stop = ctx.subject.onMicTestEvent(handler);
+        await ctx.native.emitsMicTest({
+          test: 5,
+          event: { type: "inputLevel", rms: 0.2, open: true },
+        });
+        await ctx.native.emitsMicTest({ test: 5, event: { type: "ended" } });
+        expect(handler.mock.calls).toEqual([
+          [{ test: 5, event: { type: "inputLevel", rms: 0.2, open: true } }],
+          [{ test: 5, event: { type: "ended" } }],
+        ]);
+        stop();
+        await ctx.native.emitsMicTest({ test: 5, event: { type: "ended" } });
+        expect(handler).toHaveBeenCalledTimes(2);
+        const early = vi.fn();
+        ctx.subject.onMicTestEvent(early)();
+        await ctx.native.emitsMicTest({ test: 6, event: { type: "ended" } });
+        expect(early).not.toHaveBeenCalled();
+        const fresh = vi.fn();
+        ctx.subject.onMicTestEvent(fresh);
+        await ctx.native.emitsMicTest({ test: 7, event: { type: "ended" } });
+        expect(fresh).toHaveBeenCalledTimes(1);
+      },
+    );
 
     check("delivers each room event to the handler as the host sent it", async () => {
       const handler = vi.fn();

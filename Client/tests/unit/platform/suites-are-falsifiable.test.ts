@@ -434,6 +434,10 @@ describeNativeVoiceSuite(async () => {
     stopCamera: async () => undefined,
     startCameraPreview: async () => undefined,
     stopCameraPreview: async () => undefined,
+    startMicTest: async () => undefined,
+    updateMicTest: async () => undefined,
+    stopMicTest: async () => undefined,
+    onMicTestEvent: () => () => undefined,
     onEvent: () => () => undefined,
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
@@ -443,8 +447,11 @@ describeNativeVoiceSuite(async () => {
     hasDevices: () => undefined,
     sharesScreenAs: () => undefined,
     refusesScreenChange: () => undefined,
+    startsMicTestAs: () => undefined,
+    refusesMicTest: () => undefined,
     commands: () => [],
     emits: async () => undefined,
+    emitsMicTest: async () => undefined,
   };
   return { subject, native };
 }, failEveryTest);

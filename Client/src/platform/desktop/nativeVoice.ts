@@ -51,6 +51,23 @@ export const nativeVoice: NativeVoice = {
   listDevices: async () => (await service()).listDevices(),
   setDevice: async (session, kind, deviceId) =>
     (await service()).setDevice(session, kind, deviceId),
+  startMicTest: async (options) => (await service()).startMicTest(options),
+  updateMicTest: async (test, update) => (await service()).updateMicTest(test, update),
+  stopMicTest: async (test) => (await service()).stopMicTest(test),
+  onMicTestEvent(handler) {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void service().then((s) => {
+      const stop = s.onMicTestEvent(handler);
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+      unlisten = null;
+    };
+  },
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.

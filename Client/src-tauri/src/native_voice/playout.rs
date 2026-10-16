@@ -27,6 +27,8 @@ use super::session::{resolve_device, DeviceInfo};
 use super::stream_format::{pick_config, typed};
 
 pub const SAMPLE_RATE: u32 = 48_000;
+/// The key, and identity, of the mic test's one queue in its own mixer.
+pub const LOOPBACK: &str = "mic-test";
 /// A queue starts (or restarts after running dry) only once it holds this
 /// much, so the 10 ms pushes and the device's larger pulls do not alternate
 /// between sound and silence.
@@ -126,6 +128,12 @@ impl Mixer {
                 over: 0,
             },
         );
+    }
+
+    /// The mic test's queue: mono, on the microphone volume, under the
+    /// fixed `LOOPBACK` key, so `set_gain(LOOPBACK, ..)` is its output gain.
+    pub fn add_loopback(&self) {
+        self.add(LOOPBACK, LOOPBACK, Some(Volume::Microphone), 1);
     }
 
     fn remove(&self, sid: &str) {
@@ -459,8 +467,15 @@ impl Playout {
         result
     }
 
+    /// Whether an echo canceller hears what is played (the mic test must
+    /// never have one).
+    #[cfg(test)]
+    pub(super) fn reference_is_set(&self) -> bool {
+        self.reference.snapshot().1.is_some()
+    }
+
     /// The current stream's device id, or None when nothing plays.
-    fn playing(&self) -> Option<String> {
+    pub(super) fn playing(&self) -> Option<String> {
         lock(&self.output).as_ref().map(|(id, _)| id.clone())
     }
 
@@ -1107,6 +1122,26 @@ mod tests {
             follows.recv_timeout(QUIET),
             Err(mpsc::RecvTimeoutError::Disconnected)
         );
+    }
+
+    #[test]
+    fn loopback_frames_play_once_primed_at_the_output_gain() {
+        let frame = sine(8000.0, SAMPLE_RATE as usize / 100);
+        let level = |gain: Option<f32>| {
+            let m = Mixer::default();
+            m.add_loopback();
+            if let Some(g) = gain {
+                m.set_gain(LOOPBACK, Volume::Microphone, g);
+            }
+            m.push(LOOPBACK, &frame);
+            m.push(LOOPBACK, &frame);
+            assert_eq!(rms(&mixed(&m, PRIME)), 0.0, "two frames are still priming");
+            m.push(LOOPBACK, &frame);
+            rms(&mixed(&m, PRIME))
+        };
+        let unity = level(None);
+        assert!(unity > 0.1, "unity rms {unity}");
+        assert!((level(Some(0.5)) / unity - 0.5).abs() < 0.01);
     }
 
     #[test]

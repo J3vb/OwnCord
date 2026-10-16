@@ -22,12 +22,17 @@
 //! logged.
 pub mod camera;
 pub mod capture;
+pub mod mic_test;
 pub mod playout;
 pub mod screen;
 pub mod session;
 pub mod stream_format;
 pub mod video;
 
+use mic_test::{
+    level_event, MicTest, MicTestEnvelope, MicTestEvent, MicTestOptions, MicTestUpdate,
+    MIC_TEST_EVENT, MIC_TEST_IN_CALL,
+};
 use serde::Serialize;
 use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources, ScreenOptions};
 use tauri::{AppHandle, Emitter, Runtime};
@@ -64,6 +69,13 @@ struct Inner {
     /// cannot leave an older capture owning the single slot.
     standalone_generation: u64,
     next_id: u64,
+    /// The settings tab's mic test, under the id its events carry. Never
+    /// filled while `session` is.
+    mic_test: Option<(u64, MicTest)>,
+    /// The latest mic test start (or stop), so an overlapping start cannot
+    /// leave an older test owning the slot. Equals the slot's id whenever
+    /// the slot is filled.
+    mic_test_generation: u64,
 }
 
 impl Inner {
@@ -106,11 +118,53 @@ impl Inner {
     fn standalone_is_latest(&self, generation: u64) -> bool {
         self.standalone_generation == generation
     }
+    /// Supersede any in-flight mic test start and take the current test out
+    /// (to be released off the lock).
+    fn take_mic_test(&mut self) -> Option<(u64, MicTest)> {
+        self.mic_test_generation += 1;
+        self.mic_test.take()
+    }
+    fn mic_test_blocked(&self) -> bool {
+        mic_test_blocked(self.session.is_some())
+    }
+    /// Begin a mic test: the old one to release, the new test's id and the
+    /// connect count it must still see when it finishes opening.
+    #[allow(clippy::type_complexity)]
+    fn begin_mic_test(&mut self) -> Result<(Option<(u64, MicTest)>, u64, u64), String> {
+        if self.mic_test_blocked() {
+            return Err(MIC_TEST_IN_CALL.to_string());
+        }
+        let old = self.take_mic_test();
+        Ok((old, self.mic_test_generation, self.next_id))
+    }
+    /// Whether the start `id` that saw `connects_seen` connects may claim
+    /// the slot: no call began meanwhile and nothing superseded it.
+    fn admit_mic_test(&self, id: u64, connects_seen: u64) -> Result<(), String> {
+        if self.mic_test_blocked() || self.next_id != connects_seen {
+            Err(MIC_TEST_IN_CALL.to_string())
+        } else if self.mic_test_generation != id {
+            Err("mic test superseded".to_string())
+        } else {
+            Ok(())
+        }
+    }
+    /// Stop test `id`, unless it is stale.
+    fn stop_mic_test(&mut self, id: u64) -> Option<(u64, MicTest)> {
+        (id == self.mic_test_generation)
+            .then(|| self.take_mic_test())
+            .flatten()
+    }
     /// Supersede any in-flight start and release the current preview.
     fn clear_standalone(&mut self) {
         self.standalone_generation += 1;
         self.standalone = None;
     }
+}
+
+/// A mic test never runs during a call. A seam over `Inner::session`, which
+/// a unit test cannot build.
+fn mic_test_blocked(has_session: bool) -> bool {
+    has_session
 }
 
 #[derive(Default)]
@@ -193,7 +247,7 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
-    let (id, key, superseded) = {
+    let (id, key, superseded, test) = {
         let mut inner = state.inner.lock().await;
         let key = inner
             .key
@@ -205,8 +259,10 @@ pub async fn native_voice_connect<R: Runtime>(
         // (voice #20).
         let superseded = inner.session.take();
         inner.next_id += 1;
-        (inner.next_id, key, superseded)
+        (inner.next_id, key, superseded, inner.take_mic_test())
     };
+    // A test and a call never run together.
+    end_mic_test(&app, test).await;
     if let Some((old, s)) = superseded {
         log::info!("[native_voice] superseding session {old}");
         s.close().await;
@@ -237,11 +293,95 @@ pub async fn native_voice_connect<R: Runtime>(
     log::info!("[native_voice] session {id} connected as {identity}");
     let frames = session.frames_url().to_string();
     inner.session = Some((id, session));
+    // A test start that finished between the two locks.
+    let late = inner.take_mic_test();
+    drop(inner);
+    end_mic_test(&app, late).await;
     Ok(Connected {
         session: id,
         identity,
         frames,
     })
+}
+
+/// Tell the webview test `t` ended, then release it off the runtime.
+async fn end_mic_test<R: Runtime>(app: &AppHandle<R>, t: Option<(u64, MicTest)>) {
+    let Some((test, mic_test)) = t else {
+        return;
+    };
+    let envelope = MicTestEnvelope {
+        test,
+        event: MicTestEvent::Ended,
+    };
+    if let Err(e) = app.emit(MIC_TEST_EVENT, envelope) {
+        log::warn!("[native_voice] mic test event emit failed: {e}");
+    }
+    mic_test::release(Some(mic_test)).await;
+}
+
+/// Start the settings tab's mic test: the chosen microphone, with the call's
+/// processing, gain and gate, played on the chosen output. Replaces a running
+/// test and is refused during a call; a call that joins meanwhile ends it.
+/// Resolves with the test's id once the streams are open.
+#[tauri::command]
+pub async fn native_voice_start_mic_test<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, NativeVoiceState>,
+    options: MicTestOptions,
+) -> Result<u64, String> {
+    let (replaced, id, seen) = state.inner.lock().await.begin_mic_test()?;
+    mic_test::release(replaced.map(|(_, t)| t)).await;
+    let sink_app = app.clone();
+    let on_event: session::EventSink = std::sync::Arc::new(move |event: Event| {
+        let Some(event) = level_event(event) else {
+            return;
+        };
+        if let Err(e) = sink_app.emit(MIC_TEST_EVENT, MicTestEnvelope { test: id, event }) {
+            log::warn!("[native_voice] mic test event emit failed: {e}");
+        }
+    });
+    let (on_gate, on_level, reports) = session::capture_report_sinks(on_event);
+    let test =
+        tokio::task::spawn_blocking(move || MicTest::start(options, on_gate, on_level, reports))
+            .await
+            .map_err(|e| e.to_string())??;
+    let mut inner = state.inner.lock().await;
+    match inner.admit_mic_test(id, seen) {
+        Ok(()) => {
+            inner.mic_test = Some((id, test));
+            Ok(id)
+        }
+        Err(e) => {
+            drop(inner);
+            mic_test::release(Some(test)).await;
+            Err(e)
+        }
+    }
+}
+
+/// Apply a live change to mic test `test`. A stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_update_mic_test(
+    state: tauri::State<'_, NativeVoiceState>,
+    test: u64,
+    update: MicTestUpdate,
+) -> Result<(), String> {
+    let mut inner = state.inner.lock().await;
+    match &mut inner.mic_test {
+        Some((id, t)) if *id == test => t.update(update),
+        _ => Ok(()),
+    }
+}
+
+/// Stop mic test `test`. A stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_stop_mic_test(
+    state: tauri::State<'_, NativeVoiceState>,
+    test: u64,
+) -> Result<(), String> {
+    let stopped = state.inner.lock().await.stop_mic_test(test);
+    mic_test::release(stopped.map(|(_, t)| t)).await;
+    Ok(())
 }
 
 /// Enumerate the audio host's capture and playout devices, in or out of a
@@ -798,6 +938,7 @@ mod tests {
             standalone: None,
             standalone_generation: 0,
             next_id: 3,
+            ..Default::default()
         };
         assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
         inner.key = Some(vec![2]);
@@ -826,5 +967,69 @@ mod tests {
         // A stop while a start is in flight supersedes it too.
         inner.clear_standalone();
         assert!(!inner.standalone_is_latest(newer));
+    }
+
+    /// A double start: the older one is superseded and drops its own test.
+    #[test]
+    fn a_second_mic_test_start_supersedes_the_first() {
+        let mut inner = Inner::default();
+        let (_, older, seen) = inner.begin_mic_test().unwrap();
+        let (_, newer, _) = inner.begin_mic_test().unwrap();
+        assert_ne!(older, newer);
+        assert_eq!(
+            inner.admit_mic_test(older, seen),
+            Err("mic test superseded".to_string())
+        );
+        assert_eq!(inner.admit_mic_test(newer, seen), Ok(()));
+    }
+
+    #[test]
+    fn stopping_a_mic_test_supersedes_its_start_and_ignores_stale_ids() {
+        let mut inner = Inner::default();
+        let (_, older, seen) = inner.begin_mic_test().unwrap();
+        let (_, current, _) = inner.begin_mic_test().unwrap();
+        assert!(inner.stop_mic_test(older).is_none());
+        assert_eq!(
+            inner.admit_mic_test(current, seen),
+            Ok(()),
+            "a stale stop leaves the current start admitted"
+        );
+        assert!(inner.stop_mic_test(current).is_none(), "nothing stored yet");
+        assert!(inner.admit_mic_test(current, seen).is_err());
+    }
+
+    #[test]
+    fn a_connect_ends_the_mic_test_and_refuses_one_still_starting() {
+        let mut inner = Inner::default();
+        let (_, id, seen) = inner.begin_mic_test().unwrap();
+        // What `native_voice_connect` does under its first lock hold.
+        assert!(inner.take_mic_test().is_none());
+        inner.next_id += 1;
+        assert_eq!(
+            inner.admit_mic_test(id, seen),
+            Err(MIC_TEST_IN_CALL.to_string())
+        );
+    }
+
+    #[test]
+    fn a_start_between_the_two_connect_locks_is_refused() {
+        let mut inner = Inner::default();
+        // First lock hold of `native_voice_connect`.
+        assert!(inner.take_mic_test().is_none());
+        inner.next_id += 1;
+        // A start that begins after it sees the bumped connect count, so
+        // only the second take can refuse it.
+        let (_, id, seen) = inner.begin_mic_test().unwrap();
+        assert!(inner.take_mic_test().is_none());
+        assert!(inner.admit_mic_test(id, seen).is_err());
+    }
+
+    #[test]
+    fn a_mic_test_cannot_start_during_a_call() {
+        assert!(mic_test_blocked(true));
+        assert!(!mic_test_blocked(false));
+        let mut inner = Inner::default();
+        assert!(!inner.mic_test_blocked());
+        assert!(inner.begin_mic_test().is_ok());
     }
 }
