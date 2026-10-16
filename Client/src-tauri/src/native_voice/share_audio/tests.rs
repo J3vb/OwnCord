@@ -141,6 +141,19 @@ fn the_socket_is_found_by_pulse_server_then_the_runtime_dir() {
         path(None, None, Some("/run/user/1")),
         Some(PathBuf::from("/run/user/1/pulse/native"))
     );
+    // A bare path and a machine-qualified entry are local too.
+    assert_eq!(
+        path(Some("/run/q/native"), Some("/rt"), None),
+        Some(PathBuf::from("/run/q/native"))
+    );
+    assert_eq!(
+        path(Some("{abc123}unix:/run/m/native tcp:host"), None, None),
+        Some(PathBuf::from("/run/m/native"))
+    );
+    assert_eq!(
+        path(Some("{abc123}/run/b/native"), None, None),
+        Some(PathBuf::from("/run/b/native"))
+    );
     // Only remote servers named: the local socket is not the one in use.
     assert_eq!(
         path(Some("tcp:host"), Some("/rt"), Some("/run/user/1")),

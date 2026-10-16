@@ -202,6 +202,18 @@ fn resolve_own(inputs: &[SinkInputInfo], clients: &[ClientInfo]) -> Own {
 /// `PULSE_SERVER`, then `$PULSE_RUNTIME_PATH/native`, then
 /// `$XDG_RUNTIME_DIR/pulse/native`. A `PULSE_SERVER` that names only remote
 /// servers means the local socket is not the one in use: `None`, "no server".
+/// A local entry of PulseAudio's server string: `unix:/path` or a bare
+/// `/path`, either optionally prefixed by `{machine-id}`. Remote entries
+/// (`tcp:`, `host`, ...) give `None`.
+fn local_server_path(entry: &str) -> Option<PathBuf> {
+    let entry = match entry.strip_prefix('{') {
+        Some(rest) => rest.split_once('}')?.1,
+        None => entry,
+    };
+    let path = entry.strip_prefix("unix:").unwrap_or(entry);
+    path.starts_with('/').then(|| PathBuf::from(path))
+}
+
 fn socket_path_in(
     pulse_server: Option<&str>,
     pulse_runtime_path: Option<&str>,
@@ -211,8 +223,7 @@ fn socket_path_in(
     let named: Vec<PathBuf> = pulse_server
         .into_iter()
         .flat_map(str::split_whitespace)
-        .filter_map(|entry| entry.strip_prefix("unix:"))
-        .map(PathBuf::from)
+        .filter_map(local_server_path)
         .collect();
     if named.is_empty() && pulse_server.is_some_and(|s| !s.trim().is_empty()) {
         return None;
