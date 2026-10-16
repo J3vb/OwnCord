@@ -1844,11 +1844,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer.addEventListener(
       "click",
       (e) => {
-        const button = moreButtonOf(e.target);
-        if (button === null) return;
-        const skip = moreWasOpen;
+        // Reset on every click, so a press on More released elsewhere cannot
+        // leave the flag set; a keyboard click (detail 0) had no pointerdown.
+        const skip = moreWasOpen && e.detail > 0;
         moreWasOpen = false;
-        if (skip) return;
+        const button = moreButtonOf(e.target);
+        if (button === null || skip) return;
         withMessageMenu((m) =>
           m.openMessageMenuFromButton({
             opts: options,

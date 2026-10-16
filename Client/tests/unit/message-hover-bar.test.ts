@@ -287,11 +287,39 @@ describe("hover bar More button (mounted list)", () => {
     more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
     more().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await vi.waitFor(() => expect(menu()).toBeNull());
-    more().click();
+    more().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     await new Promise((r) => setTimeout(r, 20));
     expect(menu()).toBeNull();
     // A later click opens it again.
     more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+  });
+
+  it("a press on More released elsewhere does not swallow the next keyboard open", async () => {
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    // Released off the button: the click lands on the row, not on More.
+    more()
+      .closest(".message")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    more().focus();
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+  });
+
+  it("a keyboard click on More opens even if a pointer press was left noted", async () => {
+    more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().click();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
+    // Pressed while open, then never clicked (released outside the list).
+    more().dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    more().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    more().focus();
     more().click();
     await vi.waitFor(() => expect(menu()).not.toBeNull());
   });

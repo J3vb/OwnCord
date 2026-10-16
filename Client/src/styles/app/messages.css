@@ -1365,8 +1365,8 @@ ul.md-list-nested {
   line-height: 1;
 }
 /* Pin, Delete and (own message) Reply show only while Shift is held
-   (MessageList toggles .shift-held on its root). display:none keeps them out
-   of the tab order the rest of the time. */
+   (MessageList toggles .shift-held on its root). They also carry
+   tabindex=-1, so Shift+Tab never lands on one that vanishes on keyup. */
 .msg-actions-bar .msg-shift-only {
   display: none;
 }
