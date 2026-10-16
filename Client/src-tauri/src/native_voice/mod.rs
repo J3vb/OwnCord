@@ -447,7 +447,7 @@ pub async fn native_voice_stop_sound(
     sounds: tauri::State<'_, app_sound::AppSounds>,
     id: u64,
 ) -> Result<(), String> {
-    sounds.stop(id);
+    app_sound::stop(&sounds, id);
     Ok(())
 }
 

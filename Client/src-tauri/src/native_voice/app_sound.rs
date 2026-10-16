@@ -13,13 +13,13 @@
 
 use std::collections::VecDeque;
 use std::f64::consts::TAU;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use cpal::traits::HostTrait as _;
 use serde::Deserialize;
 
-use super::playout::{lock, open_once, output_devices, SAMPLE_RATE};
+use super::playout::{lock, open_once, output_devices, WatchedHost, SAMPLE_RATE};
 use super::session::{resolve_device, DeviceInfo};
 
 /// The most notes one sound may have.
@@ -62,10 +62,13 @@ fn valid(note: &ToneNote) -> bool {
     finite
         && note.at >= 0.0
         && note.duration > 0.0
+        && (0.0..=1.0).contains(&note.gain)
         && note.gain > 0.0
+        && (0.0..=1.0).contains(&note.end_gain)
         && note.end_gain > 0.0
         && !note.freqs.is_empty()
         && note.freqs.len() <= MAX_STEPS
+        && note.freqs.windows(2).all(|w| w[0].0 <= w[1].0)
         && note
             .freqs
             .iter()
@@ -84,8 +87,8 @@ pub fn render(notes: &[ToneNote], master: f32) -> Result<Vec<f32>, String> {
     if notes.is_empty() || notes.len() > MAX_NOTES {
         return Err(format!("a sound has 1 to {MAX_NOTES} notes"));
     }
-    if !master.is_finite() || master < 0.0 {
-        return Err("the sound volume is not a finite, non-negative number".into());
+    if !(0.0..=1.0).contains(&master) {
+        return Err("the sound volume is not a number from 0 to 1".into());
     }
     if !notes.iter().all(valid) {
         return Err("a note has a non-finite or out-of-range value".into());
@@ -116,7 +119,13 @@ pub fn render(notes: &[ToneNote], master: f32) -> Result<Vec<f32>, String> {
             phase = (phase + TAU * hz / f64::from(SAMPLE_RATE)) % TAU;
         }
     }
-    out.iter_mut().for_each(|s| *s = s.clamp(-1.0, 1.0));
+    out.iter_mut().for_each(|s| {
+        *s = if s.is_finite() {
+            s.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    });
     Ok(out)
 }
 
@@ -156,35 +165,57 @@ impl<S> Sounds<S> {
     }
 }
 
-/// The managed registry of live app-sound streams. Cloning shares it, so the
+/// The managed registry of live app-sound streams, and the sound-server host
+/// they open on (built on the first play, off the async workers, and kept so
+/// a play does not pay a fresh connection). Cloning shares both, so the
 /// removal task of each play holds its own handle.
-pub struct AppSounds<S = cpal::Stream>(Arc<Mutex<Sounds<S>>>);
+pub struct AppSounds<S = cpal::Stream> {
+    sounds: Arc<Mutex<Sounds<S>>>,
+    host: Arc<OnceLock<Arc<WatchedHost>>>,
+}
 
 impl<S> Default for AppSounds<S> {
     fn default() -> Self {
-        Self(Arc::default())
+        Self {
+            sounds: Arc::default(),
+            host: Arc::default(),
+        }
     }
 }
 
 impl<S> Clone for AppSounds<S> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            sounds: self.sounds.clone(),
+            host: self.host.clone(),
+        }
     }
 }
 
 impl<S> AppSounds<S> {
-    /// Register a started stream and drop the ones it displaces. The drops
-    /// run after the lock is released.
-    pub(super) fn register(&self, sound: S) -> u64 {
-        let (id, cut) = lock(&self.0).push(sound);
-        drop(cut);
-        id
+    /// Register a started stream. Its id, and the sounds it displaced, which
+    /// the caller releases with `release` once the lock is gone.
+    pub(super) fn register(&self, sound: S) -> (u64, Vec<S>) {
+        lock(&self.sounds).push(sound)
     }
 
-    /// Stop sound `id`; an unknown or finished id is a no-op.
-    pub fn stop(&self, id: u64) {
-        let sound = lock(&self.0).take(id);
-        drop(sound);
+    /// Remove sound `id` for the caller to release; an unknown or finished id
+    /// gives None.
+    pub(super) fn take(&self, id: u64) -> Option<S> {
+        lock(&self.sounds).take(id)
+    }
+}
+
+/// Drop `sound` on a blocking thread: closing a cpal stream joins the sound
+/// server's worker threads, which must not stall an async worker.
+fn release<S: Send + 'static>(sound: S) {
+    drop(tokio::task::spawn_blocking(move || drop(sound)));
+}
+
+/// Stop sound `id`; an unknown or finished id is a no-op.
+pub fn stop(sounds: &AppSounds, id: u64) {
+    if let Some(sound) = sounds.take(id) {
+        release(sound);
     }
 }
 
@@ -192,19 +223,23 @@ impl<S> AppSounds<S> {
 /// plays on the default). Blocking: it talks to the sound server. Returns the
 /// stream and how long it should be kept.
 fn start(
+    host: &OnceLock<Arc<WatchedHost>>,
     notes: &[ToneNote],
     device_id: &str,
     master: f32,
 ) -> Result<(cpal::Stream, Duration), String> {
     let samples = render(notes, master)?;
     let keep = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE)) + DRAIN;
-    let listed = output_devices(&cpal::default_host());
+    let host = host.get_or_init(WatchedHost::new);
+    // A host the sound server dropped is rebuilt before it is listed.
+    host.default_id(cpal::Host::default_output_device);
+    let listed = host.with(output_devices);
     let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
     let (index, _) = resolve_device(device_id, &infos);
     let (_, device) = index
         .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
         .ok_or("no playout device")?;
-    let stream = open_once(&device, samples.into(), Arc::new(AtomicBool::new(false)))?;
+    let stream = open_once(&device, samples.into())?;
     Ok((stream, keep))
 }
 
@@ -216,14 +251,17 @@ pub async fn play(
     device_id: String,
     master: f32,
 ) -> Result<u64, String> {
-    let (stream, keep) = tokio::task::spawn_blocking(move || start(&notes, &device_id, master))
-        .await
-        .map_err(|e| e.to_string())??;
-    let id = sounds.register(stream);
+    let host = sounds.host.clone();
+    let (stream, keep) =
+        tokio::task::spawn_blocking(move || start(&host, &notes, &device_id, master))
+            .await
+            .map_err(|e| e.to_string())??;
+    let (id, cut) = sounds.register(stream);
+    cut.into_iter().for_each(release);
     let owner = sounds.clone();
     tokio::spawn(async move {
         tokio::time::sleep(keep).await;
-        owner.stop(id);
+        stop(&owner, id);
     });
     Ok(id)
 }
@@ -336,23 +374,29 @@ mod tests {
             note(0.0, 0.1, 0.2, 0.01, &[(0.0, 0.0)]),
             note(0.0, 0.1, 0.2, 0.01, &[]),
             note(-1.0, 0.1, 0.2, 0.01, &[(0.0, 440.0)]),
+            note(0.0, 0.1, f32::MAX, 0.01, &[(0.0, 440.0)]),
+            note(0.0, 0.1, 0.2, f32::MAX, &[(0.0, 440.0)]),
+            note(0.0, 0.1, 1.5, 0.01, &[(0.0, 440.0)]),
+            note(0.0, 0.1, 0.2, 0.01, &[(0.05, 800.0), (0.0, 440.0)]),
         ] {
             assert!(render(&[bad], 1.0).is_err());
         }
         assert!(render(std::slice::from_ref(&ok), f32::NAN).is_err());
-        assert!(render(&[ok], -1.0).is_err());
+        assert!(render(std::slice::from_ref(&ok), -1.0).is_err());
+        assert!(render(std::slice::from_ref(&ok), 1.5).is_err());
+        assert!(render(&[ok], f32::MAX).is_err());
     }
 
     #[test]
     fn the_oldest_sound_is_dropped_past_the_cap() {
         let sounds = AppSounds::<u32>::default();
         let ids: Vec<u64> = (0..MAX_SOUNDS as u32 + 2)
-            .map(|s| sounds.register(s))
+            .map(|s| sounds.register(s).0)
             .collect();
         let mut ids_unique = ids.clone();
         ids_unique.dedup();
         assert_eq!(ids, ids_unique, "ids are never reused");
-        let held = lock(&sounds.0);
+        let held = lock(&sounds.sounds);
         assert_eq!(held.playing.len(), MAX_SOUNDS);
         let kept: Vec<u32> = held.playing.iter().map(|(_, s)| *s).collect();
         assert_eq!(kept, (2..MAX_SOUNDS as u32 + 2).collect::<Vec<_>>());
@@ -361,14 +405,14 @@ mod tests {
     #[test]
     fn stopping_an_unknown_or_finished_sound_is_a_noop() {
         let sounds = AppSounds::<u32>::default();
-        sounds.stop(42);
-        let a = sounds.register(1);
-        let b = sounds.register(2);
-        sounds.stop(a);
-        sounds.stop(a);
-        assert_eq!(lock(&sounds.0).playing.len(), 1);
-        sounds.stop(b);
-        sounds.stop(b);
-        assert!(lock(&sounds.0).playing.is_empty());
+        assert_eq!(sounds.take(42), None);
+        let a = sounds.register(1).0;
+        let b = sounds.register(2).0;
+        assert_eq!(sounds.take(a), Some(1));
+        assert_eq!(sounds.take(a), None);
+        assert_eq!(lock(&sounds.sounds).playing.len(), 1);
+        assert_eq!(sounds.take(b), Some(2));
+        assert_eq!(sounds.take(b), None);
+        assert!(lock(&sounds.sounds).playing.is_empty());
     }
 }

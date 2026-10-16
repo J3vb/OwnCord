@@ -684,12 +684,13 @@ fn open_output(
     reference: Option<Reference>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
-    let reference = Mutex::new(reference);
+    let mut reference = reference;
     open_stream(
         device,
+        "playout",
         move |mixed: &mut [f32], channels| {
             mixer.mix(mixed, channels);
-            if let Some(r) = lock(&reference).as_mut() {
+            if let Some(r) = reference.as_mut() {
                 r.feed(mixed, channels);
             }
         },
@@ -698,39 +699,33 @@ fn open_output(
 }
 
 /// Play `samples` (mono, 48 kHz) once on `device` through a stream of its own,
-/// then silence, setting `done` after the last sample has been handed to the
-/// device. The stream outlives the sound until it is dropped, so the owner
-/// drops it. App sounds use this: each play is its own stream, which the
+/// then silence. The stream outlives the sound until it is dropped, so the
+/// owner drops it. App sounds use this: each play is its own stream, which the
 /// sound server mixes with the others and with a call.
 pub(super) fn open_once(
     device: &cpal::Device,
     samples: Arc<[f32]>,
-    done: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     let mut at = 0;
     open_stream(
         device,
-        move |mixed: &mut [f32], channels| write_once(&samples, &mut at, mixed, channels, &done),
+        "app sound",
+        move |mixed: &mut [f32], channels| {
+            write_once(&samples, &mut at, mixed, channels);
+        },
         Arc::new(AtomicBool::new(false)),
     )
 }
 
 /// One pull of a one-shot: the next samples of `samples` (from `at`) on the
 /// front pair of each frame (mono on both, the pair's mean on a mono device,
-/// as `Mixer::mix` does), silence on every other channel and after the end,
-/// where `done` is set.
-fn write_once(
-    samples: &[f32],
-    at: &mut usize,
-    out: &mut [f32],
-    channels: usize,
-    done: &AtomicBool,
-) {
+/// as `Mixer::mix` does), silence on every other channel and after the end.
+/// Whether the sound has now been handed over in full.
+fn write_once(samples: &[f32], at: &mut usize, out: &mut [f32], channels: usize) -> bool {
     out.fill(0.0);
     for frame in out.chunks_exact_mut(channels.max(1)) {
         let Some(&s) = samples.get(*at) else {
-            done.store(true, Ordering::Relaxed);
-            return;
+            break;
         };
         *at += 1;
         match frame {
@@ -742,17 +737,16 @@ fn write_once(
             [] => {}
         }
     }
-    if *at >= samples.len() {
-        done.store(true, Ordering::Relaxed);
-    }
+    *at >= samples.len()
 }
 
 /// Open an f32 48 kHz output stream on `device` whose audio is whatever
 /// `source` writes: it is handed a buffer of whole frames and the channel
 /// count, and fills it. `dead` is set when the sound server tears the stream
-/// down.
+/// down; `label` names the stream in that log line.
 fn open_stream(
     device: &cpal::Device,
+    label: &'static str,
     source: impl FnMut(&mut [f32], usize) + Send + 'static,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
@@ -770,7 +764,7 @@ fn open_stream(
             ..config
         };
         let (source, dead) = (source.clone(), dead.clone());
-        typed!(format, build_output(device, config, source, dead))
+        typed!(format, build_output(device, config, label, source, dead))
     };
     let stream = build(cpal::BufferSize::Fixed(PERIOD_FRAMES))
         .or_else(|_| build(cpal::BufferSize::Default))
@@ -808,6 +802,7 @@ fn fill_with<T>(
 fn build_output<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
+    label: &'static str,
     source: Arc<Mutex<impl FnMut(&mut [f32], usize) + Send + 'static>>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::Error>
@@ -824,7 +819,7 @@ where
         // watcher reopens it, or the call goes silently dead in this
         // direction (voice #3).
         move |e| {
-            log::warn!("[native_voice] playout stream: {e}");
+            log::warn!("[native_voice] {label} stream: {e}");
             dead.store(true, Ordering::Relaxed);
         },
         None,
@@ -1456,29 +1451,28 @@ mod tests {
     }
 
     /// A one-shot plays its samples on the front pair, mono on both (the mean
-    /// on a mono device), then silence, and flags `done` once the last sample
-    /// is out, whatever the pull sizes.
+    /// on a mono device), then silence, and reports itself finished once the
+    /// last sample is out, whatever the pull sizes.
     #[test]
     fn a_one_shot_plays_its_samples_on_the_front_pair_then_silence_and_flags_done() {
         let samples = [0.1, 0.2, 0.3];
-        let done = AtomicBool::new(false);
         let mut at = 0;
         // A 4-channel device: the pair carries the sound, the rest stays silent.
         let mut out = [9.0; 8];
-        write_once(&samples, &mut at, &mut out, 4, &done);
+        assert!(
+            !write_once(&samples, &mut at, &mut out, 4),
+            "one sample left"
+        );
         assert_eq!(out, [0.1, 0.1, 0.0, 0.0, 0.2, 0.2, 0.0, 0.0]);
-        assert!(!done.load(Ordering::Relaxed), "one sample left");
         let mut out = [9.0; 8];
-        write_once(&samples, &mut at, &mut out, 4, &done);
+        assert!(write_once(&samples, &mut at, &mut out, 4));
         assert_eq!(out, [0.3, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        assert!(done.load(Ordering::Relaxed));
         // A mono device gets the pair's mean, and a later pull is silence.
-        let (done, mut at) = (AtomicBool::new(false), 0);
+        let mut at = 0;
         let mut out = [9.0; 5];
-        write_once(&samples, &mut at, &mut out, 1, &done);
+        assert!(write_once(&samples, &mut at, &mut out, 1));
         assert_eq!(out, [0.1, 0.2, 0.3, 0.0, 0.0]);
-        assert!(done.load(Ordering::Relaxed));
-        write_once(&samples, &mut at, &mut out, 1, &done);
+        assert!(write_once(&samples, &mut at, &mut out, 1));
         assert_eq!(out, [0.0; 5]);
     }
 }
