@@ -3703,22 +3703,47 @@ audit row.
   "role_id": 3,
   "banned": true,
   "ban_reason": "spam",
-  "ban_duration_hours": 24
+  "ban_duration_hours": 24,
+  "delete_message_seconds": 86400
 }
 ```
 
 All fields optional. `ban_duration_hours` makes the ban temporary (1–8760;
 omitted or `0` = permanent) and is only meaningful with `banned: true`.
 
+`delete_message_seconds` (integer, 0–604800) also deletes the target's messages
+posted in the last that many seconds. It is accepted only with `banned: true`
+and needs `MANAGE_MESSAGES` as well as `BAN_MEMBERS`. Messages are deleted in
+every non-DM, non-archived channel where the actor holds `READ_MESSAGES` and
+`MANAGE_MESSAGES`, up to 10,000 messages or 20 seconds per request. The checks
+run before the ban is written, so a refused request bans nobody. Connected
+clients receive a `chat_bulk_deleted` event per batch. Omitting the field, or
+sending `0`, deletes nothing.
+
+The purge may stop early. When the response has `"complete": false`, send the
+same request again to continue: if the target is already banned and the ban
+fields are unchanged, the ban is not written a second time (no new ledger row,
+no refreshed reason or expiry) and only the deletion continues.
+
 #### Response 200 OK -- the updated user (same shape as the list entry).
+
+When `delete_message_seconds` was above 0, the object also carries:
+
+```json
+{ "purge": { "deleted": 42, "complete": true } }
+```
+
+`deleted` counts the messages deleted by this request. Without the field the
+response has no `purge` member.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                        |
-| ------ | ------------- | -------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
-| 403    | `FORBIDDEN`   | Missing bit, or the actor does not outrank the target                                        |
-| 404    | `NOT_FOUND`   | User not found                                                                               |
+| Status | Code           | Cause                                                                                                                                                                                               |
+| ------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Invalid id/body, `ban_duration_hours` or `delete_message_seconds` out of range or not an integer, `delete_message_seconds` above 0 without `banned: true`, or attempting to modify your own account |
+| 403    | `FORBIDDEN`    | Missing bit (including `MANAGE_MESSAGES` for `delete_message_seconds`), or the actor does not outrank the target                                                                                    |
+| 404    | `NOT_FOUND`    | User not found                                                                                                                                                                                      |
+| 429    | `RATE_LIMITED` | `delete_message_seconds` used again too soon (one per actor every 2 seconds); nothing was changed                                                                                                   |
 
 ---
 
