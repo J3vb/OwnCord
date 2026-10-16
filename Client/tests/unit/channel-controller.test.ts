@@ -1012,8 +1012,11 @@ describe("createChannelController", () => {
       expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
       expect(mockCancelEdit).not.toHaveBeenCalled();
 
+      mockInputFocus.mockClear();
       (document.querySelector("[data-testid='msg-delete-confirm']") as HTMLButtonElement).click();
       expect(mockCancelEdit).toHaveBeenCalledTimes(1);
+      // The modal gave focus back to the editor that just went away.
+      expect(mockInputFocus).toHaveBeenCalledTimes(1);
       const deletes = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([f]) => (f as { type: string }).type === "chat_delete",
       );
@@ -3947,7 +3950,9 @@ describe("createChannelController", () => {
 
       onSendFailure(editId, "NETWORK");
 
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
       await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
@@ -3972,7 +3977,9 @@ describe("createChannelController", () => {
       // The dispatcher's error chain already shows the one error toast; the
       // controller only restores, so the user never sees two.
       expect(opts.showToast).not.toHaveBeenCalled();
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "too long"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "too long", { focus: true }),
+      );
       ctrl.destroyChannel();
     });
 
@@ -4009,7 +4016,9 @@ describe("createChannelController", () => {
       // drops: the frame can never be echoed.
       onState("reconnecting");
 
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
       await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
@@ -4035,12 +4044,58 @@ describe("createChannelController", () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockStartEdit).toHaveBeenCalledTimes(1);
-      expect(mockStartEdit).toHaveBeenCalledWith(5, "fix typo properly");
+      expect(mockStartEdit).toHaveBeenCalledWith(5, "fix typo properly", { focus: true });
       expect(opts.showToast).toHaveBeenCalledTimes(1);
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
         "error",
       );
+      ctrl.destroyChannel();
+    });
+
+    it("a failed edit that lands while the composer holds a draft restores quietly, without focus", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      // The user has since started typing in the composer.
+      mockIsIdle.mockReturnValue(false);
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: false }),
+      );
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("a failed edit that lands while another text field has focus restores without focus", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      const search = document.createElement("input");
+      document.body.appendChild(search);
+      search.focus();
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: false }),
+      );
+      search.remove();
       ctrl.destroyChannel();
     });
 

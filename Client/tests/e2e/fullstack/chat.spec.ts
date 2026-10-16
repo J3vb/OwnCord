@@ -221,7 +221,11 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   await submit(fresh);
   const edited = row(bob, before);
   await edited.hover();
-  await edited.locator("[data-testid^='msg-edit-']").click();
+  await edited
+    .locator(
+      "[data-testid^='msg-edit-']:not([data-testid^='msg-edit-input-']):not([data-testid^='msg-edit-cancel-']):not([data-testid^='msg-edit-save-'])",
+    )
+    .click();
   // The edit happens in the row itself (WP 3A-8), not in the composer.
   // The row no longer has its text, so find it by its editor.
   const editInput = bob.locator(".message.editing .msg-inline-edit-input");

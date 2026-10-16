@@ -147,6 +147,8 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
       // An Escape that cancels is used up: the app-wide Escape (mark the
       // channel read) leaves a prevented key alone.
       if (e.key === "Escape") {
+        // Escape during IME composition cancels the composition, not the edit.
+        if (e.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         o.onCancel();
       }

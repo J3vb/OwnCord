@@ -338,6 +338,22 @@ describe("inline message editor (WP 3A-8)", () => {
       expect(editor(1)).not.toBeNull();
     });
 
+    it.each([
+      ["isComposing", { isComposing: true }],
+      ["keyCode 229", { keyCode: 229 }],
+    ])("Escape during an IME composition (%s) keeps the edit open", async (_name, init) => {
+      mount([mine(1)]);
+      const textarea = await openEditor(1);
+      textarea.value = "half composed";
+
+      const e = key(textarea, "Escape", init);
+
+      expect(e.defaultPrevented).toBe(false);
+      expect(editor(1)).not.toBeNull();
+      expect(textarea.value).toBe("half composed");
+      expect(options.onEditEnd).not.toHaveBeenCalled();
+    });
+
     it("Escape cancels, discarding the text, and is used up so the app-wide Escape leaves it", async () => {
       mount([mine(1)]);
       const textarea = await openEditor(1);

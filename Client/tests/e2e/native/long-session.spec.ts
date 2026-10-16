@@ -38,7 +38,11 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await expect(row).not.toHaveClass(/pending/);
   await expect(row.locator(".msg-actions-bar")).toBeAttached();
   await row.hover();
-  await row.locator("[data-testid^='msg-edit-']").click();
+  await row
+    .locator(
+      "[data-testid^='msg-edit-']:not([data-testid^='msg-edit-input-']):not([data-testid^='msg-edit-cancel-']):not([data-testid^='msg-edit-save-'])",
+    )
+    .click();
   // The edit happens in the row itself (WP 3A-8), not in the composer.
   // The row no longer has its text, so find it by its editor.
   const editInput = page.locator(".message.editing .msg-inline-edit-input");

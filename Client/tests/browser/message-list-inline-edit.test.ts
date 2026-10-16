@@ -160,7 +160,9 @@ describe("MessageList inline editor in a real browser", () => {
     textarea.setSelectionRange(7, 17);
     await frames();
     const rowBefore = host.querySelector(`[data-testid="message-${id}"]`)!;
-    expect(rowBefore).toBe(el.isConnected ? el : rowBefore);
+    // Opening the editor drew the row again, so the row from before is gone.
+    expect(el.isConnected).toBe(false);
+    expect(rowBefore.contains(textarea)).toBe(true);
 
     // A reaction lands: the row is drawn again around the same textarea.
     const current = messagesStore.getState().messagesByChannel.get(1)!;
@@ -181,6 +183,43 @@ describe("MessageList inline editor in a real browser", () => {
     expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([7, 17]);
     expect(document.activeElement).toBe(textarea);
 
+    list.destroy?.();
+  });
+  it("bringing the edited row into view is not a jump: growing the editor does not re-centre the row", async () => {
+    const { list, root } = await mountReadingFromTheMiddle();
+    // Nudge the view until an own row straddles the bottom edge, so opening
+    // its editor has to scroll it in.
+    const view = root.getBoundingClientRect();
+    const straddling = (): HTMLElement | undefined =>
+      [...host.querySelectorAll<HTMLElement>(".virtual-content > .message")].find((r) => {
+        const id = Number(r.dataset.testid!.replace("message-", ""));
+        const box = r.getBoundingClientRect();
+        return id % 2 === 0 && box.top < view.bottom - 10 && box.bottom > view.bottom + 10;
+      });
+    for (let i = 0; i < 80 && straddling() === undefined; i++) {
+      root.scrollTop += 7;
+      root.dispatchEvent(new Event("scroll"));
+      await frames(2);
+    }
+    const target = straddling()!;
+    const id = Number(target.dataset.testid!.replace("message-", ""));
+
+    expect(list.startEdit(id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(host.querySelector(`[data-testid="msg-edit-input-${id}"]`)).not.toBeNull(),
+    );
+    await frames(6);
+    const textarea = host.querySelector<HTMLTextAreaElement>(
+      `[data-testid="msg-edit-input-${id}"]`,
+    )!;
+    const before = root.scrollTop;
+
+    // Five more lines, well inside the view: nothing needs to scroll.
+    textarea.value = Array.from({ length: 5 }, (_, i) => `line ${i + 1}`).join("\n");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await frames(8);
+
+    expect(root.scrollTop).toBe(before);
     list.destroy?.();
   });
 });

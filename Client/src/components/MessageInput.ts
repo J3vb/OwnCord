@@ -1410,8 +1410,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           textarea !== null &&
           textarea.value.length === 0
         ) {
-          // The browser's own ArrowUp runs after this handler and would move
-          // the caret of the just-loaded edit text to the start.
+          // The browser's own ArrowUp would move the caret in the (empty)
+          // composer as the inline editor takes focus.
           e.preventDefault();
           root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
         }

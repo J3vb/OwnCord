@@ -26,9 +26,13 @@ export function preloadInlineEdit(): void {
   load().catch((err: unknown) => log.warn("Inline editor preload failed", { error: String(err) }));
 }
 
-/** Run `use` with the loaded editor module; a failed load is logged. */
-export function withInlineEdit(use: (edit: InlineEditModule) => void): void {
+/** Run `use` with the loaded editor module; a failed load is logged and
+ *  reported to `onError`, so the caller can drop what it set up for the edit. */
+export function withInlineEdit(use: (edit: InlineEditModule) => void, onError?: () => void): void {
   load()
     .then(use)
-    .catch((err: unknown) => log.warn("Inline editor failed to open", { error: String(err) }));
+    .catch((err: unknown) => {
+      log.warn("Inline editor failed to open", { error: String(err) });
+      onError?.();
+    });
 }

@@ -192,7 +192,6 @@ export const messagingText = defineCatalog("messaging", {
   "toast.pinned": "Message pinned",
   "toast.unpinned": "Message unpinned",
   "toast.pinFailed": "Failed to pin/unpin message",
-  "toast.emptyMessage": "Message cannot be empty",
 
   "header.channelFallback": "general",
   "header.startCall": "Start a call",

@@ -394,6 +394,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
    *  loaded, not yours or not sent), and a list for another channel would
    *  target the wrong message id. At most one edit lands, the newest; the error
    *  toast (when asked for) says the text is back only if it is. */
+  /** A failure can land long after the save: if the user has moved on to the
+   *  composer or another text field, the restored editor must not take focus. */
+  function userIsBusyElsewhere(): boolean {
+    if (messageInput !== null && !messageInput.isIdle()) return true;
+    const active = document.activeElement;
+    return (
+      active instanceof HTMLElement &&
+      (active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active.isContentEditable)
+    );
+  }
+
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
@@ -402,7 +415,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         newest !== undefined &&
         messageList !== null &&
         !messageList.isEditing() &&
-        messageList.startEdit(newest.messageId, newest.content)
+        messageList.startEdit(newest.messageId, newest.content, { focus: !userIsBusyElsewhere() })
       ) {
         restored = true;
       }
@@ -1158,7 +1171,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // message. Cancel leaves the editor open; Delete closes it first.
       onEmptyEdit: (messageId: number) => {
         openDeleteConfirm(messageId, {
-          onConfirm: () => messageList?.cancelEdit(),
+          onConfirm: () => {
+            messageList?.cancelEdit();
+            // The modal handed focus back to the editor that is now gone.
+            messageInput?.focus();
+          },
           clicked: false,
         });
       },

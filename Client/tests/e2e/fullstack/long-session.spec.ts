@@ -126,7 +126,11 @@ async function runCycle(
   await expect(ownRow).not.toHaveClass(/pending/);
   await expect(ownRow.locator(".msg-actions-bar")).toBeAttached();
   await ownRow.hover();
-  await ownRow.locator("[data-testid^='msg-edit-']").click();
+  await ownRow
+    .locator(
+      "[data-testid^='msg-edit-']:not([data-testid^='msg-edit-input-']):not([data-testid^='msg-edit-cancel-']):not([data-testid^='msg-edit-save-'])",
+    )
+    .click();
   const edited = `${own}-edited`;
   // The edit happens in the row itself (WP 3A-8): the inline editor has no
   // double-send guard, so one Enter saves it.
