@@ -764,6 +764,36 @@ describe("syntax highlighting", () => {
     expect(tokens.filter((t) => t.cls === "string")).toEqual([]);
   });
 
+  it("keeps yaml #, apostrophes and quoted values in their place", () => {
+    const url = highlightCode("url: http://x.com/#frag", "yaml");
+    expect(url.filter((t) => t.cls === "comment")).toEqual([]);
+    const plain = highlightCode("title: don't stop # note", "yaml");
+    expect(plain.filter((t) => t.cls === "string")).toEqual([]);
+    expect(plain).toContainEqual({ text: "# note", cls: "comment" });
+    expect(highlightCode("a: 'it''s'", "yaml")).toContainEqual({ text: "'it''s'", cls: "string" });
+    expect(highlightCode("- 'x'", "yaml")).toContainEqual({ text: "'x'", cls: "string" });
+  });
+
+  it("closes SQL, C# verbatim and Java text-block strings correctly", () => {
+    expect(highlightCode("'C:\\' -- c", "sql")).toContainEqual({ text: "-- c", cls: "comment" });
+    const cs = highlightCode('@"C:\\dir\\" + x; // c', "csharp");
+    expect(cs[0]).toEqual({ text: '@"C:\\dir\\"', cls: "string" });
+    expect(cs).toContainEqual({ text: "// c", cls: "comment" });
+    const java = highlightCode('"""\nreturn if\n""" + x', "java");
+    expect(java[0]).toEqual({ text: '"""\nreturn if\n"""', cls: "string" });
+  });
+
+  it("highlights a hostile 40,000-character yaml run in linear time", () => {
+    // A key that rescans a run of key characters from every position is
+    // O(n^2): ~50 ms at the 4000-rune cap and seconds at 40k.
+    const src = "-".repeat(40_000);
+    const start = performance.now();
+    const tokens = highlightCode(src, "yaml");
+    const elapsed = performance.now() - start;
+    expect(tokens.map((t) => t.text).join("")).toBe(src);
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("does not treat a keyword-prefixed identifier as a keyword", () => {
     const tokens = highlightCode("constant = 1", "javascript");
     expect(tokens[0]!.cls).toBeNull();

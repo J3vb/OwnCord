@@ -176,11 +176,11 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
   cpp: {
     patterns: [C_PREPROC, ...JS_LIKE_NO_BT],
     keywords: kw(
-      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t class public private protected virtual override namespace using template typename new delete this nullptr try catch throw auto constexpr operator explicit friend namespace std",
+      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t class public private protected virtual override namespace using template typename new delete this nullptr try catch throw auto constexpr operator explicit friend std",
     ),
   },
   java: {
-    patterns: JS_LIKE_NO_BT,
+    patterns: [{ re: /"""[\s\S]*?(?:"""|$)/y, cls: "string" }, ...JS_LIKE_NO_BT],
     keywords: kw(
       "class interface enum extends implements package import public private protected static final " +
         "abstract void int long short byte char float double boolean new this super return if else for " +
@@ -189,7 +189,7 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     ),
   },
   csharp: {
-    patterns: JS_LIKE_NO_BT,
+    patterns: [{ re: /@"(?:[^"]|"")*"?/y, cls: "string" }, ...JS_LIKE_NO_BT],
     keywords: kw(
       "namespace using class struct interface enum record public private protected internal static " +
         "readonly const abstract virtual override sealed void int long short byte char float double " +
@@ -199,7 +199,14 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
   },
   sql: {
     ignoreCase: true,
-    patterns: [{ re: /--[^\n]*/y, cls: "comment" }, C_BLOCK_COMMENT, SQ_STRING, DQ_STRING, NUMBER],
+    patterns: [
+      { re: /--[^\n]*/y, cls: "comment" },
+      C_BLOCK_COMMENT,
+      // Standard SQL has no backslash escape; '' is two adjacent strings.
+      { re: /'[^'\n]*'?/y, cls: "string" },
+      DQ_STRING,
+      NUMBER,
+    ],
     keywords: kw(
       "select from where and or not in is null like between join inner left right full outer cross on " +
         "group by order having limit offset as distinct union all insert into values update set delete " +
@@ -210,10 +217,13 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
   },
   yaml: {
     patterns: [
-      HASH_COMMENT,
+      // A comment needs whitespace before "#"; a quote opens a string only
+      // where a value starts, so "don't" stays plain text; a key starts only
+      // at the start of a run, which keeps hostile runs linear.
+      { re: /(?<!\S)#[^\n]*/y, cls: "comment" },
       DQ_STRING,
-      SQ_STRING,
-      { re: /[A-Za-z0-9_./-]+(?=[ \t]*:(?:[ \t]|$))/my, cls: "keyword" },
+      { re: /'(?<=(?:^|[:[{,-])[ \t]*')(?:[^'\n]|'')*'?/my, cls: "string" },
+      { re: /(?<![\w./-])[\w./-]+(?=[ \t]*:(?:[ \t]|$))/my, cls: "keyword" },
       NUMBER,
     ],
     keywords: kw("true false null"),
