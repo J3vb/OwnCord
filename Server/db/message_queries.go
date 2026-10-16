@@ -480,90 +480,38 @@ func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string
 }
 
 // SearchMessages performs a full-text search against the messages_fts virtual table.
-// When channelID is non-nil the search is scoped to that channel.
-// Deleted messages are excluded from results.
+// When channelID is non-nil the search is scoped to that channel; nil searches
+// every channel. Deleted messages are excluded from results. It is a thin
+// wrapper over SearchMessagesFiltered, which owns the SQL.
 func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64, page SearchPage) ([]MessageSearchResult, error) {
-	match := ftsMatchQuery(query)
-	if match == "" || page.Limit < 1 {
+	if !HasSearchTerms(query) {
 		return []MessageSearchResult{}, nil
 	}
-
-	where := "messages_fts MATCH ? AND m.deleted = 0"
-	args := []any{match}
+	var channelIDs []int64
 	if channelID != nil {
-		where += " AND m.channel_id = ?"
-		args = append(args, *channelID)
+		channelIDs = []int64{*channelID}
+	} else {
+		all, err := d.allChannelIDs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("SearchMessages: %w", err)
+		}
+		channelIDs = all
 	}
-	tail, tailArgs := searchPageSQL(page)
-
-	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf(
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
-			        m.timestamp, m.mentions_everyone
-			 FROM messages_fts f
-			 JOIN messages m ON f.rowid = m.id
-			 JOIN channels c ON m.channel_id = c.id
-			 JOIN users u ON m.user_id = u.id
-			 WHERE %s%s`,
-			where, tail),
-		append(args, tailArgs...)...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("SearchMessages: %w", err)
+	if len(channelIDs) == 0 {
+		return []MessageSearchResult{}, nil
 	}
-	defer rows.Close() //nolint:errcheck
-
-	results, err := scanSearchResults(rows, "SearchMessages")
-	if err != nil {
-		return nil, err
-	}
-	return d.attachSearchMentions(ctx, results)
+	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
 // SearchMessagesInChannels performs a full-text search scoped to the given
 // channel IDs. This prevents information leakage by filtering at the DB level
-// rather than post-filtering in application code.
+// rather than post-filtering in application code. It is a thin wrapper over
+// SearchMessagesFiltered.
 func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page SearchPage) ([]MessageSearchResult, error) {
-	if len(channelIDs) == 0 {
+	if len(channelIDs) == 0 || !HasSearchTerms(query) {
 		return []MessageSearchResult{}, nil
 	}
-	match := ftsMatchQuery(query)
-	if match == "" || page.Limit < 1 {
-		return []MessageSearchResult{}, nil
-	}
-
-	// Build IN clause placeholders.
-	placeholders := make([]string, len(channelIDs))
-	args := make([]any, 0, len(channelIDs)+3)
-	args = append(args, match)
-	for i, id := range channelIDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	tail, tailArgs := searchPageSQL(page)
-
-	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf(
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
-			        m.timestamp, m.mentions_everyone
-			 FROM messages_fts f
-			 JOIN messages m ON f.rowid = m.id
-			 JOIN channels c ON m.channel_id = c.id
-			 JOIN users u ON m.user_id = u.id
-			 WHERE messages_fts MATCH ? AND m.channel_id IN (%s) AND m.deleted = 0%s`,
-			strings.Join(placeholders, ","), tail),
-		append(args, tailArgs...)...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("SearchMessagesInChannels: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	results, err := scanSearchResults(rows, "SearchMessagesInChannels")
-	if err != nil {
-		return nil, err
-	}
-	return d.attachSearchMentions(ctx, results)
+	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
 // GetMessagesForAPI returns messages in the API.md response shape, including

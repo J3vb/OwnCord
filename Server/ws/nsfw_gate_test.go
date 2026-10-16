@@ -159,12 +159,12 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.bobID, f.labelledID, f.msgID, "👍"); !isNSFWForbidden(err) {
 		t.Errorf("GetReactionUsers(bob) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
-	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); !isNSFWForbidden(err) {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, service.SearchRequest{Query: "needleword", ChannelID: &f.labelledID, Page: db.SearchPage{Limit: 10}}); !isNSFWForbidden(err) {
 		t.Errorf("SearchMessages(bob, single-channel) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
 	// Both orders, so newest-first paging (DP-20) cannot reopen the leak.
 	for _, page := range []db.SearchPage{{Limit: 10}, {Limit: 10, Recent: true}} {
-		globalHits, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", nil, page)
+		globalHits, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, service.SearchRequest{Query: "needleword", Page: page})
 		if err != nil {
 			t.Fatalf("SearchMessages(bob, global, %+v): %v", page, err)
 		}
@@ -323,7 +323,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.aliceID, f.labelledID, f.msgID, "👍"); err != nil {
 		t.Errorf("GetReactionUsers(alice) = %v, want nil", err)
 	}
-	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); err != nil {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, service.SearchRequest{Query: "needleword", ChannelID: &f.labelledID, Page: db.SearchPage{Limit: 10}}); err != nil {
 		t.Errorf("SearchMessages(alice, single-channel) = %v, want nil", err)
 	}
 	aliceRole, err := f.db.GetRoleForUser(ctx, f.aliceID)

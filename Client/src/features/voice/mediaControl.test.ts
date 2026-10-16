@@ -45,6 +45,7 @@ vi.mock("../../lib/screenShare", () => ({
 import { setLocalMuted, setListenOnly, setShareDenied } from "../../stores/voice.store";
 import { savePref } from "../../lib/preferences";
 import { enableCamera, disableCamera } from "../../lib/screenShare";
+import { CameraSwitchUnavailable } from "./cameraSwitch";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
 
 type Permissions = { canPublish: boolean; canPublishSources: number[] } | undefined;
@@ -257,6 +258,26 @@ describe("switchVideoDevice", () => {
     const { media } = setup(fakeRoom(), camera);
     await media.switchVideoDevice("/dev/video9");
     expect(disableCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to a restart when the in-place switch is unavailable", async () => {
+    const track = webTrack();
+    track.setDeviceId.mockRejectedValueOnce(new CameraSwitchUnavailable("busy"));
+    const { media, onError } = setup(fakeRoom(), { manualCameraTrack: track });
+    await media.switchVideoDevice("cam-2");
+    expect(enableCamera).toHaveBeenCalledTimes(1);
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("a non-CameraSwitchUnavailable failure still disables the camera with cameraFailed", async () => {
+    const track = webTrack();
+    track.setDeviceId.mockRejectedValueOnce(new Error("boom"));
+    const { media, onError } = setup(fakeRoom(), { manualCameraTrack: track });
+    await media.switchVideoDevice("cam-2");
+    expect(enableCamera).not.toHaveBeenCalled();
+    expect(disableCamera).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalled();
   });
 
   it("a failed switch turns the camera off and says so", async () => {

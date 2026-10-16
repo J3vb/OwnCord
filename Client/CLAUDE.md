@@ -130,6 +130,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   track's own (`NativeScreenTrack.changeSource`, the host's
   `native_voice_change_screen`), reached through `lib/screenShare.ts`'s
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
+  A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
+  host's `native_voice_change_camera`); `mediaControl` restarts the camera only
+  when it rejects `CameraSwitchUnavailable`.
   Keep the state machine platform-blind: a Linux-only behaviour belongs in
   the adapter or the Rust session, never as a branch in
   `joinOrchestration`/`mediaControl`. The interop proof is

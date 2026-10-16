@@ -57,6 +57,7 @@ const host = vi.hoisted(() => ({
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
   startCamera: (): Promise<unknown> => Promise.resolve({ capture: 5, width: 1280, height: 720 }),
+  changeCamera: (): Promise<unknown> => Promise.resolve({ capture: 7, width: 960, height: 720 }),
   setDevice: (): Promise<void> => Promise.resolve(),
   getStats: (): Promise<NativeVoiceStats | null> => Promise.resolve(null),
   setVideoView: (): Promise<void> => Promise.resolve(),
@@ -185,6 +186,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["stopScreen", args]);
         return Promise.resolve();
       },
+      changeCamera: (...args: unknown[]) => {
+        host.calls.push(["changeCamera", args]);
+        return host.changeCamera();
+      },
       changeScreen: (...args: unknown[]) => {
         host.calls.push(["changeScreen", args]);
         return host.changeScreen();
@@ -202,6 +207,7 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
+import { CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
 import { createConnectionStatsPoller } from "../../../lib/connectionStats";
 import { readSenderSample } from "../shareSenderStats";
@@ -235,6 +241,7 @@ beforeEach(() => {
   });
   host.publishCamera = () => Promise.resolve("TR_cam");
   host.startCamera = () => Promise.resolve({ capture: 5, width: 1280, height: 720 });
+  host.changeCamera = () => Promise.resolve({ capture: 7, width: 960, height: 720 });
   host.setVideoView = () => Promise.resolve();
   host.getStats = () => Promise.resolve(null);
   host.pick = () =>
@@ -1502,6 +1509,98 @@ const share = async (room: ReturnType<typeof createNativeRoom>) => {
   const [screen] = await room.localParticipant.createScreenTracks();
   return screen!;
 };
+
+const publishedCamera = async () => {
+  const room = createNativeRoom(audio);
+  await room.connect("u", "t");
+  const cam = await startCamera(room);
+  await room.localParticipant.publishTrack(cam, cameraOptions);
+  host.calls.length = 0;
+  return { room, cam };
+};
+const names = () => host.calls.map(([n]) => n);
+
+describe("NativeRoom camera switch", () => {
+  it("switches the camera in place: same sid, same preview track, new capture id", async () => {
+    const { room, cam } = await publishedCamera();
+    const preview = cam.mediaStreamTrack;
+    await expect(cam.setDeviceId("/dev/video2")).resolves.toBe(true);
+    expect(host.calls).toEqual([
+      ["changeCamera", [1, "/dev/video2", { fps: 30, maxWidth: 0, maxHeight: 0 }]],
+    ]);
+    expect(names()).not.toContain("stopCamera");
+    expect(names()).not.toContain("startCamera");
+    expect(names()).not.toContain("publishCamera");
+    expect(cam).toMatchObject({ capture: 7, width: 960, height: 720, device: "/dev/video2" });
+    expect(cam.mediaStreamTrack).toBe(preview);
+    expect(host.renderers).toHaveLength(1);
+    expect(host.renderers[0]!.disposed).toBe(false);
+    const publication = room.localParticipant.getTrackPublication("camera")!;
+    expect(publication.track).toBe(cam);
+    expect(publication.trackSid).toBe("TR_cam");
+    // Stop now names the new capture.
+    cam.stop();
+    expect(host.calls.at(-1)).toEqual(["stopCamera", [1, 7]]);
+  });
+
+  it("a failed in-place switch throws CameraSwitchUnavailable and stops nothing", async () => {
+    const { room, cam } = await publishedCamera();
+    host.changeCamera = () => Promise.reject("busy");
+    await expect(cam.setDeviceId("/dev/video2")).rejects.toBeInstanceOf(CameraSwitchUnavailable);
+    expect(names()).toEqual(["changeCamera"]);
+    expect(cam).toMatchObject({ capture: 5, device: "" });
+    expect(host.renderers[0]!.disposed).toBe(false);
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
+  });
+
+  it("a stop during the switch neither retargets nor falls back", async () => {
+    const { cam } = await publishedCamera();
+    let resolve!: (v: unknown) => void;
+    host.changeCamera = () => new Promise((r) => (resolve = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    cam.stop();
+    expect(host.calls.at(-1)).toEqual(["stopCamera", [1, 5]]);
+    resolve({ capture: 7, width: 960, height: 720 });
+    const err = await switching.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(CameraSwitchUnavailable);
+    expect(cam.capture).toBe(5);
+    // The swap landed after the stop named the old capture: the new one stops too.
+    expect(host.calls.at(-1)).toEqual(["stopCamera", [1, 7]]);
+  });
+
+  it("a stop during a failing switch is not reported as unavailable", async () => {
+    const { cam } = await publishedCamera();
+    let reject!: (e: unknown) => void;
+    host.changeCamera = () => new Promise((_, r) => (reject = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    cam.stop();
+    reject("camera stopped during the change");
+    const err = await switching.catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(CameraSwitchUnavailable);
+  });
+
+  it("a capture-ended event that beats the switch reply ends the track", async () => {
+    const { cam } = await publishedCamera();
+    let resolve!: (v: unknown) => void;
+    host.changeCamera = () => new Promise((r) => (resolve = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    emit({ session: 1, event: { type: "cameraCaptureEnded", capture: 7 } });
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
+    resolve({ capture: 7, width: 960, height: 720 });
+    await expect(switching).resolves.toBe(true);
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toContain("ended");
+  });
+
+  it("picking the current device is a no-op", async () => {
+    const { cam } = await publishedCamera();
+    await expect(cam.setDeviceId("")).resolves.toBe(true);
+    expect(host.calls).toEqual([]);
+  });
+});
 
 describe("NativeRoom screen share", () => {
   it("changes the live share's source in the host, keeping the track and its preview", async () => {

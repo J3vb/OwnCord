@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
   changeRefusal: null as string | null,
+  cameraChangeRefusal: null as string | null,
   micTest: 0,
   micTestRefusal: null as string | null,
   stats: null as unknown,
@@ -57,6 +58,12 @@ vi.mock("@tauri-apps/api/core", () => ({
       const refusal = state.micTestRefusal;
       state.micTestRefusal = null;
       return refusal === null ? Promise.resolve(state.micTest) : Promise.reject(refusal);
+    }
+    if (cmd === "native_voice_change_camera") {
+      const refusal = state.cameraChangeRefusal;
+      state.cameraChangeRefusal = null;
+      // Tauri rejects with the command's error string.
+      return refusal === null ? Promise.resolve(state.camera) : Promise.reject(refusal);
     }
     if (cmd === "native_voice_change_screen") {
       const refusal = state.changeRefusal;
@@ -105,6 +112,9 @@ describeNativeVoiceSuite(async () => {
       },
       sharesScreenAs(sources, started, sid) {
         state.screen = { sources, started, sid };
+      },
+      refusesCameraChange(reason) {
+        state.cameraChangeRefusal = reason;
       },
       refusesScreenChange(reason) {
         state.changeRefusal = reason;

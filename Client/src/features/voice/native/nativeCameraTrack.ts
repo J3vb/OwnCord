@@ -13,16 +13,21 @@
 // Lifecycle (B7-11): the shared camera state owns the track and stops it on
 // disable/leave; `NativeRoom` also stops it when it disconnects. stop() is
 // idempotent.
-import type { NativeVoiceCameraStarted } from "../../../platform/contracts/nativeVoice";
+import type {
+  NativeVoiceCameraCapture,
+  NativeVoiceCameraStarted,
+} from "../../../platform/contracts/nativeVoice";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
 
 export class NativeCameraTrack {
   readonly kind = "video";
   readonly source = "camera";
-  readonly capture: number;
-  readonly width: number;
-  readonly height: number;
+  capture: number;
+  width: number;
+  height: number;
+  /** The device id the capture runs on (what `setDeviceId` compares to). */
+  device: string;
   private readonly renderer: NativeVideoRenderer;
   private stopped = false;
 
@@ -32,7 +37,15 @@ export class NativeCameraTrack {
     started: NativeVoiceCameraStarted,
     previewUrl: string,
     private readonly onStop: (track: NativeCameraTrack) => void,
+    device: string,
+    /** The capture pacing and size cap a device change starts its capture with. */
+    readonly captureRequest: NativeVoiceCameraCapture,
+    private readonly onChangeDevice: (
+      track: NativeCameraTrack,
+      deviceId: string,
+    ) => Promise<boolean>,
   ) {
+    this.device = device;
     this.capture = started.capture;
     this.width = started.width;
     this.height = started.height;
@@ -52,6 +65,22 @@ export class NativeCameraTrack {
     if (this.stopped) return;
     this.mediaStreamTrack.stop();
     this.mediaStreamTrack.dispatchEvent(new Event("ended"));
+  }
+
+  /** Use camera `deviceId` under the same publication: the host starts a
+   *  capture of it beside the live one and swaps once it has a frame. The
+   *  preview socket carries on, so the renderer and its track stay. Rejects
+   *  with `CameraSwitchUnavailable` when the host cannot (the camera is still
+   *  on its old device); `mediaControl` then restarts it. */
+  setDeviceId(deviceId: string): Promise<boolean> {
+    return this.onChangeDevice(this, deviceId);
+  }
+
+  /** The host moved this camera onto capture `started`. */
+  retarget(started: NativeVoiceCameraStarted): void {
+    this.capture = started.capture;
+    this.width = started.width;
+    this.height = started.height;
   }
 
   stop(): void {
