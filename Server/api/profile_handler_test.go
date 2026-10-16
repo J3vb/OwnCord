@@ -294,6 +294,10 @@ func TestUpdateProfile_EmptyUsername(t *testing.T) {
 // survivor punctuation instead of leaving it as typed, so a name with an
 // apostrophe would be persisted as e.g. "O&#39;Brien" — unreachable by the
 // literal name on the next login.
+//
+// WP 3C-9: an apostrophe is no longer a legal character in a name being
+// chosen, so a rename to "O'Brien" is refused. What remains pinned is that
+// the refusal leaves the old name in place and stores no escaped form.
 func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
@@ -302,21 +306,19 @@ func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "O'Brien",
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	if resp["username"] != "O'Brien" {
-		t.Errorf("username = %v, want %q (must not be HTML-escaped)", resp["username"], "O'Brien")
+	for _, name := range []string{"O'Brien", "O&#39;Brien"} {
+		u, err := database.GetUserByUsername(context.Background(), name)
+		if err == nil && u != nil {
+			t.Errorf("a row exists for %q after a refused rename", name)
+		}
 	}
-
-	// The row itself must be reachable by the literal name — that is exactly
-	// what a future login looks up.
-	u, err := database.GetUserByUsername(context.Background(), "O'Brien")
+	u, err := database.GetUserByUsername(context.Background(), "apostropheuser")
 	if err != nil || u == nil {
-		t.Fatalf("GetUserByUsername(%q) = %v, %v — rename escaped the username and would lock the account out on next login", "O'Brien", u, err)
+		t.Fatalf("the original name is gone after a refused rename: %v, %v", u, err)
 	}
 }
 
