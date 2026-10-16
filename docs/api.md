@@ -1707,15 +1707,15 @@ List all open DM channels for the authenticated user, ordered by most recent act
 }
 ```
 
-| Field                  | Description                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`            | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients`           | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`                 | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                              |
-| `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
-| `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
-| `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                |
+| Field                  | Description                                                                                                                                                                                                                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recipient`            | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`.                                                                                                     |
+| `recipients`           | Every participant except the caller. What group-aware clients read.                                                                                                                                                        |
+| `name`                 | Optional group name, max 100 characters, one line: runs of spaces collapse, and control characters, line breaks, invisible characters and stacked combining marks are refused. `""` for a 1:1 DM and for an unnamed group. |
+| `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                                                                                                                                  |
+| `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.                                                                                                              |
+| `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.                                                                                                        |
+| `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                                                                                                                    |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 
@@ -1785,6 +1785,9 @@ refuses — its name is who is in it.
 ```
 
 An empty name clears it, and the group falls back to listing its members.
+
+The name follows the same single-line rule as at creation: no line breaks,
+control or invisible characters, and at most 2 combining marks in a row.
 
 #### Response 200 OK
 
@@ -3390,6 +3393,10 @@ reopen the wizard; afterwards the endpoint returns an error.
 
 **Auth:** None (public), plus the one-time setup token
 **Rate limit:** 5 requests/minute per IP
+
+The owner's `username` follows the registration rules: 2–32 characters; letters
+(any script), digits, `_`, `.` and `-`; no spaces; starting with a letter or
+digit; `everyone` and `here` reserved. A refused name is `400 BAD_REQUEST`.
 
 `setup_token` must equal the token the server printed in its start-up output;
 a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.

@@ -224,11 +224,12 @@ instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
 
 `display_name` (max 32), `custom_status` (max 128) and a group DM name (max 100) are single-line text: runs of spaces collapse to one, and the server
-refuses control characters (so no line breaks or tabs), invisible characters
-(zero-width, bidi overrides; a zero-width joiner is allowed only between two
-emoji symbols) and more than 2 combining marks in a row. The length cap counts
-what is left after collapsing. Names and statuses stored before this rule stay
-as they are.
+refuses control characters, line and paragraph separators (so no line breaks or
+tabs), invisible and blank-filler characters (zero-width, bidi overrides,
+variation selectors other than the emoji selector after a symbol) and more than
+2 combining marks in a row. A zero-width joiner is allowed only between
+emoji/symbol characters. The length cap counts what is left after collapsing.
+Names and statuses stored before this rule stay as they are.
 
 `custom_status_expires_at` (RFC 3339 UTC, or `null` when the custom status has
 no expiry or there is none) is the instant the signed-in user's own custom

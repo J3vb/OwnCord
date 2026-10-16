@@ -122,10 +122,20 @@ func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "dnrules", 4)
 
-	for _, name := range []string{"two\nlines", "tab\there", "e\u0301\u0302\u0303", "a\u200bb"} {
+	// Cases the pre-3C-9 control/Cf check let through (separators, blank
+	// fillers, mark stacks, entity-encoded separators) plus the old ones.
+	for _, name := range []string{"two\nlines", "tab\there", "e\u0301\u0302\u0303", "a\u200bb", "a\u2028b", "a&#x2028;b", "a\u3164b", "a\u034fb"} {
 		rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "dnrules", "display_name": name})
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("display_name %q = %d, want 400; body = %s", name, rr.Code, rr.Body.String())
+			continue
+		}
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(rr.Body).Decode(&e)
+		if e.Error != "INVALID_INPUT" {
+			t.Errorf("display_name %q error code = %q, want INVALID_INPUT", name, e.Error)
 		}
 	}
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "dnrules", "display_name": "  Ada    Lovelace  "})
@@ -138,5 +148,43 @@ func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&got)
 	if got.DisplayName != "Ada Lovelace" {
 		t.Errorf("display_name = %q, want collapsed %q", got.DisplayName, "Ada Lovelace")
+	}
+}
+
+// A legacy name with an apostrophe (made before the strict rules) keeps
+// working: it can be resent while editing the display name, and recovery
+// accepts it.
+func TestLegacyApostropheUsername_ProfileEditAndRecovery(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	profileRouter := buildProfileRouter(database)
+	const legacy = "O'Brien"
+	uid := seedUser(t, database, legacy, "LegacyPass1!", 4)
+	token := issueSessionToken(t, database, uid)
+
+	rr := patchJSON(t, profileRouter, "/api/v1/users/me", token, map[string]string{"username": legacy, "display_name": "Paddy"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH with the legacy name and a new display name = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&got)
+	if got.Username != legacy || got.DisplayName != "Paddy" {
+		t.Errorf("response username=%q display_name=%q, want %q / %q", got.Username, got.DisplayName, legacy, "Paddy")
+	}
+
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "LegacyPass1!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var issue struct {
+		KitSecret string `json:"kit_secret"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": legacy, "kit_secret": issue.KitSecret, "new_password": "Recovered-Pass2!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("recovery with a legacy apostrophe name = %d; body = %s", rr.Code, rr.Body.String())
 	}
 }
