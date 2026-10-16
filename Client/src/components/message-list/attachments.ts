@@ -1578,6 +1578,8 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
       e.preventDefault();
       closeBtn.focus();
     }
+    // Ctrl/Cmd with these keys zooms the whole app, not the image.
+    if (e.ctrlKey || e.metaKey) return;
     if (e.key === "+" || e.key === "=") {
       scale = Math.min(10, scale * 1.3);
       applyTransform();

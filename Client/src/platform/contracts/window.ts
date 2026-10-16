@@ -26,4 +26,7 @@ export interface WindowControl {
    *  uses it: HTML full screen fills only the webview in WebView2. With a
    *  label, the window of that label instead (a stream pop-out). */
   setFullscreen(on: boolean, label?: string): Promise<void>;
+  /** Zoom the webview (1 is 100%). Native zoom, not CSS `zoom`, which skews
+   *  pointer coordinates. Resolves false, never rejects, when it cannot. */
+  setZoom(scale: number): Promise<boolean>;
 }
