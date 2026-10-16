@@ -17,6 +17,21 @@ import type { LightboxGallery, LightboxHandle } from "./attachments";
 
 const log = createLogger("lightbox-gallery");
 
+function arrow(
+  cls: string,
+  label: string,
+  icon: "chevron-left" | "chevron-right",
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    class: cls,
+    type: "button",
+    "aria-label": label,
+    title: label,
+  });
+  btn.appendChild(createIcon(icon, 24));
+  return btn;
+}
+
 /** Add the arrows, the "n of m" counter, key stepping and the deletion watch
  *  to an open viewer. Everything is released with the viewer's `signal`. */
 export function attachLightboxGallery(gallery: LightboxGallery, handle: LightboxHandle): void {
@@ -47,16 +62,6 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
   let step = 0;
 
   const counter = createElement("div", { class: "image-lightbox-counter", role: "status" });
-  const arrow = (cls: string, label: string, icon: "chevron-left" | "chevron-right") => {
-    const btn = createElement("button", {
-      class: cls,
-      type: "button",
-      "aria-label": label,
-      title: label,
-    });
-    btn.appendChild(createIcon(icon, 24));
-    return btn;
-  };
   const prevBtn = arrow("image-lightbox-prev", mediaControlsText("lightbox.prev"), "chevron-left");
   const nextBtn = arrow("image-lightbox-next", mediaControlsText("lightbox.next"), "chevron-right");
 

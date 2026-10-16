@@ -233,7 +233,10 @@ describe("lightbox gallery", () => {
   });
 
   it.each([
-    ["answers 404", () => Promise.resolve({ ok: false, status: 404, headers: { get: () => null } })],
+    [
+      "answers 404",
+      () => Promise.resolve({ ok: false, status: 404, headers: { get: () => null } }),
+    ],
     ["rejects", () => Promise.reject(new Error("offline"))],
   ])("a step whose image fetch %s drops the previous picture", async (_name, fail) => {
     fetchMock.mockImplementation((url: string) =>
