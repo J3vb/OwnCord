@@ -1969,12 +1969,14 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(button.textContent).toBe("Let's Check");
   });
 
-  it("tells the user the processing toggles apply on the next join", async () => {
+  it("describes the processing toggles as it does elsewhere: they apply live", async () => {
     const tab = await mount();
-    const descs = [...tab.element.querySelectorAll(".setting-desc")].map((d) => d.textContent);
-    expect(
-      descs.filter((d) => d?.endsWith("Applies when you next join a voice channel.")),
-    ).toHaveLength(4);
+    const descs = [...tab.element.querySelectorAll(".setting-desc")].map(
+      (d) => d.textContent ?? "",
+    );
+    expect(descs.filter((d) => /next join/i.test(d))).toEqual([]);
+    expect(descs).toContain("Reduce echo from speakers feeding back into microphone");
+    expect(descs).toContain("Automatically adjust microphone volume");
   });
 
   it("lists the native engine's audio devices, not the webview's", async () => {

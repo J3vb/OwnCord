@@ -48,6 +48,13 @@ export const nativeVoice: NativeVoice = {
       throw err instanceof Error ? err : new Error(String(err));
     }
   },
+  async setAudioProcessing(session, audio) {
+    try {
+      await invoke<void>("native_voice_set_audio_processing", { session, audio });
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
   setVideoView: (session, identity, sid, enabled, quality) =>

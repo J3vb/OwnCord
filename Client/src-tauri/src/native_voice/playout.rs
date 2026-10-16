@@ -22,7 +22,7 @@ use livekit::prelude::*;
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
 use tokio::task::JoinHandle;
 
-use super::capture::{Apm, Reference};
+use super::capture::{Apm, Reference, Shared};
 use super::session::{resolve_device, DeviceInfo};
 use super::stream_format::{pick_config, typed};
 
@@ -403,7 +403,9 @@ pub struct Playout {
     /// the stream dies.
     output: Output,
     /// The processing whose echo canceller hears what is played.
-    reference: Option<Arc<Apm>>,
+    /// Shared with every output stream, so a replacement reaches the one
+    /// playing.
+    reference: Arc<Shared<Option<Arc<Apm>>>>,
     /// Set by the output stream's error callback when the sound server tears
     /// the stream down. The watcher polls it and reopens.
     dead: Arc<AtomicBool>,
@@ -432,10 +434,10 @@ impl Playout {
         lock(&self.readers).len()
     }
 
-    /// Feed what is played to `apm`'s echo canceller, from the next
-    /// (re)opened output stream on.
+    /// Feed what is played to `apm`'s echo canceller. A playing stream
+    /// follows the change on a later buffer.
     pub fn set_reference(&mut self, apm: Arc<Apm>) {
-        self.reference = Some(apm);
+        self.reference.set(Some(apm));
     }
 
     /// Open the output stream on device `id` (empty: the default), unless it
@@ -475,7 +477,7 @@ impl Playout {
                 open_output(
                     device,
                     self.mixer.clone(),
-                    reference.map(Reference::new),
+                    Some(Reference::following(reference)),
                     self.dead.clone(),
                 )
             },
@@ -523,7 +525,7 @@ impl Playout {
                         open_output(
                             device,
                             mixer.clone(),
-                            reference.clone().map(Reference::new),
+                            Some(Reference::following(reference.clone())),
                             follow_dead.clone(),
                         )
                     },

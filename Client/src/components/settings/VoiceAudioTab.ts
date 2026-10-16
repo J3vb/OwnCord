@@ -1283,9 +1283,7 @@ function buildVoiceAudioTabInner(
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
     const label = createElement("div", { class: "setting-label" }, item.label);
-    // The native engine reads these at connect, not live.
-    const descText = nativeAudio ? t("voiceAudio.applyNextJoin", { desc: item.desc }) : item.desc;
-    const desc = createElement("div", { class: "setting-desc" }, descText);
+    const desc = createElement("div", { class: "setting-desc" }, item.desc);
     appendChildren(info, label, desc);
 
     const isOn = loadPref<boolean>(item.key, item.fallback);

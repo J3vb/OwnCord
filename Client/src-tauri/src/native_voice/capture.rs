@@ -13,7 +13,7 @@
 //! input-sensitivity gate (`VoiceGate`) and push-to-talk's gate decide
 //! whether the frame goes out or silence does.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -36,6 +36,59 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub const SAMPLE_RATE: u32 = 48_000;
 /// One 10 ms frame: the APM's unit and RNNoise's (`nnnoiseless::FRAME_SIZE`).
 pub const FRAME: usize = SAMPLE_RATE as usize / 100;
+
+/// A value the audio threads follow while another thread replaces it. The
+/// generation moves under the lock, so a follower that sees it unchanged has
+/// nothing to read; one that sees it changed reads with `try_lock`, which
+/// never waits: a set in progress is picked up on a later frame.
+pub struct Shared<T> {
+    generation: AtomicU64,
+    value: Mutex<T>,
+}
+
+impl<T: Default> Default for Shared<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T> Shared<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            generation: AtomicU64::new(0),
+            value: Mutex::new(value),
+        }
+    }
+}
+
+impl<T: Clone> Shared<T> {
+    pub fn set(&self, value: T) {
+        let mut held = lock(&self.value);
+        *held = value;
+        self.generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// The value and the generation it belongs to.
+    pub fn snapshot(&self) -> (u64, T) {
+        let held = lock(&self.value);
+        (self.generation.load(Ordering::Acquire), held.clone())
+    }
+
+    /// For the audio thread: the new value when the generation moved past
+    /// `seen` and the lock is free right now, else None (retry next frame).
+    pub fn poll(&self, seen: &mut u64) -> Option<T> {
+        if self.generation.load(Ordering::Acquire) == *seen {
+            return None;
+        }
+        let held = match self.value.try_lock() {
+            Ok(held) => held,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        *seen = self.generation.load(Ordering::Acquire);
+        Some(held.clone())
+    }
+}
 
 /// libwebrtc's processing, shared by the capture (its forward stream) and the
 /// playout (its reverse stream: the reference the echo canceller subtracts).
@@ -95,14 +148,32 @@ fn front_mono(frame: &[f32]) -> f32 {
 /// and the per-track queues' delay), mixed down to mono, becomes the echo
 /// canceller's reverse stream.
 pub struct Reference {
-    apm: Arc<Apm>,
+    apm: Option<Arc<Apm>>,
+    /// Where a later processing arrives (the playout's shared one), and the
+    /// generation `apm` came from.
+    slot: Option<Arc<Shared<Option<Arc<Apm>>>>>,
+    seen: u64,
     framer: Framer,
 }
 
 impl Reference {
     pub fn new(apm: Arc<Apm>) -> Self {
         Self {
+            apm: Some(apm),
+            slot: None,
+            seen: 0,
+            framer: Framer::default(),
+        }
+    }
+
+    /// Feed whatever APM `slot` currently holds, and follow it when it is
+    /// replaced (a live change of the audio processing).
+    pub fn following(slot: Arc<Shared<Option<Arc<Apm>>>>) -> Self {
+        let (seen, apm) = slot.snapshot();
+        Self {
             apm,
+            slot: Some(slot),
+            seen,
             framer: Framer::default(),
         }
     }
@@ -110,10 +181,17 @@ impl Reference {
     /// `out` is the interleaved buffer just filled for the device; playout
     /// uses only its first two (front) channels.
     pub fn feed(&mut self, out: &[f32], channels: usize) {
+        if let Some(slot) = &self.slot {
+            if let Some(apm) = slot.poll(&mut self.seen) {
+                self.apm = apm;
+            }
+        }
         let mono = out
             .chunks_exact(channels.max(1))
             .map(|f| to_i16(front_mono(f)));
-        let apm = &self.apm;
+        let Some(apm) = &self.apm else {
+            return;
+        };
         self.framer.push(mono, |frame| {
             // A failed frame only weakens the reference; nothing to recover.
             let _ = apm
@@ -302,6 +380,10 @@ fn rms(frame: &[i16]) -> f32 {
 pub struct Processor {
     apm: Arc<Apm>,
     denoise: Option<Box<DenoiseState<'static>>>,
+    /// Where a live change of the processing arrives, and the generation
+    /// `apm` and `denoise` came from.
+    follow: Option<Processing>,
+    seen: u64,
     /// Push-to-talk's gate: while set, every frame goes out as silence.
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate (the capture's shared one).
@@ -322,6 +404,8 @@ impl Processor {
         Self {
             apm,
             denoise: enhanced_noise_suppression.then(DenoiseState::new),
+            follow: None,
+            seen: 0,
             gated: Arc::default(),
             voice: Arc::default(),
             gain: InputGain::default(),
@@ -331,6 +415,15 @@ impl Processor {
             input: Box::new([0.0; FRAME]),
             output: Box::new([0.0; FRAME]),
         }
+    }
+
+    /// Follow `processing` (the capture's shared one), whose generation
+    /// `seen` this processor was built from: a replacement is taken on the
+    /// next frame whose read of it does not wait.
+    fn following(mut self, processing: Processing, seen: u64) -> Self {
+        self.follow = Some(processing);
+        self.seen = seen;
+        self
     }
 
     /// Follow push-to-talk gate `gated` (the capture's shared one).
@@ -363,6 +456,8 @@ impl Processor {
         let Self {
             apm,
             denoise,
+            follow,
+            seen,
             gated,
             voice,
             gain,
@@ -373,6 +468,14 @@ impl Processor {
             output,
         } = self;
         framer.push(samples.into_iter().map(to_i16), |frame| {
+            if let Some(follow) = follow {
+                if let Some(Some((next, enhanced))) = follow.poll(seen) {
+                    *apm = next;
+                    if enhanced != denoise.is_some() {
+                        *denoise = enhanced.then(DenoiseState::new);
+                    }
+                }
+            }
             let _ = apm.lock().process_stream(frame, SAMPLE_RATE as i32, 1);
             if let Some(d) = denoise {
                 // RNNoise takes 16-bit-range floats.
@@ -467,7 +570,7 @@ type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
 
 /// The audio processing and whether RNNoise follows it, shared with the
 /// watcher.
-type Processing = Arc<Mutex<Option<(Arc<Apm>, bool)>>>;
+type Processing = Arc<Shared<Option<(Arc<Apm>, bool)>>>;
 
 /// What an input stream feeds: the processing and the published track's
 /// source, shared with the watcher so a reopen feeds the current ones.
@@ -485,18 +588,23 @@ struct Feed {
 
 impl Feed {
     fn ready(&self) -> bool {
-        lock(&self.processing).is_some() && lock(&self.source).is_some()
+        self.processing.snapshot().1.is_some() && lock(&self.source).is_some()
+    }
+
+    /// A processor on the latest processing, which keeps following it.
+    fn processor(&self) -> Result<Processor, String> {
+        let (seen, current) = self.processing.snapshot();
+        let (apm, denoise) = current.ok_or("audio processing is not set up")?;
+        Ok(Processor::new(apm, denoise)
+            .following(self.processing.clone(), seen)
+            .gated_by(self.gated.clone())
+            .with_voice_gate(self.voice.clone())
+            .with_input_gain(self.gain.clone()))
     }
 
     fn open(&self, device: &cpal::Device, dead: Arc<AtomicBool>) -> Result<cpal::Stream, String> {
-        let (apm, denoise) = lock(&self.processing)
-            .clone()
-            .ok_or("audio processing is not set up")?;
+        let processor = self.processor()?;
         let source = lock(&self.source).clone().ok_or("no microphone track")?;
-        let processor = Processor::new(apm, denoise)
-            .gated_by(self.gated.clone())
-            .with_voice_gate(self.voice.clone())
-            .with_input_gain(self.gain.clone());
         open_input(device, processor, source, dead)
     }
 }
@@ -511,10 +619,21 @@ impl Capture {
         on_voice_gate: GateSink,
         on_level: LevelSink,
     ) {
-        *lock(&self.feed.processing) = Some((apm, enhanced_noise_suppression));
+        self.feed
+            .processing
+            .set(Some((apm, enhanced_noise_suppression)));
         let mut voice = lock(&self.feed.voice);
         voice.report_to(on_voice_gate);
         voice.report_levels_to(on_level);
+    }
+
+    /// Replace the audio processing, on a running stream too: the input
+    /// callback takes it on a later frame, without waiting for this thread,
+    /// and a stopped (muted) capture opens its next stream with it.
+    pub fn set_processing(&self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
+        self.feed
+            .processing
+            .set(Some((apm, enhanced_noise_suppression)));
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
@@ -1265,5 +1384,84 @@ mod tests {
                 elapsed / seconds * 100.0
             );
         }
+    }
+
+    /// A toggle reaches a processor that is already running, on its next
+    /// frame: the new APM replaces the old and RNNoise starts (or stops).
+    #[test]
+    fn a_running_processor_takes_a_new_processing_on_the_next_frame() {
+        let first = Apm::new(&opts(false, false));
+        let slot: Processing = Arc::new(Shared::new(Some((first.clone(), false))));
+        let (seen, _) = slot.snapshot();
+        let mut p = Processor::new(first.clone(), false).following(slot.clone(), seen);
+        let input = noise(FRAME * 3, 0.1, 7);
+        run(&mut p, &input);
+        assert!(Arc::ptr_eq(&p.apm, &first) && p.denoise.is_none());
+
+        let second = Apm::new(&opts(true, true));
+        slot.set(Some((second.clone(), true)));
+        run(&mut p, &input[..FRAME]);
+        assert!(Arc::ptr_eq(&p.apm, &second));
+        assert!(p.denoise.is_some());
+
+        // And back off: the denoiser is dropped, the APM replaced again.
+        let third = Apm::new(&opts(false, false));
+        slot.set(Some((third.clone(), false)));
+        run(&mut p, &input[..FRAME]);
+        assert!(Arc::ptr_eq(&p.apm, &third) && p.denoise.is_none());
+    }
+
+    /// The audio thread never waits on a set in progress: with the slot's
+    /// lock held the frame is processed with the old processing, and the
+    /// swap lands on the first frame after the lock is free.
+    #[test]
+    fn a_set_racing_the_callback_never_blocks_it_and_lands_later() {
+        let first = Apm::new(&opts(false, false));
+        let slot: Processing = Arc::new(Shared::new(Some((first.clone(), false))));
+        let (seen, _) = slot.snapshot();
+        let mut p = Processor::new(first.clone(), false).following(slot.clone(), seen);
+        let second = Apm::new(&opts(true, true));
+        let held = lock(&slot.value);
+        // Move the generation as `set` does, while it still holds the lock.
+        slot.generation.fetch_add(1, Ordering::Release);
+        let frame = noise(FRAME, 0.1, 3);
+        let out = run(&mut p, &frame);
+        assert_eq!(out.len(), FRAME);
+        assert!(Arc::ptr_eq(&p.apm, &first) && p.denoise.is_none());
+        drop(held);
+        *lock(&slot.value) = Some((second.clone(), true));
+        run(&mut p, &frame);
+        assert!(Arc::ptr_eq(&p.apm, &second) && p.denoise.is_some());
+    }
+
+    /// A set while the stream is stopped (muted) is what the next open uses.
+    #[test]
+    fn a_set_while_stopped_is_used_by_the_next_open() {
+        let mut capture = Capture::default();
+        let first = Apm::new(&opts(false, false));
+        capture.configure(first.clone(), false, Arc::new(|_| {}), Arc::new(|_, _| {}));
+        let before = capture.feed.processor().unwrap();
+        assert!(Arc::ptr_eq(&before.apm, &first) && before.denoise.is_none());
+
+        capture.stop();
+        let second = Apm::new(&opts(true, true));
+        capture.set_processing(second.clone(), true);
+        let after = capture.feed.processor().unwrap();
+        assert!(Arc::ptr_eq(&after.apm, &second));
+        assert!(after.denoise.is_some());
+    }
+
+    /// The echo canceller's reference follows a replaced APM as well.
+    #[test]
+    fn the_reference_follows_a_replaced_apm() {
+        let slot: Arc<Shared<Option<Arc<Apm>>>> = Arc::default();
+        let mut reference = Reference::following(slot.clone());
+        let buffer = vec![0.1_f32; FRAME];
+        reference.feed(&buffer, 1);
+        assert!(reference.apm.is_none());
+        let apm = Apm::new(&opts(true, false));
+        slot.set(Some(apm.clone()));
+        reference.feed(&buffer, 1);
+        assert!(reference.apm.as_ref().is_some_and(|a| Arc::ptr_eq(a, &apm)));
     }
 }

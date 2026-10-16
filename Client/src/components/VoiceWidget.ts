@@ -28,7 +28,6 @@ import {
   retryMicPermission,
 } from "@lib/livekitSession";
 import { loadPref, savePref } from "@lib/preferences";
-import { isLinuxDesktop } from "../features/voice/native/platform";
 import { voiceText as t } from "../i18n/voice";
 import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
@@ -550,10 +549,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
-    // The native engine reads it at connect, not live.
-    const nsLabel = t(
-      isLinuxDesktop() ? "widget.control.nextJoin" : "widget.control.noiseSuppression",
-    );
+    const nsLabel = t("widget.control.noiseSuppression");
     nsBtn = createElement("button", {
       type: "button",
       class: "vw-ns",
