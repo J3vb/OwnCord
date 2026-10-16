@@ -18,6 +18,8 @@ mod fallback_crypto;
 mod http_pool;
 mod http_proxy;
 mod idle;
+#[cfg(target_os = "linux")]
+mod idle_wayland;
 mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
