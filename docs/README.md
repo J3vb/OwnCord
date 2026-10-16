@@ -37,6 +37,7 @@ Knowing the kind tells you how far to trust a page:
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | [quick-start.md](quick-start.md)             | Get a server running in as few steps as possible.                                                 |
 | [deployment.md](deployment.md)               | Run a server on Windows or Linux, and keep it running: logs, storage, failures, restore, updates. |
+| [linux-install.md](linux-install.md)         | Install the desktop app on Linux: .deb, AppImage, tray, keyring, Wayland and uninstall.           |
 | [known-limitations.md](known-limitations.md) | What the beta does not do, and a short FAQ.                                                       |
 | [STATUS.md](STATUS.md)                       | The current release, nightly test health and the roadmap.                                         |
 | [contributing.md](contributing.md)           | Set up, the branch and pull request model, coding standards, and how to run the CI checks.        |
