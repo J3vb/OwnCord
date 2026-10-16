@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding, VideoPreset};
+use livekit::options::{
+    AudioEncoding, TrackPublishOptions, VideoCodec, VideoEncoding, VideoPreset,
+};
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -504,6 +506,26 @@ impl DeviceKind {
     }
 }
 
+/// The video codec a publish asks for (WP LP-7c). VP8 is the default and what
+/// a webview that sends no `codec` gets; H.264 is sent only when
+/// `native_voice_video_codecs` says the engine can encode it.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PublishCodec {
+    #[default]
+    Vp8,
+    H264,
+}
+
+impl PublishCodec {
+    fn video_codec(self) -> VideoCodec {
+        match self {
+            PublishCodec::Vp8 => VideoCodec::VP8,
+            PublishCodec::H264 => VideoCodec::H264,
+        }
+    }
+}
+
 /// How the screen share is published: the capture's size and the web
 /// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
 /// effective frame rate, `isScreenShareSimulcast`).
@@ -515,6 +537,8 @@ pub struct ScreenOptions {
     pub max_bitrate: u64,
     pub max_framerate: f64,
     pub simulcast: bool,
+    #[serde(default)]
+    pub codec: PublishCodec,
 }
 
 /// The screen share's publish options. With simulcast it adds the web path's
@@ -540,6 +564,7 @@ fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
             max_bitrate: opts.max_bitrate,
             max_framerate: opts.max_framerate,
         }),
+        video_codec: opts.codec.video_codec(),
         ..Default::default()
     }
 }
@@ -554,6 +579,8 @@ pub struct CameraOptions {
     pub max_bitrate: u64,
     pub max_framerate: f64,
     pub simulcast: bool,
+    #[serde(default)]
+    pub codec: PublishCodec,
 }
 
 /// The camera's publish options. A 1080p camera adds the web path's
@@ -581,6 +608,7 @@ fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
             max_bitrate: opts.max_bitrate,
             max_framerate: opts.max_framerate,
         }),
+        video_codec: opts.codec.video_codec(),
         ..Default::default()
     }
 }
@@ -1327,6 +1355,15 @@ impl NativeSession {
         }
     }
 
+    /// Unpublish the screen share if `capture` is the running one, keeping the
+    /// capture alive (a codec republish publishes it again). A stale id is a
+    /// no-op.
+    pub async fn unpublish_screen_keep_capture(&mut self, capture: u64) {
+        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            self.unpublish_screen().await;
+        }
+    }
+
     async fn unpublish_screen(&mut self) {
         if let Some(screen) = &self.screen {
             screen.capture.set_source(None);
@@ -1735,6 +1772,7 @@ mod tests {
             max_bitrate: 6_000_000,
             max_framerate: 30.0,
             simulcast,
+            codec: PublishCodec::default(),
         }
     }
 
@@ -1767,7 +1805,43 @@ mod tests {
             max_bitrate: 4_000_000,
             max_framerate: 30.0,
             simulcast,
+            codec: PublishCodec::default(),
         }
+    }
+
+    #[test]
+    fn camera_publish_options_carry_the_codec() {
+        let mut opts = camera(720, false);
+        assert_eq!(camera_publish_options(&opts).video_codec, VideoCodec::VP8);
+        opts.codec = PublishCodec::H264;
+        assert_eq!(camera_publish_options(&opts).video_codec, VideoCodec::H264);
+    }
+
+    #[test]
+    fn screen_publish_options_carry_the_codec() {
+        let mut opts = screen(false);
+        assert_eq!(screen_publish_options(&opts).video_codec, VideoCodec::VP8);
+        opts.codec = PublishCodec::H264;
+        assert_eq!(screen_publish_options(&opts).video_codec, VideoCodec::H264);
+    }
+
+    #[test]
+    fn codec_defaults_to_vp8_when_absent() {
+        let camera: CameraOptions = serde_json::from_str(
+            r#"{"width":1280,"height":720,"maxBitrate":1,"maxFramerate":30.0,"simulcast":false}"#,
+        )
+        .expect("camera options without codec");
+        assert_eq!(camera.codec, PublishCodec::Vp8);
+        let screen: ScreenOptions = serde_json::from_str(
+            r#"{"width":1280,"height":720,"maxBitrate":1,"maxFramerate":30.0,"simulcast":false}"#,
+        )
+        .expect("screen options without codec");
+        assert_eq!(screen.codec, PublishCodec::Vp8);
+        let h264: CameraOptions = serde_json::from_str(
+            r#"{"width":1,"height":1,"maxBitrate":1,"maxFramerate":1.0,"simulcast":false,"codec":"h264"}"#,
+        )
+        .expect("camera options with h264");
+        assert_eq!(h264.codec, PublishCodec::H264);
     }
 
     #[test]

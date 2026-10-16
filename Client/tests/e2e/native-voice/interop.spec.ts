@@ -26,7 +26,10 @@
 //      its local preview arrives on the frame socket, and repeated share
 //      stop/start releases every capturer;
 //   9. the screen-share negative control: with a wrong key the browser
-//      decodes not one frame of it.
+//      decodes not one frame of it;
+//  10. a native H.264 camera (the Linux codec choice, WP LP-7c) decodes in the
+//      browser with the same key; skipped, with the reason, where the native
+//      engine cannot encode H.264 or the browser cannot decode it.
 // Not exercised here: the X11 capturer and the Wayland portal (CI has no
 // display); see docs/architecture/voice-e2ee.md.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
@@ -555,6 +558,59 @@ test("a simulcast native camera keeps decoding in the browser", async ({ page })
   // frame and then stalls must fail here.
   expect(Math.min(...perSecond)).toBeGreaterThan(10);
   expect(browser.videoWidth).toBeGreaterThan(0);
+  expect(browser.encErrors).toBe(0);
+});
+
+test("a native H.264 camera decodes in the browser with the same key", async ({ page }) => {
+  // The picker enables H.264 only where the engine's probe says it can encode
+  // it, so the probe decides here too: `--probe-codecs` prints it and exits.
+  const probe = await runNativePeer(["--probe-codecs"]).done;
+  const nativeH264 = probe.some((l) => l.event.type === "codecs" && l.event.h264 === true);
+  test.skip(!nativeH264, "the native engine cannot encode H.264 in this build");
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const browserH264 = await page.evaluate(
+    () =>
+      RTCRtpReceiver.getCapabilities("video")?.codecs.some(
+        (c) => c.mimeType.toLowerCase() === "video/h264",
+      ) ?? false,
+  );
+  test.skip(!browserH264, "this browser cannot decode H.264");
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    "20",
+    "--video",
+    "1280x720",
+    "--simulcast",
+    "--codec",
+    "h264",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  const perSecond: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    await resetBrowserMeters(page);
+    await page.waitForTimeout(1_000);
+    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
+  }
+  const browser = await readBrowserPeer(page, "user-2");
+  await peer.done;
+  console.log(
+    `browser decoded H.264 native camera, frames/s: ${perSecond.join(",")} at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  // Every second of the window: a camera that sends one frame and stalls fails.
+  expect(Math.min(...perSecond)).toBeGreaterThan(10);
+  expect(browser.videoWidth).toBeGreaterThan(0);
+  // Decrypted with the same key: no frame failed its authentication.
   expect(browser.encErrors).toBe(0);
 });
 

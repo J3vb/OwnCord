@@ -6,15 +6,17 @@
  * H.264 are the two every shipped client decodes; VP9 and H.265 are options
  * picked only when every peer reports decoding them (H.265 also needs a
  * hardware encoder and a non-Intel GPU, WP M-6). VP8 is the default; H.264
- * lets Windows encode on the graphics card. The Linux native engine always
- * publishes VP8: its release build has no hardware encoder, and software
- * H.264 there is slower than VP8.
+ * lets Windows encode on the graphics card. The Linux native engine has no
+ * hardware encoder in its release build: it publishes VP8, or H.264 (software,
+ * slower than VP8) only when chosen and the engine reports it can encode it.
+ * Auto is VP8 there. VP9 and H.265 are never published on Linux.
  */
 
 import { supportsH265, supportsVP9 } from "livekit-client";
 import { loadPref } from "../../lib/preferences";
 import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";
+import { nativeVideoCodecs } from "./native/videoCodecs";
 
 export type VideoCodecPref = "vp8" | "h264" | "vp9" | "h265" | "auto";
 export type PublishCodec = "vp8" | "h264" | "vp9" | "h265";
@@ -42,6 +44,13 @@ function canPublishVp9(): boolean {
  *  one of them cannot play VP9 (WP M-5b). */
 export function vp9Offered(): boolean {
   return !isLinuxDesktop() && canPublishVp9();
+}
+
+/** Whether the settings can offer H.264: always off Linux (the webview or
+ *  WebView2 encodes it), and on Linux only when the native engine reports an
+ *  H.264 encoder. A probe that fails reads as no. */
+export async function h264Offered(): Promise<boolean> {
+  return !isLinuxDesktop() || (await nativeVideoCodecs()).h264;
 }
 
 /** Whether this webview can publish H.265. livekit-client's check throws where
@@ -149,8 +158,11 @@ async function resolvePreferredCodec(
   fps: number,
   bitrate: number,
 ): Promise<PublishCodec> {
-  if (isLinuxDesktop()) return "vp8";
   const pref = getVideoCodecPref();
+  // Linux: VP8 unless H.264 is chosen and the native encoder has it. Auto is
+  // VP8 (software H.264 is slower, and hardware H.264 under E2EE is unproven),
+  // and a saved VP9 or H.265 is VP8, as the select shows.
+  if (isLinuxDesktop()) return pref === "h264" && (await h264Offered()) ? "h264" : "vp8";
   if (pref === "h264") return pref;
   if (pref === "h265") return (await h265Publishable(track, fps, bitrate)) ? pref : "vp8";
   // livekit-client silently publishes VP8 for an unsupported VP9, which would

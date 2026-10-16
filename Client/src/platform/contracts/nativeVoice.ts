@@ -132,6 +132,14 @@ export interface NativeVoiceConnected {
   frames: string;
 }
 
+/** A video codec the native engine publishes (WP LP-7c). */
+export type NativeVoiceVideoCodec = "vp8" | "h264";
+
+/** Which codecs beyond VP8 the native engine can encode. */
+export interface NativeVoiceVideoCodecs {
+  h264: boolean;
+}
+
 /** How the camera is published: the web path's `publishTrack` options. */
 export interface NativeVoiceCameraOptions {
   width: number;
@@ -139,6 +147,9 @@ export interface NativeVoiceCameraOptions {
   maxBitrate: number;
   maxFramerate: number;
   simulcast: boolean;
+  /** The codec to publish with. The host defaults to VP8 when it is absent;
+   *  `h264` only goes out when `videoCodecs` said the engine can encode it. */
+  codec: NativeVoiceVideoCodec;
 }
 
 /** A native camera device: the id `startCamera` takes. */
@@ -218,6 +229,9 @@ export interface NativeVoiceScreenOptions {
   maxBitrate: number;
   maxFramerate: number;
   simulcast: boolean;
+  /** The codec to publish with. The host defaults to VP8 when it is absent;
+   *  `h264` only goes out when `videoCodecs` said the engine can encode it. */
+  codec: NativeVoiceVideoCodec;
 }
 
 /** What the settings tab's mic test starts with (Linux only). */
@@ -394,6 +408,9 @@ export interface NativeVoice {
    *  available is "no camera plugged in"; this false is "camera support is
    *  missing". */
   cameraSupport(): Promise<NativeVoiceCameraSupport>;
+  /** Whether the engine can encode H.264 (libwebrtc lists a `video/H264`
+   *  sender codec). A rejection resolves `{ h264: false }`, never throws. */
+  videoCodecs(): Promise<NativeVoiceVideoCodecs>;
   /** Start capturing native camera `source` (replacing any running capture)
    *  and resolve once its first frame arrives; a source that fails or yields
    *  no frame in time rejects. The preview then plays on the frame socket's
@@ -436,6 +453,9 @@ export interface NativeVoice {
     capture: number,
     options: NativeVoiceScreenOptions,
   ): Promise<string>;
+  /** Unpublish the share of capture `capture` but keep the capture running,
+   *  so a codec republish can publish it again; a stale id is a no-op. */
+  unpublishScreen(session: number, capture: number): Promise<void>;
   /** Unpublish and stop capture `capture`, releasing the capturer and any
    *  portal session; a stale id is a no-op. */
   stopScreen(session: number, capture: number): Promise<void>;

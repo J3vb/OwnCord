@@ -36,7 +36,12 @@ import {
   onNativeDevicesChanged,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
-import { getVideoCodecPref, h265Offered, vp9Offered } from "../../features/voice/videoCodec";
+import {
+  getVideoCodecPref,
+  h264Offered,
+  h265Offered,
+  vp9Offered,
+} from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
 import {
   NATIVE_MIC_TEST_IN_CALL,
@@ -822,6 +827,8 @@ function buildVoiceAudioTabInner(
     pref: string,
     saved: string,
     options: Array<[string, string]>,
+    /** Option values shown but not selectable. */
+    disabled: ReadonlySet<string> = new Set(),
   ): HTMLElement[] {
     const header = createElement("div", { class: "settings-field-label" }, label);
     const description = createElement("p", { class: "setting-desc" }, desc);
@@ -833,6 +840,7 @@ function buildVoiceAudioTabInner(
     for (const [value, text] of options) {
       const opt = createElement("option", { value }, text);
       if (value === saved) opt.setAttribute("selected", "");
+      if (disabled.has(value)) opt.disabled = true;
       select.appendChild(opt);
     }
     select.value = saved;
@@ -959,30 +967,57 @@ function buildVoiceAudioTabInner(
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
-  // The Linux native engine always publishes VP8 (lib/videoCodec).
-  if (!isLinuxDesktop()) {
+  // The codec choice. Off Linux the webview's own encoders decide what is
+  // offered; on Linux the native engine offers VP8, Auto (VP8) and H.264 only
+  // when its probe says it can encode it (WP LP-7c).
+  const codecGroup = (h264Available: boolean): HTMLElement[] => {
+    const linux = isLinuxDesktop();
     const offerVp9 = vp9Offered();
     const offerH265 = h265Offered();
     const savedCodec = getVideoCodecPref();
-    cameraCard.append(
+    // A saved codec that is no longer offered reads as VP8, as the resolver
+    // does; the pref itself is left alone for a build that offers it.
+    const unoffered =
+      (savedCodec === "vp9" && !offerVp9) ||
+      (savedCodec === "h265" && !offerH265) ||
+      (savedCodec === "h264" && !h264Available);
+    return [
       ...qualityGroup(
         t("voiceAudio.videoCodec"),
         t("voiceAudio.videoCodecDesc"),
         "videoCodec",
-        // A saved VP9 or H.265 that is no longer offered reads as VP8, as the resolver does.
-        (savedCodec === "vp9" && !offerVp9) || (savedCodec === "h265" && !offerH265)
-          ? "vp8"
-          : savedCodec,
+        unoffered ? "vp8" : savedCodec,
         [
           ["vp8", t("voiceAudio.videoCodec.vp8")],
-          ["h264", t("voiceAudio.videoCodec.h264")],
+          [
+            "h264",
+            h264Available
+              ? t("voiceAudio.videoCodec.h264")
+              : t("voiceAudio.videoCodec.h264Unavailable"),
+          ],
           ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
           ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
           ["auto", t("voiceAudio.videoCodec.auto")],
         ],
+        h264Available ? new Set() : new Set(["h264"]),
       ),
-      createElement("p", { class: "setting-desc" }, t("voiceAudio.videoCodecIntel")),
-    );
+      createElement(
+        "p",
+        { class: "setting-desc" },
+        t(linux ? "voiceAudio.videoCodecLinux" : "voiceAudio.videoCodecIntel"),
+      ),
+    ];
+  };
+  if (isLinuxDesktop()) {
+    // The probe is asked of the host, so the group fills a slot that holds its
+    // place (a group's height) and the cards below do not jump.
+    const slot = createElement("div", { class: "voice-codec-slot", style: "min-height:104px" });
+    cameraCard.appendChild(slot);
+    void h264Offered().then((available) => {
+      if (!signal.aborted) slot.append(...codecGroup(available));
+    });
+  } else {
+    cameraCard.append(...codecGroup(true));
   }
 
   // Device names seen while this tab is open, to name one that is unplugged.
