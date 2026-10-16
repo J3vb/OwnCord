@@ -14,16 +14,19 @@
 use tauri::{AppHandle, Manager};
 
 /// Enable spell checking on the main window's WebKitGTK web context, using
-/// the language from the locale environment (`LC_ALL`, `LC_MESSAGES`, `LANG`).
+/// the languages from the locale environment (`LANGUAGE`, `LC_ALL`,
+/// `LC_MESSAGES`, `LANG`).
 pub fn enable_spell_checking(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         log::warn!("linux_spellcheck: main window not found; spell checking stays off");
         return;
     };
-    let lang = spell_language(
-        &std::env::var("LC_ALL").unwrap_or_default(),
-        &std::env::var("LC_MESSAGES").unwrap_or_default(),
-        &std::env::var("LANG").unwrap_or_default(),
+    let env = |name| std::env::var(name).unwrap_or_default();
+    let langs = spell_languages(
+        &env("LANGUAGE"),
+        &env("LC_ALL"),
+        &env("LC_MESSAGES"),
+        &env("LANG"),
     );
     let result = window.with_webview(move |webview| {
         use webkit2gtk::{WebContextExt, WebViewExt};
@@ -32,8 +35,12 @@ pub fn enable_spell_checking(app: &AppHandle) {
         match webview.context() {
             Some(ctx) => {
                 ctx.set_spell_checking_enabled(true);
-                ctx.set_spell_checking_languages(&[lang.as_str()]);
-                log::info!("linux_spellcheck: spell checking enabled ({lang})");
+                let refs: Vec<&str> = langs.iter().map(String::as_str).collect();
+                ctx.set_spell_checking_languages(&refs);
+                log::info!(
+                    "linux_spellcheck: spell checking enabled ({})",
+                    refs.join(", ")
+                );
             }
             None => log::warn!("linux_spellcheck: webview has no web context"),
         }
@@ -41,6 +48,38 @@ pub fn enable_spell_checking(app: &AppHandle) {
     if let Err(e) = result {
         log::warn!("linux_spellcheck: failed to configure spell checking: {e}");
     }
+}
+
+/// The spell-check languages in GNU gettext order: the colon-separated
+/// `LANGUAGE` list first, then the locale from [`spell_language`], without
+/// duplicates. As in gettext, `LANGUAGE` is ignored when the locale is `C` or
+/// `POSIX` (the result is then `en_US` alone).
+pub fn spell_languages(language: &str, lc_all: &str, lc_messages: &str, lang: &str) -> Vec<String> {
+    let locale = spell_language(lc_all, lc_messages, lang);
+    let locale_is_c = [lc_all, lc_messages, lang]
+        .into_iter()
+        .find(|v| !v.is_empty())
+        .is_none_or(|v| strip_locale(v).is_empty() || matches!(strip_locale(v), "C" | "POSIX"));
+    let mut out: Vec<String> = Vec::new();
+    if !locale_is_c {
+        for entry in language.split(':').map(strip_locale) {
+            if !entry.is_empty()
+                && entry != "C"
+                && entry != "POSIX"
+                && !out.iter().any(|l| l == entry)
+            {
+                out.push(entry.to_string());
+            }
+        }
+    }
+    if !out.contains(&locale) {
+        out.push(locale);
+    }
+    out
+}
+
+fn strip_locale(raw: &str) -> &str {
+    &raw[..raw.find(['.', '@']).unwrap_or(raw.len())]
 }
 
 /// Pick the spell-check language from the locale variables, in POSIX
@@ -52,8 +91,7 @@ pub fn spell_language(lc_all: &str, lc_messages: &str, lang: &str) -> String {
         .into_iter()
         .find(|v| !v.is_empty())
         .unwrap_or("");
-    let end = raw.find(['.', '@']).unwrap_or(raw.len());
-    let base = &raw[..end];
+    let base = strip_locale(raw);
     if base.is_empty() || base == "C" || base == "POSIX" {
         return "en_US".to_string();
     }
@@ -62,7 +100,34 @@ pub fn spell_language(lc_all: &str, lc_messages: &str, lang: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::spell_language;
+    use super::{spell_language, spell_languages};
+
+    #[test]
+    fn spell_languages_language_list_comes_first() {
+        assert_eq!(
+            spell_languages("fr_FR:en", "", "", "en_US.UTF-8"),
+            ["fr_FR", "en", "en_US"]
+        );
+    }
+
+    #[test]
+    fn spell_languages_without_language_is_the_locale() {
+        assert_eq!(spell_languages("", "", "", "nl_BE.UTF-8"), ["nl_BE"]);
+    }
+
+    #[test]
+    fn spell_languages_drops_duplicates_and_empty_entries() {
+        assert_eq!(
+            spell_languages("nl_BE.UTF-8::nl_BE", "", "", "nl_BE.UTF-8"),
+            ["nl_BE"]
+        );
+    }
+
+    #[test]
+    fn spell_languages_ignores_language_under_a_c_locale() {
+        assert_eq!(spell_languages("fr_FR:en", "", "", "C.UTF-8"), ["en_US"]);
+        assert_eq!(spell_languages("fr_FR", "", "", ""), ["en_US"]);
+    }
 
     #[test]
     fn spell_language_lc_all_wins() {
