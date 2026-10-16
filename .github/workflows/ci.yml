@@ -1286,7 +1286,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 35, above playwright.config.ts's 30-minute globalTimeout, so the suite
+    # stops itself and still uploads its report.
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: Client/
