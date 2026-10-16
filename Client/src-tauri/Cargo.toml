@@ -219,6 +219,14 @@ png = "0.18"
 # `pulseaudio` host is a pure-Rust client (no libpulse link) that lists the
 # same device descriptions the device module showed; plain ALSA is the fallback.
 cpal = { version = "0.18", features = ["pulseaudio"] }
+# The same pure-Rust PulseAudio protocol crate cpal's host uses, taken directly
+# for the screen-share audio capture (native_voice/share_audio.rs): it records
+# other applications' sink inputs over its public `protocol` module. Pinned to
+# the version cpal resolves, so no new crate enters the tree. share_audio.rs
+# recognises OwnCord's own playback by the client name cpal gives its
+# connections (`cpal-pulseaudio-<pid>`, cpal src/host/pulseaudio/mod.rs): a
+# cpal bump has to re-check that name.
+pulseaudio = "=0.3.1"
 # RNNoise for the Enhanced Noise Suppression setting on the native capture
 # path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
 # path runs as WASM. Default features only add its command-line tool.

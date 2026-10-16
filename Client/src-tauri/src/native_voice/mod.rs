@@ -28,6 +28,7 @@ pub mod mic_test;
 pub mod playout;
 pub mod screen;
 pub mod session;
+pub mod share_audio;
 pub mod stats;
 pub mod stream_format;
 pub mod video;
