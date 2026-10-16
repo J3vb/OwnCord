@@ -129,37 +129,41 @@ function isGifUrl(url: string): boolean {
 
 // -- YouTube ------------------------------------------------------------------
 
-/** Extract YouTube video ID from various YouTube URL formats. */
+/** Hosts whose URLs name a YouTube video; every one embeds through the
+ *  existing www.youtube.com player, so the CSP needs no new origin. */
+const YOUTUBE_HOSTS: ReadonlySet<string> = new Set([
+  "www.youtube.com",
+  "youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "www.youtube-nocookie.com",
+  "youtube-nocookie.com",
+]);
+
+/** Path prefixes that carry the video ID as the next segment. */
+const YOUTUBE_ID_PREFIXES: readonly string[] = ["/embed/", "/shorts/", "/live/"];
+
+/** Extract YouTube video ID from various YouTube URL formats. A `t=`/`start=`
+ *  time offset is a query parameter and never part of the ID. */
 export function extractYouTubeId(url: string): string | null {
   try {
     const parsed = new URL(url);
-    // youtube.com/watch?v=ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname === "/watch"
-    ) {
-      return parsed.searchParams.get("v");
-    }
     // youtu.be/ID
     if (parsed.hostname === "youtu.be") {
       const id = parsed.pathname.slice(1);
       return id.length > 0 ? id : null;
     }
-    // youtube.com/embed/ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname.startsWith("/embed/")
-    ) {
-      const id = parsed.pathname.slice(7);
-      return id.length > 0 ? id : null;
+    if (!YOUTUBE_HOSTS.has(parsed.hostname)) return null;
+    // youtube.com/watch?v=ID
+    if (parsed.pathname === "/watch") {
+      return parsed.searchParams.get("v");
     }
-    // youtube.com/shorts/ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname.startsWith("/shorts/")
-    ) {
-      const id = parsed.pathname.slice(8);
-      return id.length > 0 ? id : null;
+    // youtube.com/embed/ID, /shorts/ID, /live/ID
+    for (const prefix of YOUTUBE_ID_PREFIXES) {
+      if (parsed.pathname.startsWith(prefix)) {
+        const id = parsed.pathname.slice(prefix.length).split("/")[0] ?? "";
+        return id.length > 0 ? id : null;
+      }
     }
   } catch {
     // Invalid URL

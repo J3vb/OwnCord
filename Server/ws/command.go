@@ -82,31 +82,12 @@ type PresenceUpdateCmd struct {
 	// sends a bare status flip several times an hour and must not wipe the
 	// text the user typed.
 	CustomStatus *string
+	// ExpiresIn is custom_status_expires_in (seconds), nil when absent.
+	ExpiresIn *int64
 }
 
 func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
 func (c PresenceUpdateCmd) UserID() int64 { return c.userID }
-
-// ChannelFocusCmd represents a channel_focus message.
-type ChannelFocusCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c ChannelFocusCmd) Type() string  { return MsgTypeChannelFocus }
-func (c ChannelFocusCmd) UserID() int64 { return c.userID }
-
-// MarkReadCmd represents a mark_read message: advance the caller's read state
-// for a channel without making it their focused channel. channel_focus already
-// marks read, but it also rebinds the connection's focused channel, so it is
-// the wrong tool for "mark that other channel read from its context menu".
-type MarkReadCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c MarkReadCmd) Type() string  { return MsgTypeMarkRead }
-func (c MarkReadCmd) UserID() int64 { return c.userID }
 
 // ReactionAddCmd represents a reaction_add message.
 type ReactionAddCmd struct {
@@ -244,6 +225,9 @@ type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
 	Signature string
+	// VideoDecode is the sender's raw video_decode list (WP M-4). Unvalidated
+	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
+	VideoDecode []string
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
@@ -440,31 +424,12 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypePresenceUpdate: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			Status       string  `json:"status"`
-			CustomStatus *string `json:"custom_status"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid presence_update payload: %w", err)
-		}
-		return PresenceUpdateCmd{userID: userID, Status: p.Status, CustomStatus: p.CustomStatus}, nil
+		return parsePresenceUpdate(userID, raw)
 	},
 
-	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeChannelFocus, raw)
-		if err != nil {
-			return nil, err
-		}
-		return ChannelFocusCmd{userID: userID, ChannelID: chID}, nil
-	},
-
-	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeMarkRead, raw)
-		if err != nil {
-			return nil, err
-		}
-		return MarkReadCmd{userID: userID, ChannelID: chID}, nil
-	},
+	MsgTypeChannelFocus: parseChannelFocus,
+	MsgTypeMarkRead:     parseMarkRead,
+	MsgTypeMarkUnread:   parseMarkUnread,
 
 	MsgTypeCallRing: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		chID, err := parseCallChannelID(MsgTypeCallRing, raw)
@@ -634,13 +599,19 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 
 	MsgTypeVoiceE2EEAnnounce: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		var p struct {
-			PublicKey string `json:"public_key"`
-			Signature string `json:"signature"`
+			PublicKey   string          `json:"public_key"`
+			Signature   string          `json:"signature"`
+			VideoDecode json.RawMessage `json:"video_decode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature}, nil
+		// A wrongly typed list is dropped like an invalid one; it must never cost the key.
+		var videoDecode []string
+		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
+			videoDecode = nil
+		}
+		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {

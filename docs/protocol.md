@@ -95,15 +95,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                               |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_activity`, `channel_create` (targeted per recipient; see below)             |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                |
+| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                                    |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                  |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                 |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                              |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                        |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                 |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -203,6 +203,7 @@ keeps it until one authenticates.
       "display_name": "Alex A.",
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
+      "custom_status_expires_at": "2026-10-15T18:00:00Z",
       "status": "invisible"
     },
     "server_name": "My Server",
@@ -221,6 +222,14 @@ keeps it until one authenticates.
 profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
+
+`custom_status_expires_at` (RFC 3339 UTC, or `null` when the custom status has
+no expiry or there is none) is the instant the signed-in user's own custom
+status clears itself, so a client can show a countdown. It is **only** in the
+user's own `auth_ok` and `GET /api/v1/users/me`: every other client is never
+told the instant, it just sees the status go to `null` (see `presence`). A
+status whose instant has passed but that the server has not cleared yet is
+sent as `null` in both fields.
 
 `status` is the user's **own true status**, `"invisible"` included. Only this
 message and their own `ready` entry ever carry it — every other client is told
@@ -465,12 +474,18 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0 }`.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true }`. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+
+`last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
+the newest message id they have read, or `0` when they have no read state for the
+channel. It is not `last_message_id`, which is the newest live message in the
+channel. A client can place its NEW line after the pointer. It is plain data with
+no capability flag; an older server omits it.
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -516,7 +531,11 @@ a client then keeps its role-only behaviour and must not treat absent as
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
 raised by the send that mentions them (never by an edit) and reset to 0 by
-`channel_focus` or `mark_read`. Unlike `unread_count` it is never capped.
+`channel_focus` or `mark_read` at the latest message. A read-state move to the
+middle of a channel (`mark_read` with `message_id`, `mark_unread`) recomputes it
+from the mentions that raised the badge, with a forward move never raising it
+and a backward move never lowering it (see Channel Focus and Read State).
+Unlike `unread_count` it is never capped.
 
 `unread_count` counts unread messages but is **capped at 100**: any channel with
 100 or more unread messages reports exactly `100`, and the client renders the cap
@@ -524,7 +543,10 @@ as `99+`. The cap bounds the per-channel count on every connect — a channel wi
 thousands of never-read messages does not scan every row — so a client must not
 read `100` as an exact total.
 
-**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`
+**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`, `last_read_message_id`
+
+A DM's `last_read_message_id` is the caller's own read pointer for the DM, `0` when
+they have never read it. The same value is returned by `GET /api/v1/dms`.
 
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
@@ -532,6 +554,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+
+**member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
 `status` is per-viewer. Two rules apply, in this order, so a client never has
 to reconstruct them:
@@ -957,6 +981,17 @@ Typing broadcasts are ephemeral -- they are NOT stored in the replay ring buffer
 }
 ```
 
+```json
+{
+  "type": "presence_update",
+  "payload": {
+    "status": "dnd",
+    "custom_status": "in a meeting",
+    "custom_status_expires_in": 3600
+  }
+}
+```
+
 Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 `"offline"` is still accepted from older clients (which used it to mean
 "appear offline") and is treated as the plain offline it says. Rate limited:
@@ -968,6 +1003,19 @@ clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
 typed. While the user is timed out a non-empty `custom_status` is refused with
 `TIMED_OUT`; a bare status change and `""` still apply.
+
+`custom_status_expires_in` is optional: whole seconds, **60 to 604800** (one
+minute to seven days), after which the server clears the custom status by
+itself. A relative duration, so a client's clock skew does not matter; "clear
+today" is the seconds to local midnight. It is valid only with a non-empty
+`custom_status`: sent without one, with `""`, as a string or a fraction, or out
+of range, the frame is refused with `BAD_REQUEST`. A new `custom_status`
+without it has no expiry and replaces any old one; a bare status flip leaves
+both text and expiry alone; `""` clears both. The user's own `auth_ok.user` and
+`GET /api/v1/users/me` return the resulting `custom_status_expires_at`; it is
+never sent to other users. Idle, DnD and Invisible timers are not part of this:
+they stay on the client. An older server ignores the field, so the status just
+never expires there.
 
 The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
@@ -989,7 +1037,10 @@ cleared on `POST /api/v1/auth/logout`.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
 distinguishable from "this event does not mention it"; every presence
-broadcast carries the current value.
+broadcast carries the current value. When a custom status expires the server
+broadcasts a `presence` for the user with `custom_status: null` and the same
+`status` (split for an invisible user like any other presence), exactly as if
+they had cleared it; clients need no timer for other users' statuses.
 
 **Invisible splits this message in two.** When a user's status is
 `"invisible"`, everyone else receives a broadcast that says `"offline"`, and
@@ -1046,28 +1097,92 @@ member's custom text, which is what `ready` shows.
 
 ```json
 { "type": "channel_focus", "payload": { "channel_id": 5 } }
+{ "type": "channel_focus", "payload": { "channel_id": 5, "read": false } }
 ```
 
-Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
+Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: by default it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
+
+`read` is an optional boolean and is `true` when absent, so older clients behave as before. With `"read": false` the frame focuses and subscribes only: it writes no read state and sends no `read_state` frame, and a pending `channel_activity` hint for the channel is still delivered. A deferred focus (see the rate limits) keeps its `read` flag. `read: false` is meant for a client that places the NEW line by the read pointer and marks read itself (see `mark_read`); a server without the `read_pointer` capability ignores the field.
 
 ### mark_read (Client -> Server)
 
 ```json
 { "type": "mark_read", "payload": { "channel_id": 5 } }
+{ "type": "mark_read", "payload": { "channel_id": 5, "message_id": 812 } }
 ```
 
-Advances the caller's read state for `channel_id` to that channel's latest
-message and resets its `mention_count` to 0 — exactly what `channel_focus` does
-to unread state — **without** changing which channel the connection is focused
-on. This is what backs "Mark as Read" in the channel context menu and "Mark All
-as Read": marking a channel the user is _not_ looking at must not rebind the
-connection's focused channel, which would misroute unread bookkeeping for the
-channel actually on screen.
+Without `message_id`, advances the caller's read state for `channel_id` to that
+channel's latest message and resets its `mention_count` to 0 — exactly what
+`channel_focus` does to unread state — **without** changing which channel the
+connection is focused on. This is what backs "Mark as Read" in the channel
+context menu and "Mark All as Read": marking a channel the user is _not_ looking
+at must not rebind the connection's focused channel, which would misroute unread
+bookkeeping for the channel actually on screen.
+
+With `message_id`, reads the channel up to that message. The move is
+**forward only**: a `message_id` at or below the current pointer changes
+nothing (a late mark from a device that was displaced cannot undo newer
+progress), and an id past the channel's newest message is clamped to it. The id
+need not name an existing message. When the pointer moves, `mention_count`
+becomes the lower of its current value and the number of live mentions after the
+new pointer; when it does not move, `mention_count` is unchanged. A
+`message_id` that is not a positive integer answers `BAD_REQUEST`.
 
 Same access check as `channel_focus`: `READ_MESSAGES` on the channel, or DM
 participation. A denied channel answers `FORBIDDEN`; a non-positive
-`channel_id` answers `BAD_REQUEST`. There is no response on success — the client
-clears its local badge optimistically and the next `ready` confirms.
+`channel_id` answers `BAD_REQUEST`. Every accepted `mark_read`, including one
+that changes nothing, is answered with a `read_state` frame to the caller. Over
+its 5/sec budget a frame is dropped silently.
+
+### mark_unread (Client -> Server)
+
+```json
+{ "type": "mark_unread", "payload": { "channel_id": 5, "message_id": 790 } }
+```
+
+Moves the caller's read pointer to the message just before `message_id`, so that
+message and every later one are unread again (the pointer is `0` when it is the
+channel's first message). It may move the pointer either way. `message_id` is
+required and must be a positive integer (`BAD_REQUEST` otherwise) naming a live
+message of `channel_id`, otherwise the answer is `NOT_FOUND` and nothing
+changes. The same access check as `channel_focus` applies (`FORBIDDEN`).
+
+`mention_count` is recomputed from the mentions that raised the badge: a
+backward move raises it to the number of live mentions after the new pointer
+unless it is already higher, and a forward move lowers it to that number unless
+it is already lower. Mentions that reached the user before the server began
+recording them (see `docs/schema.md`, `mention_receipts`) are not restored.
+
+`mark_unread` has its own 5/sec budget and, unlike `mark_read`, answers
+`RATE_LIMITED` over it. On success the caller gets a `read_state` frame.
+
+### read_state (Server -> Client, direct)
+
+```json
+{
+  "type": "read_state",
+  "payload": {
+    "channel_id": 5,
+    "last_read_message_id": 789,
+    "unread_count": 23,
+    "mention_count": 1
+  }
+}
+```
+
+The caller's read pointer in `channel_id` after a `mark_read` or `mark_unread`
+was accepted. It replaces the client's pointer, `unread_count` (capped at 100,
+like the one in `ready`) and `mention_count` for that channel or DM outright,
+including the one on screen. Sent after every accepted `mark_read` and
+`mark_unread`, even a no-op, and never after `channel_focus`. A rejected command
+sends no frame.
+
+Targeted to the caller's one live connection, unsequenced and never replayed;
+it shares the queue of `mention_count`, and each is written and sent under one
+lock, so a reader's last frame carries the latest committed state. A client that
+resumes keeps its own pointer, and the next full `ready` is the truth. A frame
+that reaches a connection just before its `ready` can be overwritten by an
+older snapshot; the next `ready` corrects it.
 
 ### mention_count (Server -> Client, direct)
 
@@ -1590,6 +1705,21 @@ with its ledger id, is readable over REST at `GET /api/v1/users/me/moderation` (
 `kind` is `warning` or `timeout`. `expires_at` is `null` for a warning and
 for a lifted timeout; present for an active timeout.
 
+### member_timeouts (Server -> Client)
+
+WP 3C-7c: the active-timeout list changed. A timeout was issued, lifted or ran out, or the viewer's role changed so that they now (or no longer) hold `MODERATE_MEMBERS`/`ADMINISTRATOR`. Targeted and unsequenced, never replayed. It **replaces the viewer's list wholesale**, the way `roles_update` and `emoji_update` do: drop what you hold and keep exactly these entries.
+
+```json
+{
+  "type": "member_timeouts",
+  "payload": {
+    "timeouts": [{ "user_id": 5, "expires_at": "2026-10-15T13:00:00Z" }]
+  }
+}
+```
+
+Audience: every connected moderator (`MODERATE_MEMBERS` or `ADMINISTRATOR`) receives the full list; a timed-out member receives only their own entry (or `[]` once it ends). Anyone else normally receives nothing, but after a role change or a reconnect a non-moderator may receive a redundant frame holding only their own entry (often `[]`); apply it like any other. When a viewer stops being a moderator they receive one last frame holding only their own entry. A frame can arrive straight after `ready` when a role change lands while the connection is being set up; apply it over the `ready` list like any other. `ready.member_timeouts` carries the same view on every connect, and a resume that missed a change takes a full `ready`, so a client that was offline never needs the frame. An entry is active while now is before `expires_at`; a client should also drop it locally at that moment. The list names no actor and no reason. An Administrator target is exempt from the timeout's effect, but the sanction still exists, so the list shows it. The server does not consult this view: enforcement stays in the send predicates.
+
 ## Appeals
 
 ### appeal_status (Server -> Client)
@@ -1978,7 +2108,8 @@ published identity key but the signature is missing/invalid → reject).
   "type": "voice_e2ee_announce",
   "payload": {
     "public_key": "base64-ecdh-pubkey",
-    "signature": "base64-ecdsa-signature"
+    "signature": "base64-ecdsa-signature",
+    "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
@@ -1987,11 +2118,21 @@ The server validates `signature` like `public_key` (standard-alphabet base64,
 max 128 chars) and stores it alongside the key, but never verifies it — only
 clients hold the pinned identity keys.
 
+`video_decode` is optional: the video codecs this participant can decode, as
+lowercase MIME subtypes (`vp8`, `h264`, `vp9`, `h265`, `av1`), so a screen
+sharer can pick a codec every viewer can decrypt and render. The server treats
+the values as opaque but accepts at most 8 entries, each 1-16 characters of
+`[a-z0-9]`. If the list breaks that rule, or is not a list of strings, the server drops the whole field and
+still accepts the announce — a bad list never affects the key. Each announce
+replaces the stored list; an announce without the field clears it. Receivers
+treat an absent or empty list as `["vp8", "h264"]`.
+
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
 Relayed to the other participants with the sender's user ID attached. Also
-replayed to late joiners from the stored key+signature. `signature` is
-omitted when the announcing client did not send one:
+replayed to late joiners (and to a resumed socket) from the stored
+key+signature+list. `signature` and `video_decode` are omitted when the
+announcing client did not send them (or sent an invalid `video_decode`):
 
 ```json
 {
@@ -1999,7 +2140,8 @@ omitted when the announcing client did not send one:
   "payload": {
     "user_id": 1,
     "public_key": "base64-ecdh-pubkey",
-    "signature": "base64-ecdsa-signature"
+    "signature": "base64-ecdsa-signature",
+    "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
@@ -2064,6 +2206,10 @@ The payload is the same shape as one entry of the `ready` payload's
 parse. It is built **per viewer**: `recipient` and `recipients` are both defined
 relative to who is reading them, and the reader never appears in their own
 `recipients`.
+
+The one exception to "same shape" is `last_read_message_id`: it comes from the
+read-state lookup behind `ready` and `GET /api/v1/dms`, which this event does not
+run, so it is **absent** here rather than reported as `0`.
 
 ```json
 {
@@ -2200,7 +2346,7 @@ request exists, not its state, not whether it was ever decided.
 
 ### DM Authorization
 
-All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
+All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `mark_unread`, `call_ring`, `call_decline`.
 
 Group DMs need no special case: `dm_participants` holds one row per
 participant, and every check is a lookup on `(user_id, channel_id)`.
@@ -2453,7 +2599,7 @@ recipient from being flooded.
 A `channel_focus` over its budget is deferred rather than dropped: the server
 remembers the latest refused channel and applies it (subscription and read
 state) as soon as the window frees, so a burst of channel switches ends on the
-channel the user landed on. A newer `channel_focus` supersedes a pending one,
+channel the user landed on, with the `read` flag it carried. A newer `channel_focus` supersedes a pending one,
 whether it succeeds or fails. If the user can no longer read the deferred
 channel when it is applied, the reply is a `FORBIDDEN` error carrying that
 frame's `id`.
@@ -2479,7 +2625,8 @@ tables below add per-type behavioral notes.
 | `reaction_remove`     | 5/sec                                |                                                                 |
 | `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
 | `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
-| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus                         |
+| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
+| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                              |                                                                 |
 | `voice_join`          | 5/sec                                |                                                                 |
 | `voice_leave`         | 5/sec                                | Empty payload                                                   |
@@ -2501,54 +2648,56 @@ tables below add per-type behavioral notes.
 
 ### Server -> Client (45 types)
 
-| Type                  | Has seq? | Delivery                                                                |
-| --------------------- | -------- | ----------------------------------------------------------------------- |
-| `auth_ok`             | No       | Direct                                                                  |
-| `auth_error`          | No       | Direct (then close)                                                     |
-| `ready`               | No       | Direct                                                                  |
-| `chat_message`        | Yes      | Channel or DM participants                                              |
-| `chat_send_ok`        | No       | Direct to sender                                                        |
-| `chat_edited`         | Yes      | Channel or DM participants                                              |
-| `chat_deleted`        | Yes      | Channel or DM participants                                              |
-| `chat_bulk_deleted`   | Yes      | Channel                                                                 |
-| `chat_pinned`         | Yes      | Channel                                                                 |
-| `reaction_update`     | Yes      | Channel or DM participants                                              |
-| `typing`              | No       | Channel (excl. sender) or DM                                            |
-| `presence`            | Yes      | All clients                                                             |
-| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                 |
-| `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
-| `channel_update`      | Yes      | All clients                                                             |
-| `channel_delete`      | Yes      | All clients                                                             |
-| `voice_state`         | Yes      | All clients                                                             |
-| `voice_leave`         | Yes      | All clients                                                             |
-| `voice_moved`         | No       | Direct to moved user                                                    |
-| `voice_disconnected`  | No       | Direct to disconnected user                                             |
-| `voice_config`        | No       | Direct to joiner                                                        |
-| `voice_token`         | No       | Direct to joiner                                                        |
-| `member_join`         | Yes      | All clients                                                             |
-| `member_update`       | Yes      | All clients                                                             |
-| `user_update`         | Yes      | All clients (profile changes)                                           |
-| `member_ban`          | Yes      | All clients                                                             |
-| `roles_update`        | Yes      | All clients (full role list)                                            |
-| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
-| `upload_policy`       | No       | All clients (both upload file-type lists)                               |
-| `dm_channel_open`     | No       | Direct to participant                                                   |
-| `dm_channel_close`    | No       | Direct to participant                                                   |
-| `dm_request`          | No       | Direct to recipient (B5-6)                                              |
-| `call_incoming`       | No       | Direct to each other DM participant                                     |
-| `call_declined`       | No       | Direct to each other DM participant                                     |
-| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
-| `voice_e2ee_offer`    | No       | Direct to target participant                                            |
-| `server_restart`      | Yes      | All clients                                                             |
-| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
-| `mod_action`          | No       | Direct to the live target only                                          |
-| `appeal_status`       | No       | Direct to the appellant only                                            |
-| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                |
-| `error`               | No       | Direct to requester                                                     |
-| `pong`                | No       | Direct to pinger                                                        |
-| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
-| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
-| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                 |
+| Type                  | Has seq? | Delivery                                                                                               |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `auth_ok`             | No       | Direct                                                                                                 |
+| `auth_error`          | No       | Direct (then close)                                                                                    |
+| `ready`               | No       | Direct                                                                                                 |
+| `chat_message`        | Yes      | Channel or DM participants                                                                             |
+| `chat_send_ok`        | No       | Direct to sender                                                                                       |
+| `chat_edited`         | Yes      | Channel or DM participants                                                                             |
+| `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
+| `chat_bulk_deleted`   | Yes      | Channel                                                                                                |
+| `chat_pinned`         | Yes      | Channel                                                                                                |
+| `reaction_update`     | Yes      | Channel or DM participants                                                                             |
+| `typing`              | No       | Channel (excl. sender) or DM                                                                           |
+| `presence`            | Yes      | All clients                                                                                            |
+| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
+| `channel_create`      | No       | Each client that may view the channel (per-recipient)                                                  |
+| `channel_update`      | Yes      | All clients                                                                                            |
+| `channel_delete`      | Yes      | All clients                                                                                            |
+| `voice_state`         | Yes      | All clients                                                                                            |
+| `voice_leave`         | Yes      | All clients                                                                                            |
+| `voice_moved`         | No       | Direct to moved user                                                                                   |
+| `voice_disconnected`  | No       | Direct to disconnected user                                                                            |
+| `voice_config`        | No       | Direct to joiner                                                                                       |
+| `voice_token`         | No       | Direct to joiner                                                                                       |
+| `member_join`         | Yes      | All clients                                                                                            |
+| `member_update`       | Yes      | All clients                                                                                            |
+| `user_update`         | Yes      | All clients (profile changes)                                                                          |
+| `member_ban`          | Yes      | All clients                                                                                            |
+| `roles_update`        | Yes      | All clients (full role list)                                                                           |
+| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                                                    |
+| `upload_policy`       | No       | All clients (both upload file-type lists)                                                              |
+| `dm_channel_open`     | No       | Direct to participant                                                                                  |
+| `dm_channel_close`    | No       | Direct to participant                                                                                  |
+| `dm_request`          | No       | Direct to recipient (B5-6)                                                                             |
+| `call_incoming`       | No       | Direct to each other DM participant                                                                    |
+| `call_declined`       | No       | Direct to each other DM participant                                                                    |
+| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                                                           |
+| `voice_e2ee_offer`    | No       | Direct to target participant                                                                           |
+| `server_restart`      | Yes      | All clients                                                                                            |
+| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
+| `mod_action`          | No       | Direct to the live target only                                                                         |
+| `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
+| `appeal_status`       | No       | Direct to the appellant only                                                                           |
+| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
+| `read_state`          | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
+| `error`               | No       | Direct to requester                                                                                    |
+| `pong`                | No       | Direct to pinger                                                                                       |
+| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
+| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
+| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                                                |
 
 ### Plugin command types
 

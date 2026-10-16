@@ -958,11 +958,12 @@ describe("messages store", () => {
       expect(getChannelMessages(1)[1]!.pinned).toBe(false);
     });
 
-    it("is a no-op if the channel does not exist", () => {
+    it("changes no message list if the channel does not exist, but still counts the pin change", () => {
       const before = messagesStore.getState();
       setMessagePinned(99, 100, true);
       const after = messagesStore.getState();
-      expect(before).toBe(after);
+      expect(after.messagesByChannel).toBe(before.messagesByChannel);
+      expect(after.pinRevision?.get(99)).toBe(1);
     });
 
     it("produces a new message object (immutable update)", () => {

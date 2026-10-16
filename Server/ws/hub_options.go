@@ -258,6 +258,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// Installed here, before the composition root starts the worker, so
 		// StartMentionWorker captures it.
 		svc.Messages.SetMentionNotifier(h)
+		// WP 3D-5c: the read_state frame MoveReadPointer sends under the same
+		// lock the mention frames use.
+		svc.Messages.SetReadStateNotifier(h)
 	}
 
 	registerChatHandlers(reg, chatDeps)

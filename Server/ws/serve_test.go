@@ -393,6 +393,67 @@ func TestBuildReady_TextChannelHasUnreadCount(t *testing.T) {
 	}
 }
 
+func TestBuildReady_ChannelsCarryLastReadMessageID(t *testing.T) {
+	ctx := context.Background()
+	hub, database := newServeHub(t)
+	user := seedServeUser(t, database, "ready-lastread")
+	role := ownerRole(t, database)
+
+	var ids = map[string]int64{}
+	for _, c := range []struct{ name, typ string }{
+		{"lr-text", "text"}, {"lr-news", "announcement"}, {"lr-voice", "voice"}, {"lr-fresh", "text"},
+	} {
+		ch, err := database.CreateChannel(ctx, c.name, c.typ, "", "", 0)
+		if err != nil {
+			t.Fatalf("CreateChannel %s: %v", c.name, err)
+		}
+		ids[c.name] = ch
+	}
+	var pointers = map[string]int64{}
+	for _, name := range []string{"lr-text", "lr-news"} {
+		first, err := database.CreateMessage(ctx, ids[name], user.ID, "one", nil)
+		if err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if _, err := database.CreateMessage(ctx, ids[name], user.ID, "two", nil); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if err := database.UpdateReadState(ctx, user.ID, ids[name], first); err != nil {
+			t.Fatalf("UpdateReadState: %v", err)
+		}
+		pointers[name] = first
+	}
+
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
+	if err != nil {
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
+	}
+	var env struct {
+		Payload struct {
+			Channels []map[string]any `json:"channels"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	byID := map[int64]map[string]any{}
+	for _, ch := range env.Payload.Channels {
+		byID[int64(ch["id"].(float64))] = ch
+	}
+	for _, name := range []string{"lr-text", "lr-news"} {
+		got, ok := byID[ids[name]]["last_read_message_id"].(float64)
+		if !ok || int64(got) != pointers[name] {
+			t.Errorf("%s last_read_message_id = %v, want %d", name, byID[ids[name]]["last_read_message_id"], pointers[name])
+		}
+	}
+	if got, ok := byID[ids["lr-fresh"]]["last_read_message_id"].(float64); !ok || got != 0 {
+		t.Errorf("channel with no read row: last_read_message_id = %v, want 0", byID[ids["lr-fresh"]]["last_read_message_id"])
+	}
+	if _, present := byID[ids["lr-voice"]]["last_read_message_id"]; present {
+		t.Error("voice channel must not carry last_read_message_id")
+	}
+}
+
 func TestBuildReady_ValidJSON(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-validjson")

@@ -657,3 +657,59 @@ func TestGetDMRecipient_NonExistentChannel(t *testing.T) {
 		t.Errorf("expected nil for non-existent channel, got user ID %d", recipient.ID)
 	}
 }
+
+// GetUserDMChannels carries the viewer's own read pointer: the id they last
+// read, 0 when they have never read the DM, and never the other side's.
+func TestGetUserDMChannels_LastReadMessageID(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	user1 := seedUser(t, database, "alice")
+	user2 := seedUser(t, database, "bob")
+	user3 := seedUser(t, database, "charlie")
+
+	readDM, _, err := database.GetOrCreateDMChannel(ctx, user1, user2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
+	}
+	unreadDM, _, err := database.GetOrCreateDMChannel(ctx, user1, user3)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel(u1,u3): %v", err)
+	}
+	msg1, err := database.CreateMessage(ctx, readDM.ID, user2, "hello", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, readDM.ID, user2, "again", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, unreadDM.ID, user3, "hi", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.UpdateReadState(ctx, user1, readDM.ID, msg1); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	dms, err := database.GetUserDMChannels(ctx, user1)
+	if err != nil {
+		t.Fatalf("GetUserDMChannels: %v", err)
+	}
+	got := make(map[int64]*int64, len(dms))
+	for i := range dms {
+		got[dms[i].ChannelID] = dms[i].LastReadMessageID
+	}
+	if p := got[readDM.ID]; p == nil || *p != msg1 {
+		t.Errorf("read DM LastReadMessageID = %v, want %d", p, msg1)
+	}
+	if p := got[unreadDM.ID]; p == nil || *p != 0 {
+		t.Errorf("never-read DM LastReadMessageID = %v, want a pointer to 0", p)
+	}
+
+	// The other participant has no row for the DM: their own pointer is 0.
+	theirs, err := database.GetUserDMChannels(ctx, user2)
+	if err != nil {
+		t.Fatalf("GetUserDMChannels(u2): %v", err)
+	}
+	if len(theirs) != 1 || theirs[0].LastReadMessageID == nil || *theirs[0].LastReadMessageID != 0 {
+		t.Errorf("other participant pointer = %+v, want a pointer to 0", theirs)
+	}
+}

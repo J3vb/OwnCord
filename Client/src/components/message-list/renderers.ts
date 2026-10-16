@@ -7,25 +7,18 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@lib/preferences";
-import { canManageMessages } from "@lib/permissions";
-import { showToast } from "@lib/toast";
-import { formatMessageLink } from "@lib/deep-link";
+import {
+  connectionLockReason,
+  copyMessageLink,
+  copyWithToast,
+  messageActionGates,
+} from "./message-actions";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
-import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
-
-/** Cached value of the developerMode preference. Invalidated on pref change. */
-let developerModeEnabled = loadPref<boolean>("developerMode", false);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "developerMode") {
-    developerModeEnabled = loadPref<boolean>("developerMode", false);
-  }
-}) as EventListener);
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -51,7 +44,13 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatClockTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import {
+  formatClockTime,
+  formatFullDate,
+  formatMessageTimestamp,
+  parseTimestamp,
+} from "@lib/formatting";
+import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
@@ -61,9 +60,14 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
-import { reactionLockReason, renderReactions, wireReactionControl } from "./reactions";
+import { renderReactions, wireReactionControl } from "./reactions";
 
 // -- Composite rendering functions --------------------------------------------
+
+/** Weekday, date and time for a tooltip, in Discord's "F" style. */
+export function fullDateTimeTitle(iso: string): string {
+  return formatFullDateTime(parseTimestamp(iso));
+}
 
 export function renderDayDivider(iso: string): HTMLDivElement {
   const divider = createElement("div", { class: "msg-day-divider" });
@@ -160,9 +164,7 @@ function applyDeleteGate(
   }
   btn.disabled = true;
   btn.setAttribute("aria-disabled", "true");
-  btn.title = shellText(
-    status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
-  );
+  btn.title = connectionLockReason(status) ?? messagingText("action.delete");
 }
 
 /** Toggle the delete gate on every rendered delete control for the current
@@ -351,7 +353,7 @@ export function renderMessage(
       "div",
       {
         class: "msg-hover-time",
-        title: formatFullDate(msg.timestamp),
+        title: fullDateTimeTitle(msg.timestamp),
       },
       // The header's clock time without its "Today at" (F24): the full form
       // wrapped onto three lines over the avatar column. The title has the date.
@@ -384,7 +386,7 @@ export function renderMessage(
   );
   const time = createElement(
     "span",
-    { class: "msg-time", title: formatFullDate(msg.timestamp) },
+    { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
   appendChildren(header, authorEl, time);
@@ -406,7 +408,11 @@ export function renderMessage(
     el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
     if (msg.editedAt !== null) {
       el.appendChild(
-        createElement("span", { class: "msg-edited" }, messagingText("message.edited")),
+        createElement(
+          "span",
+          { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
+          messagingText("message.edited"),
+        ),
       );
     }
 
@@ -451,6 +457,7 @@ export function renderMessage(
   // The hover action bar (react/reply/pin/edit/delete) only applies to
   // confirmed server messages — not deleted rows or unsent optimistic rows.
   if (!msg.deleted && msg.status === "sent") {
+    const gates = messageActionGates(msg, opts);
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
     const reactBtn = createElement("button", {
@@ -464,7 +471,7 @@ export function renderMessage(
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
-      reactionLockReason(),
+      gates.react.reason,
       signal,
     );
     actionsBar.appendChild(reactBtn);
@@ -487,15 +494,11 @@ export function renderMessage(
     pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
       signal,
     });
-    // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but
-    // any DM participant may pin — so offering it to a plain member is a
-    // broken affordance (PRD.md: permission is a pre-disabled affordance, not
-    // a rejection after the fact).
-    if (opts.channelType === "dm" || canManageMessages()) {
+    if (gates.pin.shown) {
       actionsBar.appendChild(pinBtn);
     }
 
-    if (msg.user.id === opts.currentUserId) {
+    if (gates.edit.shown) {
       const editBtn = createElement("button", {
         "data-testid": `msg-edit-${msg.id}`,
         "aria-label": messagingText("action.edit"),
@@ -506,8 +509,7 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    // Own message, or a moderator acting on someone else's.
-    if (msg.user.id === opts.currentUserId || canManageMessages()) {
+    if (gates.delete.shown) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
@@ -535,23 +537,12 @@ export function renderMessage(
     });
     copyLinkBtn.appendChild(createIcon("link", 16));
     copyLinkBtn.title = messagingText("action.copyLink");
-    copyLinkBtn.addEventListener(
-      "click",
-      () => {
-        // No silent success: a copy with no feedback is indistinguishable
-        // from a clipboard that refused.
-        void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
-          () => showToast(messagingText("toast.linkCopied"), "success"),
-          () => showToast(messagingText("toast.linkCopyFailed"), "error"),
-        );
-      },
-      { signal },
-    );
+    copyLinkBtn.addEventListener("click", () => copyMessageLink(msg), { signal });
     actionsBar.appendChild(copyLinkBtn);
 
     // Someone else's message: report it, or one of its attachments (B9-10).
     const onReport = opts.onReportClick;
-    if (onReport !== undefined && msg.user.id !== opts.currentUserId) {
+    if (onReport !== undefined && gates.report.shown) {
       const reportBtn = createElement("button", {
         "data-testid": `msg-report-${msg.id}`,
         "aria-label": reportEntryText("reportMessage"),
@@ -563,7 +554,7 @@ export function renderMessage(
       actionsBar.appendChild(reportBtn);
     }
 
-    if (developerModeEnabled) {
+    if (gates.copyId.shown) {
       const copyIdBtn = createElement("button", {
         "data-testid": `msg-copy-id-${msg.id}`,
         "aria-label": messagingText("action.copyId"),
@@ -572,14 +563,7 @@ export function renderMessage(
       copyIdBtn.title = messagingText("action.copyId");
       copyIdBtn.addEventListener(
         "click",
-        () => {
-          // No silent success: a copy with no feedback is indistinguishable
-          // from a clipboard that refused.
-          void navigator.clipboard.writeText(String(msg.id)).then(
-            () => showToast(messagingText("toast.idCopied"), "success"),
-            () => showToast(messagingText("toast.idCopyFailed"), "error"),
-          );
-        },
+        () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
         { signal },
       );
       actionsBar.appendChild(copyIdBtn);

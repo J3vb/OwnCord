@@ -88,6 +88,23 @@ export interface MessagesState {
    */
   readonly historyLoadState: ReadonlyMap<number, "loading" | "error">;
   /**
+   * Channels whose last older-page fetch (scrolling up) failed, so the list
+   * shows an inline Retry at its top. Set on a failure, cleared when a page
+   * lands, when the window is replaced, or when the channel is mounted again.
+   * The store always sets it; optional only so the many inline MessagesState
+   * test fixtures need not restate it.
+   */
+  readonly olderLoadFailed?: ReadonlySet<number>;
+  /**
+   * channelId -> count of pin/unpin changes seen (setMessagePinned), bumped even
+   * when the message is not loaded. The open pinned panel watches its channel's
+   * entry to know its fetched list went stale (a chat_pinned names only the
+   * message). Optional like the fields above so inline fixtures need not set it.
+   */
+  readonly pinRevision?: ReadonlyMap<number, number>;
+  /** messageId -> count of pin/unpin changes seen for that message. */
+  readonly messagePinRevision?: ReadonlyMap<number, number>;
+  /**
    * Channels whose loaded window is an around-window detached from the live
    * tail: newer messages exist on the server below what is rendered. While a
    * channel is here the list shows a "Jump to Present" pill and incoming
@@ -176,6 +193,9 @@ export const INITIAL_STATE: MessagesState = {
   loadedChannels: new Set(),
   hasMore: new Map(),
   historyLoadState: new Map(),
+  olderLoadFailed: new Set(),
+  pinRevision: new Map(),
+  messagePinRevision: new Map(),
   detachedChannels: new Set(),
   loadWatermark: new Map(),
 };

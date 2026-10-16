@@ -552,6 +552,7 @@ Get the current authenticated user's profile.
   "display_name": "Alex",
   "about": "A short bio.",
   "custom_status": "building things",
+  "custom_status_expires_at": "2026-10-15T18:00:00Z",
   "status": "online",
   "role_id": 2,
   "totp_enabled": true,
@@ -562,18 +563,19 @@ Get the current authenticated user's profile.
 This is the canonical **user object**, also returned as `user` by register,
 login and the TOTP challenge.
 
-| Field           | Type         | Description                                                                                                                                                                                                   |
-| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | int64        | User ID                                                                                                                                                                                                       |
-| `username`      | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
-| `avatar`        | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
-| `display_name`  | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
-| `about`         | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
-| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
-| `status`        | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
-| `role_id`       | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
-| `totp_enabled`  | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
-| `created_at`    | string       | ISO 8601 timestamp                                                                                                                                                                                            |
+| Field                      | Type         | Description                                                                                                                                                                                                   |
+| -------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | int64        | User ID                                                                                                                                                                                                       |
+| `username`                 | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
+| `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
+| `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
+| `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
+| `custom_status`            | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
+| `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                          |
+| `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
+| `role_id`                  | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
+| `totp_enabled`             | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
+| `created_at`               | string       | ISO 8601 timestamp                                                                                                                                                                                            |
 
 ---
 
@@ -1698,20 +1700,22 @@ List all open DM channels for the authenticated user, ordered by most recent act
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
       "unread_count": 3,
-      "mention_count": 1
+      "mention_count": 1,
+      "last_read_message_id": 5039
     }
   ]
 }
 ```
 
-| Field           | Description                                                                                                            |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`     | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients`    | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`          | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`      | True for a group DM. Stored, not derived from the live participant count.                                              |
-| `unread_count`  | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
-| `mention_count` | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
+| Field                  | Description                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`            | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients`           | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`                 | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                              |
+| `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
+| `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
+| `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 
@@ -5070,7 +5074,7 @@ Check whether the LiveKit server is reachable.
 }
 ```
 
-### /livekit/* (Reverse Proxy)
+### /livekit/\* (Reverse Proxy)
 
 All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The `/livekit` prefix is stripped before forwarding. This allows the client to connect to LiveKit through OwnCord's HTTPS server, avoiding mixed-content blocks.
 

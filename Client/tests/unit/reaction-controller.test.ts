@@ -13,7 +13,7 @@ const {
   captured,
 } = vi.hoisted(() => {
   const captured: {
-    onSelect: ((emoji: string) => void) | null;
+    onSelect: ((emoji: string, select?: { keepOpen: boolean }) => void) | null;
     onClose: (() => void) | null;
   } = { onSelect: null, onClose: null };
   const createMockEmojiPickerElement = () => document.createElement("div");
@@ -27,7 +27,7 @@ const {
     mockListCustomEmoji: vi.fn((): Array<{ id: number; shortcode: string; url: string }> => []),
     mockCreateEmojiPicker: vi.fn(
       (opts: {
-        onSelect: (e: string) => void;
+        onSelect: (e: string, select?: { keepOpen: boolean }) => void;
         onClose: () => void;
         customEmoji?: readonly { id: number; shortcode: string; url: string }[];
       }) => {
@@ -76,6 +76,13 @@ vi.mock("@stores/emoji.store", () => ({
 
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
 import type { ReactionControllerOptions } from "../../src/pages/main-page/ReactionController";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,6 +124,19 @@ describe("createReactionController", () => {
   afterEach(() => {
     document.querySelectorAll(".reaction-picker-wrap").forEach((el) => el.remove());
     document.querySelectorAll("[data-testid]").forEach((el) => el.remove());
+  });
+
+  it("refuses to send while the socket is down, even from an open picker (3A-3)", () => {
+    mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+    const opts = makeOpts();
+    const ctrl = createReactionController(opts);
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    ctrl.handleReaction(1, "👍");
+
+    expect(opts.ws.send).not.toHaveBeenCalled();
+    expect(opts.showError).toHaveBeenCalledWith("Reconnecting…");
   });
 
   describe("20 different emoji per message (3A-12)", () => {
@@ -396,6 +416,33 @@ describe("createReactionController", () => {
       });
       // Picker should be removed from DOM
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+    });
+
+    it("a Shift-pick sends the reaction and keeps the picker open", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", "msg-react-1");
+      document.body.appendChild(btn);
+
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+      ctrl.handleReaction(1, "");
+
+      captured.onSelect!("🎉", { keepOpen: true });
+      captured.onSelect!("🔥", { keepOpen: true });
+
+      expect(opts.ws.send).toHaveBeenCalledTimes(2);
+      expect(opts.ws.send).toHaveBeenLastCalledWith({
+        type: "reaction_add",
+        payload: { message_id: 1, emoji: "🔥" },
+      });
+      expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
+      expect(mockEmojiPickerDestroy).not.toHaveBeenCalled();
+
+      // A plain pick still closes it.
+      captured.onSelect!("👍");
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
     });
 
     it("calls pickerDestroy when emoji is selected", () => {

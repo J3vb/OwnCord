@@ -88,6 +88,25 @@ export const settingsText = defineCatalog("settings", {
   "notifications.voiceSounds.label": "Voice Sounds",
   "notifications.voiceSounds.desc":
     "Play a sound when someone joins or leaves your call, and when you mute or deafen",
+  "notifications.volume.label": "App sounds volume",
+  "notifications.volume.desc":
+    "How loud OwnCord's own sounds are. 100% is the normal level, 0% is silent.",
+  "notifications.volume.value": "{percent}%",
+  "notifications.sound.message.label": "Message sound",
+  "notifications.sound.message.desc": "The chime for a new message",
+  "notifications.sound.mention.label": "Mention sound",
+  "notifications.sound.mention.desc": "The chime when a message names you",
+  "notifications.sound.ring.label": "Ring sound",
+  "notifications.sound.ring.desc": "The chime that repeats while someone calls you",
+  "notifications.sound.ringback.label": "Ringback sound",
+  "notifications.sound.ringback.desc": "The soft tone you hear while your call rings",
+  "notifications.sound.joinLeave.label": "Join and leave sounds",
+  "notifications.sound.joinLeave.desc":
+    "When you or someone in your call joins, leaves or is moved",
+  "notifications.sound.muteDeafen.label": "Mute and deafen sounds",
+  "notifications.sound.muteDeafen.desc": "When you mute, unmute, deafen or undeafen",
+  "notifications.sound.stream.label": "Stream sounds",
+  "notifications.sound.stream.desc": "When a screen share starts or ends in your call",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",
@@ -356,7 +375,8 @@ export const settingsText = defineCatalog("settings", {
     "Hear yourself the way others will, through your output device. Use headphones to avoid echo.",
   "voiceAudio.micTest.start": "Let's Check",
   "voiceAudio.micTest.stop": "Stop Testing",
-  "voiceAudio.micTest.linux": "The mic test is not available on Linux yet.",
+  "voiceAudio.micTest.inCall": "Leave the voice channel to test your mic.",
+  "voiceAudio.micTest.failed": "The mic test could not start.",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
   "voiceAudio.gstreamerMissing":
@@ -397,6 +417,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.videoCodecDesc":
     "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. A 120 fps screen share uses H.264 when your graphics card can encode it, whatever you choose here. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
+  "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
   "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
   "voiceAudio.videoCodecIntel":
     "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
@@ -417,7 +438,6 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.enhanced.label": "Enhanced Noise Suppression",
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
-  "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
-    "On Linux, audio runs in the app's native engine. Your microphone level is handled by the engine's automatic gain control, so the input volume control is not available here and the level bar stays empty. Use your system mixer to adjust your microphone level.",
+    "On Linux, the level bar shows your microphone in a voice channel or while the mic test runs.",
 });

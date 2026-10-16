@@ -27,6 +27,7 @@
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
               "custom_status": "fixture custom status",
+              "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
@@ -44,7 +45,8 @@
             "capabilities": {
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "read_pointer": true
             },
             "channels": [
               {
@@ -56,6 +58,7 @@
                 "category": "",
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
                 "mention_count": 0,
                 "name": "general",
                 "nsfw": false,
@@ -88,6 +91,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",
@@ -269,6 +273,7 @@
               "about": null,
               "avatar": null,
               "custom_status": null,
+              "custom_status_expires_at": "<ts:null>",
               "display_name": null,
               "id": "<id:number>",
               "role": "member",
@@ -286,7 +291,8 @@
             "capabilities": {
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "read_pointer": true
             },
             "channels": [
               {
@@ -298,6 +304,7 @@
                 "category": "",
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
                 "mention_count": 0,
                 "name": "general",
                 "nsfw": false,
@@ -330,6 +337,7 @@
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
                 "about": "fixture profile text",

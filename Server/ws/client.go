@@ -47,8 +47,7 @@ type Client struct {
 	// while its voice_states row stays behind for nothing to reap (OC-0270).
 	// Guarded by voiceMu.
 	voiceJoinCompleted bool
-	e2eePubKey         string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	e2eeSignature      string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
+	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list); guarded by voiceMu
 	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
 	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
 	// the voice_states row those flags normally live in before the target's
@@ -102,6 +101,7 @@ type Client struct {
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
 	sendLow       chan []byte    // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
+	timeouts      heldTimeouts   // which member_timeouts list this client holds (member_timeouts_delivery.go)
 	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	cseq          cseqState      // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
@@ -115,6 +115,8 @@ type Client struct {
 	focusSeq uint64
 	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
 	pendingFocusChID int64
+	// pendingFocusRead is the read flag of the deferred focus (false = the frame said read:false); guarded by mu.
+	pendingFocusRead bool
 	// pendingFocusReqID is the req_id of the deferred frame, echoed on an error; guarded by mu.
 	pendingFocusReqID string
 	// pendingFocusSeq is the focusSeq the pending intent was assigned; guarded by mu.
@@ -179,6 +181,11 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
+	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// of customStatus, "" when it has none. It is the tag the expirer's
+	// CustomStatusExpired compares: only a connection still showing the status
+	// that expired is cleared.
+	customStatusExpiresAt string
 }
 
 // livePresence returns the connection's live presence, a zero value (status
@@ -191,8 +198,8 @@ func (c *Client) livePresence() livePresence {
 }
 
 // setLivePresence records the presence this connection just stamped or chose.
-func (c *Client) setLivePresence(status string, customStatus *string) {
-	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
+func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
+	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.
@@ -248,8 +255,7 @@ func (c *Client) clearVoiceState() (int64, string, bool) {
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
 	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
+	c.e2ee = e2eeAnnounce{}
 	return oldChID, oldJoinToken, oldCompleted
 }
 
@@ -267,8 +273,7 @@ func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
 	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
+	c.e2ee = e2eeAnnounce{}
 	return oldJoinToken, true
 }
 
@@ -298,22 +303,6 @@ func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, server
 	c.pendingModServerDeafened = false
 	c.pendingModServerMutedBy = nil
 	return serverMuted, serverDeafened, serverMutedBy
-}
-
-// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
-// together with its identity-key signature ("" for legacy announces).
-func (c *Client) setE2EEPubKey(key, signature string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.e2eePubKey = key
-	c.e2eeSignature = signature
-}
-
-// getE2EEPubKey returns the stored ECDH public key and its signature.
-func (c *Client) getE2EEPubKey() (string, string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.e2eePubKey, c.e2eeSignature
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

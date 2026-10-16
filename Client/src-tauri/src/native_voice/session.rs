@@ -18,6 +18,7 @@ use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
@@ -27,7 +28,7 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::video::{FrameServer, Observer};
@@ -170,6 +171,14 @@ pub enum Event {
     /// The input-sensitivity gate opened (speech) or closed (silence). It
     /// lights the local speaking ring, as the web path's detector does.
     VoiceGate {
+        open: bool,
+    },
+    /// A level report from the capture, every ~50 ms while it runs: the
+    /// loudest ~10 ms RMS after the input volume, and whether the voice gate
+    /// is open. It drives the settings meter and automatic sensitivity, as
+    /// the web path's detector reports do.
+    InputLevel {
+        rms: f32,
         open: bool,
     },
     EncryptionStatus {
@@ -335,7 +344,7 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
 
 /// Microphone audio processing, from the same preferences the web path feeds
 /// `audioCaptureDefaults`, plus its Enhanced Noise Suppression (RNNoise).
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOptions {
     pub echo_cancellation: bool,
@@ -343,6 +352,52 @@ pub struct AudioOptions {
     pub auto_gain_control: bool,
     #[serde(default)]
     pub enhanced_noise_suppression: bool,
+}
+
+/// Keep `old` until nothing but this list holds it. A lagging audio
+/// callback can still hold an older generation after a second rebuild, so
+/// drop only the entries every follower has let go of, here on the caller's
+/// thread.
+pub(super) fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+    retired.retain(|r| Arc::strong_count(r) > 1);
+    retired.extend(old);
+}
+
+/// What a request to change the audio processing asks of a session.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ProcessingChange {
+    /// Audio is not enabled yet: only remember the options.
+    Remember,
+    /// The options are what the running processing already has.
+    Unchanged,
+    /// Only Enhanced Noise Suppression changed: RNNoise runs outside
+    /// libwebrtc, so keep the processing (and the echo canceller's
+    /// adaptation) and only switch the denoiser.
+    Reroute,
+    /// Build the processing again (libwebrtc's flags are fixed at
+    /// construction) and swap it in.
+    Rebuild,
+}
+
+pub(super) fn processing_change(
+    enabled: bool,
+    current: Option<AudioOptions>,
+    next: AudioOptions,
+) -> ProcessingChange {
+    if !enabled {
+        ProcessingChange::Remember
+    } else if current == Some(next) {
+        ProcessingChange::Unchanged
+    } else if current.is_some_and(|c| {
+        AudioOptions {
+            enhanced_noise_suppression: next.enhanced_noise_suppression,
+            ..c
+        } == next
+    }) {
+        ProcessingChange::Reroute
+    } else {
+        ProcessingChange::Rebuild
+    }
 }
 
 /// Rust-side resource counts for the facade's debug surface (B7-11: the
@@ -579,6 +634,13 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     /// Set by `enable_audio`: the processing capture and playout share.
     apm: Option<Arc<Apm>>,
+    /// The options `apm` was built from, or the latest asked for before
+    /// `enable_audio` ran.
+    audio: Option<AudioOptions>,
+    /// Processing that rebuilds replaced, each kept until the capture and
+    /// playout have both moved past it, so its last reference is never
+    /// dropped on an audio thread.
+    retired: Vec<Arc<Apm>>,
     /// The published microphone track — not its publication: a full
     /// reconnect republishes the same track under a new publication and
     /// detaches the old one, so muting through a stored publication would
@@ -607,6 +669,36 @@ pub struct NativeSession {
     playout: Playout,
     capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
+    /// Emits the capture's reports (`enable_audio`), off the audio thread.
+    capture_reports: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Capture reports (gate edges and level reports, ~20 a second) waiting for
+/// the webview: about three seconds of them.
+const CAPTURE_REPORT_QUEUE: usize = 64;
+
+/// The capture's report sinks and the task that emits what they queue. The
+/// capture reports from the audio callback thread, which must never wait on
+/// an emit (it serializes and takes the webviews' lock): the sinks only
+/// queue, dropping a report when the queue is full, and the task emits, in
+/// order. It ends when the sinks are dropped with the capture.
+pub(super) fn capture_report_sinks(
+    on_event: EventSink,
+) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
+    let (reports, mut queue) = tokio::sync::mpsc::channel(CAPTURE_REPORT_QUEUE);
+    let emitter = tokio::spawn(async move {
+        while let Some(event) = queue.recv().await {
+            on_event(event);
+        }
+    });
+    let gate_reports = reports.clone();
+    let on_gate: GateSink = Arc::new(move |open| {
+        let _ = gate_reports.try_send(Event::VoiceGate { open });
+    });
+    let on_level: LevelSink = Arc::new(move |rms, open| {
+        let _ = reports.try_send(Event::InputLevel { rms, open });
+    });
+    (on_gate, on_level, emitter)
 }
 
 /// The microphone's publish options: the channel's configured bitrate
@@ -619,6 +711,10 @@ fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
         ..Default::default()
     }
 }
+
+/// The local (by source key) and remote (by publication sid) video tracks
+/// whose stats the webview reads.
+pub type StatsTracks = (Vec<(&'static str, LocalTrack)>, Vec<(String, RemoteTrack)>);
 
 impl NativeSession {
     /// Connect with the room key already installed: the TS key exchange
@@ -667,6 +763,8 @@ impl NativeSession {
             room,
             key_provider,
             apm: None,
+            retired: Vec::new(),
+            audio: None,
             mic: None,
             mic_source: None,
             mic_withdrawn,
@@ -682,6 +780,7 @@ impl NativeSession {
             playout,
             capture: Capture::default(),
             forwarder,
+            capture_reports: None,
         })
     }
 
@@ -737,17 +836,50 @@ impl NativeSession {
         if self.apm.is_some() {
             return;
         }
+        // Options asked for before this ran win over the connect-time ones.
+        let opts = self.audio.unwrap_or(opts);
+        self.audio = Some(opts);
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
-        let on_event = self.on_event.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
+        self.capture_reports = Some(emitter);
         self.capture.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
-            Arc::new(move |open| on_event(Event::VoiceGate { open })),
+            on_gate,
+            on_level,
         );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
+        }
+    }
+
+    /// Apply new audio processing options in a running call: libwebrtc's
+    /// processing takes its flags at construction, so build a new one and
+    /// hand it to both the capture (forward stream) and the playout (the
+    /// echo canceller's reverse stream). Both follow it on a later audio
+    /// frame, whether or not the microphone is unmuted. Before
+    /// `enable_audio` the options are only remembered.
+    pub fn set_audio_processing(&mut self, audio: AudioOptions) {
+        match processing_change(self.apm.is_some(), self.audio, audio) {
+            ProcessingChange::Unchanged => {}
+            ProcessingChange::Remember => self.audio = Some(audio),
+            ProcessingChange::Reroute => {
+                if let Some(apm) = &self.apm {
+                    self.capture
+                        .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                }
+                self.audio = Some(audio);
+            }
+            ProcessingChange::Rebuild => {
+                let apm = Apm::new(&audio);
+                self.playout.set_reference(apm.clone());
+                self.capture
+                    .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                retire(&mut self.retired, self.apm.replace(apm));
+                self.audio = Some(audio);
+            }
         }
     }
 
@@ -783,7 +915,7 @@ impl NativeSession {
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(source.clone())?;
+            self.capture.start(Sink::Track(source.clone()))?;
             self.mic_source = Some(source.clone());
             let published = self
                 .publish_audio(RtcAudioSource::Native(source), bitrate)
@@ -800,7 +932,7 @@ impl NativeSession {
         if enabled {
             // The interop example publishes its own source and captures nothing.
             if let Some(source) = &self.mic_source {
-                self.capture.start(source.clone())?;
+                self.capture.start(Sink::Track(source.clone()))?;
             }
             track.unmute();
         } else {
@@ -816,9 +948,15 @@ impl NativeSession {
         self.capture.set_ptt_gated(gated);
     }
 
-    /// Set the input-sensitivity gate's threshold (0: no gate).
-    pub fn set_voice_gate(&self, threshold: f32) {
-        self.capture.set_voice_gate(threshold);
+    /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
+    /// moves it without restarting the detector.
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+        self.capture.set_voice_gate(threshold, retune);
+    }
+
+    /// Set the input volume as a linear gain (0 to 2).
+    pub fn set_input_gain(&self, gain: f32) {
+        self.capture.set_input_gain(gain);
     }
 
     /// Publish any audio source as the microphone track. The app passes its
@@ -1127,6 +1265,47 @@ impl NativeSession {
         self.screen.take();
     }
 
+    /// The publisher and subscriber transports' raw stats.
+    pub async fn transport_stats(&self) -> Result<(Vec<RtcStats>, Vec<RtcStats>), String> {
+        let s = self
+            .room
+            .get_stats()
+            .await
+            .map_err(|e| format!("native voice stats: {e}"))?;
+        Ok((s.publisher_stats, s.subscriber_stats))
+    }
+
+    /// Handles (Arc clones) of the video tracks whose stats the webview
+    /// reads. Local tracks are keyed by source, not sid, so the lookup is
+    /// immune to the issued/live sid split after a full reconnect; remote
+    /// ones by publication sid (what `remote_pub_info` sends). Unsubscribed
+    /// publications have no track and are skipped.
+    pub fn stats_tracks(&self) -> StatsTracks {
+        let local = self
+            .room
+            .local_participant()
+            .track_publications()
+            .values()
+            .filter_map(|p| {
+                let key = match p.source() {
+                    TrackSource::Camera => "camera",
+                    TrackSource::Screenshare => "screen_share",
+                    _ => return None,
+                };
+                p.track().map(|t| (key, t))
+            })
+            .collect();
+        let remote = self
+            .room
+            .remote_participants()
+            .values()
+            .flat_map(|participant| participant.track_publications().into_values())
+            .filter(|p| p.kind() == TrackKind::Video)
+            .filter_map(|p| p.track().map(|t| (p.sid().to_string(), t)))
+            .collect();
+        (local, remote)
+    }
+
     pub fn remote_publication(
         &self,
         identity: &str,
@@ -1214,6 +1393,9 @@ impl NativeSession {
             log::warn!("[native_voice] room close: {e}");
         }
         self.forwarder.abort();
+        if let Some(reports) = &self.capture_reports {
+            reports.abort();
+        }
     }
 }
 
@@ -1424,6 +1606,19 @@ mod tests {
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
     use livekit_protocol as proto;
 
+    #[test]
+    fn retire_keeps_every_generation_a_follower_still_holds() {
+        let mut retired = Vec::new();
+        let first = Arc::new(1);
+        let held_by_lagging_callback = first.clone();
+        retire(&mut retired, Some(first));
+        retire(&mut retired, Some(Arc::new(2)));
+        assert_eq!(retired.len(), 2, "the first generation is still held");
+        drop(held_by_lagging_callback);
+        retire(&mut retired, None);
+        assert!(retired.is_empty(), "unheld generations are freed here");
+    }
+
     fn permission(
         can_publish: bool,
         sources: &[proto::TrackSource],
@@ -1627,6 +1822,30 @@ mod tests {
         ));
     }
 
+    /// The audio thread's report sinks only queue: with the emitter not yet
+    /// run they return at once, past a full queue, and the emitter then
+    /// delivers what fit, in order.
+    #[tokio::test]
+    async fn capture_reports_queue_without_blocking_and_arrive_in_order() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(Arc::new(move |event| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::to_string(&event).unwrap());
+        }));
+        on_gate(false);
+        for _ in 0..CAPTURE_REPORT_QUEUE * 2 {
+            on_level(0.5, false);
+        }
+        drop((on_gate, on_level));
+        emitter.await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), CAPTURE_REPORT_QUEUE, "the overflow is dropped");
+        assert_eq!(seen[0], r#"{"type":"voiceGate","open":false}"#);
+        assert_eq!(seen[1], r#"{"type":"inputLevel","rms":0.5,"open":false}"#);
+    }
+
     #[test]
     fn events_serialize_with_a_type_tag() {
         let json = serde_json::to_string(&Event::ActiveSpeakers {
@@ -1639,6 +1858,12 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+        let json = serde_json::to_string(&Event::InputLevel {
+            rms: 0.25,
+            open: false,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"inputLevel","rms":0.25,"open":false}"#);
     }
 
     #[test]
@@ -1776,5 +2001,47 @@ mod tests {
     #[test]
     fn process_threads_reads_procfs() {
         assert!(process_threads() >= 1);
+    }
+
+    fn audio(ec: bool, enhanced: bool) -> AudioOptions {
+        AudioOptions {
+            echo_cancellation: ec,
+            noise_suppression: true,
+            auto_gain_control: true,
+            enhanced_noise_suppression: enhanced,
+        }
+    }
+
+    /// A toggle that changes nothing must not replace the processing (and
+    /// reset the echo canceller's adaptation); an Enhanced Noise Suppression
+    /// change only switches the denoiser; any other change rebuilds it, and
+    /// before audio is enabled it is only remembered.
+    #[test]
+    fn set_audio_processing_rebuilds_only_on_a_change() {
+        let on = audio(true, false);
+        assert_eq!(
+            processing_change(true, Some(on), on),
+            ProcessingChange::Unchanged
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, false)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(true, true)),
+            ProcessingChange::Reroute
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, true)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(false, None, on),
+            ProcessingChange::Remember
+        );
+        assert_eq!(
+            processing_change(false, Some(on), audio(false, false)),
+            ProcessingChange::Remember
+        );
     }
 }

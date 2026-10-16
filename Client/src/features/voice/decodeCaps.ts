@@ -70,7 +70,7 @@ export type PeerDecodeLists = ReadonlyArray<readonly string[] | undefined>;
 
 /** `preferred` when every peer decodes it, else VP8. An absent or empty peer
  *  list is the baseline; no peers means `preferred`. */
-export function pickCommonCodec<C extends "vp8" | "h264">(
+export function pickCommonCodec<C extends "vp8" | "h264" | "vp9">(
   preferred: C,
   peers: PeerDecodeLists,
 ): C | "vp8" {

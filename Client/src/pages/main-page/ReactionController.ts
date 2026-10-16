@@ -5,22 +5,16 @@
 
 import { createElement } from "@lib/dom";
 import { createEmojiPicker } from "@components/EmojiPicker";
+import {
+  atReactionLimit,
+  channelCanReact,
+  reactionLockReason,
+} from "@components/message-list/reactions";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
 import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
-
-/** The server refuses a new emoji on a message that already has this many (3A-12). */
-export const MAX_DISTINCT_REACTIONS = 20;
-
-/** A new emoji would push the message past the cap; existing pills stay clickable. */
-function atReactionLimit(reactions: readonly { emoji: string }[], emoji: string | null): boolean {
-  return (
-    reactions.length >= MAX_DISTINCT_REACTIONS &&
-    (emoji === null || !reactions.some((r) => r.emoji === emoji))
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,7 +42,13 @@ export function createReactionController(opts: ReactionControllerOptions): React
   const { ws, reactionsLimiter, getChannelId, showError } = opts;
 
   function sendReaction(msgId: number, emoji: string): void {
+    // A picker opened before the socket dropped must not send into the void.
     const channelId = getChannelId();
+    const locked = reactionLockReason(channelCanReact(channelId));
+    if (locked !== null) {
+      showError(locked);
+      return;
+    }
     const msgs = getChannelMessages(channelId);
     const msg = msgs.find((m) => m.id === msgId);
     if (msg !== undefined && atReactionLimit(msg.reactions, emoji)) {
@@ -114,8 +114,9 @@ export function createReactionController(opts: ReactionControllerOptions): React
       // emoji_update while the app is alive must be in the next picker the
       // user opens (matches MessageInput.ts's composer picker).
       customEmoji: listCustomEmoji(),
-      onSelect: (selectedEmoji: string) => {
-        closePicker();
+      onSelect: (selectedEmoji: string, select) => {
+        // Shift-pick sends the reaction and leaves the picker up for more.
+        if (select?.keepOpen !== true) closePicker();
         sendReaction(msgId, selectedEmoji);
       },
       onClose: () => {

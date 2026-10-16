@@ -28,7 +28,6 @@ import {
   retryMicPermission,
 } from "@lib/livekitSession";
 import { loadPref, savePref } from "@lib/preferences";
-import { isLinuxDesktop } from "../features/voice/native/platform";
 import { voiceText as t } from "../i18n/voice";
 import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
@@ -191,9 +190,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (oldSvg) oldSvg.remove();
     signalWrap.insertBefore(createSignalIcon(bars, color, 14), pingLabel);
 
-    // Update ping text. No transport to measure (native Linux voice, the
-    // SDK's internals changed, or the first sample has not landed yet) reads
-    // as unavailable, not a false 4-green-bars "excellent".
+    // Update ping text. No transport to measure (the native host returned no
+    // sample, the SDK's internals changed, or the first sample has not landed
+    // yet) reads as unavailable, not a false 4-green-bars "excellent".
     const rttText = stats.available && stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
@@ -239,8 +238,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // bars via onUpdate, but never expands the pane on its own (DP-41).
     statsPoller.start();
     // Paint the initial state now. updateSignalIcon only runs on a sample;
-    // where none ever arrives (native Linux voice has no peer connection)
-    // the widget would otherwise keep its constructed 4-green-bars default.
+    // where none arrives (the first poll is 2 s out, or the native host has
+    // no sample) the widget would otherwise keep its constructed
+    // 4-green-bars default.
     updateSignalIcon(statsPoller.getStats());
   }
 
@@ -550,10 +550,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
-    // The native engine reads it at connect, not live.
-    const nsLabel = t(
-      isLinuxDesktop() ? "widget.control.nextJoin" : "widget.control.noiseSuppression",
-    );
+    const nsLabel = t("widget.control.noiseSuppression");
     nsBtn = createElement("button", {
       type: "button",
       class: "vw-ns",

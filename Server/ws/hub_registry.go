@@ -49,6 +49,13 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// after the hub lock is released.
 	var replacedVoiceChID int64
 
+	// Until told otherwise, assume c holds the full member_timeouts list: a
+	// replaying resume keeps whatever list its last connection held (its old
+	// *Client is usually gone by now), and a fresh connect lowers this in
+	// commitReadyTimeouts. A wrong true costs one own-only frame on the next
+	// role refresh; a wrong false would leave a demoted user the full list.
+	c.timeouts.full.Store(true)
+
 	h.mu.Lock()
 	if h.wakeBlockedLocked(c) {
 		// U4: leave the other device's session alone and refuse this one;
@@ -59,7 +66,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 		return true
 	}
 	if old, exists := h.clients[c.userID]; exists {
-		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
+		oldE2EE := old.getE2EEAnnounce()
 		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID
 		// A moderator-imposed mute/deafen stashed by voice_mod_move
@@ -107,7 +114,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 				// re-announces on a LiveKit-room reconnect, so without the
 				// transfer voice_join replays nothing for this user and new
 				// joiners' key exchanges time out.
-				c.setE2EEPubKey(oldE2EEKey, oldE2EESig)
+				c.setE2EEAnnounce(oldE2EE)
 			}
 			// The focused channel must transfer too: the client never
 			// re-sends channel_focus on a resume (mountChannel early-returns
@@ -245,8 +252,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 		// CURRENT room key whenever it sees a peer announce a key it
 		// already knows, so re-announcing our own (unchanged) key is enough
 		// to make the key holder re-offer — no client change needed.
-		if key, sig := c.getE2EEPubKey(); key != "" {
-			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, key, sig))
+		if a := c.getE2EEAnnounce(); a.key != "" {
+			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, a))
 		}
 	}
 	return false

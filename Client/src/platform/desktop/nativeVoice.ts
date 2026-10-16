@@ -15,7 +15,11 @@ export const nativeVoice: NativeVoice = {
   setMicrophone: async (session, enabled, bitrate) =>
     (await service()).setMicrophone(session, enabled, bitrate),
   setPttGated: async (session, gated) => (await service()).setPttGated(session, gated),
-  setVoiceGate: async (session, threshold) => (await service()).setVoiceGate(session, threshold),
+  setVoiceGate: async (session, threshold, retune) =>
+    (await service()).setVoiceGate(session, threshold, retune),
+  setInputGain: async (session, percent) => (await service()).setInputGain(session, percent),
+  setAudioProcessing: async (session, audio) =>
+    (await service()).setAudioProcessing(session, audio),
   setSubscribed: async (session, identity, sid, subscribed) =>
     (await service()).setSubscribed(session, identity, sid, subscribed),
   setVideoView: async (session, identity, sid, enabled, quality) =>
@@ -43,10 +47,28 @@ export const nativeVoice: NativeVoice = {
   stopScreen: async (session, capture) => (await service()).stopScreen(session, capture),
   changeScreen: async (session, source, capture) =>
     (await service()).changeScreen(session, source, capture),
+  getStats: async (session) => (await service()).getStats(session),
   debugInfo: async () => (await service()).debugInfo(),
   listDevices: async () => (await service()).listDevices(),
   setDevice: async (session, kind, deviceId) =>
     (await service()).setDevice(session, kind, deviceId),
+  startMicTest: async (options) => (await service()).startMicTest(options),
+  updateMicTest: async (test, update) => (await service()).updateMicTest(test, update),
+  stopMicTest: async (test) => (await service()).stopMicTest(test),
+  onMicTestEvent(handler) {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void service().then((s) => {
+      const stop = s.onMicTestEvent(handler);
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+      unlisten = null;
+    };
+  },
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.

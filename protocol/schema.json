@@ -12,6 +12,7 @@
     { "wire": "typing_start", "go": "MsgTypeTypingStart", "ts": "TYPING_START" },
     { "wire": "channel_focus", "go": "MsgTypeChannelFocus", "ts": "CHANNEL_FOCUS" },
     { "wire": "mark_read", "go": "MsgTypeMarkRead", "ts": "MARK_READ" },
+    { "wire": "mark_unread", "go": "MsgTypeMarkUnread", "ts": "MARK_UNREAD" },
     { "wire": "presence_update", "go": "MsgTypePresenceUpdate", "ts": "PRESENCE_UPDATE" },
     { "wire": "voice_join", "go": "MsgTypeVoiceJoin", "ts": "VOICE_JOIN" },
     { "wire": "voice_leave", "go": "MsgTypeVoiceLeave", "ts": "VOICE_LEAVE" },
@@ -109,6 +110,12 @@
       "note": "B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed"
     },
     {
+      "wire": "member_timeouts",
+      "go": "MsgTypeMemberTimeouts",
+      "ts": "MEMBER_TIMEOUTS",
+      "note": "WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale"
+    },
+    {
       "wire": "appeal_status",
       "go": "MsgTypeAppealStatus",
       "ts": "APPEAL_STATUS",
@@ -119,6 +126,12 @@
       "go": "MsgTypeMentionCount",
       "ts": "MENTION_COUNT",
       "note": "DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal"
+    },
+    {
+      "wire": "read_state",
+      "go": "MsgTypeReadState",
+      "ts": "READ_STATE",
+      "note": "WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed"
     },
     {
       "wire": "channel_activity",

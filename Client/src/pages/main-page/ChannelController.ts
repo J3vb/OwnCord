@@ -27,6 +27,7 @@ import type {
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
+  messagesStore,
   getChannelMessages,
   setMessagePinned,
   addOptimisticMessage,
@@ -37,6 +38,10 @@ import {
   invalidateChannelMessageWindow,
   clearChannelContent,
 } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
+import { resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/avatar";
+import { markdownToPlainText } from "@lib/markdown";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
@@ -50,6 +55,7 @@ import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/last-channel";
+import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/savedDrafts";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -73,6 +79,11 @@ const log = createLogger("channel-ctrl");
 /** Longer than ws.ts's 60 s server-silence deadline, so a half-open socket is
  *  declared dead (and the entry failed) before the entry can expire. */
 const TRACKED_ACTION_EXPIRY_MS = 90_000;
+/** How long typing must pause before the draft is written to storage. */
+const DRAFT_SAVE_DELAY_MS = 750;
+
+/** Characters of the message shown in the delete confirm. */
+const DELETE_PREVIEW_MAX_CHARS = 200;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,6 +140,39 @@ function currentMessageUser(): MessageUser | null {
   return { id: u.id, username: u.username, avatar: u.avatar };
 }
 
+/** The message the dialog is about: author and a truncated plain-text
+ *  excerpt, both set as text. An attachments-only message shows nothing
+ *  extra beyond its author. */
+function renderDeletePreview(msg: Message): HTMLElement {
+  const author = resolveDisplayName(resolveAuthor(msg.user));
+  const plain = Array.from(markdownToPlainText(msg.content, messagingText("spoiler.revealed")));
+  const excerpt = plain.slice(0, DELETE_PREVIEW_MAX_CHARS).join("");
+  const preview = createElement("div", {
+    class: "msg-delete-preview",
+    "data-testid": "msg-delete-preview",
+  });
+  preview.appendChild(createElement("span", { class: "msg-delete-preview-author" }, author));
+  if (excerpt !== "") {
+    const truncated = plain.length > DELETE_PREVIEW_MAX_CHARS;
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        truncated ? `${excerpt}\u2026` : excerpt,
+      ),
+    );
+  } else if (msg.attachments.length > 0) {
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        messagingText("reply.attachment"),
+      ),
+    );
+  }
+  return preview;
+}
+
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
   const {
     ws,
@@ -147,6 +191,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
+  const pinsInFlight = new Set<string>();
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
@@ -165,6 +210,67 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // (not per-mount) because the whole point is to outlive a channel switch.
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
+
+  // 3A-3: the mounted composer's text and reply also go to storage, so they
+  // survive a restart. Saved a moment after typing stops, and at once when the
+  // draft empties or the channel switches.
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // The account the mounted composer belongs to, captured at mount, so a late
+  // save never files a draft under whoever is signed in by then.
+  let draftOwner: { host: string; userId: number; current: () => boolean } | null = null;
+  // What was last written, so an edit (whose peeked draft never changes) does
+  // not rewrite storage on every key.
+  let lastSavedDraft = "";
+
+  function persistDraft(channelId: number, draft: SavedDraft): void {
+    const owner = draftOwner;
+    if (owner === null || !(owner.userId > 0) || owner.host === "" || !owner.current()) return;
+    const stamp = JSON.stringify([owner.host, owner.userId, channelId, draft]);
+    if (stamp === lastSavedDraft) return;
+    lastSavedDraft = stamp;
+    saveDraft(owner.host, owner.userId, channelId, draft);
+  }
+
+  function saveMountedDraft(): void {
+    if (draftSaveTimer !== null) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    if (messageInput !== null && currentChannelId !== null) {
+      persistDraft(currentChannelId, messageInput.peekDraft());
+    }
+  }
+
+  function scheduleDraftSave(): void {
+    if (draftSaveTimer !== null) clearTimeout(draftSaveTimer);
+    const draft = messageInput?.peekDraft();
+    if (draft !== undefined && draft.content === "" && draft.replyTo === null) {
+      saveMountedDraft();
+      return;
+    }
+    draftSaveTimer = setTimeout(saveMountedDraft, DRAFT_SAVE_DELAY_MS);
+  }
+
+  /** After a restart there is no in-memory draft, so take the saved one. Its
+   *  reply is dropped only when the loaded history shows the target deleted:
+   *  history is usually not loaded yet, and the server refuses a reply to a
+   *  message that is gone. */
+  function restoreSavedDraft(channelId: number, input: MessageInputComponent): void {
+    const userId = getCurrentUserId();
+    const host = api.getConfig?.().host ?? "";
+    if (!(userId > 0) || host === "") return;
+    const saved = loadSavedDraft(host, userId, channelId);
+    if (saved === null) return;
+    const target = saved.replyTo;
+    const gone =
+      target !== null &&
+      getChannelMessages(channelId).some((m) => m.id === target.messageId && m.deleted);
+    input.restoreDraft({
+      content: saved.content,
+      replyTo: gone ? null : target,
+      attachments: [],
+    });
+  }
 
   // When the last accepted send happened (epoch ms) per channel, so the Send
   // gate's countdown survives a channel switch instead of restarting from zero
@@ -347,6 +453,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     const reply = target === undefined ? null : { ...replyTargetOf(target), ping };
     if (sentTo === currentChannelId && messageInput !== null) {
       messageInput.restoreUnsent(files, reason, reply);
+      scheduleDraftSave();
       return;
     }
     const stashed = draftByChannel.get(sentTo);
@@ -391,6 +498,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       typingIndicator = null;
     }
     if (messageInput !== null) {
+      saveMountedDraft();
       // UX-1: stash the unsent state before the composer is torn down. Empty
       // drafts are not stored, so switching away from a channel with nothing
       // typed leaves no entry behind.
@@ -472,6 +580,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+    draftOwner = { ...owner, current: ownsAccountSession };
 
     /**
      * Mount the gate or the withdraw bar. Their module (with its catalog) is
@@ -900,7 +1009,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
-    function openDeleteConfirm(msgId: number): void {
+    /** `onConfirm` runs just before the delete is sent. */
+    function openDeleteConfirm(
+      msgId: number,
+      flow: { readonly onConfirm?: () => void; readonly clicked: boolean },
+    ): void {
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -910,6 +1023,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       body.appendChild(
         createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
       );
+      const target = getChannelMessages(channelId).find((m) => m.id === msgId);
+      if (target !== undefined) body.appendChild(renderDeletePreview(target));
+      // The tip is about the Delete click, so it is left out when no click
+      // opened this (an emptied edit).
+      if (flow.clicked) {
+        body.appendChild(
+          createElement(
+            "p",
+            { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
+            messagingText("delete.shiftTip"),
+          ),
+        );
+      }
       const footer = createElement("div", { class: "modal-footer" });
       const cancel = createElement(
         "button",
@@ -937,6 +1063,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         "click",
         () => {
           modal.close();
+          flow.onConfirm?.();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -1009,7 +1136,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Shift-click skips the prompt, as Discord's delete confirm does
         // (P4-12). A plain click opens a confirm.
         if (!shiftKey) {
-          openDeleteConfirm(msgId);
+          openDeleteConfirm(msgId, { clicked: true });
           return;
         }
         sendDelete(msgId);
@@ -1018,20 +1145,36 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         reactionCtrl.handleReaction(msgId, emoji);
       },
       onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
+        // One request per message at a time: a second click while one is
+        // pending would race its revert against the first.
+        const flightKey = `${chId}:${msgId}`;
+        if (pinsInFlight.has(flightKey)) return;
+        pinsInFlight.add(flightKey);
+        // Optimistic: the row flips now and snaps back if the server refuses,
+        // so the control answers the click instead of waiting on the round trip.
+        setMessagePinned(chId, msgId, !currentlyPinned);
+        const revisionAfterFlip = messagesStore.getState().messagePinRevision?.get(msgId);
         const action = currentlyPinned
           ? api.unpinMessage(chId, msgId)
           : api.pinMessage(chId, msgId);
         action
           .then(() => {
-            setMessagePinned(chId, msgId, !currentlyPinned);
             showToast(
               currentlyPinned ? messagingText("toast.unpinned") : messagingText("toast.pinned"),
               "success",
             );
           })
           .catch((err) => {
+            // A moved revision means a chat_pinned for this message already
+            // holds the truth; do not overwrite it.
+            if (messagesStore.getState().messagePinRevision?.get(msgId) === revisionAfterFlip) {
+              setMessagePinned(chId, msgId, currentlyPinned);
+            }
             log.error("Pin/unpin failed", { error: String(err) });
             showToast(messagingText("toast.pinFailed"), "error");
+          })
+          .finally(() => {
+            pinsInFlight.delete(flightKey);
           });
       },
       onReportClick: (msgId: number) => {
@@ -1148,6 +1291,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         });
         track(pendingEdits, id, { channelId, messageId, content: trimmed });
       },
+      // Discord's flow: clearing an edit and pressing Enter asks to delete the
+      // message. Cancel leaves the edit open; Delete closes it first.
+      onEmptyEdit: (messageId: number) => {
+        openDeleteConfirm(messageId, {
+          onConfirm: () => messageInput?.cancelEdit(),
+          clicked: false,
+        });
+      },
+      onDraftChange: scheduleDraftSave,
     });
     messageInput.mount(slots.inputSlot);
 
@@ -1166,7 +1318,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           : stashedDraft.replyTo;
       messageInput.restoreDraft({ ...stashedDraft, replyTo });
       draftByChannel.delete(channelId);
+    } else {
+      restoreSavedDraft(channelId, messageInput);
     }
+    // A dropped reply must not come back from storage on the next start.
+    scheduleDraftSave();
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
@@ -1213,7 +1369,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       }
       return null;
     };
+    // The standing slow-mode note: shown from the first moment, for anyone
+    // slow mode would limit. Not a send gate, so the first send still goes.
+    const refreshSlowModeNote = (): void => {
+      const seconds = channelsStore.getState().channels.get(channelId)?.slowMode ?? 0;
+      messageInput?.setSlowModeNote(
+        seconds > 0 && !canManageMessages()
+          ? messagingText("composer.slowModeNote", { seconds: String(seconds) })
+          : null,
+      );
+    };
     const refreshComposerState = (): void => {
+      refreshSlowModeNote();
       messageInput?.setDisabled(computeComposerReason());
       // Slow mode gates the SEND only: the draft stays editable so the user
       // can keep typing through the cooldown (Discord parity, F12).
@@ -1405,9 +1572,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         () => refreshComposerState(),
       ),
     );
+    // A channel_update/create that changes the interval refreshes the note.
+    composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(channelId)?.slowMode ?? 0,
+        () => refreshComposerState(),
+      ),
+    );
     composerGatingUnsubs.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
+        () => refreshComposerState(),
+      ),
+    );
+    // A role change can make the user exempt from slow mode, or no longer so.
+    composerGatingUnsubs.push(
+      membersStore.subscribeSelector(
+        (s) => s.roleRevision ?? 0,
         () => refreshComposerState(),
       ),
     );

@@ -34,8 +34,17 @@ export interface EmojiPickerOptions {
    * and the renderer turns that text back into the image.
    */
   readonly customEmoji?: readonly CustomEmoji[];
-  readonly onSelect: (emoji: string) => void;
+  /**
+   * The second argument is passed only when Shift was held (click or
+   * Shift+Enter): `keepOpen` then tells the owner to leave the picker open so
+   * several emoji can be picked in a row. A plain pick passes the emoji alone.
+   */
+  readonly onSelect: (emoji: string, select?: EmojiSelectOptions) => void;
   readonly onClose: () => void;
+}
+
+export interface EmojiSelectOptions {
+  readonly keepOpen: boolean;
 }
 
 /** The catalog key the server's own emoji appear under. */
@@ -83,7 +92,7 @@ function readStoredRecent(): string[] {
  * lands, or after a failed fetch is retried. Persisting the filtered list
  * turns "do not show this" into "delete this", for every server at once.
  */
-function getRecentEmoji(): string[] {
+export function getRecentEmoji(): string[] {
   try {
     // A `:shortcode:`-shaped entry is only meaningful when it still resolves
     // on *this* server: a custom emoji clicked on one server would otherwise
@@ -221,7 +230,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       if (cell === null) return;
       const emoji = cell.dataset.emoji;
       if (emoji === undefined) return;
-      handleEmojiClick(emoji);
+      handleEmojiClick(emoji, e.shiftKey);
     },
     { signal },
   );
@@ -273,13 +282,58 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     return cats;
   }
 
-  function handleEmojiClick(emoji: string): void {
+  function handleEmojiClick(emoji: string, keepOpen: boolean): void {
     addRecentEmoji(emoji);
-    options.onSelect(emoji);
+    if (keepOpen) options.onSelect(emoji, { keepOpen: true });
+    else options.onSelect(emoji);
+  }
+
+  /** The load-failure row, built once while the load stays failed. It is kept
+   *  in place across re-renders (a search keystroke must not re-announce it
+   *  or stack listeners) and dropped when the failure ends. */
+  let failureRow: HTMLElement | null = null;
+  function ensureFailureRow(): HTMLElement {
+    if (failureRow !== null) return failureRow;
+    const failure = createElement("div", {
+      class: "ep-load-failed",
+      role: "alert",
+      "data-testid": "emoji-load-failed",
+    });
+    const retry = createElement(
+      "button",
+      { class: "ep-retry", type: "button", "data-testid": "emoji-retry" },
+      messagingText("retry"),
+    );
+    retry.addEventListener(
+      "click",
+      () => {
+        loadFailed = false;
+        renderAll();
+        startCatalogLoad();
+        // The row is gone: keep keyboard focus in the picker.
+        searchInput.focus();
+      },
+      { signal },
+    );
+    failure.append(createElement("span", {}, messagingText("emoji.loadFailed")), retry);
+    failureRow = failure;
+    return failure;
   }
 
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
-    clearChildren(scrollArea);
+    for (const child of Array.from(scrollArea.children)) {
+      if (child !== failureRow) child.remove();
+    }
+
+    // A failed load says so, with a way to try again, above whatever Recent
+    // and Server emoji are already showing.
+    if (loadFailed && emojiCatalog() === null) {
+      const row = ensureFailureRow();
+      if (row.parentElement !== scrollArea) scrollArea.prepend(row);
+    } else if (failureRow !== null) {
+      failureRow.remove();
+      failureRow = null;
+    }
 
     // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
     const raw = searchQuery.toLowerCase();
@@ -346,8 +400,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   // Initial render: Recent and Server straight away, the Unicode set when its
   // lazy chunk lands (at once, if an earlier picker or popup loaded it).
   let loadFailed = false;
-  renderAll();
-  if (emojiCatalog() === null) {
+  function startCatalogLoad(): void {
     void loadEmojiCatalog().then(
       () => {
         if (!signal.aborted) renderAll();
@@ -358,6 +411,8 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       },
     );
   }
+  renderAll();
+  if (emojiCatalog() === null) startCatalogLoad();
 
   toneSelect.addEventListener(
     "change",
@@ -389,7 +444,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       if (first === null) return;
       e.preventDefault();
       const emoji = first.dataset.emoji;
-      if (emoji !== undefined) handleEmojiClick(emoji);
+      if (emoji !== undefined) handleEmojiClick(emoji, e.shiftKey);
     },
     { signal },
   );

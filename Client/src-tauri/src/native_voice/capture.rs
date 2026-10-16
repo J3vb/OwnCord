@@ -6,14 +6,14 @@
 //! standalone audio processing module (APM): echo cancellation against what
 //! `playout.rs` actually plays, noise suppression, gain control and a
 //! high-pass filter. With Enhanced Noise Suppression on it then goes through
-//! RNNoise (`nnnoiseless`), and into the published track's
-//! `NativeAudioSource`. RNNoise runs after the APM, as on the web path, where
+//! RNNoise (`nnnoiseless`), and into a `Sink`: the published track's
+//! `NativeAudioSource`, or the mic test's loopback queue. RNNoise runs after the APM, as on the web path, where
 //! the browser's processing precedes the RNNoise worklet: the echo canceller
 //! needs the linear echo path that RNNoise would break. Last, the
 //! input-sensitivity gate (`VoiceGate`) and push-to-talk's gate decide
 //! whether the frame goes out or silence does.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -24,7 +24,9 @@ use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
-use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
+use super::playout::{
+    host_devices, pinned_listed, Mixer, Selected, WatchedHost, Watcher, FOLLOW_EVERY, LOOPBACK,
+};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 use super::stream_format::{pick_config, typed};
 
@@ -36,6 +38,59 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub const SAMPLE_RATE: u32 = 48_000;
 /// One 10 ms frame: the APM's unit and RNNoise's (`nnnoiseless::FRAME_SIZE`).
 pub const FRAME: usize = SAMPLE_RATE as usize / 100;
+
+/// A value the audio threads follow while another thread replaces it. The
+/// generation moves under the lock, so a follower that sees it unchanged has
+/// nothing to read; one that sees it changed reads with `try_lock`, which
+/// never waits: a set in progress is picked up on a later frame.
+pub struct Shared<T> {
+    generation: AtomicU64,
+    value: Mutex<T>,
+}
+
+impl<T: Default> Default for Shared<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T> Shared<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            generation: AtomicU64::new(0),
+            value: Mutex::new(value),
+        }
+    }
+}
+
+impl<T: Clone> Shared<T> {
+    pub fn set(&self, value: T) {
+        let mut held = lock(&self.value);
+        *held = value;
+        self.generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// The value and the generation it belongs to.
+    pub fn snapshot(&self) -> (u64, T) {
+        let held = lock(&self.value);
+        (self.generation.load(Ordering::Acquire), held.clone())
+    }
+
+    /// For the audio thread: the new value when the generation moved past
+    /// `seen` and the lock is free right now, else None (retry next frame).
+    pub fn poll(&self, seen: &mut u64) -> Option<T> {
+        if self.generation.load(Ordering::Acquire) == *seen {
+            return None;
+        }
+        let held = match self.value.try_lock() {
+            Ok(held) => held,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        *seen = self.generation.load(Ordering::Acquire);
+        Some(held.clone())
+    }
+}
 
 /// libwebrtc's processing, shared by the capture (its forward stream) and the
 /// playout (its reverse stream: the reference the echo canceller subtracts).
@@ -95,14 +150,32 @@ fn front_mono(frame: &[f32]) -> f32 {
 /// and the per-track queues' delay), mixed down to mono, becomes the echo
 /// canceller's reverse stream.
 pub struct Reference {
-    apm: Arc<Apm>,
+    apm: Option<Arc<Apm>>,
+    /// Where a later processing arrives (the playout's shared one), and the
+    /// generation `apm` came from.
+    slot: Option<Arc<Shared<Option<Arc<Apm>>>>>,
+    seen: u64,
     framer: Framer,
 }
 
 impl Reference {
     pub fn new(apm: Arc<Apm>) -> Self {
         Self {
+            apm: Some(apm),
+            slot: None,
+            seen: 0,
+            framer: Framer::default(),
+        }
+    }
+
+    /// Feed whatever APM `slot` currently holds, and follow it when it is
+    /// replaced (a live change of the audio processing).
+    pub fn following(slot: Arc<Shared<Option<Arc<Apm>>>>) -> Self {
+        let (seen, apm) = slot.snapshot();
+        Self {
             apm,
+            slot: Some(slot),
+            seen,
             framer: Framer::default(),
         }
     }
@@ -110,10 +183,17 @@ impl Reference {
     /// `out` is the interleaved buffer just filled for the device; playout
     /// uses only its first two (front) channels.
     pub fn feed(&mut self, out: &[f32], channels: usize) {
+        if let Some(slot) = &self.slot {
+            if let Some(apm) = slot.poll(&mut self.seen) {
+                self.apm = apm;
+            }
+        }
         let mono = out
             .chunks_exact(channels.max(1))
             .map(|f| to_i16(front_mono(f)));
-        let apm = &self.apm;
+        let Some(apm) = &self.apm else {
+            return;
+        };
         self.framer.push(mono, |frame| {
             // A failed frame only weakens the reference; nothing to recover.
             let _ = apm
@@ -137,6 +217,56 @@ const GATE_LOOKAHEAD_FRAMES: usize = 5;
 /// Told whether the voice gate is open after each change.
 pub type GateSink = Arc<dyn Fn(bool) + Send + Sync>;
 
+/// Told each level report: the loudest ~10 ms RMS since the last one, after
+/// the input volume, and whether the voice gate is open.
+pub type LevelSink = Arc<dyn Fn(f32, bool) + Send + Sync>;
+
+/// Frames per level report: vad-worklet.js reports its loudest level every
+/// ~50 ms, which the meter and automatic sensitivity both read.
+const LEVEL_REPORT_FRAMES: u32 = 5;
+
+/// The input volume's top: 200 %, as audioPipeline's `setInputVolume`.
+const MAX_INPUT_GAIN: f32 = 2.0;
+
+/// The input volume as a linear gain (0 to 2, `inputVolume` / 100 as on the
+/// web path), shared by every stream a capture opens.
+#[derive(Clone)]
+pub struct InputGain(Arc<AtomicU32>);
+
+impl Default for InputGain {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU32::new(1.0_f32.to_bits())))
+    }
+}
+
+impl InputGain {
+    pub fn set(&self, gain: f32) {
+        let gain = if gain.is_finite() {
+            gain.clamp(0.0, MAX_INPUT_GAIN)
+        } else {
+            1.0
+        };
+        self.0.store(gain.to_bits(), Ordering::Relaxed);
+    }
+
+    fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+}
+
+/// Scale `frame` by a gain that moves from `from` to `to` across it, so a
+/// slider move does not click (micProcessor's GainNode ramps likewise).
+fn apply_gain(frame: &mut [i16], from: f32, to: f32) {
+    if from == 1.0 && to == 1.0 {
+        return;
+    }
+    let step = (to - from) / frame.len() as f32;
+    for (i, s) in frame.iter_mut().enumerate() {
+        let gain = from + step * (i + 1) as f32;
+        *s = (f32::from(*s) * gain).round().clamp(-32768.0, 32767.0) as i16;
+    }
+}
+
 /// The input-sensitivity gate: the web path's voice detector
 /// (vad-worklet.js) on the same level scale, the RMS (-1 to 1) of ~10 ms of
 /// processed audio, so one slider position gates alike on both paths.
@@ -149,11 +279,18 @@ pub struct VoiceGate {
     speech: u32,
     closed: bool,
     on_change: Option<GateSink>,
+    on_level: Option<LevelSink>,
+    level_peak: f32,
+    level_frames: u32,
 }
 
 impl VoiceGate {
     pub fn report_to(&mut self, sink: GateSink) {
         self.on_change = Some(sink);
+    }
+
+    pub fn report_levels_to(&mut self, sink: LevelSink) {
+        self.on_level = Some(sink);
     }
 
     /// Restart the detector open at `threshold`, as the web path restarts its
@@ -163,12 +300,24 @@ impl VoiceGate {
             threshold: threshold.max(0.0),
             closed: self.closed,
             on_change: self.on_change.take(),
+            on_level: self.on_level.take(),
             ..Self::default()
         };
         if self.on() {
             self.set_closed(false);
         } else {
             self.closed = false;
+        }
+    }
+
+    /// Move the threshold without restarting the detector, as automatic
+    /// sensitivity moves the worklet's (its "threshold" message): the gate
+    /// keeps its state and counts. Only a running gate moves: a retune sent
+    /// before the gate was turned off (Push to Talk, sensitivity 100) must
+    /// not turn it back on.
+    pub fn retune(&mut self, threshold: f32) {
+        if self.on() && threshold > 0.0 {
+            self.threshold = threshold;
         }
     }
 
@@ -205,6 +354,23 @@ impl VoiceGate {
         }
         self.closed
     }
+
+    /// Take one frame's level: the gate runs on it while on, and every
+    /// `LEVEL_REPORT_FRAMES` the loudest one goes to the level sink. Returns
+    /// whether the gate is now closed.
+    fn observe(&mut self, rms: f32) -> bool {
+        let closed = self.on() && self.update(rms);
+        if let Some(sink) = &self.on_level {
+            self.level_peak = self.level_peak.max(rms);
+            self.level_frames += 1;
+            if self.level_frames >= LEVEL_REPORT_FRAMES {
+                sink(self.level_peak, !closed);
+                self.level_peak = 0.0;
+                self.level_frames = 0;
+            }
+        }
+        closed
+    }
 }
 
 fn rms(frame: &[i16]) -> f32 {
@@ -216,10 +382,18 @@ fn rms(frame: &[i16]) -> f32 {
 pub struct Processor {
     apm: Arc<Apm>,
     denoise: Option<Box<DenoiseState<'static>>>,
+    /// Where a live change of the processing arrives, and the generation
+    /// `apm` and `denoise` came from.
+    follow: Option<Processing>,
+    seen: u64,
     /// Push-to-talk's gate: while set, every frame goes out as silence.
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate (the capture's shared one).
     voice: Arc<Mutex<VoiceGate>>,
+    /// The input volume (the capture's shared one) and the gain the last
+    /// frame ended on, which the next ramps from.
+    gain: InputGain,
+    applied_gain: f32,
     /// The voice behind the gate's detector while the gate is on.
     lookahead: VecDeque<i16>,
     framer: Framer,
@@ -232,13 +406,26 @@ impl Processor {
         Self {
             apm,
             denoise: enhanced_noise_suppression.then(DenoiseState::new),
+            follow: None,
+            seen: 0,
             gated: Arc::default(),
             voice: Arc::default(),
+            gain: InputGain::default(),
+            applied_gain: 1.0,
             lookahead: VecDeque::new(),
             framer: Framer::default(),
             input: Box::new([0.0; FRAME]),
             output: Box::new([0.0; FRAME]),
         }
+    }
+
+    /// Follow `processing` (the capture's shared one), whose generation
+    /// `seen` this processor was built from: a replacement is taken on the
+    /// next frame whose read of it does not wait.
+    fn following(mut self, processing: Processing, seen: u64) -> Self {
+        self.follow = Some(processing);
+        self.seen = seen;
+        self
     }
 
     /// Follow push-to-talk gate `gated` (the capture's shared one).
@@ -253,7 +440,17 @@ impl Processor {
         self
     }
 
+    /// Follow input volume `gain` (the capture's shared one).
+    pub fn with_input_gain(mut self, gain: InputGain) -> Self {
+        self.applied_gain = gain.get();
+        self.gain = gain;
+        self
+    }
+
     /// Feed mono samples (-1 to 1); each processed 10 ms frame goes to `out`.
+    /// The input volume applies after the APM and RNNoise and before the
+    /// voice gate, as on the web path (micProcessor's GainNode feeds the
+    /// detector), so the gate and the level reports see what is sent.
     /// While the voice gate or push-to-talk's is closed the frame is zeroed
     /// after the APM and RNNoise ran, so their state stays warm for the next
     /// word or press.
@@ -261,14 +458,26 @@ impl Processor {
         let Self {
             apm,
             denoise,
+            follow,
+            seen,
             gated,
             voice,
+            gain,
+            applied_gain,
             lookahead,
             framer,
             input,
             output,
         } = self;
         framer.push(samples.into_iter().map(to_i16), |frame| {
+            if let Some(follow) = follow {
+                if let Some(Some((next, enhanced))) = follow.poll(seen) {
+                    *apm = next;
+                    if enhanced != denoise.is_some() {
+                        *denoise = enhanced.then(DenoiseState::new);
+                    }
+                }
+            }
             let _ = apm.lock().process_stream(frame, SAMPLE_RATE as i32, 1);
             if let Some(d) = denoise {
                 // RNNoise takes 16-bit-range floats.
@@ -282,9 +491,12 @@ impl Processor {
                     .zip(output.iter())
                     .for_each(|(s, o)| *s = o.clamp(-32768.0, 32767.0) as i16);
             }
+            let target = gain.get();
+            apply_gain(frame, *applied_gain, target);
+            *applied_gain = target;
             let (voiced, closed) = {
                 let mut voice = lock(voice);
-                (voice.on(), voice.on() && voice.update(rms(frame)))
+                (voice.on(), voice.observe(rms(frame)))
             };
             if voiced {
                 if lookahead.is_empty() {
@@ -330,8 +542,39 @@ pub fn list_inputs() -> Vec<DeviceInfo> {
         .collect()
 }
 
+/// Where processed 10 ms frames go. Lock order: the input callback's state
+/// lock, then (Loopback) the mixer's; the playout callback takes the mixer's
+/// alone.
+#[derive(Clone)]
+pub enum Sink {
+    /// The published microphone track (a call).
+    Track(NativeAudioSource),
+    /// The mic test's own playout queue.
+    Loopback(Arc<Mixer>),
+}
+
+impl Sink {
+    fn deliver(&self, frame: &[i16]) {
+        match self {
+            Self::Track(source) => {
+                // The source is unbuffered (queue 0), so this completes at once.
+                let _ = source
+                    .capture_frame(&AudioFrame {
+                        data: frame.into(),
+                        sample_rate: SAMPLE_RATE,
+                        num_channels: 1,
+                        samples_per_channel: FRAME as u32,
+                    })
+                    .now_or_never();
+            }
+            Self::Loopback(mixer) => mixer.push(LOOPBACK, frame),
+        }
+    }
+}
+
 /// The session's microphone: the selected device and, while unmuted, its
-/// input stream feeding the published track's source.
+/// input stream feeding the published track's source (or the mic test's
+/// loopback).
 #[derive(Default)]
 pub struct Capture {
     /// The selected id (empty: the default), shared with the watcher.
@@ -360,53 +603,87 @@ type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
 
 /// The audio processing and whether RNNoise follows it, shared with the
 /// watcher.
-type Processing = Arc<Mutex<Option<(Arc<Apm>, bool)>>>;
+type Processing = Arc<Shared<Option<(Arc<Apm>, bool)>>>;
 
 /// What an input stream feeds: the processing and the published track's
-/// source, shared with the watcher so a reopen feeds the current ones.
+/// sink, shared with the watcher so a reopen feeds the current ones.
 #[derive(Default, Clone)]
 struct Feed {
     processing: Processing,
-    source: Arc<Mutex<Option<NativeAudioSource>>>,
+    sink: Arc<Mutex<Option<Sink>>>,
     /// Push-to-talk's gate, followed by every stream opened from this feed.
     gated: Arc<AtomicBool>,
     /// The input-sensitivity gate, likewise.
     voice: Arc<Mutex<VoiceGate>>,
+    /// The input volume, likewise.
+    gain: InputGain,
 }
 
 impl Feed {
     fn ready(&self) -> bool {
-        lock(&self.processing).is_some() && lock(&self.source).is_some()
+        self.processing.snapshot().1.is_some() && lock(&self.sink).is_some()
+    }
+
+    /// A processor on the latest processing, which keeps following it.
+    fn processor(&self) -> Result<Processor, String> {
+        let (seen, current) = self.processing.snapshot();
+        let (apm, denoise) = current.ok_or("audio processing is not set up")?;
+        Ok(Processor::new(apm, denoise)
+            .following(self.processing.clone(), seen)
+            .gated_by(self.gated.clone())
+            .with_voice_gate(self.voice.clone())
+            .with_input_gain(self.gain.clone()))
     }
 
     fn open(&self, device: &cpal::Device, dead: Arc<AtomicBool>) -> Result<cpal::Stream, String> {
-        let (apm, denoise) = lock(&self.processing)
-            .clone()
-            .ok_or("audio processing is not set up")?;
-        let source = lock(&self.source).clone().ok_or("no microphone track")?;
-        let processor = Processor::new(apm, denoise)
-            .gated_by(self.gated.clone())
-            .with_voice_gate(self.voice.clone());
-        open_input(device, processor, source, dead)
+        let processor = self.processor()?;
+        let sink = lock(&self.sink).clone().ok_or("no capture sink")?;
+        open_input(device, processor, sink, dead)
     }
 }
 
 impl Capture {
-    /// `on_voice_gate` is told each time the voice gate opens or closes.
+    /// `on_voice_gate` is told each time the voice gate opens or closes,
+    /// `on_level` each level report.
     pub fn configure(
         &mut self,
         apm: Arc<Apm>,
         enhanced_noise_suppression: bool,
         on_voice_gate: GateSink,
+        on_level: LevelSink,
     ) {
-        *lock(&self.feed.processing) = Some((apm, enhanced_noise_suppression));
-        lock(&self.feed.voice).report_to(on_voice_gate);
+        self.feed
+            .processing
+            .set(Some((apm, enhanced_noise_suppression)));
+        let mut voice = lock(&self.feed.voice);
+        voice.report_to(on_voice_gate);
+        voice.report_levels_to(on_level);
+    }
+
+    /// Replace the audio processing, on a running stream too: the input
+    /// callback takes it on a later frame, without waiting for this thread,
+    /// and a stopped (muted) capture opens its next stream with it.
+    pub fn set_processing(&self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
+        self.feed
+            .processing
+            .set(Some((apm, enhanced_noise_suppression)));
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
-    /// path's scale (`vadThreshold`).
-    pub fn set_voice_gate(&self, threshold: f32) {
-        lock(&self.feed.voice).set_threshold(threshold);
+    /// path's scale (`vadThreshold`). `retune` moves it without restarting
+    /// the detector (automatic sensitivity's steps).
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+        let mut voice = lock(&self.feed.voice);
+        if retune {
+            voice.retune(threshold);
+        } else {
+            voice.set_threshold(threshold);
+        }
+    }
+
+    /// Set the input volume as a linear gain (0 to 2).
+    pub fn set_input_gain(&self, gain: f32) {
+        self.feed.gain.set(gain);
     }
 
     /// Close or open push-to-talk's gate. The input stream stays as it is:
@@ -420,10 +697,11 @@ impl Capture {
         usize::from(self.stream().is_some())
     }
 
-    /// Start capturing into `source` (the first unmute publishes it). A cached
-    /// device that no longer opens (unplugged) is resolved again once.
-    pub fn start(&mut self, source: NativeAudioSource) -> Result<(), String> {
-        *lock(&self.feed.source) = Some(source);
+    /// Start capturing into `sink` (the first unmute publishes a track's
+    /// source). A cached device that no longer opens (unplugged) is resolved
+    /// again once.
+    pub fn start(&mut self, sink: Sink) -> Result<(), String> {
+        *lock(&self.feed.sink) = Some(sink);
         if self.stream().is_some() {
             return Ok(());
         }
@@ -585,7 +863,7 @@ fn pick(
 fn open_input(
     device: &cpal::Device,
     processor: Processor,
-    source: NativeAudioSource,
+    sink: Sink,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     let supported = device
@@ -595,7 +873,7 @@ fn open_input(
     let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
         .ok_or("the capture device offers no 48 kHz format")?;
     // Shared by the two build attempts; only the one that succeeds runs.
-    let state = Arc::new(Mutex::new((processor, source)));
+    let state = Arc::new(Mutex::new((processor, sink)));
     let build = |buffer_size| {
         let config = cpal::StreamConfig {
             buffer_size,
@@ -626,7 +904,7 @@ where
 fn build_input<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    state: Arc<Mutex<(Processor, NativeAudioSource)>>,
+    state: Arc<Mutex<(Processor, Sink)>>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::Error>
 where
@@ -638,18 +916,8 @@ where
         config,
         move |data, _| {
             let mut guard = state.lock().unwrap_or_else(|p| p.into_inner());
-            let (processor, source) = &mut *guard;
-            processor.push(to_mono(data, width), |frame| {
-                // The source is unbuffered (queue 0), so this completes at once.
-                let _ = source
-                    .capture_frame(&AudioFrame {
-                        data: frame.into(),
-                        sample_rate: SAMPLE_RATE,
-                        num_channels: 1,
-                        samples_per_channel: FRAME as u32,
-                    })
-                    .now_or_never();
-            });
+            let (processor, sink) = &mut *guard;
+            processor.push(to_mono(data, width), |frame| sink.deliver(frame));
         },
         // A stream the sound server tore down (suspend/resume, a
         // pulseaudio restart) is reported only here: flag it so the
@@ -761,7 +1029,12 @@ mod tests {
     fn the_watchers_feed_follows_the_captures_current_source() {
         let mut capture = Capture::default();
         let watchers = capture.feed.clone();
-        capture.configure(Apm::new(&opts(false, false)), false, Arc::new(|_| {}));
+        capture.configure(
+            Apm::new(&opts(false, false)),
+            false,
+            Arc::new(|_| {}),
+            Arc::new(|_, _| {}),
+        );
         assert!(!watchers.ready(), "no source yet");
         let source = NativeAudioSource::new(
             livekit::webrtc::audio_source::AudioSourceOptions::default(),
@@ -769,10 +1042,26 @@ mod tests {
             1,
             0,
         );
-        *lock(&capture.feed.source) = Some(source);
+        *lock(&capture.feed.sink) = Some(Sink::Track(source));
         assert!(watchers.ready(), "the watcher sees the source set after it");
-        *lock(&capture.feed.source) = None;
+        *lock(&capture.feed.sink) = None;
         assert!(!watchers.ready());
+    }
+
+    /// The mic test's sink hands every processed frame to the loopback
+    /// queue, which plays once it holds its prime.
+    #[test]
+    fn a_loopback_sink_delivers_processed_frames_to_the_mixer() {
+        let mixer = Arc::new(Mixer::default());
+        mixer.add_loopback();
+        let sink = Sink::Loopback(mixer.clone());
+        let frame: Vec<i16> = (0..FRAME).map(|i| ((i % 40) as i16 - 20) * 400).collect();
+        for _ in 0..3 {
+            sink.deliver(&frame);
+        }
+        let mut out = vec![0.0f32; FRAME * 3];
+        mixer.mix(&mut out, 1);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "the audio is present");
     }
 
     /// DP-30: push-to-talk's gate keeps the capture and its processing
@@ -893,8 +1182,130 @@ mod tests {
     fn the_voice_gate_is_shared_with_the_watchers_feed() {
         let capture = Capture::default();
         let watchers = capture.feed.clone();
-        capture.set_voice_gate(0.03);
+        capture.set_voice_gate(0.03, false);
         assert_eq!(lock(&watchers.voice).threshold, 0.03);
+    }
+
+    /// Automatic sensitivity's steps move the threshold without restarting
+    /// the detector: a closed gate stays closed and says nothing, as the
+    /// worklet's "threshold" message keeps its counts. It never turns the
+    /// gate on or off: that is a set_threshold.
+    #[test]
+    fn a_retune_moves_the_threshold_without_reopening_the_gate() {
+        let (gate, reports) = reporting_gate(0.02);
+        let mut p =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
+        run(&mut p, &noise(FRAME * 100, 0.005, 9));
+        assert_eq!(*lock(&reports), [false]);
+        lock(&gate).retune(0.03);
+        assert_eq!(lock(&gate).threshold, 0.03);
+        assert!(lock(&gate).closed, "still closed");
+        assert_eq!(*lock(&reports), [false], "no restart, no report");
+        lock(&gate).retune(0.0);
+        assert_eq!(lock(&gate).threshold, 0.03, "a retune never turns it off");
+        // A late retune after the gate was turned off leaves it off.
+        lock(&gate).set_threshold(0.0);
+        lock(&gate).retune(0.02);
+        assert!(!lock(&gate).on(), "a retune never turns it on");
+    }
+
+    fn reported_levels(gate: &Arc<Mutex<VoiceGate>>) -> Arc<Mutex<Vec<(f32, bool)>>> {
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let sink = levels.clone();
+        lock(gate).report_levels_to(Arc::new(move |rms, open| lock(&sink).push((rms, open))));
+        levels
+    }
+
+    /// One level report per 50 ms, the loudest 10 ms frame in it, as
+    /// vad-worklet.js reports its peak: the meter and automatic sensitivity
+    /// read the same numbers on both paths. It reports with no gate too.
+    #[test]
+    fn level_reports_carry_the_loudest_frame_every_fifty_ms() {
+        let gate = Arc::new(Mutex::new(VoiceGate::default()));
+        let levels = reported_levels(&gate);
+        for rms in [0.01, 0.04, 0.02, 0.0, 0.01, 0.03, 0.0, 0.0, 0.0] {
+            lock(&gate).observe(rms);
+        }
+        assert_eq!(*lock(&levels), [(0.04, true)], "one report so far");
+        lock(&gate).observe(0.0);
+        assert_eq!(*lock(&levels), [(0.04, true), (0.03, true)]);
+    }
+
+    /// A report says whether the gate is open, for the meter's colour.
+    #[test]
+    fn a_level_report_says_the_gate_is_closed() {
+        let (gate, _) = reporting_gate(0.02);
+        let levels = reported_levels(&gate);
+        let mut p =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
+        run(&mut p, &noise(FRAME * 100, 0.005, 9));
+        let last = *lock(&levels).last().unwrap();
+        assert!(!last.1, "closed after the hold: {last:?}");
+        assert!(last.0 > 0.0 && last.0 < 0.02, "the quiet level: {last:?}");
+    }
+
+    /// The loudest reported level once the ramp has settled.
+    fn steady_level(gain: f32, input: &[f32]) -> f32 {
+        let gate = Arc::new(Mutex::new(VoiceGate::default()));
+        let levels = reported_levels(&gate);
+        let input_gain = InputGain::default();
+        input_gain.set(gain);
+        let mut p = Processor::new(Apm::new(&opts(false, false)), false)
+            .with_voice_gate(gate)
+            .with_input_gain(input_gain);
+        run(&mut p, input);
+        let reports = lock(&levels).clone();
+        reports[2..].iter().map(|r| r.0).fold(0.0, f32::max)
+    }
+
+    /// The input volume scales the voice before the gate and the level
+    /// reports see it, as micProcessor's GainNode feeds the web detector:
+    /// 200 % doubles the level, 50 % halves it, 0 % is silence.
+    #[test]
+    fn the_input_volume_scales_what_the_gate_and_meter_see() {
+        let input = noise(FRAME * 50, 0.05, 3);
+        let unity = steady_level(1.0, &input);
+        assert!(unity > 0.0);
+        let double = steady_level(2.0, &input);
+        let half = steady_level(0.5, &input);
+        assert!((double / unity - 2.0).abs() < 0.05, "{double} vs {unity}");
+        assert!((half / unity - 0.5).abs() < 0.05, "{half} vs {unity}");
+        assert_eq!(steady_level(0.0, &input), 0.0);
+    }
+
+    /// A volume change ramps across one frame instead of jumping, so a slider
+    /// move does not click; a frame at 100 % is left untouched.
+    #[test]
+    fn a_volume_change_ramps_across_one_frame() {
+        let mut frame = [1000_i16; FRAME];
+        apply_gain(&mut frame, 1.0, 2.0);
+        assert!(
+            frame[0] > 1000 && frame[0] < 1010,
+            "starts near the old gain"
+        );
+        assert_eq!(frame[FRAME - 1], 2000, "ends on the new one");
+        assert!(frame.windows(2).all(|w| w[0] <= w[1]), "no jump");
+        let mut unity = [1234_i16; FRAME];
+        apply_gain(&mut unity, 1.0, 1.0);
+        assert!(unity.iter().all(|&s| s == 1234));
+        let mut loud = [30000_i16; FRAME];
+        apply_gain(&mut loud, 2.0, 2.0);
+        assert!(loud.iter().all(|&s| s == 32767), "clipped, not wrapped");
+    }
+
+    /// The capture's input volume is the one every stream it opens follows,
+    /// held to 0-200 %; a stray non-number keeps 100 %.
+    #[test]
+    fn the_input_volume_is_shared_with_the_watchers_feed() {
+        let capture = Capture::default();
+        let watchers = capture.feed.clone();
+        assert_eq!(watchers.gain.get(), 1.0, "100 % until set");
+        capture.set_input_gain(0.5);
+        assert_eq!(watchers.gain.get(), 0.5);
+        capture.set_input_gain(3.0);
+        assert_eq!(watchers.gain.get(), 2.0);
+        capture.set_input_gain(f32::NAN);
+        assert_eq!(watchers.gain.get(), 1.0);
     }
 
     /// A stream the watcher reopens (device loss, a default move) is built
@@ -1013,5 +1424,84 @@ mod tests {
                 elapsed / seconds * 100.0
             );
         }
+    }
+
+    /// A toggle reaches a processor that is already running, on its next
+    /// frame: the new APM replaces the old and RNNoise starts (or stops).
+    #[test]
+    fn a_running_processor_takes_a_new_processing_on_the_next_frame() {
+        let first = Apm::new(&opts(false, false));
+        let slot: Processing = Arc::new(Shared::new(Some((first.clone(), false))));
+        let (seen, _) = slot.snapshot();
+        let mut p = Processor::new(first.clone(), false).following(slot.clone(), seen);
+        let input = noise(FRAME * 3, 0.1, 7);
+        run(&mut p, &input);
+        assert!(Arc::ptr_eq(&p.apm, &first) && p.denoise.is_none());
+
+        let second = Apm::new(&opts(true, true));
+        slot.set(Some((second.clone(), true)));
+        run(&mut p, &input[..FRAME]);
+        assert!(Arc::ptr_eq(&p.apm, &second));
+        assert!(p.denoise.is_some());
+
+        // And back off: the denoiser is dropped, the APM replaced again.
+        let third = Apm::new(&opts(false, false));
+        slot.set(Some((third.clone(), false)));
+        run(&mut p, &input[..FRAME]);
+        assert!(Arc::ptr_eq(&p.apm, &third) && p.denoise.is_none());
+    }
+
+    /// The audio thread never waits on a set in progress: with the slot's
+    /// lock held the frame is processed with the old processing, and the
+    /// swap lands on the first frame after the lock is free.
+    #[test]
+    fn a_set_racing_the_callback_never_blocks_it_and_lands_later() {
+        let first = Apm::new(&opts(false, false));
+        let slot: Processing = Arc::new(Shared::new(Some((first.clone(), false))));
+        let (seen, _) = slot.snapshot();
+        let mut p = Processor::new(first.clone(), false).following(slot.clone(), seen);
+        let second = Apm::new(&opts(true, true));
+        let held = lock(&slot.value);
+        // Move the generation as `set` does, while it still holds the lock.
+        slot.generation.fetch_add(1, Ordering::Release);
+        let frame = noise(FRAME, 0.1, 3);
+        let out = run(&mut p, &frame);
+        assert_eq!(out.len(), FRAME);
+        assert!(Arc::ptr_eq(&p.apm, &first) && p.denoise.is_none());
+        drop(held);
+        *lock(&slot.value) = Some((second.clone(), true));
+        run(&mut p, &frame);
+        assert!(Arc::ptr_eq(&p.apm, &second) && p.denoise.is_some());
+    }
+
+    /// A set while the stream is stopped (muted) is what the next open uses.
+    #[test]
+    fn a_set_while_stopped_is_used_by_the_next_open() {
+        let mut capture = Capture::default();
+        let first = Apm::new(&opts(false, false));
+        capture.configure(first.clone(), false, Arc::new(|_| {}), Arc::new(|_, _| {}));
+        let before = capture.feed.processor().unwrap();
+        assert!(Arc::ptr_eq(&before.apm, &first) && before.denoise.is_none());
+
+        capture.stop();
+        let second = Apm::new(&opts(true, true));
+        capture.set_processing(second.clone(), true);
+        let after = capture.feed.processor().unwrap();
+        assert!(Arc::ptr_eq(&after.apm, &second));
+        assert!(after.denoise.is_some());
+    }
+
+    /// The echo canceller's reference follows a replaced APM as well.
+    #[test]
+    fn the_reference_follows_a_replaced_apm() {
+        let slot: Arc<Shared<Option<Arc<Apm>>>> = Arc::default();
+        let mut reference = Reference::following(slot.clone());
+        let buffer = vec![0.1_f32; FRAME];
+        reference.feed(&buffer, 1);
+        assert!(reference.apm.is_none());
+        let apm = Apm::new(&opts(true, false));
+        slot.set(Some(apm.clone()));
+        reference.feed(&buffer, 1);
+        assert!(reference.apm.as_ref().is_some_and(|a| Arc::ptr_eq(a, &apm)));
     }
 }

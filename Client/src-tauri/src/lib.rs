@@ -21,6 +21,8 @@ mod idle;
 mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
+#[cfg(target_os = "linux")]
+mod linux_spellcheck;
 mod livekit_proxy;
 // Message notifications that open their message on click (the plugin's desktop
 // backend drops clicks). Desktop-only: the plugin's mobile backend has its own
@@ -49,6 +51,8 @@ mod update_commands;
 mod window_prefs;
 #[cfg(windows)]
 mod windows_media;
+#[cfg(windows)]
+mod windows_share_bar;
 mod ws_proxy;
 
 /// Map the RUST_LOG env var to a global level filter for the log plugin.
@@ -250,6 +254,10 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_voice_gate,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_input_gain,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_audio_processing,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_set_subscribed,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_video_view,
@@ -259,6 +267,8 @@ pub fn run() {
             native_voice::native_voice_set_screenshare_volume,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_get_stats,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_list_devices,
             #[cfg(target_os = "linux")]
@@ -279,6 +289,12 @@ pub fn run() {
             native_voice::native_voice_start_camera_preview,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_stop_camera_preview,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_mic_test,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_update_mic_test,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_mic_test,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_screen_sources,
             #[cfg(target_os = "linux")]
@@ -388,6 +404,12 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // WebView2 hides device names until mic/camera are allowed.
         #[cfg(windows)]
         windows_media::allow_media_capture(&window, app.config(), config.use_https_scheme);
+        // WebView2's own "is sharing your screen" bar; the stream card has Stop.
+        #[cfg(windows)]
+        windows_share_bar::hide_on_capture(
+            &window,
+            windows_media::app_origin(app.config(), config.use_https_scheme),
+        );
         #[cfg(target_os = "linux")]
         exit_watch::watch_webview(&window);
         let handle = app.handle().clone();
@@ -418,6 +440,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // voice/video works on Linux (no-op elsewhere; see linux_media).
     #[cfg(target_os = "linux")]
     linux_media::enable_media_capture(app.handle());
+    // WebKitGTK ships spell checking off — enable it in the system language.
+    #[cfg(target_os = "linux")]
+    linux_spellcheck::enable_spell_checking(app.handle());
     Ok(())
 }
 

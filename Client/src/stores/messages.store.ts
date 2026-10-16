@@ -34,6 +34,7 @@ import {
 import {
   reduceSetChannelLoading,
   reduceSetChannelLoadError,
+  reduceSetOlderLoadFailed,
   reduceSetMessages,
   reduceSetAroundMessages,
   reduceInvalidateLoadedMessageWindows,
@@ -198,7 +199,11 @@ export function setMessages(
   anchorId: number | null = null,
 ): void {
   messagesStore.setState((prev) =>
-    reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
+    reduceSetOlderLoadFailed(
+      reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
+      channelId,
+      false,
+    ),
   );
 }
 
@@ -232,7 +237,11 @@ export function setAroundMessages(
   splice = false,
 ): void {
   messagesStore.setState((prev) =>
-    reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
+    reduceSetOlderLoadFailed(
+      reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
+      channelId,
+      false,
+    ),
   );
 }
 
@@ -282,7 +291,9 @@ export function invalidateChannelMessageWindow(channelId: number): void {
  * user's own unsent text, like every other window-replacing writer.
  */
 export function clearChannelContent(channelId: number): void {
-  messagesStore.setState((prev) => reduceClearChannelContent(prev, channelId));
+  messagesStore.setState((prev) =>
+    reduceSetOlderLoadFailed(reduceClearChannelContent(prev, channelId), channelId, false),
+  );
 }
 
 /**
@@ -308,7 +319,24 @@ export function prependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  messagesStore.setState((prev) => reducePrependMessages(prev, channelId, messages, hasMore));
+  messagesStore.setState((prev) =>
+    reduceSetOlderLoadFailed(
+      reducePrependMessages(prev, channelId, messages, hasMore),
+      channelId,
+      false,
+    ),
+  );
+}
+
+/** Record that a channel's older-page fetch failed (the list offers Retry at
+ *  its top), or clear the mark. Clearing an unset mark changes nothing. */
+export function setOlderLoadFailed(channelId: number, failed: boolean): void {
+  messagesStore.setState((prev) => reduceSetOlderLoadFailed(prev, channelId, failed));
+}
+
+/** Whether the channel's last older-page fetch failed. */
+export function hasOlderLoadFailed(channelId: number): boolean {
+  return messagesStore.select((s) => s.olderLoadFailed?.has(channelId) ?? false);
 }
 
 /** Append the next newer page below a detached window. The server returns an

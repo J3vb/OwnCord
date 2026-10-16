@@ -45,6 +45,31 @@
   background: transparent;
   color: var(--text-muted);
 }
+/* A row of emoji buttons (the message menu's quick reactions). */
+.context-menu-group {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+.context-menu-item--content {
+  flex: 1;
+  justify-content: center;
+  width: auto;
+  font-size: var(--font-size-lg, 18px);
+  line-height: 1;
+}
+.context-menu-item--content img {
+  width: 20px;
+  height: 20px;
+}
+.context-menu-item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-menu-item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
 .context-menu-sep {
   height: 1px;
   background: var(--border);
@@ -606,4 +631,24 @@
 .whats-new-actions {
   display: flex;
   gap: var(--space-2);
+}
+
+/* Masked-link warning: the real address, wrapped so a long one stays in the box. */
+.masked-link-url {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+  max-height: 8em;
+  overflow-y: auto;
+}
+.masked-link-trust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }

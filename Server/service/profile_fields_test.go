@@ -305,7 +305,8 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	ctx := context.Background()
 
 	text := "  <b>away</b>  "
-	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusInvisible, &text, nil)
+	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusInvisible, &text, nil, nil)
+	got := res.CustomStatus
 	if err != nil {
 		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
@@ -323,7 +324,8 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	// A later status flip that carries no custom_status field must leave the
 	// text alone AND still put it on the wire, or the auto-idle timer would
 	// blank everyone else's copy several times an hour.
-	got, err = svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil)
+	res, err = svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil, nil)
+	got = res.CustomStatus
 	if err != nil {
 		t.Fatalf("HandlePresenceUpdate (bare): %v", err)
 	}
@@ -354,7 +356,7 @@ func TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing(t *t
 	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
 
 	start := time.Now()
-	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil)
+	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil, nil)
 	elapsed := time.Since(start)
 	if !errors.Is(err, ErrBadRequest) {
 		t.Errorf("oversized custom_status err = %v, want ErrBadRequest", err)
@@ -380,11 +382,11 @@ func TestHandlePresenceUpdate_RejectsUnknownStatusAndOverlongText(t *testing.T) 
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	ctx := context.Background()
 
-	if _, err := svc.HandlePresenceUpdate(ctx, 1, "afk", nil, nil); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.HandlePresenceUpdate(ctx, 1, "afk", nil, nil, nil); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("unknown status err = %v, want ErrBadRequest", err)
 	}
 	long := strings.Repeat("x", MaxCustomStatusLen+1)
-	if _, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &long, nil); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &long, nil, nil); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("overlong custom_status err = %v, want ErrBadRequest", err)
 	}
 	// The rejected call must not have committed the status either.

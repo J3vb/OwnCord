@@ -363,6 +363,10 @@ var erasureStatements = []struct {
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
+	// Mention ledger (migration 063): receipts naming the subject as the
+	// recipient. Receipts for the subject's own messages go with those messages
+	// through the cascade above.
+	{"mention_receipts", `DELETE FROM mention_receipts WHERE user_id = ?`},
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
 	// Web Push subscriptions (migration 045, B5-4, class 2a): the users
 	// delete below would cascade this too, but a surviving endpoint is a

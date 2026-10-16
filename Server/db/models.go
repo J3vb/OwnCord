@@ -34,6 +34,10 @@ type User struct {
 	// CustomStatus is the optional free-text status line shown under the name.
 	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
 	CustomStatus *string
+	// CustomStatusExpiresAt is the instant CustomStatus clears itself, as
+	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
+	// non-nil CustomStatus.
+	CustomStatusExpiresAt *string
 }
 
 // EffectiveDisplayName returns the name to render for the user: the display
@@ -313,6 +317,10 @@ type ChannelUnread struct {
 	// this user directly or via an authorized @everyone/@here. Zeroed by
 	// channel_focus, never advanced by an edit.
 	MentionCount int `json:"mention_count"`
+	// LastReadMessageID is read_states.last_message_id: the caller's read
+	// pointer, 0 when the caller has no row for the channel. It is not
+	// LastMessageID, which is the newest live message in the channel.
+	LastReadMessageID int64 `json:"last_read_message_id"`
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.

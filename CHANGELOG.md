@@ -52,26 +52,55 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
+- Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
+
+**Voice**
+
+- On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
+- On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
+- On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.
+- Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
 
 **Profiles**
 
 - The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
+- A custom status can clear itself: `presence_update` takes an optional `custom_status_expires_in` (60 seconds to 7 days), the server clears the status at that moment and tells everyone with a `presence` whose `custom_status` is `null`, and an expired status no longer comes back when you reconnect. Your own `auth_ok.user` and `/users/me` carry `custom_status_expires_at`; nobody else sees it. The desktop app's "Clear after" picker follows in a later change.
+- Moderators can see who is timed out: `ready` gains `member_timeouts` and a new `member_timeouts` frame is sent when a timeout is issued, lifted or runs out, to everyone who can moderate members and to the timed-out member (their own entry only). Other members are not told. The desktop app's timeout icon follows in a later change.
 
 **Messaging**
 
+- The server can now read a channel up to a given message and mark a message unread again: `mark_read` takes an optional `message_id`, there is a new `mark_unread`, and `channel_focus` takes `read: false` to focus without marking read. `mark_read` and `mark_unread` each answer with a `read_state` frame, and `ready` advertises `capabilities.read_pointer`. Clients that do not send the new fields behave as before.
 - A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. In the desktop app, the reply bar now names the author by display name and has an **@ ON / @ OFF** toggle: it starts on for each reply, is hidden when you reply to yourself, and a retried send keeps the choice.
 - A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone. The desktop app refuses a 21st emoji straight away and says the message has reached the reaction limit.
 - Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
 - Typing `#` in the message box suggests channels to link, as `@` does for people.
 - Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
+- Right-clicking a message now opens a menu, as in Discord: three quick reactions, Add Reaction, Edit Message (your own), Reply, Copy Text (and Copy when you have selected some of it), Pin Message, Copy Message Link, Delete Message (hold Shift to skip the confirmation), Report Message, and Copy Message ID in developer mode. Right-clicking a link adds Copy Link and Open Link. Actions you cannot use right now, such as reacting while offline or timed out, are greyed out with the reason. The menu also opens from the keyboard with the Menu key or Shift+F10 on a message's buttons.
 - Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
+- Linux: spell checking in the message composer, in the system language (needs a hunspell dictionary).
 - Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
 - A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
 - Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
 - When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
 - Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
 - The server now tells each client, per channel, whether it may delete other members' messages, pin, and react (`can_delete_others`, `can_pin`, `can_react` in `ready` and in the per-viewer `channel_create`), so the app can disable controls the server would refuse. Pinning now follows the same permission rule as before, defined in one place; nothing about who can pin changes. A timed-out moderator keeps pin and delete-others in channels; a timed-out member cannot react. The desktop app's buttons follow in a later change.
+- The desktop app's message box, as in Discord: the + button takes several files at once, dragging a file over the chat shows **Upload to #channel**, and a draft's text and reply are kept when you restart the app (per server and account; attachments are not).
+- A character counter appears when 200 characters are left and turns red past 4,000, and pasting text that would go past the limit attaches it as `message.txt` instead.
+- Clearing an edit and pressing Enter now asks whether to delete the message, instead of doing nothing.
+- Hovering a message's time, or its follow-up time beside it, now shows the weekday, date and time (for example "Tuesday, October 7, 2026 at 2:34 PM"), and "(edited)" now shows when the message was edited on hover.
+- Three people typing are now named ("Ana, Ben, and Cy are typing..."), with the names in bold. Four or more still read "Several people are typing...".
+- The delete confirmation now shows who wrote the message and the start of its text, and tells you that holding Shift when you click Delete skips the question.
+- A channel with slow mode now says so under the message box, with the interval ("Slow mode is on: one message every 5s"), before you send anything. Moderators, who are not limited, do not see it.
+- The pinned messages panel now shows each pin as formatted text (bold, links, mentions, emoji) instead of raw characters, stays open when you unpin a message (the card just leaves the list), and follows pins and unpins made by anyone while it is open. Unpin appears or disappears as your permission changes.
+- Pinning or unpinning a message from its menu now updates the message straight away, and puts it back if the server refuses.
+- A link whose text hides its address (`[text](address)`) now asks before leaving OwnCord, showing the full address; tick "Trust this site's links from now on" to skip the question for that site. Plain links open as before.
+- Links from `m.youtube.com`, `music.youtube.com`, `youtube-nocookie.com` and YouTube `/live/` addresses now get a video player in chat, like other YouTube links.
+- Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
+
+**Voice and video**
+
+- A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
 
 ### Changed
 
@@ -102,11 +131,19 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
 - Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
+- Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.
+- Editing a message showed you as typing to everyone in the channel. Editing no longer does.
+- Delete, Pin and React now follow the channel's permissions. A channel that grants or removes them for you now shows or hides those buttons, instead of the buttons following your role alone.
+- Messages from the same person now group when sent up to 7 minutes apart, as in Discord, instead of 5.
+- When the emoji list could not load, the picker said "No emoji found". It now says it could not load emoji and has a Retry button.
+- When older messages failed to load as you scrolled up, a brief pop-up came and went. A "Couldn't load messages" row with Retry now stays at the top of the chat until it works.
 
 **Voice and video**
 
+- On Linux the voice panel's ping read "—" with empty signal bars, a watched screen share had no quality chip, and your own Go Live showed no frame rate. All three now show, as on Windows.
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 - On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.

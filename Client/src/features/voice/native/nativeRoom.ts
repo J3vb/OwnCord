@@ -29,12 +29,15 @@
 import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { loadPref } from "../../../lib/preferences";
+import { NoiseFloorTracker } from "../../../lib/noiseFloor";
 import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
 import type {
   NativeVoiceAudioOptions,
   NativeVoiceEnvelope,
   NativeVoiceEvent,
+  NativeVoiceStats,
+  NativeVoiceStatsEntry,
   NativeVoiceTrack,
   NativeVideoQuality,
 } from "../../../platform/contracts/nativeVoice";
@@ -61,11 +64,54 @@ type Listener = (...args: unknown[]) => void;
  *  canvas track stands in for the browser's decoded track. */
 export class NativeRemoteVideoTrack {
   readonly kind = "video";
+  private disposed = false;
+  private last: { bytes: number; atMs: number } | null = null;
+  /** bits/s from the last two distinct samples' byte deltas; undefined until
+   *  two exist (what the tile chip reads on the web path). */
+  currentBitrate: number | undefined = undefined;
   constructor(
     readonly sid: string,
     readonly source: string,
     private readonly renderer: NativeVideoRenderer,
+    private readonly stats: () => Promise<NativeVoiceStats | null> = () => Promise.resolve(null),
   ) {}
+  /** The tile chip's receiver sample (`remoteTracks.getRemoteVideoStats`),
+   *  from the host's shared stats tick. Undefined when the host has no sample
+   *  for this track, so the chip falls back to the element's size. */
+  async getReceiverStats(): Promise<
+    | {
+        frameWidth: number;
+        frameHeight: number;
+        framesDecoded: number;
+        timestamp: number;
+        mimeType?: string;
+        packetsLost: number;
+        packetsReceived: number;
+      }
+    | undefined
+  > {
+    const reply = await this.stats();
+    const s = this.disposed ? undefined : reply?.remoteVideo[this.sid];
+    if (reply == null || s === undefined) return undefined;
+    if (this.last !== null && reply.atMs > this.last.atMs) {
+      this.currentBitrate =
+        s.bytesReceived >= this.last.bytes
+          ? ((s.bytesReceived - this.last.bytes) * 8 * 1000) / (reply.atMs - this.last.atMs)
+          : undefined;
+    }
+    if (this.last === null || reply.atMs > this.last.atMs) {
+      this.last = { bytes: s.bytesReceived, atMs: reply.atMs };
+    }
+    return {
+      frameWidth: s.frameWidth,
+      frameHeight: s.frameHeight,
+      framesDecoded: s.framesDecoded,
+      timestamp: reply.atMs,
+      mimeType: s.mimeType,
+      packetsLost: s.packetsLost,
+      packetsReceived: s.packetsReceived,
+    };
+  }
   get mediaStreamTrack(): MediaStreamTrack {
     return this.renderer.mediaStreamTrack;
   }
@@ -74,6 +120,7 @@ export class NativeRemoteVideoTrack {
     return [];
   }
   dispose(): void {
+    this.disposed = true;
     this.renderer.dispose();
   }
 }
@@ -198,6 +245,40 @@ interface NativeLocalPublication {
   readonly track: PublishableTrack | NativeCameraTrack | NativeScreenTrack;
 }
 
+/** How long callers share one host stats reply: the poller, a watched tile
+ *  and your own share all poll every 2 s, so their ticks collapse into one
+ *  IPC; the poller alone always gets a fresh one. */
+const STATS_SHARE_MS = 1500;
+
+/** Stands in for livekit-client's `PCTransport` where connectionStats and
+ *  livekitDiagnostics read it (WP LP-5). */
+class NativeStatsTransport {
+  constructor(
+    private readonly room: NativeRoom,
+    private readonly side: "publisher" | "subscriber",
+  ) {}
+  /** undefined (not an empty report) when there is nothing: the poller must
+   *  see "no transports" and keep reading unavailable, never a 4-bar
+   *  "excellent" with rtt 0. */
+  async getStats(): Promise<ReadonlyMap<string, NativeVoiceStatsEntry> | undefined> {
+    const entries = (await this.room.readStats())?.[this.side];
+    return entries === undefined || entries.length === 0
+      ? undefined
+      : new Map(entries.map((e) => [e.id, e]));
+  }
+  /** The backend does not report ICE state to the webview; livekitDiagnostics
+   *  logs these. */
+  getICEConnectionState(): string {
+    return "unknown";
+  }
+  getConnectionState(): string {
+    return "unknown";
+  }
+  getSignallingState(): string {
+    return "unknown";
+  }
+}
+
 export class NativeRoom {
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   readonly name = "";
@@ -205,9 +286,39 @@ export class NativeRoom {
   /** Voice plays in the session's own mixer, so per-user gains above 1 are
    *  fine here (audioElements checks for this marker). */
   readonly nativePlayout = true;
-  /** connectionStats/connectionDiagnostics read `engine.pcManager`; native
-   *  has no browser peer connection, so they see "no transports". */
-  readonly engine = { pcManager: undefined, client: { ws: undefined } };
+  /** connectionStats/livekitDiagnostics read `engine.pcManager`; native has
+   *  no browser peer connection, so these stand-ins serve the host's filtered
+   *  W3C-shaped stats (`native_voice_get_stats`) and nothing while the room
+   *  is not connected. */
+  readonly engine = {
+    pcManager: {
+      publisher: new NativeStatsTransport(this, "publisher"),
+      subscriber: new NativeStatsTransport(this, "subscriber"),
+    },
+    client: { ws: undefined },
+  };
+  private statsTick: {
+    session: number;
+    at: number;
+    reply: Promise<NativeVoiceStats | null>;
+  } | null = null;
+  /** @internal The adapter's own readers only: the stats transports, the
+   *  remote video tracks and the screen track. One host call per tick. */
+  readStats(): Promise<NativeVoiceStats | null> {
+    const session = this.sessionId;
+    if (session === null || this.state !== "connected") return Promise.resolve(null);
+    const now = performance.now();
+    const tick = this.statsTick;
+    if (tick !== null && tick.session === session && now - tick.at < STATS_SHARE_MS) {
+      return tick.reply;
+    }
+    const reply = desktop.nativeVoice
+      .getStats(session)
+      .catch(() => null)
+      .then((r) => (this.sessionId === session ? r : null));
+    this.statsTick = { session, at: now, reply };
+    return reply;
+  }
   /** connectionDiagnostics asks this instead of `engine.client.ws`: the
    *  backend's signaling is up exactly while the room reads "connected"
    *  (it reports "reconnecting" and "disconnected" as they happen). */
@@ -236,14 +347,18 @@ export class NativeRoom {
       if (this.sessionId === null) throw new Error("native room is not connected");
       if (enabled) {
         await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
-        // A new session starts with no sensitivity gate.
+        // A new session starts with no sensitivity gate and at 100 %.
         if (this.voiceThreshold > 0)
           await desktop.nativeVoice.setVoiceGate(this.sessionId, this.voiceThreshold);
+        if (this.inputGainPercent !== 100)
+          await desktop.nativeVoice.setInputGain(this.sessionId, this.inputGainPercent);
       }
       // A device-switch re-enable passes no options: keep the last bitrate
       // so a first publish after a failed one is not left at the default.
       const bitrate = publishOptions?.audioPreset?.maxBitrate ?? this.micBitrate;
       this.micBitrate = bitrate;
+      if (enabled) this.capturing = true;
+      else this.stopInputLevels();
       if (bitrate === undefined) await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
       else await desktop.nativeVoice.setMicrophone(this.sessionId, enabled, bitrate);
     },
@@ -291,6 +406,18 @@ export class NativeRoom {
    *  verdicts. */
   private voiceThreshold = 0;
   private onVoiceGate: (speaking: boolean | null) => void = () => {};
+  /** Automatic sensitivity's noise-floor estimate over the capture's level
+   *  reports, as the web detector runs it; null on a fixed threshold. */
+  private autoFloor: NoiseFloorTracker | null = null;
+  private onAutoThreshold: (threshold: number) => void = () => {};
+  /** The input volume (0-200 %); a new session starts at 100. */
+  private inputGainPercent = 100;
+  /** Who hears the capture's level reports (the settings meter); null as
+   *  the level means the capture stopped. */
+  private onInputLevel: ((rms: number | null, open: boolean) => void) | null = null;
+  /** Whether the session's capture runs, so a report still in flight after a
+   *  mute or leave cannot repaint the meter. */
+  private capturing = false;
   /** The session's frame-socket base URL (token included); never logged. */
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
@@ -317,7 +444,7 @@ export class NativeRoom {
    *  `screenshareVolumeOf` is their screen-share audio's, which the web path
    *  sets on its audio element; `applyScreenshareVolumes` re-reads it. */
   constructor(
-    private readonly audio: NativeVoiceAudioOptions,
+    private audio: NativeVoiceAudioOptions,
     private readonly volumeOf: (identity: string) => number = () => 1,
     private readonly screenshareVolumeOf: (identity: string) => number = () => 1,
   ) {}
@@ -364,10 +491,19 @@ export class NativeRoom {
   }
   /** The input-sensitivity gate for the native room, which has no web mic
    *  processor to run the detector (AudioPipeline.startVadPolling): the
-   *  session's capture gates on `threshold`, the web path's scale, and its
-   *  verdicts go to `onSpeaking` — open at the start, as the web detector
-   *  starts, and null when 0 runs no gate. */
-  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void {
+   *  session's capture gates on `gate`, a threshold on the web path's scale,
+   *  and its verdicts go to `onSpeaking` — open at the start, as the web
+   *  detector starts, and null when 0 runs no gate. "auto" runs the web
+   *  path's noise-floor estimate over the capture's level reports, starting
+   *  at `auto.seed` and telling `auto.onThreshold` each step. */
+  setVoiceGate(
+    gate: number | "auto",
+    onSpeaking: (speaking: boolean | null) => void,
+    auto?: { seed?: number; onThreshold?: (threshold: number) => void },
+  ): void {
+    this.autoFloor = gate === "auto" ? new NoiseFloorTracker(auto?.seed) : null;
+    this.onAutoThreshold = auto?.onThreshold ?? (() => {});
+    const threshold = this.autoFloor?.threshold ?? (gate === "auto" ? 0 : gate);
     this.voiceThreshold = threshold;
     this.onVoiceGate = onSpeaking;
     onSpeaking(threshold > 0 ? true : null);
@@ -375,6 +511,51 @@ export class NativeRoom {
     desktop.nativeVoice
       .setVoiceGate(this.sessionId, threshold)
       .catch((err) => log.warn("Voice sensitivity could not reach the native gate", err));
+  }
+  /** Automatic sensitivity moved: the gate takes the new level without
+   *  restarting, as the web detector's worklet does. */
+  private retuneVoiceGate(threshold: number): void {
+    this.voiceThreshold = threshold;
+    this.onAutoThreshold(threshold);
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setVoiceGate(this.sessionId, threshold, true)
+      .catch((err) => log.warn("Automatic sensitivity could not reach the native gate", err));
+  }
+  /** The input volume (0-200 %, the `inputVolume` pref) for the session's
+   *  capture, as AudioPipeline.setInputVolume sets the web processor's gain.
+   *  The noise floor learned behind the old gain is dropped, as the web
+   *  detector's resetFloor does. */
+  setInputGain(percent: number): void {
+    this.inputGainPercent = Math.max(0, Math.min(200, percent));
+    this.autoFloor?.reset(performance.now());
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setInputGain(this.sessionId, this.inputGainPercent)
+      .catch((err) => log.warn("Input volume could not reach the native capture", err));
+  }
+  /** The mic processing toggles (echo cancellation, noise suppression,
+   *  automatic gain control, Enhanced Noise Suppression): kept for a
+   *  reconnect and, in a call, applied by the session's capture and echo
+   *  canceller within a few frames, as AudioPipeline.reapplyAudioProcessing
+   *  restarts the web mic track for them. */
+  setAudioProcessing(audio: NativeVoiceAudioOptions): void {
+    this.audio = audio;
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setAudioProcessing(this.sessionId, audio)
+      .catch((err) => log.warn("Audio processing could not reach the native capture", err));
+  }
+  /** Hear the capture's level reports (null to stop): the settings meter's
+   *  feed while the native capture runs. */
+  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void {
+    this.onInputLevel = listener;
+  }
+  /** The capture stopped (mute, deafen, leave): no more reports will come. */
+  private stopInputLevels(): void {
+    if (!this.capturing) return;
+    this.capturing = false;
+    this.onInputLevel?.(null, false);
   }
   /** Native playout needs no autoplay gesture. */
   startAudio(): Promise<void> {
@@ -440,8 +621,10 @@ export class NativeRoom {
     this.pending = null;
     this.releaseVideo();
     this.clearDecryptTimers();
+    this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
+    this.statsTick = null;
     if (this.counted) nativeCounters.openRooms--;
     this.counted = false;
     this.state = "disconnected";
@@ -578,6 +761,7 @@ export class NativeRoom {
       { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
       pick.capture,
       (t) => this.changeScreenSource(session, t),
+      () => this.readStats(),
     );
     this.screen?.stop();
     this.screen = track;
@@ -696,7 +880,9 @@ export class NativeRoom {
     this.unsubscribeVideo(identity, pub);
     const renderer = new NativeVideoRenderer(`${this.frames}/remote/${pub.trackSid}`);
     pub.resetVideoView();
-    pub.track = new NativeRemoteVideoTrack(pub.trackSid, pub.source, renderer);
+    pub.track = new NativeRemoteVideoTrack(pub.trackSid, pub.source, renderer, () =>
+      this.readStats(),
+    );
     this.emit(RoomEvent.TrackSubscribed, pub.track, pub, this.participant(identity));
   }
 
@@ -882,6 +1068,13 @@ export class NativeRoom {
       case "voiceGate":
         if (this.voiceThreshold > 0) this.onVoiceGate(event.open);
         break;
+      case "inputLevel": {
+        if (!this.capturing) break;
+        this.onInputLevel?.(event.rms, event.open);
+        const next = this.autoFloor?.push(event.rms, performance.now()) ?? null;
+        if (next !== null) this.retuneVoiceGate(next);
+        break;
+      }
       case "activeSpeakers":
         this.emit(
           RoomEvent.ActiveSpeakersChanged,
@@ -927,6 +1120,7 @@ export class NativeRoom {
         break;
       case "reconnecting":
         this.state = "reconnecting";
+        this.statsTick = null;
         this.emit(RoomEvent.Reconnecting);
         break;
       case "reconnected":
@@ -935,6 +1129,7 @@ export class NativeRoom {
         break;
       case "disconnected":
         this.state = "disconnected";
+        this.statsTick = null;
         this.clearDecryptTimers();
         this.emit(
           RoomEvent.Disconnected,

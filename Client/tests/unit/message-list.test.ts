@@ -810,6 +810,8 @@ describe("MessageList", () => {
   });
 
   it("disables every reaction control inline while timed out, and re-enables on lift (B9-15)", () => {
+    setConnectionStatus("connected");
+    uiStore.flush();
     setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
     msgList.mount(container);
     const controls = (): HTMLElement[] => [
@@ -1231,6 +1233,8 @@ describe("MessageList", () => {
     });
 
     it("disables reaction controls while timed out without rebuilding rows (B9-15)", () => {
+      setConnectionStatus("connected");
+      uiStore.flush();
       setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
       msgList.mount(container);
       const row1 = container.querySelector("[data-testid='message-1']");
@@ -1778,6 +1782,7 @@ describe("MessageList", () => {
         const text = container.querySelector(".msg-time")!.textContent!;
         expect(text).toContain("18:34");
         expect(text).not.toMatch(/AM|PM/i);
+        expect(container.querySelector<HTMLElement>(".msg-time")!.title).toContain("18:34");
       } finally {
         vi.useRealTimers();
       }

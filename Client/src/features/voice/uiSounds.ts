@@ -29,6 +29,7 @@ import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/preferences";
 import { loadUserStatus } from "@lib/userStatus";
 import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
+import { soundSwitchOn, type SoundSwitch } from "@lib/soundPrefs";
 import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */
@@ -78,6 +79,25 @@ function canPlay(): boolean {
   return loadPref<boolean>("voiceSounds", true);
 }
 
+/** The per-sound switch (WP M-8) each voice sound answers to. */
+const SOUND_SWITCH: Readonly<Record<VoiceSound, SoundSwitch>> = {
+  join: "joinLeave",
+  leave: "joinLeave",
+  moved: "joinLeave",
+  mute: "muteDeafen",
+  unmute: "muteDeafen",
+  deafen: "muteDeafen",
+  undeafen: "muteDeafen",
+  streamStart: "stream",
+  streamEnd: "stream",
+};
+
+/** Play `kind` unless its own switch is off. Callers have already passed the
+ *  `voiceSounds` group switch and Do Not Disturb (`canPlay`). */
+function play(kind: VoiceSound): void {
+  if (soundSwitchOn(SOUND_SWITCH[kind])) playVoiceSound(kind);
+}
+
 /**
  * Subscribe to voiceStore and play the voice UI sounds. Returns an
  * unsubscribe that also stops any pending sound decision.
@@ -103,7 +123,7 @@ export function startVoiceUiSounds(): () => void {
     cancelLeave();
     leaveTimer = setTimeout(() => {
       leaveTimer = null;
-      if (!isVoiceMovePending()) playVoiceSound("leave");
+      if (!isVoiceMovePending()) play("leave");
     }, LEAVE_GRACE_MS);
   };
 
@@ -148,7 +168,7 @@ export function startVoiceUiSounds(): () => void {
     // a deafen implies (the keybind mutes too) must not also blip.
     const deafenChanged = next.localDeafened !== prev.localDeafened;
     if (deafenChanged) {
-      if (canPlay()) playVoiceSound(next.localDeafened ? "deafen" : "undeafen");
+      if (canPlay()) play(next.localDeafened ? "deafen" : "undeafen");
       finish();
       return;
     }
@@ -166,7 +186,7 @@ export function startVoiceUiSounds(): () => void {
     // connects, and then only the join: never a leave and a join back to back.
     if (self !== null || next.channelId !== prev.channelId) {
       if (self === "leave") scheduleLeave();
-      else if (self !== null) playVoiceSound(self);
+      else if (self !== null) play(self);
       finish();
       return;
     }
@@ -181,19 +201,19 @@ export function startVoiceUiSounds(): () => void {
     if (next.rosterRevision !== prev.rosterRevision && next.channelId !== null) {
       const joined = [...next.peers].some((id) => !prev.peers.has(id));
       const left = [...prev.peers].some((id) => !next.peers.has(id));
-      if (joined) playVoiceSound("join");
-      else if (left) playVoiceSound("leave");
+      if (joined) play("join");
+      else if (left) play("leave");
       else if ([...next.sharing].some((id) => !prev.sharing.has(id))) {
-        playVoiceSound("streamStart");
+        play("streamStart");
       } else if ([...prev.sharing].some((id) => !next.sharing.has(id))) {
-        playVoiceSound("streamEnd");
+        play("streamEnd");
       }
       finish();
       return;
     }
 
     if (next.localMuted !== prev.localMuted) {
-      playVoiceSound(next.localMuted ? "mute" : "unmute");
+      play(next.localMuted ? "mute" : "unmute");
     }
 
     finish();

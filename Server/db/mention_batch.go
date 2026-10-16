@@ -143,6 +143,7 @@ func insertMentionCountChunks(ctx context.Context, tx *sql.Tx, channelID, msgID 
 		if err != nil {
 			return fmt.Errorf("IncrementMentionCounts: %w", err)
 		}
+		admitted := make([]int64, 0, len(chunk))
 		for rows.Next() {
 			var uid, count int64
 			if err := rows.Scan(&uid, &count); err != nil {
@@ -150,12 +151,42 @@ func insertMentionCountChunks(ctx context.Context, tx *sql.Tx, channelID, msgID 
 				return fmt.Errorf("IncrementMentionCounts scan: %w", err)
 			}
 			bumped[uid] = count
+			admitted = append(admitted, uid)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close() //nolint:errcheck // read path; the rows error is the one that matters
 			return fmt.Errorf("IncrementMentionCounts rows: %w", err)
 		}
 		rows.Close() //nolint:errcheck // read path; a close error adds nothing over the committed txn
+		// The writer is one connection, so no statement may run while rows are
+		// open: the receipts go in only after the RETURNING set is drained.
+		if err := insertMentionReceipts(ctx, tx, channelID, msgID, admitted); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertMentionReceipts records, in the same transaction as the increment, one
+// mention_receipts row per recipient whose badge the guard admitted for msgID.
+// A reader the guard skipped is not in userIDs, so they get no receipt, which
+// matches the counter. OR IGNORE keeps a repeated entry idempotent.
+func insertMentionReceipts(ctx context.Context, tx *sql.Tx, channelID, msgID int64, userIDs []int64) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	rowPlaceholders := make([]string, len(userIDs))
+	args := make([]any, 0, len(userIDs)*3)
+	for i, uid := range userIDs {
+		rowPlaceholders[i] = "(?, ?, ?)"
+		args = append(args, uid, channelID, msgID)
+	}
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+		`INSERT OR IGNORE INTO mention_receipts (user_id, channel_id, message_id) VALUES %s`,
+		strings.Join(rowPlaceholders, ","),
+	)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("IncrementMentionCounts receipts: %w", err)
 	}
 	return nil
 }

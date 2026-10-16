@@ -38,6 +38,8 @@ type userResponse struct {
 	About       *string `json:"about"`
 	// CustomStatus is the user's own free-text status line.
 	CustomStatus *string `json:"custom_status"`
+	// CustomStatusExpiresAt: RFC 3339 instant the status clears; null if none.
+	CustomStatusExpiresAt *string `json:"custom_status_expires_at"`
 	// Status is the user's own true status, invisible included. This response
 	// only ever describes the caller, so there is nothing to hide from them.
 	Status      string `json:"status"`
@@ -52,17 +54,27 @@ func toUserResponse(u *db.User) *userResponse {
 	if u.Avatar != nil {
 		avatar = *u.Avatar
 	}
+	customStatus, expiresAt := u.CustomStatus, u.CustomStatusExpiresAt
+	if expiresAt != nil {
+		if at, err := time.Parse(service.CustomStatusExpiryLayout, *expiresAt); err == nil && !time.Now().Before(at) {
+			customStatus = nil // expired, not yet cleared by the expirer
+		}
+	}
+	if customStatus == nil {
+		expiresAt = nil
+	}
 	return &userResponse{
-		ID:           u.ID,
-		Username:     u.Username,
-		Avatar:       avatar,
-		DisplayName:  u.DisplayName,
-		About:        u.About,
-		CustomStatus: u.CustomStatus,
-		Status:       u.Status,
-		RoleID:       u.RoleID,
-		TOTPEnabled:  u.TOTPSecret != nil,
-		CreatedAt:    u.CreatedAt,
+		ID:                    u.ID,
+		Username:              u.Username,
+		Avatar:                avatar,
+		DisplayName:           u.DisplayName,
+		About:                 u.About,
+		CustomStatus:          customStatus,
+		CustomStatusExpiresAt: expiresAt,
+		Status:                u.Status,
+		RoleID:                u.RoleID,
+		TOTPEnabled:           u.TOTPSecret != nil,
+		CreatedAt:             u.CreatedAt,
 	}
 }
 

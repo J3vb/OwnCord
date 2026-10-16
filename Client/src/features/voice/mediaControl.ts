@@ -18,6 +18,7 @@ import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
+import { CodecSwitchController } from "./codecSwitch";
 import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
@@ -61,6 +62,13 @@ export class MediaControl {
   /** Camera switches run one at a time; a queued one that is no longer the
    *  latest pick is skipped, so the last pick wins. */
   private videoSwitch: Promise<void> = Promise.resolve();
+  /** Keeps a live camera or share on a codec every viewer plays (WP M-5b). */
+  private readonly codecSwitch = new CodecSwitchController({
+    getCameraState: () => this._cameraState,
+    getScreenState: () => this._screenState,
+    getDeps: () => this._videoTrackDeps,
+    onSwitchError: (err) => log.warn("Codec switch failed", err),
+  });
   private latestVideoDevice: string | null = null;
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
@@ -268,7 +276,9 @@ export class MediaControl {
   }
 
   async enableCamera(): Promise<void> {
-    return doEnableCamera(this._cameraState, this._videoTrackDeps);
+    await doEnableCamera(this._cameraState, this._videoTrackDeps);
+    // A viewer may have joined while the enable was in flight.
+    this.codecSwitch.kick();
   }
 
   async disableCamera(): Promise<void> {
@@ -276,7 +286,13 @@ export class MediaControl {
   }
 
   async enableScreenshare(): Promise<void> {
-    return doEnableScreenshare(this._screenState, this._videoTrackDeps);
+    await doEnableScreenshare(this._screenState, this._videoTrackDeps);
+    this.codecSwitch.kick();
+  }
+
+  /** The session ended or is reconnecting: stop the live codec switch. */
+  stopCodecSwitch(): void {
+    this.codecSwitch.stop();
   }
 
   async disableScreenshare(): Promise<void> {

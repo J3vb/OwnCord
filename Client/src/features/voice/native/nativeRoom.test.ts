@@ -1,5 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { NativeVoiceEnvelope } from "../../../platform/contracts/nativeVoice";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type {
+  NativeVoiceEnvelope,
+  NativeVoiceStats,
+} from "../../../platform/contracts/nativeVoice";
 import type { Participant } from "livekit-client";
 
 vi.mock("livekit-client", () => ({
@@ -55,6 +58,7 @@ const host = vi.hoisted(() => ({
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
   startCamera: (): Promise<unknown> => Promise.resolve({ capture: 5, width: 1280, height: 720 }),
   setDevice: (): Promise<void> => Promise.resolve(),
+  getStats: (): Promise<NativeVoiceStats | null> => Promise.resolve(null),
   setVideoView: (): Promise<void> => Promise.resolve(),
   pick: (): Promise<unknown> =>
     Promise.resolve({
@@ -121,6 +125,14 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setVoiceGate", args]);
         return Promise.resolve();
       },
+      setInputGain: (...args: unknown[]) => {
+        host.calls.push(["setInputGain", args]);
+        return Promise.resolve();
+      },
+      setAudioProcessing: (...args: unknown[]) => {
+        host.calls.push(["setAudioProcessing", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
@@ -140,6 +152,10 @@ vi.mock("../../../platform/desktop", () => ({
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
         return host.setDevice();
+      },
+      getStats: (...args: unknown[]) => {
+        host.calls.push(["getStats", args]);
+        return host.getStats();
       },
       publishCamera: (...args: unknown[]) => {
         host.calls.push(["publishCamera", args]);
@@ -187,6 +203,8 @@ vi.mock("../../../platform/desktop", () => ({
 import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
+import { createConnectionStatsPoller } from "../../../lib/connectionStats";
+import { readSenderSample } from "../shareSenderStats";
 import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/roomEventHandlers";
 
 const audio = {
@@ -218,6 +236,7 @@ beforeEach(() => {
   host.publishCamera = () => Promise.resolve("TR_cam");
   host.startCamera = () => Promise.resolve({ capture: 5, width: 1280, height: 720 });
   host.setVideoView = () => Promise.resolve();
+  host.getStats = () => Promise.resolve(null);
   host.pick = () =>
     Promise.resolve({
       source: "screen:7",
@@ -540,6 +559,159 @@ describe("NativeRoom room surface", () => {
       emit({ session: 1, event: { type: "voiceGate", open: true } });
       expect(verdicts).toEqual([null]);
     });
+
+    // Automatic sensitivity runs the web detector's noise-floor estimate over
+    // the capture's level reports, and moves the session's gate without
+    // restarting it.
+    it("auto starts at the seed and retunes the gate from the level reports", async () => {
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      host.calls.length = 0;
+      const steps: number[] = [];
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate("auto", (speaking) => verdicts.push(speaking), {
+        seed: 0.03,
+        onThreshold: (next) => steps.push(next),
+      });
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.03]]]);
+      expect(verdicts).toEqual([true]);
+      host.calls.length = 0;
+
+      // A quiet room at RMS 0.002 for a little over a second: the gate settles
+      // 10 dB above it.
+      for (; now <= 1100; now += 50) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.002, open: true } });
+      }
+      expect(steps).toHaveLength(1);
+      expect(steps[0]).toBeCloseTo(0.002 * 10 ** 0.5, 5);
+      expect(host.calls).toEqual([["setVoiceGate", [1, steps[0], true]]]);
+      // Its verdicts still reach the speaking ring.
+      emit({ session: 1, event: { type: "voiceGate", open: false } });
+      expect(verdicts).toEqual([true, false]);
+
+      // An input volume move forgets the floor: the next second's reports
+      // only re-learn it, as the web detector's resetFloor does.
+      room.setInputGain(200);
+      host.calls.length = 0;
+      const resetAt = now;
+      for (; now < resetAt + 1000; now += 50) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.004, open: true } });
+      }
+      expect(host.calls).toEqual([]);
+      vi.restoreAllMocks();
+    });
+
+    it("a fixed threshold ignores the level reports", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      room.setVoiceGate(0.05, () => {});
+      host.calls.length = 0;
+      for (let i = 0; i < 100; i++) {
+        emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: true } });
+      }
+      expect(host.calls).toEqual([]);
+    });
+  });
+
+  describe("audio processing", () => {
+    const changed = {
+      ...audio,
+      echoCancellation: !audio.echoCancellation,
+      enhancedNoiseSuppression: true,
+    };
+
+    it("sends a changed set to the running session", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+      room.setAudioProcessing(changed);
+      expect(host.calls).toEqual([["setAudioProcessing", [1, changed]]]);
+    });
+
+    it("before a connection sends nothing, and the connect carries the new options", async () => {
+      const room = createNativeRoom(audio);
+      room.setAudioProcessing(changed);
+      expect(host.calls).toEqual([]);
+      await room.connect("u", "t");
+      expect(host.calls[0]).toEqual(["connect", ["u", "t", changed]]);
+    });
+  });
+
+  describe("input volume and level", () => {
+    // The session's capture applies the input volume, as the web processor's
+    // gain does; a new session starts at 100 %, so the saved one goes with
+    // every enable, after the gates.
+    it("sends the input volume to the session, and with every enable", async () => {
+      const room = createNativeRoom(audio);
+      room.setInputGain(150);
+      expect(host.calls).toEqual([]);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, false]],
+        ["setInputGain", [1, 150]],
+        ["setMicrophone", [1, true]],
+      ]);
+      host.calls.length = 0;
+
+      room.setInputGain(50);
+      room.setInputGain(300);
+      expect(host.calls).toEqual([
+        ["setInputGain", [1, 50]],
+        ["setInputGain", [1, 200]],
+      ]);
+    });
+
+    it("forwards the capture's level reports to the listener", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      await room.localParticipant.setMicrophoneEnabled(true);
+      const levels: Array<[number | null, boolean]> = [];
+      room.setInputLevelListener((rms, open) => levels.push([rms, open]));
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.001, open: false } });
+      room.setInputLevelListener(null);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.03, open: true } });
+      expect(levels).toEqual([
+        [0.02, true],
+        [0.001, false],
+      ]);
+    });
+
+    // Neither a mute nor a leave reports a last level, so the meter would
+    // freeze on the last one: the room says the capture stopped, and a report
+    // still in flight is dropped.
+    it("tells the listener when the capture stops, and drops late reports", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const levels: Array<[number | null, boolean]> = [];
+      room.setInputLevelListener((rms, open) => levels.push([rms, open]));
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.02, open: true } });
+      await room.localParticipant.setMicrophoneEnabled(false);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.03, open: true } });
+      expect(levels).toEqual([
+        [0.02, true],
+        [null, false],
+      ]);
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.01, open: false } });
+      await room.disconnect();
+      expect(levels.slice(2)).toEqual([
+        [0.01, false],
+        [null, false],
+      ]);
+      // A second stop (leave after mute) says nothing more.
+      await room.disconnect();
+      expect(levels).toHaveLength(4);
+    });
   });
 
   it("deafen unsubscribes remote audio publications through the session", async () => {
@@ -818,7 +990,8 @@ describe("NativeRoom room surface", () => {
     await expect(room.startAudio()).resolves.toBeUndefined();
     await expect(room.switchActiveDevice("audioinput", "x")).rejects.toThrow(/not connected/);
     expect(room.canPlaybackAudio).toBe(true);
-    expect(room.engine.pcManager).toBeUndefined();
+    // LP-5: stats stand-ins that report nothing until the room is connected.
+    await expect(room.engine.pcManager.publisher.getStats()).resolves.toBeUndefined();
     expect(room.localParticipant.getTrackPublication("microphone")).toBeUndefined();
     expect(room.localParticipant.permissions).toBeUndefined();
     await expect(room.localParticipant.setCameraEnabled(true)).rejects.toThrow(/Linux/);
@@ -1546,5 +1719,254 @@ describe("NativeRoom screen share", () => {
     finish!();
     await expect(sharing).rejects.toThrow(/disconnected/);
     expect(host.renderers).toHaveLength(0);
+  });
+});
+
+const sample = (over: Partial<NativeVoiceStats> = {}): NativeVoiceStats => ({
+  atMs: 1000,
+  publisher: [
+    {
+      type: "candidate-pair",
+      id: "CP1",
+      currentRoundTripTime: 0.042,
+      bytesSent: 900,
+      bytesReceived: 1200,
+    },
+    { type: "outbound-rtp", id: "OA1", kind: "audio", packetsSent: 100, bytesSent: 4000 },
+    {
+      type: "inbound-rtp",
+      id: "IA1",
+      kind: "audio",
+      packetsReceived: 100,
+      bytesReceived: 3000,
+      packetsLost: 0,
+      jitter: 0.004,
+    },
+  ],
+  subscriber: [],
+  remoteVideo: {},
+  localVideo: {},
+  ...over,
+});
+const getStatsCalls = () => host.calls.filter(([n]) => n === "getStats");
+const transports = (room: ReturnType<typeof createNativeRoom>) =>
+  room.engine.pcManager as unknown as {
+    publisher: { getStats(): Promise<ReadonlyMap<string, unknown> | undefined> };
+    subscriber: { getStats(): Promise<ReadonlyMap<string, unknown> | undefined> };
+  };
+const tile = async (room: ReturnType<typeof createNativeRoom>) => {
+  emit({
+    session: 1,
+    event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+  });
+  return room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.track!;
+};
+const remote = (bytesReceived: number) => ({
+  frameWidth: 1280,
+  frameHeight: 720,
+  framesDecoded: 60,
+  bytesReceived,
+  packetsLost: 2,
+  packetsReceived: 300,
+  mimeType: "video/VP8",
+});
+
+const layer = (fps: number) => ({
+  framesPerSecond: fps,
+  frameWidth: 1920,
+  frameHeight: 1080,
+  qualityLimitationReason: "cpu",
+  encoderImplementation: "libvpx",
+  active: true,
+});
+
+describe("NativeRoom stats (LP-5)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("the stats poller reads ping, loss and jitter from the native reply", async () => {
+    host.getStats = () => Promise.resolve(sample());
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const poller = createConnectionStatsPoller(() => room as never);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+    const stats = poller.getStats();
+    poller.stop();
+    expect(stats.available).toBe(true);
+    expect(stats.rtt).toBeCloseTo(42, 5);
+    expect(stats.jitter).toBeCloseTo(4, 5);
+    expect(stats.quality).toBe("excellent");
+    expect(stats.totalUp).toBe(900);
+  });
+
+  it("one host call per tick is shared by the poller, a tile and the share", async () => {
+    host.getStats = () =>
+      Promise.resolve(
+        sample({
+          remoteVideo: {
+            TR_v: {
+              frameWidth: 640,
+              frameHeight: 360,
+              framesDecoded: 1,
+              bytesReceived: 1,
+              packetsLost: 0,
+              packetsReceived: 1,
+            },
+          },
+          localVideo: {
+            screen_share: [
+              { frameWidth: 1, frameHeight: 1, qualityLimitationReason: "none", active: true },
+            ],
+          },
+        }),
+      );
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const watched = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.track!;
+    const screen = await share(room);
+    await Promise.all([
+      transports(room).publisher.getStats(),
+      transports(room).subscriber.getStats(),
+      watched.getReceiverStats(),
+      screen.getSenderStats(),
+    ]);
+    expect(getStatsCalls()).toEqual([["getStats", [1]]]);
+    await vi.advanceTimersByTimeAsync(1500);
+    await transports(room).publisher.getStats();
+    expect(getStatsCalls()).toHaveLength(2);
+  });
+
+  it("no host call and no report while not connected", async () => {
+    host.getStats = () => Promise.resolve(sample());
+    const room = createNativeRoom(audio);
+    expect(await transports(room).publisher.getStats()).toBeUndefined();
+    await room.connect("u", "t");
+    emit({ session: 1, event: { type: "reconnecting" } });
+    expect(await transports(room).publisher.getStats()).toBeUndefined();
+    emit({ session: 1, event: { type: "reconnected" } });
+    expect(await transports(room).publisher.getStats()).toBeDefined();
+    expect(getStatsCalls()).toHaveLength(1);
+    await room.disconnect();
+    expect(await transports(room).publisher.getStats()).toBeUndefined();
+    expect(getStatsCalls()).toHaveLength(1);
+  });
+
+  it("a reply that lands after disconnect is dropped", async () => {
+    let land: ((s: NativeVoiceStats) => void) | undefined;
+    host.getStats = () => new Promise((r) => (land = r));
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const pending = transports(room).publisher.getStats();
+    await room.disconnect();
+    land!(sample());
+    expect(await pending).toBeUndefined();
+  });
+
+  it("a failed reply reads as no transports", async () => {
+    host.getStats = () => Promise.resolve(null);
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const poller = createConnectionStatsPoller(() => room as never);
+    const updates = vi.fn();
+    poller.onUpdate(updates);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+    poller.stop();
+    expect(updates).not.toHaveBeenCalled();
+    expect(poller.getStats().available).toBe(false);
+    // A rejecting host is the same as a null one, and is not cached as a rejection.
+    host.getStats = () => Promise.reject(new Error("boom"));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await transports(room).publisher.getStats()).toBeUndefined();
+  });
+
+  it("an empty transport list is no report, not an empty one", async () => {
+    host.getStats = () => Promise.resolve(sample({ publisher: [], subscriber: [] }));
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    expect(await transports(room).publisher.getStats()).toBeUndefined();
+    expect(await transports(room).subscriber.getStats()).toBeUndefined();
+  });
+
+  it("serves each side's entries by id as a report", async () => {
+    host.getStats = () => Promise.resolve(sample());
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const report = await transports(room).publisher.getStats();
+    expect([...report!.keys()]).toEqual(["CP1", "OA1", "IA1"]);
+    expect(await transports(room).subscriber.getStats()).toBeUndefined();
+  });
+
+  it("getReceiverStats maps the tile sample and bitrate comes from byte deltas", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const tileTrack = await tile(room);
+    host.getStats = () => Promise.resolve(sample({ atMs: 1000, remoteVideo: { TR_v: remote(0) } }));
+    const first = await tileTrack.getReceiverStats();
+    expect(tileTrack.currentBitrate).toBeUndefined();
+    expect(first).toEqual({
+      frameWidth: 1280,
+      frameHeight: 720,
+      framesDecoded: 60,
+      timestamp: 1000,
+      mimeType: "video/VP8",
+      packetsLost: 2,
+      packetsReceived: 300,
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    host.getStats = () =>
+      Promise.resolve(sample({ atMs: 3000, remoteVideo: { TR_v: remote(250_000) } }));
+    await tileTrack.getReceiverStats();
+    expect(tileTrack.currentBitrate).toBe(1_000_000);
+  });
+
+  it("getReceiverStats is undefined for a sid not in the reply and after dispose", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const tileTrack = await tile(room);
+    host.getStats = () => Promise.resolve(sample({ remoteVideo: { TR_other: remote(1) } }));
+    expect(await tileTrack.getReceiverStats()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2000);
+    host.getStats = () => Promise.resolve(sample({ remoteVideo: { TR_v: remote(1) } }));
+    expect(await tileTrack.getReceiverStats()).toBeDefined();
+    tileTrack.dispose();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await tileTrack.getReceiverStats()).toBeUndefined();
+  });
+
+  it("getSenderStats returns the share's layers and readSenderSample gives the sent fps", async () => {
+    host.getStats = () =>
+      Promise.resolve(sample({ localVideo: { screen_share: [layer(30), layer(15)] } }));
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    expect(await screen.getSenderStats()).toEqual([layer(30), layer(15)]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await readSenderSample(screen)).toMatchObject({ sentFps: 30, limitation: "cpu" });
+    await vi.advanceTimersByTimeAsync(2000);
+    host.getStats = () => Promise.resolve(sample());
+    await expect(screen.getSenderStats()).rejects.toThrow(/unavailable/);
+    await vi.advanceTimersByTimeAsync(2000);
+    host.getStats = () => Promise.resolve(null);
+    await expect(screen.getSenderStats()).rejects.toThrow(/unavailable/);
+  });
+
+  it("the ICE getters read unknown rather than throw", async () => {
+    const room = createNativeRoom(audio);
+    const pub = room.engine.pcManager.publisher;
+    expect([
+      pub.getICEConnectionState(),
+      pub.getConnectionState(),
+      pub.getSignallingState(),
+    ]).toEqual(["unknown", "unknown", "unknown"]);
   });
 });

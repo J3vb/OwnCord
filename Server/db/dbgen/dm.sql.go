@@ -295,7 +295,9 @@ SELECT
       LIMIT 100)
     ) AS unread_count,
     CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
-               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count,
+    CAST(COALESCE((SELECT rs.last_message_id FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS last_read_message_id
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (
@@ -306,14 +308,15 @@ ORDER BY COALESCE(lm.timestamp, dos.opened_at) DESC
 `
 
 type GetUserDMChannelsRow struct {
-	ChannelID     int64  `json:"channelId"`
-	Name          string `json:"name"`
-	IsGroup       int64  `json:"isGroup"`
-	LastMessageID *int64 `json:"lastMessageId"`
-	LastMessage   string `json:"lastMessage"`
-	LastMessageAt string `json:"lastMessageAt"`
-	UnreadCount   int64  `json:"unreadCount"`
-	MentionCount  int64  `json:"mentionCount"`
+	ChannelID         int64  `json:"channelId"`
+	Name              string `json:"name"`
+	IsGroup           int64  `json:"isGroup"`
+	LastMessageID     *int64 `json:"lastMessageId"`
+	LastMessage       string `json:"lastMessage"`
+	LastMessageAt     string `json:"lastMessageAt"`
+	UnreadCount       int64  `json:"unreadCount"`
+	MentionCount      int64  `json:"mentionCount"`
+	LastReadMessageID int64  `json:"lastReadMessageId"`
 }
 
 // A DM row carries no recipient any more: dm_participants holds N users, so
@@ -338,6 +341,7 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, userID int64) ([]GetUse
 			&i.LastMessageAt,
 			&i.UnreadCount,
 			&i.MentionCount,
+			&i.LastReadMessageID,
 		); err != nil {
 			return nil, err
 		}

@@ -44,8 +44,7 @@ type voiceGraceEntry struct {
 	client    *Client
 	channelID int64
 	joinToken string
-	e2eeKey   string
-	e2eeSig   string
+	e2ee      e2eeAnnounce
 	timer     *time.Timer
 }
 
@@ -139,7 +138,7 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 // membership is parked in the grace window; anything else (disabled window, a
 // failed/half join, a kick that refuses reconnection) leaves immediately.
 func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason string) {
-	key, sig := c.getE2EEPubKey()
+	e2ee := c.getE2EEAnnounce()
 	chID, joinToken, completed := c.clearVoiceState()
 	if chID == 0 {
 		return
@@ -153,8 +152,7 @@ func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason stri
 		client:    c,
 		channelID: chID,
 		joinToken: joinToken,
-		e2eeKey:   key,
-		e2eeSig:   sig,
+		e2ee:      e2ee,
 	}
 	h.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
 		h.expireVoiceGrace(c.userID, entry)
@@ -232,7 +230,7 @@ func (h *Hub) inheritParkedVoice(c *Client) int64 {
 	}
 	c.setVoiceState(e.channelID, e.joinToken)
 	c.markVoiceJoinCompleteIfMatch(e.channelID, e.joinToken)
-	c.setE2EEPubKey(e.e2eeKey, e.e2eeSig)
+	c.setE2EEAnnounce(e.e2ee)
 	slog.Info("hub: resumed connection inherited the grace-window voice membership",
 		"user_id", c.userID, "channel_id", e.channelID)
 	return e.channelID

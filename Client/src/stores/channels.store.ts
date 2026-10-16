@@ -37,6 +37,15 @@ export interface Channel {
    * Absent when the server never said, which offers no voice moderation.
    */
   readonly canModerateVoice?: boolean | undefined;
+  /**
+   * Whether the current user may delete others' messages / pin / react here,
+   * as the server computed it. Undefined when the server never said (older
+   * server): callers fall back to the role's MANAGE_MESSAGES for the first two
+   * and to true for react — never to false.
+   */
+  readonly canDeleteOthers?: boolean | undefined;
+  readonly canPin?: boolean | undefined;
+  readonly canReact?: boolean | undefined;
   /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
   readonly slowMode: number;
   /**
@@ -114,6 +123,9 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
       canModerateVoice: ch.can_moderate_voice,
+      canDeleteOthers: ch.can_delete_others,
+      canPin: ch.can_pin,
+      canReact: ch.can_react,
       slowMode: ch.slow_mode ?? 0,
       // Older servers omit these; "absent" reads as unflagged / unlimited,
       // which is also what an unconfigured channel sends.
@@ -187,6 +199,9 @@ export function addChannel(channel: ChannelCreatePayload): void {
       canSend: channel.can_send ?? existing?.canSend ?? true,
       // Same targeted, absent-means-unchanged rule; a new channel stays unknown.
       canModerateVoice: channel.can_moderate_voice ?? existing?.canModerateVoice,
+      canDeleteOthers: channel.can_delete_others ?? existing?.canDeleteOthers,
+      canPin: channel.can_pin ?? existing?.canPin,
+      canReact: channel.can_react ?? existing?.canReact,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
       // channel_create never carries the per-viewer acknowledgement; keep the

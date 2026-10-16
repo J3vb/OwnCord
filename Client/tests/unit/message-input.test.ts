@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /** Captured emoji picker callbacks so tests can simulate selection. */
-let lastEmojiPickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null =
-  null;
+let lastEmojiPickerOptions: {
+  onSelect: (emoji: string, select?: { keepOpen: boolean }) => void;
+  onClose: () => void;
+} | null = null;
 
 vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: (opts: { onSelect: (emoji: string) => void; onClose: () => void }) => {
+  createEmojiPicker: (opts: NonNullable<typeof lastEmojiPickerOptions>) => {
     lastEmojiPickerOptions = opts;
     const element = document.createElement("div");
     element.classList.add("emoji-picker");
@@ -1037,6 +1039,40 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
+    it("shows a slow-mode note under the composer and hides it again, never gating Send", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const note = (): HTMLElement | null =>
+        container.querySelector<HTMLElement>("[data-testid='slow-mode-note']");
+      expect(note()?.hidden).toBe(true);
+
+      comp.setSlowModeNote("Slow mode is on: one message every 5s");
+      expect(note()?.hidden).toBe(false);
+      expect(note()?.textContent).toBe("Slow mode is on: one message every 5s");
+
+      // The note is information only: the first send still goes.
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "first message";
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("first message", null, [], [], false);
+
+      comp.setSlowModeNote(null);
+      expect(note()?.hidden).toBe(true);
+      expect(note()?.textContent).toBe("");
+      comp.destroy?.();
+    });
+
+    it("keeps a slow-mode note set before mount", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.setSlowModeNote("Slow mode is on: one message every 9s");
+      comp.mount(container);
+      expect(container.querySelector("[data-testid='slow-mode-note']")?.textContent).toBe(
+        "Slow mode is on: one message every 9s",
+      );
+      comp.destroy?.();
+    });
+
     it("keeps the composer editable under a send gate, only refusing Send (#12)", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
@@ -1967,6 +2003,34 @@ describe("MessageInput", () => {
     // Emoji should be inserted at cursor position
     expect(textarea.value).toBe("Hello 🎉 world");
 
+    comp.destroy?.();
+  });
+
+  it("a plain pick closes the emoji picker", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+
+    lastEmojiPickerOptions!.onSelect("🎉");
+
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    comp.destroy?.();
+  });
+
+  it("a Shift-pick inserts at the caret and keeps the picker open for the next one", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "ab";
+    textarea.selectionStart = textarea.selectionEnd = 1;
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+
+    lastEmojiPickerOptions!.onSelect("🎉", { keepOpen: true });
+    lastEmojiPickerOptions!.onSelect("🔥", { keepOpen: true });
+
+    expect(textarea.value).toBe("a🎉🔥b");
+    expect(textarea.selectionStart).toBe("a🎉🔥".length);
+    expect(container.querySelector(".emoji-picker")).not.toBeNull();
     comp.destroy?.();
   });
 

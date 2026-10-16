@@ -3,6 +3,7 @@
  * time zone and clock preference. Pure: the renderer decides the element.
  */
 import { TEXT_LOCALE, formatDate } from "../../i18n/format";
+import { getTimeFormat } from "../../lib/timeFormat";
 
 /** Discord's timestamp styles; `f` is the default. */
 export type TimestampStyle = "t" | "T" | "d" | "D" | "f" | "F" | "R";
@@ -22,6 +23,19 @@ const STYLE_OPTIONS: Record<Exclude<TimestampStyle, "R">, Intl.DateTimeFormatOpt
     minute: "2-digit",
   },
 };
+
+const fullFormats: { h12?: Intl.DateTimeFormat; h24?: Intl.DateTimeFormat } = {};
+
+/** Weekday, date and time ("F" style) for a tooltip. The formatter is built
+ *  once per clock preference, not once per call: a list draws one per row. */
+export function formatFullDateTime(date: Date): string {
+  const key = getTimeFormat() === "12h" ? "h12" : "h24";
+  fullFormats[key] ??= new Intl.DateTimeFormat(TEXT_LOCALE, {
+    ...STYLE_OPTIONS.F,
+    hour12: key === "h12",
+  });
+  return fullFormats[key].format(date);
+}
 
 /** Largest unit first: the first whose size fits the gap is used. */
 const RELATIVE_UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
@@ -61,7 +75,7 @@ export function formatDiscordTimestamp(
   nowMs: number = Date.now(),
 ): { readonly text: string; readonly title: string } {
   const date = new Date(unix * 1000);
-  const title = formatDate(date, STYLE_OPTIONS.F);
+  const title = formatFullDateTime(date);
   const text = style === "R" ? formatRelative(unix, nowMs) : formatDate(date, STYLE_OPTIONS[style]);
   return { text, title };
 }

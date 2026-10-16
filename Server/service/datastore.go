@@ -54,6 +54,10 @@ type Store interface {
 	// CreateMessageWithMentions / CreateMessageDelivery.
 	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	// MoveReadPointer moves a reader's pointer and recomputes mention_count
+	// from the receipts in one writer transaction (WP 3D-5c). The caller holds
+	// mentionEmitMu across it and the frame it sends.
+	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
 	// ── Mentions ──
@@ -140,7 +144,10 @@ type Store interface {
 	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
-	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
+	NextCustomStatusExpiry(ctx context.Context) (string, bool, error)
+	ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]db.ExpiredCustomStatus, error)
+	ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error)
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	StampConnections(ctx context.Context, connected, disconnected []int64) error

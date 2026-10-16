@@ -14,6 +14,8 @@
 import type {
   NativeVoiceScreenCapture,
   NativeVoiceScreenStarted,
+  NativeVoiceSenderLayer,
+  NativeVoiceStats,
 } from "../../../platform/contracts/nativeVoice";
 import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
 import { nativeCounters } from "./counters";
@@ -90,6 +92,8 @@ export class NativeScreenTrack {
     readonly publishEncoding: ScreenPublishEncoding,
     readonly captureRequest: NativeVoiceScreenCapture,
     private readonly onChangeSource: (track: NativeScreenTrack) => Promise<void>,
+    private readonly senderStats: () => Promise<NativeVoiceStats | null> = () =>
+      Promise.resolve(null),
   ) {
     this.capture = started.capture;
     this.width = started.width;
@@ -100,6 +104,18 @@ export class NativeScreenTrack {
 
   get mediaStreamTrack(): MediaStreamTrack {
     return this.renderer.mediaStreamTrack;
+  }
+
+  /** The share's encoder layers (shareSenderStats.ts's native seam). Rejects
+   *  when the host has no sample, so the tile keeps "sender stats unavailable"
+   *  instead of an empty readout. */
+  async getSenderStats(): Promise<readonly NativeVoiceSenderLayer[]> {
+    const layers = (await this.senderStats())?.localVideo.screen_share;
+    if (this.stopped || layers === undefined || layers.length === 0) {
+      // i18n-exempt: internal, caught by VideoGrid's poll
+      throw new Error("native share stats unavailable");
+    }
+    return layers;
   }
 
   /** The host capture ended on its own: do what a browser capture track

@@ -224,17 +224,13 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		h.applyFocusResult(c, env.Type, *result.SetChannelID)
 	}
 	if result.DeferChannelFocus != nil {
-		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID)
+		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus)
+		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
 	}
-	if result.SetE2EEPubKey != nil {
-		sig := ""
-		if result.SetE2EESignature != nil {
-			sig = *result.SetE2EESignature
-		}
-		c.setE2EEPubKey(*result.SetE2EEPubKey, sig)
+	if result.SetE2EEAnnounce != nil {
+		c.setE2EEAnnounce(*result.SetE2EEAnnounce)
 	}
 	if result.SetVoiceJoinToken != nil {
 		unlock := h.voiceLock(c.userID)

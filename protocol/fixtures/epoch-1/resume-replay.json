@@ -28,6 +28,7 @@
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
               "custom_status": "fixture custom status",
+              "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",

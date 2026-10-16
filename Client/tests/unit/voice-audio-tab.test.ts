@@ -5,6 +5,11 @@ const mockSwitchOutputDevice = vi.fn().mockResolvedValue(undefined);
 const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
+/** The native engine's level reports: the meter's listener and its release. */
+let nativeLevelListener: ((rms: number | null, open: boolean) => void) | null = null;
+const mockUnsubscribeNativeLevel = vi.fn(() => {
+  nativeLevelListener = null;
+});
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
@@ -29,6 +34,10 @@ vi.mock("@lib/livekitSession", () => ({
   setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
   applyInputMode: () => mockApplyInputMode(),
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
+  onNativeInputLevel: (listener: (rms: number | null, open: boolean) => void) => {
+    nativeLevelListener = listener;
+    return mockUnsubscribeNativeLevel;
+  },
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
   reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
@@ -38,6 +47,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
 import { vadThreshold } from "@lib/audioPipeline";
+import type { NativeMicTestEnvelope } from "../../src/platform/contracts/nativeVoice";
 import { GATE_LOOKAHEAD_S } from "@lib/micProcessor";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
@@ -1762,8 +1772,24 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const stopCameraPreview = vi.fn();
   const nativeCameraDevices = vi.fn();
   const nativeCameraSupport = vi.fn();
+  const startMicTest = vi.fn();
+  const updateMicTest = vi.fn();
+  const stopMicTest = vi.fn();
+  const onMicTestEvent = vi.fn();
+  const unsubscribeTest = vi.fn();
+  /** The mic test's event handler, as the host would call it. */
+  let testHandler: ((envelope: NativeMicTestEnvelope) => void) | null = null;
   beforeEach(async () => {
     vi.resetModules();
+    startMicTest.mockReset().mockResolvedValue(7);
+    updateMicTest.mockReset().mockResolvedValue(undefined);
+    stopMicTest.mockReset().mockResolvedValue(undefined);
+    unsubscribeTest.mockReset();
+    testHandler = null;
+    onMicTestEvent.mockReset().mockImplementation((handler: typeof testHandler) => {
+      testHandler = handler;
+      return unsubscribeTest;
+    });
     startCameraPreview
       .mockReset()
       .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok" });
@@ -1787,8 +1813,16 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         nativeVoice: {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
+          startMicTest: (...args: unknown[]) => startMicTest(...args) as unknown,
+          updateMicTest: (...args: unknown[]) => updateMicTest(...args) as unknown,
+          stopMicTest: (...args: unknown[]) => stopMicTest(...args) as unknown,
+          onMicTestEvent: (...args: unknown[]) => onMicTestEvent(...args) as unknown,
         },
-        pushToTalk: { supported: async () => true },
+        pushToTalk: {
+          supported: async () => true,
+          stop: async () => {},
+          updateKey: async () => {},
+        },
       },
     }));
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
@@ -1824,10 +1858,11 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   async function mount() {
     const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
     const ac = new AbortController();
-    const element = create(ac.signal).build();
+    const tab = create(ac.signal);
+    const element = tab.build();
     document.body.appendChild(element);
     await new Promise((r) => setTimeout(r, 0));
-    return { element };
+    return { element, ac, tab };
   }
 
   /** The camera select once its device options have been populated. */
@@ -1853,16 +1888,21 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(headings).toContain("Screen Share FPS");
   });
 
-  it("hides the input volume control and explains why", async () => {
+  // The engine's capture applies the input volume, as the web processor does.
+  it("keeps the input volume control and applies it to the call", async () => {
+    mockSetInputVolume.mockClear();
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
-    expect(headings).not.toContain("Input Volume");
     // The engine's playout mixer applies output volume.
     expect(headings).toEqual(
-      expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
+      expect.arrayContaining(["Input Device", "Input Volume", "Output Device", "Output Volume"]),
     );
+    const slider = tab.element.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+    slider.value = "150";
+    slider.dispatchEvent(new Event("input"));
+    expect(mockSetInputVolume).toHaveBeenLastCalledWith(150);
     const labels = [...tab.element.querySelectorAll(".setting-label")].map((l) => l.textContent);
     // RNNoise runs on the engine's own capture path.
     expect(labels).toEqual(
@@ -1873,9 +1913,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         "Enhanced Noise Suppression",
       ]),
     );
+    // The capture, and so the meter, runs only in a call until the mic test.
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
-    expect(note?.textContent).toContain("system mixer");
-    expect(note?.textContent).not.toMatch(/sensitivity/i);
+    expect(note?.textContent).toContain("in a voice channel or while the mic test runs");
     // The native engine acquires no audio through the webview. The camera
     // preview may still call getUserMedia (video only) since voice #22 starts
     // it on the default device; no audio request may occur.
@@ -1885,16 +1925,15 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   // The engine's capture runs the sensitivity gate on the web path's scale;
-  // there is no webview microphone to meter, so the bar shows no level.
+  // with no level report yet (no call), the bar shows no level.
   it("shows the input sensitivity slider and applies it to the call", async () => {
     mockSetVoiceSensitivity.mockClear();
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
     expect(headings).toContain("Input Sensitivity");
-    // The engine gates on the saved slider alone: no automatic toggle.
-    expect(tab.element.querySelector("[data-testid='auto-sensitivity']")).toBeNull();
     const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
     expect(handle.hidden).toBe(false);
     handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
@@ -1903,22 +1942,456 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
   });
 
-  it("offers no mic test: the engine's capture never reaches the webview", async () => {
+  // The engine runs the web path's noise-floor estimate on its own capture.
+  it("offers automatic sensitivity, saved and applied to the call", async () => {
+    mockApplyInputMode.mockClear();
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     const tab = await mount();
-    const row = tab.element.querySelector<HTMLElement>('[data-testid="mic-test"]')!;
-    expect(row.textContent).toContain("not available on Linux yet");
-    const button = row.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!;
-    expect(button.disabled).toBe(true);
-    button.click();
-    expect(button.textContent).toBe("Let's Check");
+    const row = tab.element.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!;
+    expect(row.textContent).toContain("Automatically determine input sensitivity");
+    const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    expect(handle.hidden).toBe(false);
+    row.querySelector<HTMLElement>("[role='switch'], input, button")!.click();
+    expect(localStorage.getItem("owncord:settings:autoInputSensitivity")).toBe("true");
+    expect(mockApplyInputMode).toHaveBeenCalledTimes(1);
+    expect(handle.hidden).toBe(true);
   });
 
-  it("tells the user the processing toggles apply on the next join", async () => {
+  // The bar shows the call capture's level reports, after its input volume
+  // and with its gate's verdict, on the handle's axis.
+  it("drives the meter from the engine's level reports", async () => {
+    mockUnsubscribeNativeLevel.mockClear();
+    const ac = new AbortController();
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    expect(nativeLevelListener).not.toBeNull();
+    const level = element.querySelector<HTMLElement>(".mic-meter-level")!;
+    nativeLevelListener!(vadThreshold(50), true);
+    expect(level.style.width).toBe("50%");
+    expect(level.style.background).toBe("var(--green)");
+    nativeLevelListener!(vadThreshold(75), false);
+    expect(level.style.width).toBe("25%");
+    expect(level.style.background).toBe("var(--yellow)");
+    expect(element.textContent).toContain("Hearing you");
+    // Mute or leave: the capture stopped, so the bar and its status clear.
+    nativeLevelListener!(null, false);
+    expect(level.style.width).toBe("0%");
+    expect(element.querySelector<HTMLElement>('[data-testid="mic-status"]')!.hidden).toBe(true);
+    nativeLevelListener!(vadThreshold(50), true);
+    expect(level.style.width).toBe("50%");
+    expect(element.textContent).toContain("Hearing you");
+    ac.abort();
+    expect(mockUnsubscribeNativeLevel).toHaveBeenCalled();
+  });
+
+  /** The mic test row's button and description. */
+  function micTestRow(element: HTMLElement) {
+    const row = element.querySelector<HTMLElement>('[data-testid="mic-test"]')!;
+    return {
+      button: row.querySelector<HTMLButtonElement>('[data-testid="mic-test-button"]')!,
+      desc: row.querySelector<HTMLElement>(".setting-desc")!,
+    };
+  }
+
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  /** Press the button and let the start resolve. */
+  async function startTest(element: HTMLElement): Promise<void> {
+    micTestRow(element).button.click();
+    await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
+    await settle();
+  }
+
+  const NORMAL_DESC =
+    "Hear yourself the way others will, through your output device. Use headphones to avoid echo.";
+
+  it("offers the mic test on Linux", async () => {
     const tab = await mount();
-    const descs = [...tab.element.querySelectorAll(".setting-desc")].map((d) => d.textContent);
-    expect(
-      descs.filter((d) => d?.endsWith("Applies when you next join a voice channel.")),
-    ).toHaveLength(4);
+    const { button, desc } = micTestRow(tab.element);
+    expect(button.disabled).toBe(false);
+    expect(desc.textContent).toBe(NORMAL_DESC);
+    expect(tab.element.textContent).not.toContain("not available on Linux yet");
+    expect(startMicTest).not.toHaveBeenCalled();
+  });
+
+  it("starts the native loopback with the saved devices, processing, gains and gate", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", '"guid-mic"');
+    localStorage.setItem("owncord:settings:audioOutputDevice", '"guid-spk"');
+    localStorage.setItem("owncord:settings:inputVolume", "120");
+    localStorage.setItem("owncord:settings:outputVolume", "150");
+    localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
+    localStorage.setItem("owncord:settings:voiceSensitivity", "40");
+    localStorage.setItem("owncord:settings:echoCancellation", "false");
+    localStorage.setItem("owncord:settings:enhancedNoiseSuppression", "true");
+    const tab = await mount();
+    await startTest(tab.element);
+    expect(startMicTest).toHaveBeenCalledWith({
+      input: "guid-mic",
+      output: "guid-spk",
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: true,
+        enhancedNoiseSuppression: true,
+      },
+      inputGain: 120,
+      // The output volume caps at 100 %, as the web test does.
+      outputGain: 1,
+      threshold: vadThreshold(40),
+    });
+    const { button } = micTestRow(tab.element);
+    expect(button.textContent).toBe("Stop Testing");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    // The host's capture, not the webview's microphone, is what is tested.
+    for (const call of getUserMedia.mock.calls) {
+      expect((call[0] as MediaStreamConstraints).audio).toBe(false);
+    }
+  });
+
+  it("runs the test ungated in Push to Talk", async () => {
+    localStorage.setItem("owncord:settings:inputMode", '"ptt"');
+    const tab = await mount();
+    await startTest(tab.element);
+    expect(startMicTest.mock.calls[0]![0]).toMatchObject({ threshold: 0 });
+  });
+
+  it("a second click stops the test by its id", async () => {
+    const tab = await mount();
+    await startTest(tab.element);
+    const { button } = micTestRow(tab.element);
+    button.click();
+    expect(stopMicTest).toHaveBeenCalledTimes(1);
+    expect(stopMicTest).toHaveBeenCalledWith(7);
+    expect(unsubscribeTest).toHaveBeenCalledTimes(1);
+    expect(button.textContent).toBe("Let's Check");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("closing the tab stops a running test", async () => {
+    const closed = await mount();
+    await startTest(closed.element);
+    closed.tab.cleanup();
+    expect(stopMicTest).toHaveBeenCalledTimes(1);
+    expect(stopMicTest).toHaveBeenCalledWith(7);
+    // The overlay closing afterwards finds nothing left to stop.
+    closed.ac.abort();
+    expect(stopMicTest).toHaveBeenCalledTimes(1);
+
+    stopMicTest.mockClear();
+    startMicTest.mockClear();
+    document.body.innerHTML = "";
+    const aborted = await mount();
+    await startTest(aborted.element);
+    aborted.ac.abort();
+    expect(stopMicTest).toHaveBeenCalledTimes(1);
+    expect(stopMicTest).toHaveBeenCalledWith(7);
+  });
+
+  it("a start still in flight when the tab closes is stopped once it resolves", async () => {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const tab = await mount();
+    micTestRow(tab.element).button.click();
+    await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
+    tab.ac.abort();
+    // No id yet: nothing can be stopped, and the pending start owns itself.
+    expect(stopMicTest).not.toHaveBeenCalled();
+    resolveStart(9);
+    await vi.waitFor(() => expect(stopMicTest).toHaveBeenCalledTimes(1));
+    expect(stopMicTest).toHaveBeenCalledWith(9);
+  });
+
+  it("a start superseded by a stop click is stopped when it resolves", async () => {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const tab = await mount();
+    const { button } = micTestRow(tab.element);
+    button.click();
+    await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
+    button.click();
+    expect(button.textContent).toBe("Let's Check");
+    resolveStart(4);
+    await vi.waitFor(() => expect(stopMicTest).toHaveBeenCalledWith(4));
+    expect(stopMicTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("level reports of the running test drive the meter; another test's are ignored", async () => {
+    const tab = await mount();
+    await startTest(tab.element);
+    const level = tab.element.querySelector<HTMLElement>(".mic-meter-level")!;
+    testHandler!({
+      test: 7,
+      event: { type: "inputLevel", rms: vadThreshold(50), open: true },
+    });
+    expect(level.style.width).toBe("50%");
+    expect(level.style.background).toBe("var(--green)");
+    testHandler!({
+      test: 8,
+      event: { type: "inputLevel", rms: vadThreshold(75), open: false },
+    });
+    expect(level.style.width).toBe("50%");
+    // Stopping empties the meter, and a report queued before it cannot repaint it.
+    micTestRow(tab.element).button.click();
+    expect(level.style.width).toBe("0%");
+    testHandler!({
+      test: 7,
+      event: { type: "inputLevel", rms: vadThreshold(50), open: true },
+    });
+    expect(level.style.width).toBe("0%");
+  });
+
+  it("automatic sensitivity retunes the test's gate from its level reports", async () => {
+    const tab = await mount();
+    await startTest(tab.element);
+    // Automatic is the default: the gate starts at the tracker's seed.
+    expect(startMicTest.mock.calls[0]![0]).toMatchObject({ threshold: 0.05 });
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    for (let i = 0; i < 40; i++) {
+      now += 100;
+      testHandler!({ test: 7, event: { type: "inputLevel", rms: 0.002, open: false } });
+    }
+    expect(updateMicTest).toHaveBeenCalled();
+    const [id, update] = updateMicTest.mock.calls[0]! as [number, { threshold: number }];
+    expect(id).toBe(7);
+    expect(update).toMatchObject({ kind: "voiceGate", retune: true });
+    expect(update.threshold).toBeLessThan(0.05);
+  });
+
+  it("an ended test (a call joined) resets the button without a stop", async () => {
+    const tab = await mount();
+    await startTest(tab.element);
+    testHandler!({ test: 7, event: { type: "ended" } });
+    const { button, desc } = micTestRow(tab.element);
+    expect(button.textContent).toBe("Let's Check");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(desc.textContent).toBe("Leave the voice channel to test your mic.");
+    expect(stopMicTest).not.toHaveBeenCalled();
+    expect(unsubscribeTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("a test the host ended before its start resolved resets the button", async () => {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const tab = await mount();
+    micTestRow(tab.element).button.click();
+    await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
+    testHandler!({ test: 7, event: { type: "ended" } });
+    resolveStart(7);
+    await settle();
+    const { button, desc } = micTestRow(tab.element);
+    expect(button.textContent).toBe("Let's Check");
+    expect(desc.textContent).toBe("Leave the voice channel to test your mic.");
+    expect(stopMicTest).not.toHaveBeenCalled();
+  });
+
+  it("a start refused in a call resets the button and says why", async () => {
+    startMicTest.mockRejectedValue(new Error("mic test unavailable during a call"));
+    const tab = await mount();
+    micTestRow(tab.element).button.click();
+    await vi.waitFor(() => {
+      expect(micTestRow(tab.element).desc.textContent).toBe(
+        "Leave the voice channel to test your mic.",
+      );
+    });
+    const { button } = micTestRow(tab.element);
+    expect(button.textContent).toBe("Let's Check");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(stopMicTest).not.toHaveBeenCalled();
+    expectConsole("warn", /mic test could not start/i);
+  });
+
+  it("a start that fails otherwise says the test could not start", async () => {
+    startMicTest.mockRejectedValue(new Error("no capture device"));
+    const tab = await mount();
+    micTestRow(tab.element).button.click();
+    await vi.waitFor(() => {
+      expect(micTestRow(tab.element).desc.textContent).toBe("The mic test could not start.");
+    });
+    expect(micTestRow(tab.element).button.textContent).toBe("Let's Check");
+    // A later successful start clears the message.
+    startMicTest.mockResolvedValue(7);
+    micTestRow(tab.element).button.click();
+    await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(2));
+    expect(micTestRow(tab.element).desc.textContent).toBe(NORMAL_DESC);
+    expectConsole("warn", /mic test could not start/i);
+  });
+
+  describe("settings changes reach the running test", () => {
+    const toggleFor = (element: HTMLElement, label: string): HTMLElement =>
+      element.querySelector<HTMLElement>(`[role="switch"][aria-label="${label}"]`)!;
+    const audio = (over: Record<string, boolean>) => ({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      enhancedNoiseSuppression: false,
+      ...over,
+    });
+
+    it("maps each control to its update", async () => {
+      localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
+      const tab = await mount();
+      await settle();
+      await startTest(tab.element);
+      const el = tab.element;
+      const sliders = el.querySelectorAll<HTMLInputElement>(VOLUME_SLIDERS);
+      const selects = el.querySelectorAll("select");
+      const table: Array<[string, () => void, unknown]> = [
+        [
+          "input volume",
+          () => {
+            sliders[0]!.value = "150";
+            sliders[0]!.dispatchEvent(new Event("input"));
+          },
+          { kind: "inputGain", percent: 150 },
+        ],
+        [
+          "sensitivity drag",
+          () =>
+            el
+              .querySelector<HTMLElement>(".mic-meter-threshold")!
+              .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })),
+          { kind: "voiceGate", threshold: vadThreshold(45), retune: true },
+        ],
+        [
+          "echo cancellation",
+          () => toggleFor(el, "Echo Cancellation").click(),
+          { kind: "processing", audio: audio({ echoCancellation: false }) },
+        ],
+        [
+          "enhanced noise suppression",
+          () => toggleFor(el, "Enhanced Noise Suppression").click(),
+          {
+            kind: "processing",
+            audio: audio({ echoCancellation: false, enhancedNoiseSuppression: true }),
+          },
+        ],
+        [
+          "noise suppression",
+          () => toggleFor(el, "Noise Suppression").click(),
+          {
+            kind: "processing",
+            audio: audio({
+              echoCancellation: false,
+              noiseSuppression: false,
+              enhancedNoiseSuppression: true,
+            }),
+          },
+        ],
+        [
+          "automatic gain control",
+          () => toggleFor(el, "Automatic Gain Control").click(),
+          {
+            kind: "processing",
+            audio: audio({
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              enhancedNoiseSuppression: true,
+            }),
+          },
+        ],
+        [
+          "input device",
+          () => {
+            selects[0]!.value = "guid-mic";
+            selects[0]!.dispatchEvent(new Event("change"));
+          },
+          { kind: "inputDevice", deviceId: "guid-mic" },
+        ],
+        [
+          "output device",
+          () => {
+            selects[1]!.value = "guid-spk";
+            selects[1]!.dispatchEvent(new Event("change"));
+          },
+          { kind: "outputDevice", deviceId: "guid-spk" },
+        ],
+        [
+          "output volume",
+          () => {
+            sliders[1]!.value = "50";
+            sliders[1]!.dispatchEvent(new Event("input"));
+          },
+          { kind: "outputGain", gain: 0.5 },
+        ],
+        [
+          "automatic sensitivity on",
+          () =>
+            el
+              .querySelector<HTMLElement>("[data-testid='auto-sensitivity'] [role='switch']")!
+              .click(),
+          { kind: "voiceGate", threshold: 0.05, retune: false },
+        ],
+        [
+          "mode switch to Push to Talk",
+          () => el.querySelector<HTMLElement>("[data-testid='input-mode-ptt']")!.click(),
+          { kind: "voiceGate", threshold: 0, retune: false },
+        ],
+      ];
+      for (const [name, act, expected] of table) {
+        updateMicTest.mockClear();
+        act();
+        expect(updateMicTest, name).toHaveBeenCalledTimes(1);
+        expect(updateMicTest, name).toHaveBeenCalledWith(7, expected);
+      }
+    });
+
+    it("does nothing when no test runs", async () => {
+      const tab = await mount();
+      const slider = tab.element.querySelector<HTMLInputElement>(
+        'input[aria-label="Input Volume"]',
+      )!;
+      slider.value = "150";
+      slider.dispatchEvent(new Event("input"));
+      tab.element
+        .querySelector<HTMLElement>('[role="switch"][aria-label="Echo Cancellation"]')!
+        .click();
+      expect(updateMicTest).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a meter restart (processing toggle, device change) does not stop the test", async () => {
+    const tab = await mount();
+    await startTest(tab.element);
+    tab.element
+      .querySelector<HTMLElement>('[role="switch"][aria-label="Noise Suppression"]')!
+      .click();
+    const input = tab.element.querySelectorAll("select")[0]!;
+    input.value = "guid-mic";
+    input.dispatchEvent(new Event("change"));
+    await settle();
+    await settle();
+    expect(stopMicTest).not.toHaveBeenCalled();
+    expect(unsubscribeTest).not.toHaveBeenCalled();
+    expect(micTestRow(tab.element).button.textContent).toBe("Stop Testing");
+    // The test still takes updates after the restart.
+    updateMicTest.mockClear();
+    testHandler!({ test: 7, event: { type: "inputLevel", rms: 0.01, open: true } });
+    expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).not.toBe("0%");
+  });
+
+  it("describes the processing toggles as it does elsewhere: they apply live", async () => {
+    const tab = await mount();
+    const descs = [...tab.element.querySelectorAll(".setting-desc")].map(
+      (d) => d.textContent ?? "",
+    );
+    expect(descs.filter((d) => /next join/i.test(d))).toEqual([]);
+    expect(descs).toContain("Reduce echo from speakers feeding back into microphone");
+    expect(descs).toContain("Automatically adjust microphone volume");
   });
 
   it("lists the native engine's audio devices, not the webview's", async () => {

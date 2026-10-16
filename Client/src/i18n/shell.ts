@@ -237,6 +237,7 @@ export const shellText = defineCatalog("shell", {
   "typing.someone": "Someone",
   "typing.one": "{name} is typing...",
   "typing.two": "{first} and {second} are typing...",
+  "typing.three": "{first}, {second}, and {third} are typing...",
   "typing.many": "Several people are typing...",
 
   "tile.you": "You",
@@ -247,7 +248,6 @@ export const shellText = defineCatalog("shell", {
   "tile.nameYou": "{name} (You)",
 
   "messages.loadHistoryFailed": "Failed to load message history",
-  "messages.loadOlderFailed": "Failed to load older messages",
   "messages.loadNewerFailed": "Failed to load newer messages",
   "messages.reactionSlowDown": "Slow down! Please wait before reacting again.",
 });

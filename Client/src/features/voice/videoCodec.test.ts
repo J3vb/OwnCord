@@ -5,8 +5,17 @@ vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 
-const { getVideoCodecPref, gpuRenderer, pickAutoCodec, resolveVideoCodec } =
-  await import("./videoCodec");
+const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
+vi.mock("livekit-client", () => ({ supportsVP9: () => supportsVP9() }));
+
+const {
+  getVideoCodecPref,
+  gpuRenderer,
+  pickAutoCodec,
+  resolveCodecChoice,
+  resolveVideoCodec,
+  vp9Offered,
+} = await import("./videoCodec");
 const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
 const { channelPeerDecode } = await import("./peerDecode");
 const { authStore } = await import("../../stores/auth.store");
@@ -49,6 +58,8 @@ function savePref(value: string): void {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  supportsVP9.mockReset();
+  supportsVP9.mockReturnValue(true);
   encodingInfo.mockReset();
   vi.stubGlobal("navigator", { mediaCapabilities: { encodingInfo } });
   stubGpu(NVIDIA);
@@ -122,9 +133,90 @@ describe("getVideoCodecPref", () => {
     expect(getVideoCodecPref()).toBe("auto");
   });
 
+  it("reads a saved VP9", () => {
+    savePref("vp9");
+    expect(getVideoCodecPref()).toBe("vp9");
+  });
+
   it("falls back to VP8 for an unknown saved value", () => {
     savePref("av1");
     expect(getVideoCodecPref()).toBe("vp8");
+  });
+});
+
+describe("resolveVideoCodec with VP9", () => {
+  beforeEach(() => {
+    savePref("vp9");
+  });
+
+  it("publishes VP8 for a saved VP9 the settings no longer offer", async () => {
+    supportsVP9.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP9 when supported and nobody else is in the channel, without probing", async () => {
+    await expect(resolveVideoCodec(track(), 120, 12_000_000)).resolves.toBe("vp9");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("publishes VP9 when every peer reports decoding it", async () => {
+    await expect(
+      resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "vp9"], ["vp9"]]),
+    ).resolves.toBe("vp9");
+  });
+
+  it("falls back to VP8 when livekit-client cannot publish VP9", async () => {
+    supportsVP9.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("falls back to VP8 when supportsVP9 throws, as without RTCRtpSender", async () => {
+    supportsVP9.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("reports the preferred codec beside the pick, for the live switch (WP M-5b)", async () => {
+    await expect(resolveCodecChoice(track(), 30, 1_700_000)).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp9",
+    });
+    await expect(resolveCodecChoice(track(), 30, 1_700_000, () => [undefined])).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp8",
+    });
+  });
+
+  it("falls back to VP8 with a peer whose decode list is unknown", async () => {
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [undefined])).resolves.toBe("vp8");
+  });
+
+  it("falls back to VP8 with a VP8 and H.264 peer", async () => {
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h264"]])).resolves.toBe(
+      "vp8",
+    );
+  });
+
+  it("publishes VP8 on the Linux native engine", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+});
+
+describe("vp9Offered", () => {
+  it("is true where VP9 can be published", () => {
+    expect(vp9Offered()).toBe(true);
+  });
+
+  it("is false when VP9 cannot be published", () => {
+    supportsVP9.mockReturnValue(false);
+    expect(vp9Offered()).toBe(false);
+  });
+
+  it("is false on Linux", () => {
+    isLinuxDesktop.mockReturnValue(true);
+    expect(vp9Offered()).toBe(false);
   });
 });
 

@@ -162,6 +162,14 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 		witness); err != nil {
 		t.Fatalf("seed unrelated evidence: %v", err)
 	}
+	// The shared fixture predates the mention ledger (migration 063): give the
+	// subject one receipt as a recipient so class 11a is proved non-empty too.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO mention_receipts (user_id, channel_id, message_id)
+		 SELECT ?1, channel_id, id FROM messages WHERE channel_id = ?2 AND user_id = ?3`,
+		sub.id, sub.channel, sub.other); err != nil {
+		t.Fatalf("seed mention receipt: %v", err)
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
