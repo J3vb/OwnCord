@@ -30,6 +30,13 @@ vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../lib/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
+// The live codec switch has its own tests (codecSwitch.test.ts).
+vi.mock("./codecSwitch", () => ({
+  CodecSwitchController: class {
+    kick(): void {}
+    stop(): void {}
+  },
+}));
 vi.mock("../../lib/screenShare", () => ({
   enableCamera: vi.fn(async () => undefined),
   disableCamera: vi.fn(async () => undefined),

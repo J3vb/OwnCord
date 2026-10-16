@@ -435,6 +435,7 @@ export class LiveKitSession {
         // torn down for auto-reconnect.
         bumpGeneration(this._cameraState);
         bumpGeneration(this._screenState);
+        this._media.stopCodecSwitch();
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
@@ -857,6 +858,7 @@ export class LiveKitSession {
     this._lostOnReconnect = null;
     dismissMediaLostNotice();
     if (!keepWatched) this._remoteTracks.clearWatched();
+    this._media.stopCodecSwitch();
     this._lifecycle.leaveVoice(sendWs);
   }
 
