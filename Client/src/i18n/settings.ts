@@ -98,6 +98,8 @@ export const settingsText = defineCatalog("settings", {
   "notifications.flash.desc": "Flash taskbar on new messages",
   "notifications.suppress.label": "Suppress @everyone",
   "notifications.suppress.desc": "Mute @everyone and @here — messages that name you still notify",
+  "notifications.unreadBadge.label": "Unread message badge",
+  "notifications.unreadBadge.desc": "Show the unread count on the taskbar or tray icon",
   "notifications.sounds.label": "Notification Sounds",
   "notifications.sounds.desc": "Play sounds for notifications",
   "notifications.callSound.label": "Incoming Call Sound",

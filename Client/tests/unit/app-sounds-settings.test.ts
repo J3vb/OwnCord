@@ -160,3 +160,19 @@ describe("per-sound switches", () => {
     expect(rows[at("Ring sound")]!.classList.contains("nested")).toBe(true);
   });
 });
+
+describe("Unread message badge switch", () => {
+  it("is on by default and saves the pref when switched", () => {
+    const tab = build();
+    const sw = switchFor(tab, "Unread message badge");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(tab.textContent).toContain("Show the unread count on the taskbar or tray icon");
+
+    sw.click();
+    expect(stored("unreadBadge")).toBe("false");
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+
+    sw.click();
+    expect(stored("unreadBadge")).toBe("true");
+  });
+});
