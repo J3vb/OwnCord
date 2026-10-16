@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, plugging in or removing an audio device now updates the device lists in Settings → Voice & Video and switches over, in a call and outside one. A saved device that comes back is picked again.
 - Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
 - Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
+- Linux: video layers nobody is watching are paused, saving CPU and upload.
 
 **Profiles**
 
