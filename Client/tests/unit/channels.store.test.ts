@@ -86,6 +86,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
@@ -105,6 +106,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
@@ -137,6 +139,7 @@ describe("channels store", () => {
           canSend: true,
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -181,6 +184,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
@@ -427,6 +431,7 @@ describe("channels store", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
@@ -1157,6 +1162,59 @@ describe("channels store", () => {
       const after = channelsStore.getState().channels.get(1);
       expect(after).not.toBe(before);
       expect(before?.nsfw).toBe(false);
+    });
+  });
+
+  // WP 3D-6: `private` marks a channel hidden from @everyone. A permission
+  // override edit re-sends channel_create to everyone who can still see it, so
+  // the add must flip the flag both ways and must not drop it when a frame
+  // from an older server omits the key.
+  describe("private channels", () => {
+    const base = { id: 1, name: "staff", type: "text", category: null, position: 0 } as const;
+
+    it("defaults to not private when ready omits the key (older server)", () => {
+      setChannels([{ ...base }]);
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(false);
+    });
+
+    it("reads private off ready", () => {
+      setChannels([{ ...base, private: true }]);
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(true);
+    });
+
+    it("a channel_create for an existing row with private absent keeps the lock", () => {
+      setChannels([{ ...base, private: true }]);
+      addChannel({ ...base });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(true);
+    });
+
+    it("a channel_create sets the lock after an override flip, in both directions", () => {
+      setChannels([{ ...base, private: false }]);
+      addChannel({ ...base, private: true });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(true);
+      addChannel({ ...base, private: false });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(false);
+    });
+
+    it("a brand-new channel_create without the key is not private", () => {
+      addChannel({ ...base });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(false);
+    });
+
+    it("a channel_update without private does not reset it", () => {
+      setChannels([{ ...base, private: true }]);
+      updateChannel({ id: 1, name: "staff-room" });
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.name).toBe("staff-room");
+      expect(ch?.isPrivate).toBe(true);
+    });
+
+    it("a channel_update carrying private applies it", () => {
+      setChannels([{ ...base, private: true }]);
+      updateChannel({ id: 1, private: false });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(false);
+      updateChannel({ id: 1, private: true });
+      expect(channelsStore.getState().channels.get(1)?.isPrivate).toBe(true);
     });
   });
 

@@ -64,6 +64,7 @@ export function setChannel(overrides: Partial<Channel> = {}): void {
     canSend: true,
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
     ...overrides,

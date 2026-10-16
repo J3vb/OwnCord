@@ -24,6 +24,7 @@ function dmRow(id: number, unreadCount: number, mentionCount: number): Channel {
     canSend: true,
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };

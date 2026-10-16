@@ -178,6 +178,7 @@ describe("notifyIncomingMessage", () => {
             topic: "",
             slowMode: 0,
             nsfw: false,
+            isPrivate: false,
             voiceMaxUsers: 0,
             voiceMaxVideo: 0,
           },

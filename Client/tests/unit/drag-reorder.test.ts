@@ -51,6 +51,7 @@ function makeCh(id: number, position: number, name = `ch-${id}`): Channel {
     topic: "",
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };

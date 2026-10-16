@@ -19,6 +19,7 @@ function channel(id: number, position: number): Channel {
     slowMode: 0,
     topic: "",
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };
