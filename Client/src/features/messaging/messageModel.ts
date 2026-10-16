@@ -20,8 +20,11 @@ import type {
  * - "sent": confirmed by the server (the default for every server-sourced row).
  * - "pending": optimistic local row awaiting the chat_send_ok ack.
  * - "failed": the send was rejected or dropped; the row offers retry.
+ * - "uploading": a queued send waiting for its files (3A-9). Never in
+ *   `pendingSends`, so a disconnect sweep and the content-only echo match leave
+ *   it alone; the controller turns it into a pending row when the files land.
  */
-export type MessageStatus = "sent" | "pending" | "failed";
+export type MessageStatus = "sent" | "pending" | "failed" | "uploading";
 
 export interface Message {
   readonly id: number;

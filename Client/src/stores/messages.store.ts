@@ -109,6 +109,8 @@ export function addOptimisticMessage(params: {
   replyTo: number | null;
   attachments?: readonly Attachment[];
   timestamp: string;
+  /** "uploading" for a send queued behind its files; absent means "pending". */
+  status?: "uploading";
 }): void {
   const optimistic: Message = {
     id: 0,
@@ -122,7 +124,7 @@ export function addOptimisticMessage(params: {
     editedAt: null,
     deleted: false,
     timestamp: params.timestamp,
-    status: "pending",
+    status: params.status ?? "pending",
     correlationId: params.correlationId,
     clientMessageId: params.clientMessageId,
     errorCode: null,
