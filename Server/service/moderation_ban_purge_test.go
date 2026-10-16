@@ -285,8 +285,10 @@ func TestPurgeAfterBan_DMsUntouched(t *testing.T) {
 func TestPurgeAfterBan_WindowBoundary(t *testing.T) {
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
-	inside := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, 30*time.Minute)
+	// Seeded in ascending timestamp order: the floor search needs ids
+	// monotonic with timestamps.
 	outside := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, 90*time.Minute)
+	inside := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, 30*time.Minute)
 	newest := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, 0)
 
 	res := f.mod.PurgeAfterBan(context.Background(), fixtureMod, fixtureMember2, time.Hour)
@@ -367,10 +369,16 @@ func TestPurgeAfterBan_ReversesMentionBadges(t *testing.T) {
 	ctx := context.Background()
 
 	before := banPurgeMsg(t, f.database, fixtureChannel, fixtureOwner, time.Minute)
+	if _, err := f.database.ReplaceMessageMentions(ctx, before, []int64{fixtureMember}, false); err != nil {
+		t.Fatalf("ReplaceMessageMentions(before): %v", err)
+	}
 	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, before, []int64{fixtureMember}); err != nil {
 		t.Fatalf("IncrementMentionCounts(before): %v", err)
 	}
 	spam := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
+	if _, err := f.database.ReplaceMessageMentions(ctx, spam, []int64{fixtureMember}, false); err != nil {
+		t.Fatalf("ReplaceMessageMentions(spam): %v", err)
+	}
 	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, spam, []int64{fixtureMember}); err != nil {
 		t.Fatalf("IncrementMentionCounts(spam): %v", err)
 	}
@@ -392,6 +400,46 @@ func TestPurgeAfterBan_ReversesMentionBadges(t *testing.T) {
 	}
 	if got := mentions(); got != 1 {
 		t.Errorf("mention_count after the purge = %d, want 1 (the value before the purged message)", got)
+	}
+}
+
+// failSecondBatchStore lets the first purge batch through and fails the
+// second with a plain error.
+type failSecondBatchStore struct {
+	Store
+	calls int
+}
+
+func (s *failSecondBatchStore) PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error) {
+	s.calls++
+	if s.calls > 1 {
+		return nil, errors.New("disk I/O error")
+	}
+	return s.Store.PurgeUserChannelMessagesSince(ctx, channelID, userID, since, limit)
+}
+
+func TestPurgeAfterBan_StoreErrorAfterFirstBatch(t *testing.T) {
+	f := banPurgeFixture(t)
+	banPurgeBan(t, f, fixtureMember2)
+	for range 150 {
+		banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
+	}
+	f.mod.messages = NewMessageService(&failSecondBatchStore{Store: f.database}, f.mod.perms, nil)
+
+	res := f.mod.PurgeAfterBan(context.Background(), fixtureMod, fixtureMember2, time.Hour)
+	if !errors.Is(res.Err, ErrInternal) || res.Complete {
+		t.Fatalf("PurgeAfterBan = %+v, want an internal-error, incomplete purge", res)
+	}
+	if res.Deleted != 100 || len(res.Batches) != 1 {
+		t.Fatalf("committed batches = %+v (deleted %d), want the one batch of 100", res.Batches, res.Deleted)
+	}
+	var reason string
+	if err := f.database.QueryRowContext(context.Background(),
+		`SELECT reason FROM moderation_actions WHERE kind = 'removal' AND target_id = ?`, fixtureMember2).Scan(&reason); err != nil {
+		t.Fatalf("ledger row: %v", err)
+	}
+	if reason != "100 messages removed with ban" {
+		t.Errorf("ledger reason = %q, want the committed count", reason)
 	}
 }
 
