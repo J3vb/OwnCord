@@ -1,0 +1,400 @@
+/**
+ * GroupDmMemberPanel -- right-side panel listing the members of a group DM
+ * (WP 3B-11a): you plus everyone else, a crown on the owner, Add People in the
+ * header, and, for the owner, Remove From Group / Make Group Owner on every
+ * other member (right-click, the menu key, or the ⋯ button).
+ *
+ * Presentational: the page controller hands it a `GroupPanelView` built from
+ * the live stores and calls `update` when they change. It runs no requests; the
+ * actions it offers are callbacks.
+ *
+ * A11y: role="complementary", each member is a button that opens their
+ * profile, Escape closes the panel when focus is inside it.
+ */
+
+import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
+import { createElement, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
+import { showContextMenu, openMenuOnKeyboard } from "@lib/context-menu";
+import { createModal } from "@lib/modalFactory";
+import type { MountableComponent } from "@lib/safe-render";
+import type { UserStatus } from "@lib/types";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import type { GroupMemberView, GroupPanelView } from "../features/direct-messages/groupMembers";
+import { groupDmText } from "../i18n/groupDm";
+import { statusLabel } from "../i18n/shell";
+
+export interface GroupDmMemberPanelOptions {
+  readonly view: GroupPanelView;
+  readonly onClose: () => void;
+  /** Add People was pressed (offered only while `view.canAdd`). */
+  readonly onAddPeople: () => void;
+  /** A member was clicked: open their profile popup at (x, y). */
+  readonly onOpenProfile: (member: GroupMemberView, x: number, y: number) => void;
+  /** Owner action, already confirmed by the panel; `channelId` is the group it was asked for. */
+  readonly onRemove: (channelId: number, member: GroupMemberView) => void;
+  /** Owner action, already confirmed by the panel; `channelId` is the group it was asked for. */
+  readonly onMakeOwner: (channelId: number, member: GroupMemberView) => void;
+  /** Move focus to the panel on mount (the user opened it). Default true. */
+  readonly focus?: boolean;
+}
+
+export type GroupDmMemberPanelComponent = MountableComponent & {
+  readonly isOpen: () => boolean;
+  /** Repaint from a fresher view (members added or removed, owner changed). */
+  readonly update: (view: GroupPanelView) => void;
+};
+
+function statusColor(status: string): string {
+  switch (status) {
+    case "online":
+      return "var(--green)";
+    case "idle":
+      return "var(--yellow)";
+    case "dnd":
+      return "var(--red)";
+    default:
+      return "var(--text-micro)";
+  }
+}
+
+function asUserStatus(status: string): UserStatus {
+  return status === "online" || status === "idle" || status === "dnd" ? status : "offline";
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * The owner's crown (Lucide). Built here rather than added to the shared icon
+ * set so its path data loads with this lazy panel, not with the main page.
+ */
+function createCrownIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  for (const [k, v] of Object.entries({
+    viewBox: "0 0 24 24",
+    width: "14",
+    height: "14",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  })) {
+    svg.setAttribute(k, v);
+  }
+  const body = document.createElementNS(SVG_NS, "path");
+  body.setAttribute(
+    "d",
+    "M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z",
+  );
+  const base = document.createElementNS(SVG_NS, "path");
+  base.setAttribute("d", "M5 21h14");
+  svg.append(body, base);
+  return svg;
+}
+
+interface ConfirmSpec {
+  readonly title: string;
+  readonly body: string;
+  readonly confirmLabel: string;
+  readonly danger: boolean;
+  readonly testId: string;
+}
+
+/** Ask before an owner action; Cancel is focused first, Escape and the backdrop cancel. */
+function confirmOwnerAction(spec: ConfirmSpec, onConfirm: () => void): void {
+  const owner = new Disposable();
+  const titleId = `${spec.testId}-title`;
+  const header = createElement("div", { class: "modal-header" });
+  header.appendChild(createElement("h3", { id: titleId }, spec.title));
+  const body = createElement("div", { class: "modal-body" });
+  body.appendChild(createElement("p", {}, spec.body));
+  const cancel = createElement(
+    "button",
+    { class: "btn-modal-cancel", type: "button", "data-testid": `${spec.testId}-cancel` },
+    groupDmText("cancel"),
+  );
+  const confirm = createElement(
+    "button",
+    {
+      class: spec.danger ? "btn-danger" : "btn-primary",
+      type: "button",
+      "data-testid": `${spec.testId}-confirm`,
+    },
+    spec.confirmLabel,
+  );
+  const footer = createElement("div", { class: "modal-footer" });
+  appendChildren(footer, cancel, confirm);
+  const content = createElement("div");
+  appendChildren(content, header, body, footer);
+  const modal = createModal({
+    content,
+    ariaLabelledBy: titleId,
+    overlayAttrs: { "data-testid": spec.testId },
+    onClose: () => owner.destroy(),
+  });
+  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
+  confirm.addEventListener(
+    "click",
+    () => {
+      modal.close();
+      onConfirm();
+    },
+    { signal: owner.signal },
+  );
+  cancel.focus();
+}
+
+export function createGroupDmMemberPanel(
+  options: GroupDmMemberPanelOptions,
+): GroupDmMemberPanelComponent {
+  const disposable = new Disposable();
+  const { signal } = disposable;
+  let view = options.view;
+  let panel: HTMLElement | null = null;
+  let body: HTMLDivElement | null = null;
+  let bodyOwner: Disposable | null = null;
+  let open = false;
+
+  /** The label a confirm dialog names the group by. */
+  function groupLabel(): string {
+    if (view.groupName !== "") return view.groupName;
+    return view.members
+      .filter((m) => !m.isSelf)
+      .map((m) => m.name)
+      .join(", ");
+  }
+
+  function askRemove(member: GroupMemberView): void {
+    const channelId = view.channelId;
+    confirmOwnerAction(
+      {
+        title: groupDmText("removeTitle", { name: member.name }),
+        body: groupDmText("removeBody", { name: member.name, group: groupLabel() }),
+        confirmLabel: groupDmText("removeConfirm"),
+        danger: true,
+        testId: "group-remove-confirm",
+      },
+      () => options.onRemove(channelId, member),
+    );
+  }
+
+  function askMakeOwner(member: GroupMemberView): void {
+    const channelId = view.channelId;
+    confirmOwnerAction(
+      {
+        title: groupDmText("ownerTitle", { name: member.name }),
+        body: groupDmText("ownerBody", { name: member.name }),
+        confirmLabel: groupDmText("ownerConfirm"),
+        danger: false,
+        testId: "group-owner-confirm",
+      },
+      () => options.onMakeOwner(channelId, member),
+    );
+  }
+
+  function buildRow(member: GroupMemberView, rowSignal: AbortSignal): HTMLElement {
+    const label = member.isSelf ? groupDmText("self", { name: member.name }) : member.name;
+    const row = createElement("div", {
+      class: "member-item group-member-item",
+      "data-testid": `group-member-${member.id}`,
+      role: "button",
+      tabindex: "0",
+      "aria-haspopup": "dialog",
+      "aria-label": label,
+    });
+    const avatar = createAvatarElement(
+      { username: member.username, displayName: member.name, avatar: member.avatar },
+      { className: "mi-avatar", background: pickAvatarColor(member.username), decorative: true },
+    );
+    avatar.appendChild(
+      createElement("div", {
+        class: "mi-status",
+        style: `background: ${statusColor(member.status)}`,
+        title: statusLabel(asUserStatus(member.status)),
+      }),
+    );
+    const name = createElement("span", { class: "mi-name" }, label);
+    appendChildren(row, avatar, name);
+    if (member.isOwner) {
+      const crown = createElement("span", {
+        class: "gm-crown",
+        title: groupDmText("ownerBadge"),
+        role: "img",
+        "aria-label": groupDmText("ownerBadge"),
+        "data-testid": `group-owner-${member.id}`,
+      });
+      crown.appendChild(createCrownIcon());
+      row.appendChild(crown);
+    }
+
+    const openProfile = (x: number, y: number): void => options.onOpenProfile(member, x, y);
+    row.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal: rowSignal });
+    row.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        const rect = row.getBoundingClientRect();
+        openProfile(rect.left, rect.top);
+      },
+      { signal: rowSignal },
+    );
+
+    // Owner actions: on other members only. Everyone else gets no menu at all.
+    if (view.canManage && !member.isSelf) {
+      const openMenu = (x: number, y: number): void => {
+        showContextMenu({
+          x,
+          y,
+          signal: rowSignal,
+          className: "group-member-menu",
+          items: [
+            {
+              label: groupDmText("makeOwner"),
+              testId: `group-make-owner-${member.id}`,
+              onClick: () => askMakeOwner(member),
+            },
+            {
+              label: groupDmText("removeMember"),
+              danger: true,
+              testId: `group-remove-${member.id}`,
+              onClick: () => askRemove(member),
+            },
+          ],
+        });
+      };
+      row.addEventListener(
+        "contextmenu",
+        (e) => {
+          e.preventDefault();
+          openMenu(e.clientX, e.clientY);
+        },
+        { signal: rowSignal },
+      );
+      openMenuOnKeyboard(row, openMenu, rowSignal);
+      const more = createElement("button", {
+        type: "button",
+        class: "gm-more",
+        title: groupDmText("moreActions", { name: member.name }),
+        "aria-label": groupDmText("moreActions", { name: member.name }),
+        "aria-haspopup": "menu",
+        "data-testid": `group-member-actions-${member.id}`,
+      });
+      more.appendChild(createIcon("ellipsis", 16));
+      more.addEventListener(
+        "click",
+        (e) => {
+          e.stopPropagation();
+          const rect = more.getBoundingClientRect();
+          openMenu(rect.left, rect.bottom);
+        },
+        { signal: rowSignal },
+      );
+      row.appendChild(more);
+    }
+    return row;
+  }
+
+  function buildBody(): HTMLDivElement {
+    bodyOwner?.destroy();
+    bodyOwner = new Disposable();
+    const rowSignal = bodyOwner.signal;
+    const content = createElement("div", { class: "gm-body" });
+    const head = createElement("div", { class: "gm-head" });
+    head.appendChild(
+      createElement(
+        "div",
+        { class: "gm-heading", "data-testid": "group-member-count" },
+        groupDmText("membersHeading", { count: view.members.length }),
+      ),
+    );
+    if (view.canAdd) {
+      const add = createElement("button", {
+        type: "button",
+        class: "gm-add",
+        "data-testid": "group-add-people",
+      });
+      add.appendChild(createIcon("user-plus", 16));
+      add.appendChild(createElement("span", {}, groupDmText("addPeople")));
+      add.addEventListener("click", () => options.onAddPeople(), { signal: rowSignal });
+      head.appendChild(add);
+    }
+    content.appendChild(head);
+    const list = createElement("div", { class: "gm-list", role: "list" });
+    for (const member of view.members) list.appendChild(buildRow(member, rowSignal));
+    content.appendChild(list);
+    return content;
+  }
+
+  function mount(container: Element): void {
+    open = true;
+    panel = createElement("div", {
+      class: "dm-profile-sidebar group-member-panel",
+      role: "complementary",
+      "aria-label": groupDmText("panelLabel"),
+      tabindex: "-1",
+      "data-testid": "group-member-panel",
+    });
+    const closeBtn = createElement("button", {
+      class: "dps-close",
+      type: "button",
+      "aria-label": groupDmText("close"),
+      "data-testid": "group-panel-close",
+    });
+    closeBtn.textContent = "✕";
+    closeBtn.addEventListener("click", () => options.onClose(), { signal });
+    panel.appendChild(closeBtn);
+    body = buildBody();
+    panel.appendChild(body);
+    container.appendChild(panel);
+    if (options.focus !== false) panel.focus();
+
+    // Escape closes the panel only for a key meant for it: a dialog on top or
+    // a handler that already used the key owns it, and with focus outside the
+    // panel (the composer) Escape is not this panel's.
+    let escapeTaken = false;
+    window.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape") escapeTaken = dialogOpen();
+      },
+      { capture: true, signal },
+    );
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key !== "Escape" || !open) return;
+        if (escapeTaken || e.defaultPrevented) return;
+        if (panel === null || !panel.contains(document.activeElement)) return;
+        e.preventDefault();
+        options.onClose();
+      },
+      { signal },
+    );
+  }
+
+  function update(next: GroupPanelView): void {
+    view = next;
+    if (panel === null || body === null) return;
+    const hadFocus = body.contains(document.activeElement);
+    const fresh = buildBody();
+    body.replaceWith(fresh);
+    body = fresh;
+    if (hadFocus) panel.focus();
+  }
+
+  function destroy(): void {
+    open = false;
+    disposable.destroy();
+    bodyOwner?.destroy();
+    bodyOwner = null;
+    panel?.remove();
+    panel = null;
+    body = null;
+  }
+
+  return { mount, destroy, isOpen: () => open, update };
+}

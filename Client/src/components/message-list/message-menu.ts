@@ -22,6 +22,7 @@ import { readPointerEnabled } from "@lib/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
 import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
+import { isServerRowKind } from "@lib/messageKind";
 
 import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
 import type { MessageListOptions } from "../MessageList";
@@ -99,8 +100,8 @@ function buildItems(
   const items: (ContextMenuItem | ContextMenuSeparator)[] = [];
   const sep: ContextMenuSeparator = { separator: true };
 
-  // A call log row offers nothing but Copy ID (developer mode).
-  if (msg.kind === "call") {
+  // A server row (call log, group event) offers nothing but Copy ID (developer mode).
+  if (isServerRowKind(msg.kind)) {
     if (gates.copyId.shown) {
       items.push({
         label: messageMenuText("copyId"),
@@ -366,8 +367,8 @@ export function openMessageMenu(req: MessageMenuRequest): void {
   if (signal.aborted) return;
   const current = findMessage(msg.channelId, msg.id);
   if (current === undefined || current.deleted) return;
-  // Nothing to offer on a call row outside developer mode: no empty menu.
-  if (current.kind === "call" && !messageActionGates(current, req.opts).copyId.shown) return;
+  // Nothing to offer on a server row outside developer mode: no empty menu.
+  if (isServerRowKind(current.kind) && !messageActionGates(current, req.opts).copyId.shown) return;
   closeMessageMenu();
 
   const row = rowOf(msg.id);

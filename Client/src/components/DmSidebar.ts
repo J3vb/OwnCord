@@ -51,6 +51,8 @@ export interface DmConversation {
   readonly status?: "online" | "idle" | "dnd" | "offline";
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
+  /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
+  readonly hasOwner?: boolean;
   /** Everyone but the current user. Drives the stack and the count. */
   readonly participants?: readonly DmParticipant[];
   readonly lastMessage: string;
@@ -201,6 +203,7 @@ function menuConvo(convo: DmConversation): DmMenuConvo {
     userId: convo.userId,
     username: convo.username,
     isGroup: convo.isGroup === true,
+    hasOwner: convo.hasOwner === true,
     unread: convo.unread,
     muted,
     mutedUntil: live?.until ?? null,

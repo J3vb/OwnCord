@@ -23,6 +23,8 @@ export const requestsText = defineCatalog("requests", {
   "dm.close": "Close DM",
   "dm.leaveConfirmTitle": "Leave this group?",
   "dm.leaveConfirmBody": "You leave {name}. You won't be able to rejoin this group.",
+  "dm.leaveConfirmBodyRejoin":
+    "You leave {name}. You won't be able to rejoin unless someone adds you back.",
   "dm.leaveConfirm": "Leave Group",
   "dm.backTo": "Back to {server}",
   "dm.serverFallback": "Server",
@@ -58,4 +60,9 @@ export const requestsText = defineCatalog("requests", {
   "picker.searchLabel": "Search for people",
   "picker.noMatches": "No one matches",
   "picker.removeChip": "Remove {name}",
+  "picker.addTitle": "Add People",
+  "picker.addHint": "Select up to {max} more people to add to this group",
+  "picker.add": "Add",
+
+  "group.showMembers": "Show Member List",
 });

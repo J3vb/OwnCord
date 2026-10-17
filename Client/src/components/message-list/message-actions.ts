@@ -6,6 +6,7 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
+import { isServerRowKind } from "@lib/messageKind";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -60,8 +61,8 @@ export function isActionableMessage(msg: Message): boolean {
 
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
   const sent = isActionableMessage(msg);
-  // A call log row is read-only: only Copy ID (developer mode) applies.
-  const on = sent && msg.kind !== "call";
+  // A server row (call log, group event) is read-only: only Copy ID (developer mode) applies.
+  const on = sent && !isServerRowKind(msg.kind);
   const own = msg.user.id === opts.currentUserId;
   const channel = channelsStore.getState().channels.get(msg.channelId);
   const isDm = opts.channelType === "dm";

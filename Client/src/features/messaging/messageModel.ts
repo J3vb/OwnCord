@@ -4,6 +4,7 @@
 // stays the only import path consumers use.
 import type {
   CallInfo,
+  GroupEventInfo,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -64,6 +65,8 @@ export interface Message {
   readonly kind?: string;
   /** The call a `kind: "call"` row stands for; the render source, never `content`. */
   readonly call?: CallInfo;
+  /** The payload of a group DM system row (`kind` group_*); the render source, never `content`. */
+  readonly groupEvent?: GroupEventInfo;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -162,6 +165,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     mentionsEveryone: payload.mentions_everyone,
     ...(payload.kind !== undefined && { kind: payload.kind }),
     ...(payload.call !== undefined && { call: payload.call }),
+    ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
   };
 }
 
@@ -188,6 +192,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     mentionsEveryone: response.mentions_everyone,
     ...(response.kind !== undefined && { kind: response.kind }),
     ...(response.call !== undefined && { call: response.call }),
+    ...(response.group_event !== undefined && { groupEvent: response.group_event }),
   };
 }
 

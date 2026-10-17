@@ -85,6 +85,7 @@ function menuConvo(dm: DmChannel): DmMenuConvo {
     userId: dm.recipient.id,
     username: dmDisplayName(dm),
     isGroup: dm.isGroup,
+    hasOwner: dm.ownerId !== undefined,
     unread: dm.unreadCount > 0 || dm.mentionCount > 0,
     muted: isChannelMuted(dm.channelId),
     mutedUntil: getChannelMute(dm.channelId)?.until ?? null,

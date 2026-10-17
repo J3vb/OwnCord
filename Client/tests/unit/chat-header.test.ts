@@ -339,6 +339,26 @@ describe("updateChatHeaderForDm", () => {
       expect(refs.profileBtn.style.display).toBe("none");
     });
 
+    it("the Show Member List toggle is shown only for a group DM (WP 3B-11a)", () => {
+      const onToggleMemberList = vi.fn();
+      const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onToggleMemberList });
+      container.appendChild(element);
+      expect(refs.membersBtn.style.display).toBe("none");
+      expect(refs.membersBtn.getAttribute("aria-label")).toBe("Show Member List");
+      expect(refs.membersBtn.getAttribute("aria-pressed")).toBe("false");
+
+      updateChatHeaderForDm(refs, { username: "Bob", status: "Online" });
+      expect(refs.membersBtn.style.display).toBe("none");
+
+      updateChatHeaderForDm(refs, { username: "Group", status: "3 members", isGroup: true });
+      expect(refs.membersBtn.style.display).toBe("");
+      refs.membersBtn.click();
+      expect(onToggleMemberList).toHaveBeenCalledOnce();
+
+      updateChatHeaderForDm(refs, null);
+      expect(refs.membersBtn.style.display).toBe("none");
+    });
+
     it("calls onToggleDmProfile on click and starts unpressed", () => {
       const onToggleDmProfile = vi.fn();
       const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onToggleDmProfile });

@@ -32,6 +32,8 @@ export interface ChatAreaOptions {
   readonly getToast: () => ToastContainer | null;
   readonly getChannelCtrl: () => ChannelController | null;
   readonly onToggleDmProfile?: () => void;
+  /** Show or hide the group DM member panel. */
+  readonly onToggleMemberList?: () => void;
   /** Start a call in the current DM (join its voice channel + ring). */
   readonly onStartCall?: () => void;
   /** Start a call in the current DM with the camera on. */
@@ -161,6 +163,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       searchCtrl.open();
     },
     onToggleDmProfile: opts.onToggleDmProfile,
+    onToggleMemberList: opts.onToggleMemberList,
     onStartCall: opts.onStartCall,
     onStartVideoCall: opts.onStartVideoCall,
     onRenameGroup: opts.onRenameGroup,

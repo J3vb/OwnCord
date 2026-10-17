@@ -237,6 +237,26 @@ describe("notifyIncomingMessage", () => {
     expect(mockOscillator.start).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "group_add",
+    "group_remove",
+    "group_leave",
+    "group_rename",
+    "group_icon",
+    "group_future",
+  ])("makes no sound and no OS toast for a %s row", async (kind) => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    mockOscillator.start.mockClear();
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("notificationSounds", true);
+    notifyIncomingMessage(makePayload({ kind, group_event: { target_user_id: 2 } }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    expect(mockOscillator.start).not.toHaveBeenCalled();
+  });
+
   it("does not notify when window is focused and message is in active channel", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();

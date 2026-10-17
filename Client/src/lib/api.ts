@@ -1476,6 +1476,43 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
+     * Add people to a group DM (WP 3B-10). Any member may; the group holds at
+     * most 10. 200 carries the summary; 204 means the summary read failed after
+     * the commit, and the dm_channel_open that follows carries the state.
+     */
+    addGroupDmMembers(
+      channelId: number,
+      userIds: readonly number[],
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "POST",
+        `/dms/${channelId}/members`,
+        { user_ids: [...userIds] },
+        signal,
+      );
+    },
+
+    /** Remove another member from a group DM. Owner only; removing yourself is a leave (closeDm). */
+    removeGroupDmMember(channelId: number, userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/dms/${channelId}/members/${userId}`, undefined, signal);
+    },
+
+    /** Hand a group DM to another member. Owner only. 200 carries the summary, 204 none. */
+    setGroupDmOwner(
+      channelId: number,
+      userId: number,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "PUT",
+        `/dms/${channelId}/owner`,
+        { user_id: userId },
+        signal,
+      );
+    },
+
+    /**
      * Remove a DM from the sidebar. For a 1:1 this only hides it — the next
      * message from either side brings it back. For a group it is a *leave*:
      * the caller comes out of the participant list and cannot return unaided.

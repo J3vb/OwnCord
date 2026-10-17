@@ -1178,6 +1178,37 @@ describe("API Client", () => {
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ name: "New" });
     });
 
+    it("addGroupDmMembers calls POST /dms/{id}/members with user_ids and returns the summary", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 1 }));
+      const result = await api.addGroupDmMembers(11, [4, 5]);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/members");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_ids: [4, 5] });
+      expect(result).toEqual({ channel_id: 11, owner_id: 1 });
+    });
+
+    it("addGroupDmMembers and setGroupDmOwner resolve undefined on a 204", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.addGroupDmMembers(11, [4])).resolves.toBeUndefined();
+      await expect(api.setGroupDmOwner(11, 4)).resolves.toBeUndefined();
+    });
+
+    it("removeGroupDmMember calls DELETE /dms/{id}/members/{userId}", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.removeGroupDmMember(11, 4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/members/4");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("setGroupDmOwner calls PUT /dms/{id}/owner with user_id", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 4 }));
+      const result = await api.setGroupDmOwner(11, 4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/owner");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_id: 4 });
+      expect(result).toEqual({ channel_id: 11, owner_id: 4 });
+    });
+
     it("closeDm calls DELETE /dms/{channelId}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.closeDm(10);

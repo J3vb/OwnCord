@@ -40,6 +40,7 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
     participants,
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
+    ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,

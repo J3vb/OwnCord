@@ -137,6 +137,25 @@ describe("MessageList: blocked users' messages (WP 3B-6)", () => {
     expect(run(2)!.textContent).not.toContain("1 blocked messages");
   });
 
+  it("a server row (group event, call, unknown kind) by a blocked author is never folded", () => {
+    block(BOB.id);
+    setMessages([
+      msg(1, BOB),
+      msg(2, BOB, { kind: "group_add", groupEvent: { target_user_id: 4 } }),
+      msg(3, BOB, { kind: "group_future", content: "something happened" }),
+      msg(4, BOB, { kind: "" }),
+    ]);
+    mount();
+
+    // Rows 2 and 3 stay visible and split the blocked messages around them;
+    // an empty kind is an ordinary message and still folds.
+    expect(messageIds()).toEqual(["2", "3"]);
+    expect(runs().map((r) => r.dataset["testid"])).toEqual([
+      "msg-blocked-run-1",
+      "msg-blocked-run-4",
+    ]);
+  });
+
   it("a message by someone else splits the run", () => {
     block(BOB.id);
     setMessages([msg(1, BOB), msg(2, BOB), msg(3), msg(4, BOB)]);

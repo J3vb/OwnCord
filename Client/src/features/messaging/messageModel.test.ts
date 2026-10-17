@@ -84,6 +84,62 @@ describe("messageResponseToMessage", () => {
   });
 });
 
+describe("group_event (WP 3B-11a)", () => {
+  it("carries a group row's kind and group_event from a live broadcast and from history", () => {
+    const base: ChatMessagePayload = {
+      id: 9,
+      channel_id: 3,
+      user,
+      content: "bob added carol to the group",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "group_add",
+      group_event: { target_user_id: 5 },
+    };
+    expect(chatPayloadToMessage(base)).toMatchObject({
+      kind: "group_add",
+      groupEvent: { target_user_id: 5 },
+    });
+    expect(
+      chatPayloadToMessage({ ...base, kind: "group_rename", group_event: { name: "" } }),
+    ).toMatchObject({ kind: "group_rename", groupEvent: { name: "" } });
+    const response: MessageResponse = {
+      id: 9,
+      channel_id: 3,
+      user,
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "group_icon",
+      group_event: { icon_removed: true },
+    };
+    expect(messageResponseToMessage(response)).toMatchObject({
+      kind: "group_icon",
+      groupEvent: { icon_removed: true },
+    });
+  });
+
+  it("leaves an ordinary message without the field", () => {
+    const m = chatPayloadToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    expect("groupEvent" in m).toBe(false);
+    expect("kind" in m).toBe(false);
+  });
+});
+
 describe("INITIAL_STATE", () => {
   it("starts every collection empty", () => {
     for (const value of Object.values(INITIAL_STATE)) {

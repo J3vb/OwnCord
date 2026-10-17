@@ -6,6 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { isServerRowKind } from "@lib/messageKind";
 import type { MountableComponent } from "@lib/safe-render";
 import {
   messagesStore,
@@ -329,7 +330,8 @@ function buildVirtualItems(
   };
 
   for (const [i, msg] of messages.entries()) {
-    const isBlocked = blocked.has(msg.user.id);
+    // A server row (call log, group event) is never folded into a blocked run.
+    const isBlocked = blocked.has(msg.user.id) && !isServerRowKind(msg.kind);
     const newDay = lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp);
     const isFirstUnread = i === newDividerAt;
     if (newDay || isFirstUnread || !isBlocked) flushRun();
