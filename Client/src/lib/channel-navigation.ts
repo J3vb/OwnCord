@@ -12,6 +12,7 @@ import {
 } from "@stores/channels.store";
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
+import { isChannelMuted } from "./channel-mutes";
 import { hasUnread } from "./read-state";
 
 const reselectListeners = new Set<(channelId: number) => void>();
@@ -103,15 +104,24 @@ export function findChannelByName(name: string): { id: number; name: string } | 
  * collapsed categories' hidden rows skipped. Voice channels are skipped too:
  * opening one means joining the call, which a keyboard step must never do,
  * and a bare setActiveChannel would mount its chat unjoined (F8).
+ *
+ * The unread step (`unreadOnly`) looks inside collapsed categories, since an
+ * unread channel there is exactly what it is for, and passes over a muted
+ * channel that has no mention (its row looks read); a muted channel with a
+ * mention still counts.
  */
-function navigableChannelIds(): number[] {
+function navigableChannelIds(unreadOnly: boolean): number[] {
   if (uiStore.getState().sidebarMode === "dms") {
     return dmStore.getState().channels.map((c) => c.channelId);
   }
   const ids: number[] = [];
   for (const [category, channels] of getChannelsByCategory()) {
-    if (category !== null && isCategoryCollapsed(category)) continue;
-    for (const ch of channels) if (ch.type !== "voice") ids.push(ch.id);
+    if (!unreadOnly && category !== null && isCategoryCollapsed(category)) continue;
+    for (const ch of channels) {
+      if (ch.type === "voice") continue;
+      if (unreadOnly && isChannelMuted(ch.id) && ch.mentionCount === 0) continue;
+      ids.push(ch.id);
+    }
   }
   return ids;
 }
@@ -122,11 +132,12 @@ function navigableChannelIds(): number[] {
  * (up/previous); the steps wrap at the ends, matching Discord.
  *
  * Unread is what a badge counts (`hasUnread`): an unread or mention count in
- * either store. No-op when nothing matches — an up step with the active
+ * either store, except that the unread step also reaches into collapsed
+ * categories and skips muted channels without a mention. No-op when nothing matches — an up step with the active
  * channel already at the top, or an unread step when nothing is unread.
  */
 export function stepChannel(direction: 1 | -1, unreadOnly = false): void {
-  const ids = navigableChannelIds();
+  const ids = navigableChannelIds(unreadOnly);
   if (ids.length === 0) return;
   const current = channelsStore.getState().activeChannelId;
   const from = current === null ? (direction === 1 ? -1 : 0) : ids.indexOf(current);

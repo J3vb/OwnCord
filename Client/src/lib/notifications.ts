@@ -173,11 +173,11 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   if (!notificationAllowed(payload.channel_id, mentioned)) return;
 
   // Do Not Disturb — the settings panel promises "You will not receive desktop
-  // notifications", so honour it for the popup and the chime. The taskbar
-  // flash stays: it's a passive hint, not a notification.
+  // notifications", so honour it for the popup, the chime and the taskbar
+  // flash alike (a mention included, matching the popup and chime).
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
-  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
 
@@ -260,7 +260,7 @@ export function notifyMention(channelId: number): void {
 
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
-  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(true);
 
   if (showPopup) {
@@ -313,7 +313,7 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
 
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
-  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
 

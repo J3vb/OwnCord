@@ -11,6 +11,7 @@ import type { Channel } from "../../src/stores/channels.store";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { invalidateMuteCache, muteChannel } from "../../src/lib/channel-mutes";
 
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -246,6 +247,52 @@ describe("channel-navigation", () => {
       expect(channelsStore.getState().activeChannelId).toBe(2);
       stepChannel(1, true);
       expect(channelsStore.getState().activeChannelId).toBe(3);
+    });
+
+    it("the unread step reaches into a collapsed category; the plain step does not", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0, category: "Open" }),
+        makeChannel({ id: 2, name: "b", position: 0, category: "Shut", unreadCount: 2 }),
+        makeChannel({ id: 3, name: "c", position: 1, category: "Shut" }),
+      ]);
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Shut"]) }));
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+    });
+
+    describe("muted channels", () => {
+      beforeEach(() => {
+        localStorage.clear();
+        invalidateMuteCache();
+      });
+
+      it("the unread step skips a muted channel without a mention", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 3 }),
+          makeChannel({ id: 2, name: "b", position: 1, unreadCount: 1 }),
+        ]);
+        muteChannel(1);
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        // Nothing else is a stop: the muted one is passed over, not revisited.
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+      });
+
+      it("a muted channel with a mention still counts", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 3, mentionCount: 1 }),
+          makeChannel({ id: 2, name: "b", position: 1 }),
+        ]);
+        muteChannel(1);
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(1);
+      });
     });
 
     it("is a no-op when nothing is unread", () => {

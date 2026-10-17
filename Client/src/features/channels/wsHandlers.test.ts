@@ -182,7 +182,10 @@ describe("handleChannelDelete", () => {
     handleChannelDelete({ id: 1 });
 
     expect(channelsStore.getState().activeChannelId).toBe(3);
-    expect(showToast).toHaveBeenCalledWith("This channel was deleted", "info");
+    expect(showToast).toHaveBeenCalledWith(
+      "You no longer have access to this channel, or it was deleted",
+      "info",
+    );
   });
 
   it("leaves the active channel alone when another channel is deleted", () => {

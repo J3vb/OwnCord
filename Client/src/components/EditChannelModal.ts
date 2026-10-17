@@ -22,9 +22,14 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
-import { getKnownCategories } from "@stores/channels.store";
+import {
+  channelsStore,
+  getKnownCategories,
+  type Channel,
+  type ChannelsState,
+} from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
-import { channelTypeLabel } from "./CreateChannelModal";
+import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./CreateChannelModal";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
 export const MAX_SLOW_MODE_SECONDS = 21600;
@@ -66,13 +71,17 @@ export function clampVoiceLimit(value: number): number {
   return Math.min(MAX_VOICE_LIMIT, Math.max(0, Math.trunc(value)));
 }
 
-/** The fields an edit submits. Mirrors the PATCH body. */
+/**
+ * The fields an edit submits. Mirrors the PATCH body, which is partial: only
+ * the fields the user changed are present, so a field someone else changed
+ * meanwhile is left as they set it.
+ */
 export interface EditChannelData {
-  readonly name: string;
-  readonly topic: string;
-  readonly category: string;
-  readonly slow_mode: number;
-  readonly nsfw: boolean;
+  readonly name?: string;
+  readonly topic?: string;
+  readonly category?: string;
+  readonly slow_mode?: number;
+  readonly nsfw?: boolean;
   /**
    * Only present for a voice channel. A text channel's PATCH omits them
    * entirely rather than sending 0, so an edit here cannot wipe limits the
@@ -105,6 +114,9 @@ export interface EditChannelModalOptions {
   /** Called when the modal is closed. */
   readonly onClose: () => void;
 }
+
+const slowOf = (ch: Channel): string => String(clampSlowMode(ch.slowMode ?? 0));
+const limitOf = (value: number | undefined): string => String(clampVoiceLimit(value ?? 0));
 
 /** A labelled number input constrained to 0…MAX_VOICE_LIMIT. */
 function buildVoiceLimitField(
@@ -207,7 +219,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       class: "form-input",
       type: "text",
       placeholder: shellText("channelForm.topicPlaceholder"),
-      maxlength: "1024",
+      maxlength: String(MAX_CHANNEL_TOPIC_LENGTH),
       "data-testid": "edit-channel-topic-input",
     });
     topicInput.value = channelTopic ?? "";
@@ -317,6 +329,117 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       body.appendChild(voiceSection);
     }
 
+    // Fields the user has not touched follow the store while the dialog is
+    // open, and only touched fields are sent: a concurrent edit by another admin
+    // is neither hidden from this form nor overwritten by its save. "Touched"
+    // is the control differing from the value this dialog last wrote into it.
+    type Mutable = { -readonly [K in keyof EditChannelData]: EditChannelData[K] };
+    interface TrackedField {
+      applied: string | boolean;
+      readonly read: () => string | boolean;
+      readonly write: (value: string | boolean) => void;
+      readonly fromChannel: (ch: Channel) => string | boolean;
+      readonly send: (data: Mutable) => void;
+    }
+    const textField = (
+      input: HTMLInputElement,
+      fromChannel: (ch: Channel) => string,
+      send: (data: Mutable, value: string) => void,
+    ): TrackedField => ({
+      applied: input.value,
+      read: () => input.value,
+      write: (value) => {
+        input.value = String(value);
+      },
+      fromChannel,
+      send: (data) => send(data, input.value.trim()),
+    });
+    const fields: TrackedField[] = [
+      textField(
+        nameInput,
+        (ch) => ch.name,
+        (d, v) => {
+          d.name = v;
+        },
+      ),
+      textField(
+        topicInput,
+        (ch) => ch.topic,
+        (d, v) => {
+          d.topic = v;
+        },
+      ),
+      textField(
+        categoryInput,
+        (ch) => ch.category ?? "",
+        (d, v) => {
+          d.category = v;
+        },
+      ),
+      {
+        applied: slowSelect.value,
+        read: () => slowSelect.value,
+        write: (value) => {
+          const v = String(value);
+          if (!Array.from(slowSelect.options).some((o) => o.value === v)) {
+            slowSelect.appendChild(
+              createElement("option", { value: v }, formatSlowMode(Number(v))),
+            );
+          }
+          slowSelect.value = v;
+        },
+        fromChannel: slowOf,
+        send: (d) => {
+          d.slow_mode = clampSlowMode(Number.parseInt(slowSelect.value, 10));
+        },
+      },
+      {
+        applied: nsfwInput.checked,
+        read: () => nsfwInput.checked,
+        write: (value) => {
+          nsfwInput.checked = value === true;
+        },
+        fromChannel: (ch) => ch.nsfw === true,
+        send: (d) => {
+          d.nsfw = nsfwInput.checked;
+        },
+      },
+    ];
+    if (maxUsersInput !== null && maxVideoInput !== null) {
+      const users = maxUsersInput;
+      const video = maxVideoInput;
+      fields.push(
+        textField(
+          users,
+          (ch) => limitOf(ch.voiceMaxUsers),
+          (d) => {
+            d.voice_max_users = clampVoiceLimit(Number.parseInt(users.value, 10));
+          },
+        ),
+        textField(
+          video,
+          (ch) => limitOf(ch.voiceMaxVideo),
+          (d) => {
+            d.voice_max_video = clampVoiceLimit(Number.parseInt(video.value, 10));
+          },
+        ),
+      );
+    }
+    const touched = (f: TrackedField): boolean => f.read() !== f.applied;
+    disposable.onStoreChange<ChannelsState, Channel | undefined>(
+      channelsStore,
+      (state) => state.channels.get(options.channelId),
+      (ch) => {
+        if (ch === undefined) return;
+        for (const f of fields) {
+          if (touched(f)) continue;
+          const next = f.fromChannel(ch);
+          f.write(next);
+          f.applied = f.read();
+        }
+      },
+    );
+
     // Error display
     const errorEl = createElement("div", {
       class: "form-group",
@@ -355,24 +478,18 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           return;
         }
 
+        const data: Mutable = {};
+        for (const f of fields) if (touched(f)) f.send(data);
+        // Nothing changed: there is nothing to PATCH.
+        if (Object.keys(data).length === 0) {
+          onClose();
+          return;
+        }
+
         errorEl.style.display = "none";
         nameInput.classList.remove("error");
         saveBtn.setAttribute("disabled", "true");
         setText(saveBtn, shellText("channelForm.saving"));
-
-        const data: EditChannelData = {
-          name,
-          topic: topicInput.value.trim(),
-          category: categoryInput.value.trim(),
-          slow_mode: clampSlowMode(Number.parseInt(slowSelect.value, 10)),
-          nsfw: nsfwInput.checked,
-          ...(maxUsersInput !== null
-            ? { voice_max_users: clampVoiceLimit(Number.parseInt(maxUsersInput.value, 10)) }
-            : {}),
-          ...(maxVideoInput !== null
-            ? { voice_max_video: clampVoiceLimit(Number.parseInt(maxVideoInput.value, 10)) }
-            : {}),
-        };
 
         try {
           await onSave(data);
