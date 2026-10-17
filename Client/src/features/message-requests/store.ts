@@ -99,7 +99,7 @@ export function resetMessageRequests(): void {
   messageRequestsStore.setState((prev) => ({ ...INITIAL, snapshotSeq: prev.snapshotSeq + 1 }));
 }
 
-onAuthCleared(resetMessageRequests);
+void onAuthCleared(resetMessageRequests); // app-lifetime reset hook, registered at module load
 
 /** N for "Message Requests (N)" and the DM header badge (a navigation CountSource). */
 export const pendingRequestCount = {

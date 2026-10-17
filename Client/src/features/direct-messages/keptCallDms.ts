@@ -63,4 +63,4 @@ export function resetKeptCallDms(): void {
   stopPruning = null;
 }
 
-onAuthCleared(resetKeptCallDms);
+void onAuthCleared(resetKeptCallDms); // app-lifetime reset hook, registered at module load

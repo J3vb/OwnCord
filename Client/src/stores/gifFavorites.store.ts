@@ -40,7 +40,7 @@ export function resetGifFavorites(): void {
 
 // Registered at load, not from main.ts, so the store stays out of the startup
 // chunk; a store that never loaded holds nothing to reset.
-onAuthCleared(resetGifFavorites);
+void onAuthCleared(resetGifFavorites); // app-lifetime: the store lives as long as the app
 
 /** True once an API is bound, i.e. this server session can save favorites. */
 export function gifFavoritesAvailable(): boolean {

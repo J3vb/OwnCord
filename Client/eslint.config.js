@@ -137,6 +137,25 @@ export default tseslint.config(
       "local/invoke-needs-try-catch": "warn",
     },
   },
+  {
+    // Raw HTML sinks (ARCH-038). icons.ts writes static Lucide path data into
+    // an <svg>; nothing else may parse markup.
+    files: ["src/**/*.ts"],
+    ignores: ["src/lib/icons.ts", "src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/no-raw-html-sink": "error",
+    },
+  },
+  {
+    // Tests discard subscriptions on purpose and build DOM fixtures from markup.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/subscription-result-kept": "error",
+    },
+  },
   // --- Native imports stay behind the desktop seam (B7-1) ---
   // B7-5 moved the last call site behind src/platform/, so the seam is the only
   // exemption. no-restricted-imports covers static imports and
