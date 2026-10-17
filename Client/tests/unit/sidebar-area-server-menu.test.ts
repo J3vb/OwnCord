@@ -49,6 +49,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/read-state";
+import { isHideMutedChannels, setHideMutedChannels } from "@lib/hide-muted-channels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const UNREAD: ReadyChannel[] = [
@@ -93,6 +94,7 @@ describe("SidebarArea - server name menu", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
     channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -121,6 +123,7 @@ describe("SidebarArea - server name menu", () => {
     container.remove();
     setMarkReadSender(null);
     closeSettings();
+    localStorage.clear();
   });
 
   function mount(channels: ReadyChannel[] = READ): void {
@@ -132,9 +135,11 @@ describe("SidebarArea - server name menu", () => {
     area.sidebarWrapper.querySelector<HTMLButtonElement>('button[data-testid="server-name"]')!;
   const menu = (): HTMLElement | null => document.querySelector<HTMLElement>(".server-menu");
   const labels = (): string[] =>
-    Array.from(document.querySelectorAll(".server-menu [role='menuitem']")).map(
-      (el) => el.textContent ?? "",
-    );
+    Array.from(
+      document.querySelectorAll(
+        ".server-menu [role='menuitem'], .server-menu [role='menuitemcheckbox']",
+      ),
+    ).map((el) => el.textContent ?? "");
   const pressEscape = (): void => {
     menu()!.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -246,7 +251,7 @@ describe("SidebarArea - server name menu", () => {
 
     open();
 
-    expect(labels()).toEqual(["Notification Settings"]);
+    expect(labels()).toEqual(["Notification Settings", "Hide Muted Channels"]);
     expect(document.querySelector(".server-menu [role='separator']")).toBeNull();
   });
 
@@ -260,20 +265,30 @@ describe("SidebarArea - server name menu", () => {
       "Invite People",
       "Mark as Read",
       "Notification Settings",
+      "Hide Muted Channels",
       "Create Channel",
       "Server Settings",
     ]);
     const sep = document.querySelector(".server-menu [role='separator']")!;
-    expect(sep.previousElementSibling).toBe(item("server-menu-notifications"));
+    expect(sep.previousElementSibling).toBe(item("server-menu-hide-muted"));
     expect(sep.nextElementSibling).toBe(item("server-menu-create-channel"));
   });
 
   it("gates each row on the same bit as the header control", () => {
     mount(READ);
     const cases: Array<[number, string[]]> = [
-      [Permission.MANAGE_INVITES, ["Invite People", "Notification Settings"]],
-      [Permission.MANAGE_CHANNELS, ["Notification Settings", "Create Channel"]],
-      [Permission.VIEW_AUDIT_LOG, ["Notification Settings", "Server Settings"]],
+      [
+        Permission.MANAGE_INVITES,
+        ["Invite People", "Notification Settings", "Hide Muted Channels"],
+      ],
+      [
+        Permission.MANAGE_CHANNELS,
+        ["Notification Settings", "Hide Muted Channels", "Create Channel"],
+      ],
+      [
+        Permission.VIEW_AUDIT_LOG,
+        ["Notification Settings", "Hide Muted Channels", "Server Settings"],
+      ],
     ];
     for (const [perm, expected] of cases) {
       grant(perm);
@@ -287,18 +302,23 @@ describe("SidebarArea - server name menu", () => {
   it("re-reads permissions each time it opens (a role change between two opens)", async () => {
     mount(READ);
     open();
-    expect(labels()).toEqual(["Notification Settings"]);
+    expect(labels()).toEqual(["Notification Settings", "Hide Muted Channels"]);
     pressEscape();
 
     // A reconnect's `ready` delivers new role bits while the sidebar stays mounted.
     grant(Permission.MANAGE_INVITES | Permission.MANAGE_CHANNELS);
     open();
-    expect(labels()).toEqual(["Invite People", "Notification Settings", "Create Channel"]);
+    expect(labels()).toEqual([
+      "Invite People",
+      "Notification Settings",
+      "Hide Muted Channels",
+      "Create Channel",
+    ]);
     pressEscape();
 
     grant(Permission.SEND_MESSAGES);
     open();
-    expect(labels()).toEqual(["Notification Settings"]);
+    expect(labels()).toEqual(["Notification Settings", "Hide Muted Channels"]);
   });
 
   it("re-reads the unread state each time it opens", () => {
@@ -365,6 +385,39 @@ describe("SidebarArea - server name menu", () => {
     item("server-menu-server-settings").click();
 
     expect(openAdminPanel).toHaveBeenCalledWith("example.com", undefined);
+  });
+
+  it("Hide Muted Channels is a checkbox row, unchecked until the preference is on", () => {
+    mount();
+    open();
+
+    const row = item("server-menu-hide-muted");
+    expect(row.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(row.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("Hide Muted Channels shows checked when the preference is already on", () => {
+    setHideMutedChannels(true);
+    mount();
+    open();
+
+    expect(item("server-menu-hide-muted").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("clicking Hide Muted Channels toggles the preference and closes the menu", () => {
+    mount();
+    open();
+
+    item("server-menu-hide-muted").click();
+
+    expect(isHideMutedChannels()).toBe(true);
+    expect(menu()).toBeNull();
+
+    // Reopened, it reads the saved value; a second click turns it back off.
+    open();
+    expect(item("server-menu-hide-muted").getAttribute("aria-checked")).toBe("true");
+    item("server-menu-hide-muted").click();
+    expect(isHideMutedChannels()).toBe(false);
   });
 
   it("leaves the existing header buttons in place", () => {

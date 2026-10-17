@@ -12,6 +12,7 @@ import {
 } from "@stores/channels.store";
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
+import { hiddenByMute } from "./hide-muted-channels";
 import { hasUnread } from "./read-state";
 
 const reselectListeners = new Set<(channelId: number) => void>();
@@ -102,16 +103,21 @@ export function findChannelByName(name: string): { id: number; name: string } | 
  * the grouped channel list (categories as headers, rows by position), with
  * collapsed categories' hidden rows skipped. Voice channels are skipped too:
  * opening one means joining the call, which a keyboard step must never do,
- * and a bare setActiveChannel would mount its chat unjoined (F8).
+ * and a bare setActiveChannel would mount its chat unjoined (F8). Muted
+ * channels the sidebar hides (Hide Muted Channels) are skipped as well; the
+ * Quick Switcher still lists them.
  */
 function navigableChannelIds(): number[] {
   if (uiStore.getState().sidebarMode === "dms") {
     return dmStore.getState().channels.map((c) => c.channelId);
   }
   const ids: number[] = [];
+  const active = channelsStore.getState().activeChannelId;
   for (const [category, channels] of getChannelsByCategory()) {
     if (category !== null && isCategoryCollapsed(category)) continue;
-    for (const ch of channels) if (ch.type !== "voice") ids.push(ch.id);
+    for (const ch of channels) {
+      if (ch.type !== "voice" && !hiddenByMute(ch, active)) ids.push(ch.id);
+    }
   }
   return ids;
 }
