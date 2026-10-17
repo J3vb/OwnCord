@@ -260,6 +260,12 @@ export const shellText = defineCatalog("shell", {
   "status.customPlaceholder": "Set a custom status",
   "status.customLabel": "Custom status",
   "status.change": "Change status",
+  "status.dndNote": "You will not receive desktop notifications",
+  "status.invisibleNote": "You will appear offline",
+  "status.clearCustom": "Clear custom status",
+  "status.editProfile": "Edit Profile",
+  "status.openProfile": "Open your profile",
+  "status.profileLabel": "Your profile",
 
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",

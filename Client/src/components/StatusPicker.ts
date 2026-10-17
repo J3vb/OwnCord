@@ -11,6 +11,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
 import { shellText } from "../i18n/shell";
+import { STATUS_DEFS, colorForStatus, type StatusDef } from "@components/statusDefs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,33 +39,6 @@ export type StatusPickerComponent = MountableComponent & {
    */
   setEnabled(enabled: boolean): void;
 };
-
-// ---------------------------------------------------------------------------
-// Status definitions
-// ---------------------------------------------------------------------------
-
-interface StatusDef {
-  readonly value: UserStatus;
-  readonly labelKey: "status.online" | "status.idle" | "status.dnd" | "status.invisible";
-  readonly color: string;
-}
-
-/**
- * "invisible" is its own value now, not "offline" wearing a different label.
- * The server stores it as chosen and shows everyone else offline, so the
- * picker can finally send what it means — and the status survives a reconnect
- * instead of flashing back to online.
- */
-const STATUS_DEFS: readonly StatusDef[] = [
-  { value: "online", labelKey: "status.online", color: "var(--green)" },
-  { value: "idle", labelKey: "status.idle", color: "var(--yellow)" },
-  { value: "dnd", labelKey: "status.dnd", color: "var(--red)" },
-  { value: "invisible", labelKey: "status.invisible", color: "var(--text-micro)" },
-];
-
-function colorForStatus(status: UserStatus): string {
-  return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";
-}
 
 // ---------------------------------------------------------------------------
 // Component factory

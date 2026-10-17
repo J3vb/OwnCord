@@ -36,11 +36,35 @@ test.describe("User Bar", () => {
     await expect(status).toHaveText("Online");
   });
 
-  test("status picker dot sits on the avatar", async ({ page }) => {
+  test("status picker dot sits on the avatar corner", async ({ page }) => {
     const dot = page.locator(
-      "[data-testid='user-bar'] .ub-avatar [data-testid='status-picker-wrap'] .status-picker-dot",
+      "[data-testid='user-bar'] [data-testid='status-picker-wrap'] .status-picker-dot",
     );
     await expect(dot).toBeVisible();
+    const dotBox = await dot.boundingBox();
+    const avatarBox = await page.locator("[data-testid='user-bar'] .ub-avatar").boundingBox();
+    expect(dotBox).not.toBeNull();
+    expect(avatarBox).not.toBeNull();
+    expect(dotBox!.x).toBeGreaterThanOrEqual(avatarBox!.x);
+    expect(dotBox!.x + dotBox!.width).toBeLessThanOrEqual(avatarBox!.x + avatarBox!.width + 2);
+    expect(dotBox!.y).toBeGreaterThanOrEqual(avatarBox!.y);
+    expect(dotBox!.y + dotBox!.height).toBeLessThanOrEqual(avatarBox!.y + avatarBox!.height + 2);
+  });
+
+  test("clicking the name opens your profile card with the status menu", async ({ page }) => {
+    await page.locator("[data-testid='user-bar-name']").click();
+    const card = page.locator("[data-testid='self-profile-card']");
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("radio", { name: /Do Not Disturb/ })).toContainText(
+      "You will not receive desktop notifications",
+    );
+    await expect(card.getByRole("radio", { name: /Online/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await page.keyboard.press("Escape");
+    await expect(card).toHaveCount(0);
+    await expect(page.locator("[data-testid='user-bar-profile']")).toBeFocused();
   });
 
   test("user bar has settings button with correct label", async ({ page }) => {
