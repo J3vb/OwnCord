@@ -1,4 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+// Painting an existing avatar goes through the authenticated image fetch;
+// stub just that call so the Remove avatar tests need no network.
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+  return { ...actual, fetchImageAsObjectUrl: vi.fn(() => Promise.resolve(null)) };
+});
+
 import { buildAccountTab, validateAvatarFile } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
@@ -26,6 +34,7 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/abc"),
+    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),
@@ -220,5 +229,49 @@ describe("Account tab profile fields", () => {
     const input = container.querySelector<HTMLInputElement>('[data-testid="avatar-file-input"]')!;
     expect(input.getAttribute("accept")).toBe("image/png,image/jpeg,image/webp");
     expect(container.querySelector('[data-testid="avatar-upload-btn"]')).not.toBeNull();
+  });
+});
+
+describe("Remove avatar (3C-7a)", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  function build(opts: SettingsOverlayOptions): HTMLElement {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.appendChild(buildAccountTab(opts, new AbortController().signal));
+    return container;
+  }
+
+  it("is hidden when the user has no avatar", () => {
+    setUser({ avatar: null });
+    const btn = build(makeOptions()).querySelector<HTMLButtonElement>(
+      '[data-testid="avatar-remove-btn"]',
+    )!;
+    expect(btn.hidden).toBe(true);
+  });
+
+  it("is shown with an avatar and calls onRemoveAvatar", async () => {
+    setUser({ avatar: "/api/v1/files/abc" });
+    const onRemoveAvatar = vi.fn().mockResolvedValue(undefined);
+    const container = build(makeOptions({ onRemoveAvatar }));
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="avatar-remove-btn"]')!;
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    await vi.waitFor(() => expect(onRemoveAvatar).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows an error and keeps the button when removal fails", async () => {
+    setUser({ avatar: "/api/v1/files/abc" });
+    const onRemoveAvatar = vi.fn().mockRejectedValue(new Error("nope"));
+    const container = build(makeOptions({ onRemoveAvatar }));
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="avatar-remove-btn"]')!;
+    btn.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-testid="avatar-error"]')?.textContent).toBeTruthy(),
+    );
+    expect(btn.hidden).toBe(false);
+    expect(btn.disabled).toBe(false);
   });
 });

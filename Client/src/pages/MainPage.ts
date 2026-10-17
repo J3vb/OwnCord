@@ -1096,6 +1096,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           throw err;
         }
       },
+      onRemoveAvatar: async () => {
+        try {
+          const username = authStore.getState().user?.username ?? "";
+          const updated = await api.removeAvatar(username);
+          // Same as the upload path: the user_update broadcast also lands, but
+          // this keeps the local copy from lagging a round-trip behind.
+          updateUser({ avatar: updated.avatar ?? null });
+          showToast(account("toast.avatarRemoved"), "success");
+        } catch (err) {
+          const msg = errorText(err, account("toast.avatarRemoveFailed"));
+          showToast(msg, "error");
+          throw err;
+        }
+      },
       onLogout: () => logout(api),
       getRetentionNotice: options.getRetentionNotice,
       ...(safety === undefined ? {} : { safetyTab: (signal) => safety.build(signal, api) }),
