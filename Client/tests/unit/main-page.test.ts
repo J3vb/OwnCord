@@ -142,6 +142,7 @@ const {
         videoGridSlot: HTMLDivElement;
       };
       dmProfileSlot: HTMLDivElement;
+      profileBtn: HTMLButtonElement;
       videoGrid: {
         addStream: ReturnType<typeof vi.fn>;
         removeStream: ReturnType<typeof vi.fn>;
@@ -234,6 +235,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       videoGridSlot: document.createElement("div"),
     };
     const dmProfileSlot = document.createElement("div");
+    const profileBtn = document.createElement("button");
     const videoGrid = {
       addStream: vi.fn(),
       removeStream: vi.fn(),
@@ -264,7 +266,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       slots.inputSlot,
       slots.videoGridSlot,
     );
-    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
+    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, profileBtn, videoGrid };
     return {
       chatArea,
       slots,
@@ -276,6 +278,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        profileBtn,
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),
@@ -288,6 +291,12 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
   },
 }));
 
+import { savePref } from "../../src/lib/preferences";
+
+// The remembered-open pref must never leak between tests, whatever their order.
+afterEach(() => {
+  localStorage.removeItem("owncord:settings:dmProfileOpen");
+});
 import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
@@ -496,6 +505,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     mockDestroyChannel.mockClear();
     mockCreateChatArea.mockClear();
     capturedChatAreaRef.current = null;
+    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
+    // start from "remembered closed" and the auto-open tests set it back.
+    savePref("dmProfileOpen", false);
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -503,6 +515,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   afterEach(() => {
     page?.destroy?.();
     container.remove();
+    localStorage.removeItem("owncord:settings:dmProfileOpen");
   });
 
   it("dismisses the video grid when switching to a non-voice channel (dm/announcement), not just 'text'", () => {
@@ -886,6 +899,235 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
       keepChecking: true,
+    });
+  });
+
+  describe("DM profile panel is open by default and remembered (WP 3B-3)", () => {
+    const panel = (): HTMLElement | null =>
+      capturedChatAreaRef.current!.dmProfileSlot.querySelector<HTMLElement>(
+        '[data-testid="dm-profile-sidebar"]',
+      );
+    const names = (): string | undefined =>
+      capturedChatAreaRef.current!.dmProfileSlot.querySelector<HTMLElement>(
+        '[data-testid="dps-username"]',
+      )?.textContent ?? undefined;
+    const pref = (): string | null => localStorage.getItem("owncord:settings:dmProfileOpen");
+    const oneToOne = (channelId: number, userId: number, username: string) => ({
+      channelId,
+      recipient: { id: userId, username, avatar: "", status: "online" },
+      participants: [{ id: userId, username, avatar: "", status: "online" }],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+    function mountOnTwoDms(): void {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(1, textChannel(1, "general"));
+        ch.set(70, dmChannel(70, "dm-bob"));
+        ch.set(71, dmChannel(71, "dm-carol"));
+        ch.set(72, dmChannel(72, "group"));
+        return { ...prev, channels: ch, activeChannelId: 70 };
+      });
+      dmStore.setState(() => ({
+        channels: [
+          oneToOne(70, 7, "bob"),
+          oneToOne(71, 8, "carol"),
+          { ...oneToOne(72, 9, "dave"), isGroup: true, name: "group" },
+        ],
+      }));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      // The mocked chat area's slot is detached; focus needs it in the document.
+      container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
+    }
+    async function settle(): Promise<void> {
+      await import("@components/DmProfileSidebar");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it("opens with a 1:1 DM at mount and keeps the panel, updated for the second user, on a DM switch", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(names()).toBe("bob"));
+      expect(capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed")).toBe("true");
+      const before = panel();
+
+      setActiveChannel(71);
+      channelsStore.flush();
+      await vi.waitFor(() => expect(names()).toBe("carol"));
+      // The same panel node, repainted: it does not slide in again.
+      expect(panel()).toBe(before);
+      expect(
+        capturedChatAreaRef.current!.dmProfileSlot.querySelectorAll(
+          '[data-testid="dm-profile-sidebar"]',
+        ),
+      ).toHaveLength(1);
+      expect(pref()).toBe("true");
+    });
+
+    it("opens by default when nothing was saved", async () => {
+      localStorage.removeItem("owncord:settings:dmProfileOpen");
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+    });
+
+    it("stays closed on mount and on a DM switch when the saved preference is false", async () => {
+      mountOnTwoDms();
+      await settle();
+      expect(panel()).toBeNull();
+      setActiveChannel(71);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+      expect(capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("hides for a group or a server channel without changing the preference, and returns for the next 1:1 DM", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+
+      setActiveChannel(72);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+      expect(pref()).toBe("true");
+
+      setActiveChannel(1);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+
+      setActiveChannel(71);
+      channelsStore.flush();
+      await vi.waitFor(() => expect(names()).toBe("carol"));
+    });
+
+    it("the header's Show User Profile toggle closes, remembers false, then reopens and remembers true", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      const toggle = (): void => mockCreateChatArea.mock.calls[0]![0].onToggleDmProfile();
+      const pressed = (): string | null =>
+        capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed");
+
+      toggle();
+      expect(panel()).toBeNull();
+      expect(pressed()).toBe("false");
+      expect(pref()).toBe("false");
+
+      toggle();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      expect(pressed()).toBe("true");
+      expect(pref()).toBe("true");
+    });
+
+    describe("focus and Escape", () => {
+      let composer: HTMLTextAreaElement;
+      beforeEach(() => {
+        composer = document.createElement("textarea");
+        document.body.appendChild(composer);
+      });
+      afterEach(() => composer.remove());
+      const escape = (target: EventTarget = document): KeyboardEvent => {
+        // The Settings panel is mounted inside its closed overlay, which only the
+        // stylesheet hides; jsdom has none, so hide it or it counts as a dialog.
+        for (const settings of document.querySelectorAll<HTMLElement>(".settings-panel")) {
+          if (settings.parentElement !== null) settings.parentElement.style.display = "none";
+        }
+        const ev = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        target.dispatchEvent(ev);
+        return ev;
+      };
+
+      it("does not steal focus when the panel opens by itself, at mount or on a DM switch", async () => {
+        savePref("dmProfileOpen", true);
+        composer.focus();
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(names()).toBe("bob"));
+        expect(document.activeElement).toBe(composer);
+
+        setActiveChannel(71);
+        channelsStore.flush();
+        await vi.waitFor(() => expect(names()).toBe("carol"));
+        expect(document.activeElement).toBe(composer);
+      });
+
+      it("does focus the panel when the user opens it from the header", async () => {
+        mountOnTwoDms();
+        mockCreateChatArea.mock.calls[0]![0].onToggleDmProfile();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        expect(panel()!.contains(document.activeElement)).toBe(true);
+      });
+
+      it("keeps the panel and the pref when a field already used the Escape", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        const note = panel()!.querySelector<HTMLTextAreaElement>('[data-testid="dps-note"]')!;
+        note.focus();
+        note.addEventListener("keydown", (e) => e.preventDefault(), { once: true });
+        escape(note);
+        expect(panel()).not.toBeNull();
+        expect(pref()).toBe("true");
+      });
+
+      it("ignores an Escape while focus is outside the panel", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        composer.focus();
+        escape(composer);
+        expect(panel()).not.toBeNull();
+        expect(pref()).toBe("true");
+      });
+
+      it("closes on Escape with focus inside and remembers it", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        panel()!.focus();
+        escape();
+        expect(panel()).toBeNull();
+        expect(pref()).toBe("false");
+      });
+
+      it("leaves the panel open when Escape belongs to a dialog opened before it", async () => {
+        savePref("dmProfileOpen", true);
+        const dialog = document.createElement("div");
+        dialog.className = "modal-overlay";
+        document.body.appendChild(dialog);
+        try {
+          mountOnTwoDms();
+          await vi.waitFor(() => expect(panel()).not.toBeNull());
+          panel()!.focus();
+          escape();
+          expect(panel()).not.toBeNull();
+          expect(pref()).toBe("true");
+        } finally {
+          dialog.remove();
+        }
+      });
+    });
+
+    it("closing with the panel's own close button is remembered", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      capturedChatAreaRef
+        .current!.dmProfileSlot.querySelector<HTMLButtonElement>('[data-testid="dps-close"]')
+        ?.click();
+      expect(panel()).toBeNull();
+      expect(pref()).toBe("false");
     });
   });
 

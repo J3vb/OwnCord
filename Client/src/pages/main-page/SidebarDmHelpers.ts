@@ -18,6 +18,7 @@ import {
 } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
+import { voiceStore } from "@stores/voice.store";
 import { isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
@@ -159,6 +160,11 @@ export async function handleCreateGroupDm(
 export function dmPreviewText(dm: DmChannel): string {
   if (dm.lastMessageAt === "") return connectText("app.dmNoMessages");
   return markdownToPlainText(dm.lastMessage, connectText("notifications.spoiler"));
+}
+
+/** Someone is in this DM's call. The one source both DM lists read for the glyph. */
+export function isDmInCall(channelId: number): boolean {
+  return (voiceStore.getState().voiceUsers.get(channelId)?.size ?? 0) > 0;
 }
 
 /**

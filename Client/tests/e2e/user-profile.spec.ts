@@ -130,10 +130,16 @@ async function openDm(page: Page, index = 0): Promise<void> {
   await expect(page.locator("[data-testid='call-btn']")).toBeVisible({ timeout: 5_000 });
 }
 
-/** Open the DM profile sidebar from the chat header. */
-async function openDmProfile(page: Page): Promise<void> {
-  await page.locator("[data-testid='ch-name-group']").click();
+/** A 1:1 DM opens with its profile sidebar until the user closes it. */
+async function expectDmProfileOpen(page: Page): Promise<void> {
   await expect(profileSidebar(page)).toBeVisible({ timeout: 5_000 });
+}
+
+/** Reopen the DM profile sidebar from the chat header after it was closed. */
+async function openDmProfile(page: Page): Promise<void> {
+  await expect(profileSidebar(page)).toHaveCount(0);
+  await page.locator("[data-testid='ch-name-group']").click();
+  await expectDmProfileOpen(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,8 +378,8 @@ test.describe("DM profile sidebar", () => {
     await openDm(page, 0);
   });
 
-  test("the DM header opens a panel with the partner's nickname and status", async ({ page }) => {
-    await openDmProfile(page);
+  test("a 1:1 DM opens a panel with the partner's nickname and status", async ({ page }) => {
+    await expectDmProfileOpen(page);
 
     await expect(profileSidebar(page)).toHaveAttribute("role", "complementary");
     await expect(page.locator("[data-testid='dps-username']")).toHaveText("Otto");
@@ -382,7 +388,7 @@ test.describe("DM profile sidebar", () => {
   });
 
   test("the Note is local-only and scoped per user", async ({ page }) => {
-    await openDmProfile(page);
+    await expectDmProfileOpen(page);
 
     const note = page.locator("[data-testid='dps-note']");
     await expect(note).toHaveAttribute("placeholder", "Click to add a note");
@@ -418,7 +424,7 @@ test.describe("DM profile sidebar", () => {
   });
 
   test("the partner's status stays live while the panel is open", async ({ page }) => {
-    await openDmProfile(page);
+    await expectDmProfileOpen(page);
     await expect(page.locator("[data-testid='dps-status']")).toContainText("Online");
 
     await emitWsMessage(page, { type: "presence", payload: { user_id: OTHER_ID, status: "idle" } });
@@ -427,7 +433,7 @@ test.describe("DM profile sidebar", () => {
   });
 
   test("closes on the close button and on Escape", async ({ page }) => {
-    await openDmProfile(page);
+    await expectDmProfileOpen(page);
     await page.locator("[data-testid='dps-close']").click();
     await expect(profileSidebar(page)).toHaveCount(0);
 

@@ -19,6 +19,7 @@ import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
+import type { DmMenuActions } from "@components/dmContextMenu";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
@@ -37,6 +38,7 @@ import {
   handleCreateDm,
   handleCreateGroupDm,
   buildDmConversations,
+  isDmInCall,
   findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
@@ -139,10 +141,9 @@ export interface SidebarAreaResult {
 
 /** The DM rows, each marked when someone is in that DM's call. */
 function dmConversations(activeChannelId: number | null): DmConversation[] {
-  const voiceUsers = voiceStore.getState().voiceUsers;
   return buildDmConversations(activeChannelId).map((c) => ({
     ...c,
-    inCall: (voiceUsers.get(c.channelId)?.size ?? 0) > 0,
+    inCall: isDmInCall(c.channelId),
   }));
 }
 
@@ -719,19 +720,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     return true;
   }
 
-  function buildDmSidebar(): DmSidebar {
-    const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
-    const activeChannelId = channelsStore.getState().activeChannelId;
-    const conversations = dmConversations(activeChannelId);
-
-    return createDmSidebar({
-      conversations,
-      onSelectConversation: (channelId) => {
-        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-        if (dmChannel !== undefined) {
-          selectDmConversation(dmChannel, dmDeps);
-        }
-      },
+  /** The DM row menu's actions, shared by the full list and the compact preview. */
+  function dmMenuActions(): DmMenuActions {
+    return {
       onCloseDm: (channelId) => closeOrLeaveDm(channelId),
       onToggleMute: (channelId) => {
         toggleChannelMute(channelId);
@@ -762,6 +753,23 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         );
       },
       onRenameGroup: (channelId) => renameGroup(channelId),
+    };
+  }
+
+  function buildDmSidebar(): DmSidebar {
+    const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
+    const activeChannelId = channelsStore.getState().activeChannelId;
+    const conversations = dmConversations(activeChannelId);
+
+    return createDmSidebar({
+      conversations,
+      onSelectConversation: (channelId) => {
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+        if (dmChannel !== undefined) {
+          selectDmConversation(dmChannel, dmDeps);
+        }
+      },
+      ...dmMenuActions(),
       onNewDm: () => {
         showMemberPicker();
       },
@@ -811,6 +819,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         onNewDm: () => {
           showMemberPicker();
         },
+        menu: dmMenuActions(),
       });
       channelModeUnsubs.push(() => {
         dmSectionResult.destroy();

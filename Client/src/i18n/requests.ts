@@ -30,6 +30,9 @@ export const requestsText = defineCatalog("requests", {
   "dm.find": "Find a conversation",
   "dm.heading": "Direct Messages",
   "dm.new": "New DM",
+  "dm.empty": "No direct messages yet",
+  "dm.emptyStart": "Start one",
+  "dm.showProfile": "Show User Profile",
   "dm.groupSubtitle": "{count} members: You, {names}",
 
   "profile.label": "User profile",
