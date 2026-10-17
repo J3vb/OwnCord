@@ -26,7 +26,7 @@ import { messageRequestsText as t } from "../../i18n/messageRequests";
 import type { MessageRequest } from "./api";
 import { confirmDecision, decide, openAcceptedConversation } from "./decisions";
 import { messageRequestsStore } from "./store";
-import { requestsApi } from "./sync";
+import { loadRequests, requestsApi } from "./sync";
 
 /** Each decision's copy, in the order its buttons appear. */
 const DECISIONS = {
@@ -105,6 +105,19 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     role: "status",
     "data-testid": "requests-status",
   });
+  // Offered only while the snapshot is unavailable. aria-disabled, not
+  // disabled, for the same reason as the decision buttons: focus must stay.
+  const retry = createElement(
+    "button",
+    {
+      type: "button",
+      class: "btn-modal-cancel requests-retry",
+      "data-testid": "requests-retry",
+      "aria-disabled": "false",
+    },
+    t("retry"),
+  );
+  retry.hidden = true;
   // What the last decision did. Its own region, so the list state never talks over it.
   const outcome = createElement("p", {
     class: "requests-status",
@@ -118,10 +131,31 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     tabindex: "0",
     "data-testid": "requests-list",
   });
-  root.append(intro, help, status, outcome, list);
+  root.append(intro, help, status, retry, outcome, list);
 
   const rows = new Map<number, Row>();
   const say = (message: string): void => setText(outcome, message);
+
+  /** True from the Retry click until its fetch settles; the store has no loading state for a refetch. */
+  let retrying = false;
+  retry.addEventListener(
+    "click",
+    () => {
+      if (retrying) return;
+      retrying = true;
+      render();
+      void loadRequests(requestsApi()).finally(() => {
+        // A view that closed meanwhile has nothing left to repaint.
+        if (signal.aborted) return;
+        retrying = false;
+        // Success hides the button; keep focus in the view, on the list.
+        const hadFocus = document.activeElement === retry;
+        render();
+        if (hadFocus && retry.hidden) list.focus();
+      });
+    },
+    { signal },
+  );
 
   const run = (row: Row, decision: DmRequestDecision): void => {
     if (row.busy) return;
@@ -247,7 +281,7 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   };
 
   let shown: readonly MessageRequest[] | null = null;
-  const render = (): void => {
+  function render(): void {
     const { status: state, pending } = messageRequestsStore.getState();
     const connected = uiStore.getState().connectionStatus === "connected";
     const message = !connected
@@ -261,6 +295,10 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
             : "";
     // A live region re-reads what it is given; only speak on a change.
     if (status.textContent !== message) setText(status, message);
+    retry.hidden = !connected || state !== "unavailable";
+    retry.setAttribute("aria-disabled", String(retrying));
+    const retryLabel = t(retrying ? "retrying" : "retry");
+    if (retry.textContent !== retryLabel) setText(retry, retryLabel);
     if (pending === shown) return;
     shown = pending;
 
@@ -301,7 +339,7 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     if (pending.length === 0 && list.contains(document.activeElement)) focusLeftAt ??= 0;
     list.hidden = pending.length === 0;
     if (focusLeftAt !== null) refocus(focusLeftAt, pending);
-  };
+  }
   render();
   const unsubs = [
     messageRequestsStore.subscribe(render),

@@ -151,6 +151,7 @@ export const shards = {
   "lib-rest-3": [
     "src/lib/call-ring.ts",
     "src/features/direct-messages/callAlerts.ts",
+    "src/features/direct-messages/keptCallDms.ts",
     "src/lib/context-menu.ts",
     "src/features/developer-mode/developerTools.ts",
     "src/lib/dialogOpen.ts",

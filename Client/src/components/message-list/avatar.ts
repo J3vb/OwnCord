@@ -38,6 +38,8 @@ export interface AvatarOptions {
   readonly background?: string;
   /** Extra attributes for the wrapper (data-testid, title, …). */
   readonly attrs?: Record<string, string>;
+  /** The row beside it already names the person: the picture gets alt="". */
+  readonly decorative?: boolean;
 }
 
 /**
@@ -103,7 +105,7 @@ export function createAvatarElement(
     const img = createElement("img", {
       class: "avatar-img",
       src: objectUrl,
-      alt: resolveDisplayName(subject),
+      alt: options.decorative === true ? "" : resolveDisplayName(subject),
       loading: "lazy",
       decoding: "async",
     });
