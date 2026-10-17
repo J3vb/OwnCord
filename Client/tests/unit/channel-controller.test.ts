@@ -354,7 +354,6 @@ import {
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
-import { createMessageInput } from "@components/MessageInput";
 import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
 
 // ---------------------------------------------------------------------------

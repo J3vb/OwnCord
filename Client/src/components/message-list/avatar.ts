@@ -60,8 +60,8 @@ export function isRenderableAvatar(url: string | null | undefined): url is strin
 
 const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
 
-/** The letter fallback's background for a voice roster entry: one of five
- *  colours, stable per name (the sidebar row and the call view's tile agree). */
+/** The letter fallback's background: one of five colours, stable per
+ *  username, so the member list, chat, voice roster and call view agree. */
 export function pickAvatarColor(username: string): string {
   let hash = 0;
   for (let i = 0; i < username.length; i++) {

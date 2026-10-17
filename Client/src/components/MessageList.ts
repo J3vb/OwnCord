@@ -38,7 +38,7 @@ import {
   refreshConnectionControls,
   fullDateTimeTitle,
 } from "./message-list/renderers";
-import { createAvatarElement } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
 import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
 import { withMessageMenu } from "./message-list/message-menu-loader";
@@ -2409,7 +2409,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         avatar.replaceWith(
           createAvatarElement(author, {
             className: "msg-avatar",
-            background: roleColor,
+            background: pickAvatarColor(author.username),
             attrs: { "data-user-id": String(msg.user.id) },
           }),
         );
@@ -2440,7 +2440,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const avatar = bar.querySelector<HTMLElement>(".rr-avatar");
       if (avatar !== null) {
         avatar.replaceWith(
-          createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+          createAvatarElement(author, {
+            className: "rr-avatar",
+            background: pickAvatarColor(author.username),
+          }),
         );
       }
     }

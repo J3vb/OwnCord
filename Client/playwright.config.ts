@@ -36,10 +36,9 @@ export default defineConfig({
   // usable red quickly. 0 = unlimited (local runs see every failure).
   maxFailures: process.env.CI ? 20 : 0,
   // Self-terminate before the workflow's timeout-minutes (35) SIGKILLs the
-  // runner, so the HTML/JUnit report still gets written and uploaded. The full
-  // dev-server suite (782 tests on 2 workers) passed 20 minutes on 2026-10-16
-  // with nothing failing; the smoke set and the built-bundle parity run take
-  // far less.
+  // runner, so the HTML/JUnit report still gets written and uploaded. CI runs
+  // only the smoke set from this config now; the ceiling stays as headroom
+  // (the full dev-server suite once took about 20 minutes on 2 workers).
   globalTimeout: process.env.CI ? 30 * 60 * 1000 : 0,
   reporter: process.env.CI
     ? [

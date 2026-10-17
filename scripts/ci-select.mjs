@@ -69,7 +69,6 @@ export const CAPABILITIES = [
   "browser", // Client E2E (Playwright) + Client E2E (parity subset)
   "integration", // Client E2E (real server and media) + Admin Panel E2E
   "native", // Client E2E (Windows native)
-  "harness", // widen the development browser run from smoke to full
   "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
   "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
@@ -175,24 +174,6 @@ const DEPS_FILES = new Set([
 ]);
 
 /**
- * Paths that change the browser suite's own machinery: the Playwright specs and
- * their fixtures. A change here is the one case where the fast development run
- * stops being a fair sample of the full suite, so it widens back to full.
- * The Playwright configs are deliberately NOT here — a config change is
- * covered by running the production suite in full on every browser PR, and
- * widening on the configs would make the smoke/full split unusable.
- */
-const HARNESS_PREFIXES = ["Client/tests/e2e/", "Client/tests/browser/"];
-
-/**
- * The client's own manifests. A dependency bump can move the dev server, the
- * Playwright version or the vitest version under the smoke run, so it is a
- * harness change as well as a client change — but only for the components that
- * consume the client's npm tree, not for the Go server or the Rust crate.
- */
-const HARNESS_FILES = new Set(["Client/package.json", "Client/package-lock.json"]);
-
-/**
  * The k6 load harness and its offline contract test. Both live under `Server/`,
  * so the prefix branch below already selects `server` — this set pins the
  * dependency explicitly, so narrowing that prefix later cannot silently stop a
@@ -292,9 +273,6 @@ export function classify(paths) {
     if (K6_HARNESS_PATHS.has(path)) add("server");
     if (PERMISSIONS_MUTATION_PATHS.has(path)) add("permissions");
     if (DEPS_FILES.has(path)) add("deps");
-    if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
-      add("harness");
-    }
 
     if (path.startsWith("Server/")) {
       // `integration` because the real-server suites drive this server, and

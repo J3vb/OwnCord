@@ -564,9 +564,9 @@ Write tests first where you can.
 | `Server/**/*_test.go`             | `make test`                     | Server Build & Test                                                                | yes                    |
 | `Client/src-tauri`                | `cargo test --lib`              | Rust Unit Tests                                                                    | yes                    |
 
-On a PR, Client E2E (Playwright) runs a smaller smoke set
-(`npm run test:e2e:smoke`). It runs the full suite when the specs or their
-fixtures change.
+On a PR, Client E2E (Playwright) always runs the smaller smoke set
+(`npm run test:e2e:smoke`) against the Vite dev server. The full suite runs in
+Client E2E (parity subset) against the production bundle.
 
 `npm test`, not `npm run test:unit`, is the command that includes
 `tests/contract`. CI runs it as `vitest run --coverage`, and

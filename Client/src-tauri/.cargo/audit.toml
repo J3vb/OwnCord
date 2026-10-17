@@ -9,4 +9,9 @@ ignore = [
     # crate is Linux-only here (see the cfg(target_os = "linux") block in
     # Cargo.toml). Drop this entry when webkit2gtk moves to gtk-rs 0.20.
     "RUSTSEC-2024-0429",
+    # zip 4.6.1 / 0.6.6 extraction advisories: same reachability and removal
+    # condition as Client/src-tauri/deny.toml.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]

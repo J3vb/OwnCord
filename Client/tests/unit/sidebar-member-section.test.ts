@@ -637,6 +637,28 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    it("changeRole: keeps the role's capitalisation in the toast and still resolves its id", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        adminKickMember: vi.fn(),
+        adminBanMember: vi.fn(),
+        adminChangeRole: vi.fn().mockResolvedValue(undefined),
+      };
+      setRoles([{ id: 7, name: "Moderator", color: null, permissions: 0 }]);
+      const section = createSidebarMemberSection({
+        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+      container.appendChild(section.element);
+
+      await getCapturedCallbacks().onChangeRole(4, "Charlie", "Moderator");
+
+      expect(mockApi.adminChangeRole).toHaveBeenCalledWith(4, 7);
+      expect(mockShow).toHaveBeenCalledWith("Changed Charlie's role to Moderator", "success");
+
+      section.destroy();
+    });
+
     it("changeRole: shows error toast on API failure", async () => {
       const mockShow = vi.fn();
       const mockApi = {
@@ -897,6 +919,24 @@ describe("SidebarMemberSection", () => {
       await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(3));
       const names = [...container.querySelectorAll(".banned-name")].map((el) => el.textContent);
       expect(names).toEqual(["permanent", "serving", "garbled"]);
+
+      section.destroy();
+    });
+
+    it("shows the bans section once a roles update grants BAN_MEMBERS to your role", async () => {
+      // No permission yet: the section must not list anything.
+      const opts = defaultOpts();
+      const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
+      listUsers.mockResolvedValue([bannedUser(3, "spammer")]);
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+      await Promise.resolve();
+      expect(container.querySelectorAll(".banned-row")).toHaveLength(0);
+
+      // roles_update only rewrites channelsStore.roles.
+      grantBanPermission();
+      await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(1));
 
       section.destroy();
     });

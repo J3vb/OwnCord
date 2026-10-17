@@ -68,7 +68,7 @@ import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
-import { shellText } from "../../i18n/shell";
+import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
 import { readPointerEnabled } from "@lib/serverCapabilities";
@@ -141,23 +141,6 @@ export interface ChannelController {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
-
-const DM_STATUS_LABELS = {
-  online: "status.online",
-  idle: "status.idle",
-  dnd: "status.dnd",
-  invisible: "status.invisible",
-  offline: "status.offline",
-} as const;
-
-/** The DM partner's presence as the profile panel words it ("Do Not Disturb"),
- *  not the capitalised wire value. An unknown value reads as offline. */
-function dmStatusLabel(status: string): string {
-  const key = Object.hasOwn(DM_STATUS_LABELS, status)
-    ? DM_STATUS_LABELS[status as keyof typeof DM_STATUS_LABELS]
-    : DM_STATUS_LABELS.offline;
-  return shellText(key);
-}
 
 /** The header's mark for a DM: the partner's avatar, or a group's face stack. */
 function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
@@ -1126,9 +1109,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           });
         } else if (dmChannel !== undefined) {
           const member = membersStore.getState().members.get(dmChannel.recipient.id);
-          const status =
-            member?.status ?? dmChannel.recipient.status ?? shellText("status.offline");
-          subtitle = dmStatusLabel(status);
+          subtitle = statusLabel(member?.status ?? dmChannel.recipient.status ?? "offline");
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
         updateChatHeaderForDm(chatHeaderRefs, {
