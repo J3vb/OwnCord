@@ -934,6 +934,79 @@ test("a native screen share's audio decodes in the browser and survives a video 
   expect(left.screenCaptures).toBe(0);
 });
 
+// WP M-12a: a live quality change re-caps the running capture and republishes
+// it (livekit 0.9.5 cannot change a sender's encoding). The browser re-subscribes
+// at the new size with the same key, and the share audio keeps flowing.
+test("a native share changes quality live and keeps decoding in the browser", async ({ page }) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const events: Array<Record<string, unknown> & { type: string }> = [];
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "30",
+      "--screen",
+      "1280x720",
+      "--screen-audio",
+      "--screen-quality-after",
+      "8",
+    ],
+    ({ event }) => {
+      events.push(event);
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  // The share audio, subscribed before the change (it is published at once;
+  // the change comes 8 s later).
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).shareAudio !== null, {
+      timeout: 30_000,
+    })
+    .toBe(true);
+  const audioBefore = (await readBrowserPeer(page, "user-2#screenaudio")).shareAudio!;
+  const changed = () => events.find((e) => e.type === "screenQuality");
+  await expect.poll(() => changed() !== undefined, { timeout: 40_000 }).toBe(true);
+  expect([changed()!.width, changed()!.height]).toEqual([640, 360]);
+  // A new publication, not the old one resized: viewers get a new sid.
+  expect(changed()!.sid).not.toBe(changed()!.previousSid);
+  // The session still holds the mic, the republished video and the share
+  // audio, which the quality change leaves alone.
+  expect((changed()!.resources as Record<string, number>).localTracks).toBe(3);
+  // The republish is a new sender: let the browser subscribe to it.
+  await page.waitForTimeout(5_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const video = await readBrowserPeer(page, "user-2#screen");
+  const audio = await readBrowserPeer(page, "user-2#screenaudio");
+  await peer.done;
+
+  console.log(
+    `browser decoded the changed native share: ${video.videoFrames} frames in 5 s at ${video.videoWidth}x${video.videoHeight}`,
+  );
+  expect(video.videoFrames).toBeGreaterThan(5 * 5);
+  expect([video.videoWidth, video.videoHeight]).toEqual([640, 360]);
+  expect(video.encErrors).toBe(0);
+  expect(audio.rms, "the share audio keeps decoding across the quality change").toBeGreaterThan(
+    0.01,
+  );
+  expect(audio.encErrors).toBe(0);
+  // The video republish adds no audio publication or subscription.
+  expect(audio.shareAudio?.sid).toBe(audioBefore.sid);
+  expect(audio.shareAudio?.subscriptions).toBe(audioBefore.subscriptions);
+});
+
 test("a native screen share's audio with the wrong key is decoded as silence", async ({ page }) => {
   const key = randomBytes(32).toString("base64");
   const wrongKey = randomBytes(32).toString("base64");

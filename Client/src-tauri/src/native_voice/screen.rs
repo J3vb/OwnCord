@@ -263,6 +263,12 @@ pub type Preview = watch::Sender<Option<Arc<I420Buffer>>>;
 pub type Started = oneshot::Receiver<Result<(u32, u32), String>>;
 
 struct Shared {
+    /// Read at the top of every capture tick, so `set_options` takes effect
+    /// on the next frame.
+    options: Mutex<CaptureOptions>,
+    /// The size of the latest frame before the size cap, for `set_options`;
+    /// `None` until the first frame.
+    raw: Mutex<Option<(u32, u32)>>,
     /// The published screen share's source; `None` while not published.
     source: Mutex<Option<NativeVideoSource>>,
     /// Swapped by `take_over`, so the frame socket's `screen` route keeps
@@ -302,6 +308,8 @@ impl ScreenCapture {
         let (stop, stopped) = mpsc::channel();
         let (ready, started) = oneshot::channel();
         let shared = Arc::new(Shared {
+            options: Mutex::new(options),
+            raw: Mutex::new(None),
             source: Mutex::new(None),
             preview: Mutex::new(Arc::new(watch::channel(None).0)),
         });
@@ -311,7 +319,7 @@ impl ScreenCapture {
             .name("owncord-screen".into())
             .spawn(move || {
                 let _counted = counted;
-                run(target, options, &thread_shared, &stopped, ready, on_end);
+                run(target, &thread_shared, &stopped, ready, on_end);
             })
             .map_err(|e| format!("screen capture thread: {e}"))?;
         Ok((
@@ -330,6 +338,21 @@ impl ScreenCapture {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
+    }
+
+    /// Re-pace and re-cap the running capture. The size applies from the
+    /// next frame; the pacing from the next tick after the current wait
+    /// ends (a slow rate's wait is not cut short). Returns the size those
+    /// frames will have (`fit` of the latest raw frame, or that frame's own
+    /// size), `None` before the first frame.
+    pub fn set_options(&self, options: CaptureOptions) -> Option<(u32, u32)> {
+        *self
+            .shared
+            .options
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = options;
+        let raw = (*self.shared.raw.lock().unwrap_or_else(|p| p.into_inner()))?;
+        Some(sized(raw, options))
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
@@ -485,9 +508,13 @@ fn fit(w: u32, h: u32, max_w: u32, max_h: u32) -> Option<(u32, u32)> {
     Some((even(w as f64 * scale), even(h as f64 * scale)))
 }
 
+/// The size frames of raw size `raw` leave the capture at under `options`.
+fn sized(raw: (u32, u32), options: CaptureOptions) -> (u32, u32) {
+    fit(raw.0, raw.1, options.max_width, options.max_height).unwrap_or(raw)
+}
+
 fn run(
     target: Target,
-    options: CaptureOptions,
     shared: &Shared,
     stopped: &mpsc::Receiver<()>,
     ready: oneshot::Sender<Result<(u32, u32), String>>,
@@ -506,7 +533,6 @@ fn run(
     };
     run_loop(
         &mut || producer.grab(),
-        options,
         shared,
         stopped,
         &mut ready,
@@ -521,7 +547,6 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     grab: &mut dyn FnMut() -> Grab,
-    options: CaptureOptions,
     shared: &Shared,
     stopped: &mpsc::Receiver<()>,
     ready: &mut Option<oneshot::Sender<Result<(u32, u32), String>>>,
@@ -529,12 +554,20 @@ fn run_loop(
     failed: &str,
     on_end: impl FnOnce(),
 ) {
-    let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
     let started = Instant::now();
     // Frames are due on a fixed grid, so a late wake-up or a slow grab does
     // not push every later frame back by the same amount.
     let mut due = started;
+    let mut last_fps = f64::NAN;
     loop {
+        let options = *shared.options.lock().unwrap_or_else(|p| p.into_inner());
+        // A rate change re-anchors the grid, so frames are not owed (or
+        // withheld) against the old rate.
+        if options.fps != last_fps {
+            due = Instant::now();
+            last_fps = options.fps;
+        }
+        let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
         // Bound the pre-first-frame phase (voice #9): a picked source whose
         // capturer never produces a first frame (a transient error that
         // loops) used to spin here forever while the shared
@@ -548,12 +581,10 @@ fn run_loop(
         }
         match grab() {
             Grab::Frame(mut buffer) => {
-                if let Some((w, h)) = fit(
-                    buffer.width(),
-                    buffer.height(),
-                    options.max_width,
-                    options.max_height,
-                ) {
+                let raw = (buffer.width(), buffer.height());
+                *shared.raw.lock().unwrap_or_else(|p| p.into_inner()) = Some(raw);
+                let (w, h) = sized(raw, options);
+                if (w, h) != raw {
                     buffer = buffer.scale(w as i32, h as i32);
                 }
                 if let Some(r) = ready.take() {
@@ -627,6 +658,12 @@ mod tests {
         failed: &str,
     ) -> Option<Result<(u32, u32), String>> {
         let shared = Shared {
+            options: Mutex::new(CaptureOptions {
+                fps: 30.0,
+                max_width: 0,
+                max_height: 0,
+            }),
+            raw: Mutex::new(None),
             source: Mutex::new(None),
             preview: Mutex::new(Arc::new(watch::channel(None).0)),
         };
@@ -641,11 +678,6 @@ mod tests {
             .unwrap();
         run_loop(
             &mut grab,
-            CaptureOptions {
-                fps: 30.0,
-                max_width: 0,
-                max_height: 0,
-            },
             &shared,
             &stop_rx,
             &mut Some(ready_tx),
@@ -663,6 +695,12 @@ mod tests {
     #[test]
     fn a_120_fps_capture_paces_near_one_frame_per_8_ms() {
         let shared = Shared {
+            options: Mutex::new(CaptureOptions {
+                fps: 120.0,
+                max_width: 0,
+                max_height: 0,
+            }),
+            raw: Mutex::new(None),
             source: Mutex::new(None),
             preview: Mutex::new(Arc::new(watch::channel(None).0)),
         };
@@ -680,11 +718,6 @@ mod tests {
         let began = Instant::now();
         run_loop(
             &mut grab,
-            CaptureOptions {
-                fps: 120.0,
-                max_width: 0,
-                max_height: 0,
-            },
             &shared,
             &stop_rx,
             &mut Some(ready_tx),
@@ -852,6 +885,115 @@ mod tests {
         assert_eq!(active_captures(), base);
         // The preview ends with the capture.
         assert!(rt.block_on(preview.changed()).is_err());
+    }
+
+    fn idle_capture() -> ScreenCapture {
+        ScreenCapture {
+            shared: Arc::new(Shared {
+                options: Mutex::new(CaptureOptions {
+                    fps: 30.0,
+                    max_width: 0,
+                    max_height: 0,
+                }),
+                raw: Mutex::new(None),
+                source: Mutex::new(None),
+                preview: Mutex::new(Arc::new(watch::channel(None).0)),
+            }),
+            stop: None,
+            thread: None,
+        }
+    }
+
+    #[test]
+    fn set_options_before_the_first_frame_returns_none() {
+        let capture = idle_capture();
+        let options = CaptureOptions {
+            fps: 15.0,
+            max_width: 1280,
+            max_height: 720,
+        };
+        assert_eq!(capture.set_options(options), None);
+        // The loop still picks the options up on its first tick.
+        let held = *capture.shared.options.lock().unwrap();
+        assert_eq!(
+            (held.fps, held.max_width, held.max_height),
+            (15.0, 1280, 720)
+        );
+    }
+
+    #[test]
+    fn set_options_sizes_the_latest_raw_frame_under_the_new_cap() {
+        let capture = idle_capture();
+        *capture.shared.raw.lock().unwrap() = Some((1920, 1080));
+        let capped = |w, h| CaptureOptions {
+            fps: 30.0,
+            max_width: w,
+            max_height: h,
+        };
+        assert_eq!(capture.set_options(capped(1280, 720)), Some((1280, 720)));
+        assert_eq!(capture.set_options(capped(0, 0)), Some((1920, 1080)));
+        assert_eq!(capture.set_options(capped(4000, 3000)), Some((1920, 1080)));
+        assert_eq!(capture.set_options(capped(640, 640)), Some((640, 360)));
+    }
+
+    #[test]
+    fn set_options_changes_size_and_pace_of_a_running_capture() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let (capture, started) = ScreenCapture::start(
+            Target::Synthetic {
+                width: 1280,
+                height: 720,
+            },
+            CaptureOptions {
+                fps: 1.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            || {},
+        )
+        .unwrap();
+        assert_eq!(rt.block_on(started).unwrap(), Ok((1280, 720)));
+        let mut preview = capture.preview().subscribe();
+        let size = |frame: &I420Buffer| (frame.width(), frame.height());
+        // A stall fails the test instead of hanging it.
+        let next = |preview: &mut watch::Receiver<Option<Arc<I420Buffer>>>| {
+            // The timer must be created inside the runtime.
+            rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), preview.changed()).await
+            })
+            .expect("no preview frame within 3 s")
+            .unwrap();
+            preview.borrow_and_update().as_deref().map(size)
+        };
+        assert_eq!(next(&mut preview), Some((1280, 720)));
+
+        let resized = capture.set_options(CaptureOptions {
+            fps: 100.0,
+            max_width: 640,
+            max_height: 360,
+        });
+        assert_eq!(resized, Some((640, 360)));
+        let begun = Instant::now();
+        // At most one frame already in flight at the old size.
+        let mut last = None;
+        for _ in 0..3 {
+            last = next(&mut preview);
+            if last == Some((640, 360)) {
+                break;
+            }
+        }
+        assert_eq!(last, Some((640, 360)));
+        for _ in 0..10 {
+            assert_eq!(next(&mut preview), Some((640, 360)));
+        }
+        // The current 1 s wait ends first; ten frames at the old 1 s
+        // interval would take another ten seconds.
+        assert!(begun.elapsed() < Duration::from_secs(4));
+        drop(capture);
     }
 
     #[test]

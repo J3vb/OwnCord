@@ -344,6 +344,8 @@ pub fn run() {
             native_voice::native_voice_change_camera,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_change_screen,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_screen_quality,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

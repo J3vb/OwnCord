@@ -64,6 +64,12 @@
 //! and reports the audio sid again (`screenAudio`, phase `after-republish`):
 //! it must be the same one. It finishes by stopping the share and reporting
 //! the session's resources (`screenStopped`): video and audio are both gone.
+//! `--screen-quality-after SECS` (with `--screen`, not with `--republish-screen`)
+//! changes the live share's quality after SECS seconds the way the app does
+//! (`NativeSession::set_screen_quality`: the capture is capped to half the
+//! source's size and the share republished at that size) and reports the previous
+//! and new sids, the new size and the session's resources (`screenQuality`).
+//! The share audio is left alone.
 //! `--volume G` sets every remote participant's volume to G the way the
 //! per-user volume menu does, pulls the session's own playout mix at the
 //! device cadence (CI has no sound device to play it on) and reports its RMS
@@ -352,15 +358,15 @@ mod linux {
 
     /// Start a synthetic screen capture and publish it, as the app's
     /// `native_voice_start_screen` then `native_voice_publish_screen` do.
-    /// Returns the capture id.
+    /// Returns the capture id and the video publication's sid.
     async fn share_screen(
         session: &mut NativeSession,
         width: u32,
         height: u32,
-    ) -> Result<u64, String> {
+    ) -> Result<(u64, String), String> {
         let capture = start_screen_capture(session, width, height).await?;
-        publish_screen_video(session, capture, width, height).await?;
-        Ok(capture)
+        let sid = publish_screen_video(session, capture, width, height).await?;
+        Ok((capture, sid))
     }
 
     /// Start the synthetic capture. Returns its id.
@@ -384,13 +390,13 @@ mod linux {
     }
 
     /// Publish running capture `capture`'s video. `width` and `height` are
-    /// the synthetic source's own size.
+    /// the synthetic source's own size. Returns the publication's sid.
     async fn publish_screen_video(
         session: &mut NativeSession,
         capture: u64,
         width: u32,
         height: u32,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         session
             .publish_screen(
                 capture,
@@ -403,8 +409,7 @@ mod linux {
                     codec: PublishCodec::default(),
                 },
             )
-            .await?;
-        Ok(())
+            .await
     }
 
     /// Whether a WebSocket handshake to `url` is refused.
@@ -542,7 +547,7 @@ mod linux {
         let mut preview = None;
         let mut stereo = None;
         if let Some((width, height)) = screen_size {
-            let mut capture = share_screen(&mut session, width, height).await?;
+            let (mut capture, mut screen_sid) = share_screen(&mut session, width, height).await?;
             let screen_cycles: u32 = arg("--screen-cycles")
                 .as_deref()
                 .unwrap_or("0")
@@ -555,10 +560,9 @@ mod linux {
                 for _ in 0..screen_cycles {
                     session.stop_screen(capture).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    let stale = std::mem::replace(
-                        &mut capture,
-                        share_screen(&mut session, width, height).await?,
-                    );
+                    let (fresh, fresh_sid) = share_screen(&mut session, width, height).await?;
+                    screen_sid = fresh_sid;
+                    let stale = std::mem::replace(&mut capture, fresh);
                     // A late stop of the replaced capture must leave the
                     // new one running and published.
                     session.stop_screen(stale).await;
@@ -616,6 +620,32 @@ mod linux {
                         serde_json::json!({ "event": { "type": "screenStopped", "before": before, "after": session.resources() } }),
                     );
                 }
+            }
+            if let Some(secs) = arg("--screen-quality-after") {
+                let secs: u64 = secs.parse().map_err(|_| "--screen-quality-after")?;
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+                let (sid, new_width, new_height) = session
+                    .set_screen_quality(
+                        capture,
+                        CaptureOptions {
+                            fps: 15.0,
+                            max_width: width / 2,
+                            max_height: height / 2,
+                        },
+                        ScreenOptions {
+                            width,
+                            height,
+                            max_bitrate: 1_000_000,
+                            max_framerate: 15.0,
+                            simulcast: false,
+                            codec: PublishCodec::default(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| format!("{e:?}"))?;
+                emit(
+                    serde_json::json!({ "event": { "type": "screenQuality", "previousSid": screen_sid, "sid": sid, "width": new_width, "height": new_height, "resources": session.resources() } }),
+                );
             }
             preview = Some(tokio::spawn(watch(
                 "preview".into(),
