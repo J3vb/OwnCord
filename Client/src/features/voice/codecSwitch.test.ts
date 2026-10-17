@@ -4,6 +4,13 @@ import type { PublishCodec } from "./videoCodec";
 import type { CameraTrackState, ScreenTrackState, VideoTrackDeps } from "../../lib/screenShare";
 
 const republish = vi.hoisted(() => vi.fn());
+const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
+const nativeVp9 = vi.hoisted(() => ({ value: false }));
+
+vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }));
+vi.mock("./native/videoCodecs", () => ({
+  nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
+}));
 
 vi.mock("../../lib/screenShare", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/screenShare")>();
@@ -11,6 +18,8 @@ vi.mock("../../lib/screenShare", async (importOriginal) => {
 });
 
 const { voiceStore } = await import("../../stores/voice.store");
+const { resolveCodecChoice } = await import("./videoCodec");
+const { channelPeerDecode } = await import("./peerDecode");
 const {
   CodecSwitchController,
   SWITCH_BUSY_RETRY_MS,
@@ -139,6 +148,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  isLinuxDesktop.mockReturnValue(false);
+  nativeVp9.value = false;
+  localStorage.clear();
   for (const controller of made.splice(0)) controller.stop();
   vi.useRealTimers();
 });
@@ -326,6 +338,33 @@ describe("CodecSwitchController", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(r.calls).toEqual([]);
+    r.controller.stop();
+  });
+
+  it("a Linux VP9 share drops to VP8 when a baseline peer joins", async () => {
+    // The native engine reports a VP9 encoder and VP9 is the saved choice, so
+    // the codec comes from the real resolver rather than being set by hand
+    // (before WP M-11b it was VP8 on Linux and nothing could switch).
+    isLinuxDesktop.mockReturnValue(true);
+    nativeVp9.value = true;
+    localStorage.setItem("owncord:settings:videoCodec", JSON.stringify("vp9"));
+    const track = { getSettings: () => ({ width: 1280, height: 720 }) } as MediaStreamTrack;
+    const choice = await resolveCodecChoice(track, 30, 2_500_000, channelPeerDecode);
+    expect(choice).toEqual({ preferred: "vp9", codec: "vp9" });
+
+    // Linux native shares and cameras are live (announced, quality set) as on
+    // the web, so the controller sees them (WP M-12b set quality there).
+    const r = rig({ screen: choice.codec, camera: choice.codec, preferred: choice.preferred });
+    r.controller.kick();
+
+    join(2, VP8_PEER);
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS - 1);
+    expect(r.calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(r.calls).toEqual(["camera:vp8", "screen:vp8"]);
+    expect(r.screen.published).toBe("vp8");
+    expect(r.screen.preferred).toBe("vp9");
     r.controller.stop();
   });
 

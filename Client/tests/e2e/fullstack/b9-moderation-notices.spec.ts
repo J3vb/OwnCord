@@ -148,7 +148,7 @@ test.describe("B9-15 moderation notices (real server)", () => {
     await expect(composer(bob)).toHaveAttribute("placeholder", /^You can't send messages until /);
 
     await bob.getByRole("button", { name: "Settings" }).click();
-    await bob.getByRole("tab", { name: "Safety" }).click();
+    await bob.getByRole("tab", { name: "Privacy & Safety" }).click();
     const pane = bob.locator(".safety-tab");
     await expect(pane).toContainText(/You're timed out until .+ You can't send messages/);
     await expect(pane.locator(".safety-history-row")).toHaveCount(1);

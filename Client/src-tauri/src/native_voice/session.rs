@@ -512,13 +512,15 @@ impl DeviceKind {
 
 /// The video codec a publish asks for (WP LP-7c). VP8 is the default and what
 /// a webview that sends no `codec` gets; H.264 is sent only when
-/// `native_voice_video_codecs` says the engine can encode it.
+/// `native_voice_video_codecs` says the engine can encode it; so is VP9 (WP
+/// M-11b), which goes out as one SVC layer and never simulcast.
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PublishCodec {
     #[default]
     Vp8,
     H264,
+    Vp9,
 }
 
 impl PublishCodec {
@@ -526,6 +528,18 @@ impl PublishCodec {
         match self {
             PublishCodec::Vp8 => VideoCodec::VP8,
             PublishCodec::H264 => VideoCodec::H264,
+            PublishCodec::Vp9 => VideoCodec::VP9,
+        }
+    }
+
+    /// The RTP scalability mode this codec publishes with. VP9 is one spatial
+    /// layer with three temporal layers (`L1T3`): the SFU can drop temporal
+    /// layers for a slow viewer, and it is what browsers decode. Simulcast is
+    /// off for it, because the SDK builds one encoding when a mode is set.
+    fn svc(self) -> Option<String> {
+        match self {
+            PublishCodec::Vp9 => Some("L1T3".to_string()),
+            PublishCodec::Vp8 | PublishCodec::H264 => None,
         }
     }
 }
@@ -553,10 +567,13 @@ pub struct ScreenOptions {
 /// degrades `Balanced` (resolution before frame rate); lower rates keep
 /// resolution.
 fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
+    let scalability_mode = opts.codec.svc();
+    let simulcast = opts.simulcast && scalability_mode.is_none();
     TrackPublishOptions {
         source: TrackSource::Screenshare,
-        simulcast: opts.simulcast,
-        simulcast_layers: opts.simulcast.then(|| {
+        simulcast,
+        scalability_mode,
+        simulcast_layers: simulcast.then(|| {
             vec![VideoPreset {
                 width: 1280,
                 height: 720,
@@ -598,6 +615,8 @@ pub struct CameraOptions {
 /// `cameraSimulcastLayers` (360p and 720p) so a viewer on a 1-3 Mbps link gets
 /// 720p rather than the SDK default's 360p; 720p and below keep the defaults.
 fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
+    let scalability_mode = opts.codec.svc();
+    let simulcast = opts.simulcast && scalability_mode.is_none();
     let layer = |width, height, max_bitrate, max_framerate| VideoPreset {
         width,
         height,
@@ -608,8 +627,9 @@ fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
     };
     TrackPublishOptions {
         source: TrackSource::Camera,
-        simulcast: opts.simulcast,
-        simulcast_layers: (opts.simulcast && opts.height > 720).then(|| {
+        simulcast,
+        scalability_mode,
+        simulcast_layers: (simulcast && opts.height > 720).then(|| {
             vec![
                 layer(640, 360, 450_000, 20.0),
                 layer(1280, 720, 1_700_000, 30.0),
@@ -2148,6 +2168,37 @@ mod tests {
     }
 
     #[test]
+    fn vp9_publish_is_one_svc_layer_without_simulcast() {
+        // Camera: a 1080p simulcast request, which would add two layers for
+        // VP8, is one L1T3 encoding for VP9.
+        let mut cam = camera(1080, true);
+        cam.codec = PublishCodec::Vp9;
+        let opts = camera_publish_options(&cam);
+        assert_eq!(opts.video_codec, VideoCodec::VP9);
+        assert_eq!(opts.scalability_mode.as_deref(), Some("L1T3"));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+
+        // Screen share, the same.
+        let mut share = screen(true);
+        share.codec = PublishCodec::Vp9;
+        let opts = screen_publish_options(&share);
+        assert_eq!(opts.video_codec, VideoCodec::VP9);
+        assert_eq!(opts.scalability_mode.as_deref(), Some("L1T3"));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+
+        // VP8 and H.264 keep their simulcast and set no scalability mode.
+        assert!(camera_publish_options(&camera(1080, true))
+            .scalability_mode
+            .is_none());
+        assert!(screen_publish_options(&screen(true))
+            .scalability_mode
+            .is_none());
+        assert!(PublishCodec::H264.svc().is_none());
+    }
+
+    #[test]
     fn codec_defaults_to_vp8_when_absent() {
         let camera: CameraOptions = serde_json::from_str(
             r#"{"width":1280,"height":720,"maxBitrate":1,"maxFramerate":30.0,"simulcast":false}"#,
@@ -2164,6 +2215,11 @@ mod tests {
         )
         .expect("camera options with h264");
         assert_eq!(h264.codec, PublishCodec::H264);
+        let vp9: CameraOptions = serde_json::from_str(
+            r#"{"width":1,"height":1,"maxBitrate":1,"maxFramerate":1.0,"simulcast":false,"codec":"vp9"}"#,
+        )
+        .expect("camera options with vp9");
+        assert_eq!(vp9.codec, PublishCodec::Vp9);
     }
 
     #[test]

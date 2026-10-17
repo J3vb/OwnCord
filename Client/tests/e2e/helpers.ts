@@ -625,6 +625,11 @@ export function buildTauriMockScript(opts: {
       for (const route of HTTP_ROUTES) {
         if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
+      // Default: nobody blocked, so the Privacy & Safety tab loads without its
+      // load-failure alert. A spec's own /blocks route wins (matched above).
+      if (method === "GET" && url.split("?")[0].endsWith("/api/v1/blocks")) {
+        return { status: 200, body: { blocked_user_ids: [] } };
+      }
       return null;
     }
 
