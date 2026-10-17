@@ -13,6 +13,7 @@ vi.mock("../../src/features/voice/peerVerification", async (importOriginal) => (
 }));
 
 import {
+  absentMembers,
   createDmCallPanel,
   deriveCallView,
   type DmCallPanelComponent,
@@ -61,6 +62,15 @@ const vu = (userId: number, extra: Partial<VoiceUser> = {}): VoiceUser => ({
   camera: false,
   screenshare: false,
   ...extra,
+});
+
+const CARA = 3;
+const DAN = 4;
+const member = (id: number, name = `user${id}`): DmChannel["participants"][number] => ({
+  id,
+  username: name,
+  avatar: "",
+  status: "online",
 });
 
 const ring: RingState = { channelId: DM, fromUserId: OTTO, fromUsername: "Otto" };
@@ -309,7 +319,37 @@ describe("deriveCallView", () => {
       voice: { currentChannelId: DM, voiceUsers: room(SELF) },
       peerWasHere: true,
     });
-    expect(group).toMatchObject({ kind: "connected", peerLeft: false });
+    expect(group).toMatchObject({ kind: "connected", peerLeft: false, canRingAgain: true });
+  });
+
+  it("offers Ring again in a group whenever a member is not in the room (3B-8)", () => {
+    const groupDm = dm({
+      isGroup: true,
+      participants: [OTTO, CARA].map((id) => member(id)),
+    });
+    const input = { ...base, dms: [groupDm] };
+    const missing = deriveCallView({
+      ...input,
+      voice: { currentChannelId: DM, voiceUsers: room(SELF, OTTO) },
+    });
+    expect(missing).toMatchObject({ kind: "connected", peerLeft: false, canRingAgain: true });
+    const full = deriveCallView({
+      ...input,
+      voice: { currentChannelId: DM, voiceUsers: room(SELF, OTTO, CARA) },
+    });
+    expect(full).toMatchObject({ kind: "connected", canRingAgain: false });
+    // A 1:1 is unchanged: only a peer who left earns the redial.
+    const oneToOne = deriveCallView({
+      ...base,
+      voice: { currentChannelId: DM, voiceUsers: room(SELF, OTTO) },
+    });
+    expect(oneToOne).toMatchObject({ kind: "connected", canRingAgain: false });
+  });
+
+  it("lists the group members who are not present, never for a 1:1", () => {
+    const groupDm = dm({ isGroup: true, participants: [OTTO, CARA, DAN].map((id) => member(id)) });
+    expect(absentMembers(groupDm, [SELF, CARA])).toEqual([OTTO, DAN]);
+    expect(absentMembers(dm(), [SELF])).toEqual([]);
   });
 });
 
@@ -1280,5 +1320,147 @@ describe("DmCallPanel — resize", () => {
   it("clamps the dragged height to the chat column in the stylesheet", () => {
     const height = cascadedDeclaration(".dm-call-panel--expanded", "height");
     expect(JSON.stringify(height)).toContain("dcp-height");
+  });
+});
+
+describe("DmCallPanel — group roster (3B-8)", () => {
+  const group = (): DmChannel =>
+    dm({
+      isGroup: true,
+      name: "Trio",
+      participants: [member(OTTO, "otto"), member(CARA, "cara"), member(DAN, "dan")],
+    });
+  const tile = (root: HTMLElement, id: number) =>
+    root.querySelector<HTMLElement>(`.dcp-avatar[data-user-id='${id}']`)!;
+  const ids = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLElement>(".dcp-person .dcp-avatar")].map((e) =>
+      Number(e.dataset.userId),
+    );
+  const greyed = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLElement>(".dcp-avatar--absent")].map((e) =>
+      Number(e.dataset.userId),
+    );
+
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [group()] }));
+    dmStore.flush();
+  });
+
+  it("shows in-call members, then ringing, then the rest greyed out and labelled", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [CARA] });
+
+    expect(root.dataset.state).toBe("outgoing");
+    expect(ids(root)).toEqual([SELF, CARA, OTTO, DAN]);
+    expect(tile(root, CARA).classList.contains("dcp-avatar--ringing")).toBe(true);
+    expect(greyed(root)).toEqual([OTTO, DAN]);
+    expect(tile(root, SELF).classList.contains("dcp-avatar--absent")).toBe(false);
+    expect(root.querySelectorAll(".dcp-person--absent")).toHaveLength(2);
+    expect(tile(root, OTTO).title).toBe("Not in call");
+    expect(tile(root, OTTO).querySelector(".sr-only")!.textContent).toBe("Not in call");
+  });
+
+  it("greys out every other member once the ring went unanswered", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO, CARA, DAN] });
+
+    expect(root.dataset.state).toBe("unanswered");
+    expect(greyed(root)).toEqual([OTTO, CARA, DAN]);
+  });
+
+  it("moves a member from greyed to in-call when they join, and back when they leave", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(ids(root)).toEqual([SELF, OTTO, CARA, DAN]);
+    expect(greyed(root)).toEqual([CARA, DAN]);
+
+    setVoice(DM, [vu(SELF), vu(OTTO), vu(CARA)]);
+    expect(ids(root)).toEqual([SELF, OTTO, CARA, DAN]);
+    expect(greyed(root)).toEqual([DAN]);
+
+    setVoice(DM, [vu(SELF), vu(CARA)]);
+    expect(ids(root)).toEqual([SELF, CARA, OTTO, DAN]);
+    expect(greyed(root)).toEqual([OTTO, DAN]);
+  });
+
+  it("follows the group's participant list", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(greyed(root)).toEqual([CARA, DAN]);
+
+    dmStore.setState(() => ({
+      channels: [{ ...group(), participants: [member(OTTO, "otto"), member(CARA, "cara")] }],
+    }));
+    dmStore.flush();
+    expect(greyed(root)).toEqual([CARA]);
+
+    dmStore.setState(() => ({
+      channels: [
+        {
+          ...group(),
+          participants: [member(OTTO, "otto"), member(CARA, "cara"), member(5, "eve")],
+        },
+      ],
+    }));
+    dmStore.flush();
+    expect(greyed(root)).toEqual([CARA, 5]);
+  });
+
+  it("greys the absent members in the live strip too", () => {
+    setVoice(null, [vu(OTTO)]);
+    const { root } = mount();
+    expect(root.dataset.state).toBe("live");
+    const faces = [...root.querySelectorAll<HTMLElement>(".dcp-faces .dcp-avatar")];
+    expect(faces.map((e) => Number(e.dataset.userId))).toEqual([OTTO, CARA, DAN]);
+    expect(greyed(root)).toEqual([CARA, DAN]);
+    for (const id of [CARA, DAN]) {
+      expect(tile(root, id).title).toBe("Not in call");
+      expect(tile(root, id).querySelector(".sr-only")!.textContent).toBe("Not in call");
+    }
+    expect(tile(root, OTTO).title).toBe("");
+  });
+
+  it("offers Ring again after a peer leaves, while someone is missing, and re-rings", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO), vu(CARA), vu(DAN)]);
+    const { opts, root } = mount();
+    expect(q(root, "dcp-ring-again")).toBeNull();
+
+    setVoice(DM, [vu(SELF), vu(OTTO), vu(CARA)]);
+    expect(root.dataset.state).toBe("connected");
+    expect(q(root, "dcp-ring-again")!.textContent).toBe("Ring again");
+    q(root, "dcp-ring-again")!.click();
+    expect(opts.onRingAgain).toHaveBeenCalledWith(DM);
+
+    setVoice(DM, [vu(SELF), vu(OTTO), vu(CARA), vu(DAN)]);
+    expect(q(root, "dcp-ring-again")).toBeNull();
+  });
+
+  it("draws the greyed members as avatar tiles in the video grid", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    panel!.setVideoActive(true);
+    hostAvatars(opts);
+
+    expect(
+      [...root.querySelectorAll<HTMLElement>(".dcp-avatar--absent")].map((e) =>
+        Number(e.dataset.userId),
+      ),
+    ).toEqual([CARA, DAN]);
+    for (const id of [CARA, DAN]) {
+      expect(tile(root, id).title).toBe("Not in call");
+      expect(tile(root, id).querySelector(".sr-only")!.textContent).toBe("Not in call");
+    }
+  });
+
+  it("leaves a 1:1 call without a roster or Ring again", () => {
+    dmStore.setState(() => ({ channels: [dm()] }));
+    dmStore.flush();
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(ids(root)).toEqual([SELF, OTTO]);
+    expect(greyed(root)).toEqual([]);
+    expect(q(root, "dcp-ring-again")).toBeNull();
   });
 });
