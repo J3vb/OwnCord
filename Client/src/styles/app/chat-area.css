@@ -22,6 +22,32 @@
   font-size: 22px;
   font-weight: 600;
 }
+/* The DM partner's avatar (or a group's stack) where a channel has its "#". */
+.chat-header .ch-avatar {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.chat-header .ch-avatar .avatar-initial {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.chat-header .ch-avatar .ch-avatar-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--on-fill);
+}
+.chat-header .ch-avatar .dm-avatar-stack {
+  width: 100%;
+  height: 100%;
+}
 .chat-header .ch-name {
   font-size: var(--font-size-lg);
   font-weight: 700;

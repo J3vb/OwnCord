@@ -185,11 +185,14 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
   },
 }));
 
-const { mockReturnToChannel, mockRememberChannel, inertModeration } = vi.hoisted(() => ({
-  mockReturnToChannel: vi.fn(),
-  mockRememberChannel: vi.fn(),
-  inertModeration: { signals: [] as AbortSignal[] },
-}));
+const { mockReturnToChannel, mockRememberChannel, mockRenameGroup, inertModeration } = vi.hoisted(
+  () => ({
+    mockReturnToChannel: vi.fn(),
+    mockRenameGroup: vi.fn(),
+    mockRememberChannel: vi.fn(),
+    inertModeration: { signals: [] as AbortSignal[] },
+  }),
+);
 
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
@@ -202,6 +205,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       rememberChannel: mockRememberChannel,
       forgetChannel: vi.fn(),
       returnToChannel: mockReturnToChannel,
+      renameGroup: mockRenameGroup,
     };
   },
 }));
@@ -1699,6 +1703,101 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     capturedOnRemoteVideo.current!(10, {} as MediaStream, true);
     const config = grid.addStream.mock.calls.at(-1)![3] as { name?: string };
     expect(config.name).toBe("Bobby");
+  });
+
+  it("the header's video call button joins the DM call and turns the camera on once connected (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    // Not before the join lands: the camera follows "connected".
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    page.destroy?.();
+  });
+
+  it("the header's group name click renames the open DM through the sidebar (3B-1)", () => {
+    openOneToOneDm(50);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    mockCreateChatArea.mock.calls[0]![0].onRenameGroup();
+
+    expect(mockRenameGroup).toHaveBeenCalledWith(50);
+    page.destroy?.();
+  });
+
+  it("Video while already connected in the DM's call turns the camera on at once (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected",
+      localCamera: false,
+    }));
+    voiceStore.flush();
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    page.destroy?.();
+  });
+
+  it("a Video start refused by join backoff does not arm the camera for a later plain join (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+    const { noteJoinFailed } = await import("../../src/features/voice/joinBackoff");
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    // The refused join left no channel; a later join of the same DM, plain.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    page.destroy?.();
+    const { noteJoinSucceeded } = await import("../../src/features/voice/joinBackoff");
+    noteJoinSucceeded();
+  });
+
+  it("a plain header call leaves the camera off (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    page.destroy?.();
   });
 
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {
