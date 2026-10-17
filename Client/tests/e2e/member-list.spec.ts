@@ -89,6 +89,13 @@ test.describe("Member List", () => {
 
     // Should now have offline class
     await expect(otherUserItem).toHaveClass(/offline/, { timeout: 5_000 });
+
+    // ...and sit under the OFFLINE header.
+    const offlineHeader = page.locator("[data-testid='member-group-offline']");
+    await expect(offlineHeader).toHaveText("OFFLINE — 1");
+    await expect(
+      offlineHeader.locator("xpath=following-sibling::*[1]").locator(".mi-name"),
+    ).toHaveText("otheruser");
   });
 
   test("member list is always visible in sidebar", async ({ page }) => {
@@ -110,9 +117,14 @@ test.describe("Member List — Multi-role", () => {
     const members = page.locator(".member-item");
     expect(await members.count()).toBeGreaterThanOrEqual(3);
 
-    // Multiple role groups should be present
-    const roleGroups = page.locator(".member-role-group");
-    expect(await roleGroups.count()).toBeGreaterThanOrEqual(2);
+    // Each role counts only its online members; offline people share the
+    // last group.
+    await expect(page.locator(".member-role-group")).toHaveText([
+      "ADMIN — 1",
+      "MODERATOR — 1",
+      "MEMBER — 2",
+      "OFFLINE — 1",
+    ]);
 
     // Offline members should have the offline class
     const offlineMembers = page.locator(".member-item.offline");

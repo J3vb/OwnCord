@@ -1197,3 +1197,7 @@ details.disclose[open] > summary .icon {
   font-weight: 700;
   overflow: hidden;
 }
+.shortcuts-modal {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+}

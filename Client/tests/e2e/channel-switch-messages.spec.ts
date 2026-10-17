@@ -1,10 +1,5 @@
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSessionWithMessages,
-  navigateToMainPage,
-  emitWsMessage,
-  MOCK_CHANNELS_WITH_CATEGORIES,
-} from "./helpers";
+import { mockTauriFullSessionWithMessages, navigateToMainPage, emitWsMessage } from "./helpers";
 
 test.describe("Channel Switch — Messages", () => {
   test.beforeEach(async ({ page }) => {
