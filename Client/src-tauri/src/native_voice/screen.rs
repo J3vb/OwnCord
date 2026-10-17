@@ -961,10 +961,10 @@ mod tests {
         let size = |frame: &I420Buffer| (frame.width(), frame.height());
         // A stall fails the test instead of hanging it.
         let next = |preview: &mut watch::Receiver<Option<Arc<I420Buffer>>>| {
-            rt.block_on(tokio::time::timeout(
-                Duration::from_secs(3),
-                preview.changed(),
-            ))
+            // The timer must be created inside the runtime.
+            rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), preview.changed()).await
+            })
             .expect("no preview frame within 3 s")
             .unwrap();
             preview.borrow_and_update().as_deref().map(size)
