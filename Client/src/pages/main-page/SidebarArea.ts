@@ -20,7 +20,7 @@ import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import type { DmMenuActions } from "@components/dmContextMenu";
-import { createCreateChannelModal } from "@components/CreateChannelModal";
+import { createLazyScreen } from "@components/lazyScreen";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
@@ -49,7 +49,6 @@ import {
   findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
-import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
 import {
@@ -133,6 +132,13 @@ export interface SidebarAreaOptions {
    *  after it has selected that DM). */
   readonly onOpenDmProfile?: () => void;
 }
+
+// Both modals load on first use, so their code stays out of the main-page chunk.
+const createChannelModalScreen = createLazyScreen(
+  "create-channel-modal",
+  () => import("@components/CreateChannelModal"),
+);
+const memberPickerScreen = createLazyScreen("member-picker", () => import("./MemberPickerModal"));
 
 export interface SidebarAreaResult {
   /** The composed sidebar wrapper element. */
@@ -451,28 +457,42 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // The category "+", the empty-state button and the server menu share this.
   function openCreateChannelModal(category: string): void {
     if (activeModal !== null) return;
-    const modal = createCreateChannelModal({
-      category,
-      onCreate: async (data) => {
-        try {
-          await api.adminCreateChannel(data);
-          modal.destroy?.();
-          activeModal = null;
-        } catch (err) {
-          const msg = errorText(err, shellText("channel.createFailed"));
-          getToast()?.show(msg, "error");
-          // The modal's own catch re-enables its submit button and renders
-          // the inline error, so the failure must propagate to it.
-          throw err;
+    // The placeholder holds the modal slot while the dialog loads: a second
+    // click is refused, and a teardown or another modal in between drops the
+    // late one (the same shape as the edit dialog below).
+    const pending: MountableComponent = { mount: () => {} };
+    activeModal = pending;
+    void createChannelModalScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
         }
-      },
-      onClose: () => {
-        modal.destroy?.();
-        activeModal = null;
-      },
-    });
-    activeModal = modal;
-    modal.mount(document.body);
+        if (activeModal !== pending) return;
+        const modal = screen.createCreateChannelModal({
+          category,
+          onCreate: async (data) => {
+            try {
+              await api.adminCreateChannel(data);
+              modal.destroy?.();
+              activeModal = null;
+            } catch (err) {
+              const msg = errorText(err, shellText("channel.createFailed"));
+              getToast()?.show(msg, "error");
+              // The modal's own catch re-enables its submit button and renders
+              // the inline error, so the failure must propagate to it.
+              throw err;
+            }
+          },
+          onClose: () => {
+            modal.destroy?.();
+            activeModal = null;
+          },
+        });
+        activeModal = modal;
+        modal.mount(document.body);
+      });
   }
 
   // ---------------------------------------------------------------------------
@@ -642,22 +662,32 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    */
   function showMemberPicker(): void {
     if (activeModal !== null) return;
-
-    const picker = createMemberPickerModal({
-      onSelect: (userId) => {
-        closePickerModal();
-        void handleCreateDm(userId, dmDeps);
-      },
-      onSelectGroup: (userIds, name) => {
-        closePickerModal();
-        void handleCreateGroupDm(userIds, name, dmDeps);
-      },
-      onClose: () => {
-        activeModal = null;
-      },
-    });
-    activeModal = picker;
-    picker.mount(document.body);
+    const pending: MountableComponent = { mount: () => {} };
+    activeModal = pending;
+    void memberPickerScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
+        }
+        if (activeModal !== pending) return;
+        const picker = screen.createMemberPickerModal({
+          onSelect: (userId) => {
+            closePickerModal();
+            void handleCreateDm(userId, dmDeps);
+          },
+          onSelectGroup: (userIds, name) => {
+            closePickerModal();
+            void handleCreateGroupDm(userIds, name, dmDeps);
+          },
+          onClose: () => {
+            activeModal = null;
+          },
+        });
+        activeModal = picker;
+        picker.mount(document.body);
+      });
   }
 
   function closePickerModal(): void {

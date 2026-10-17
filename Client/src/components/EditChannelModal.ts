@@ -29,7 +29,7 @@ import {
   type ChannelsState,
 } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
-import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./CreateChannelModal";
+import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./channelTypes";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
 export const MAX_SLOW_MODE_SECONDS = 21600;
