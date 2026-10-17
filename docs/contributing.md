@@ -9,19 +9,19 @@ is cut, and the rules for tests and dependencies.
 One row per top-level folder. Each folder with its own README or `CLAUDE.md`
 has more detail there.
 
-| Folder                            | What it is                                                                                                                    |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| [Server/](../Server/README.md)    | Go REST and WebSocket server over SQLite, with LiveKit voice. Has a package map.                                              |
-| [Client/](../Client/README.md)    | Tauri v2 desktop app: TypeScript frontend and a thin Rust backend.                                                            |
-| [protocol/](../protocol/)         | `schema.json`, the source of truth for WebSocket message types. Generated code comes from it.                                 |
-| [deploy/](../deploy/)             | Deployment files: the systemd unit and the Unraid template.                                                                   |
-| [docs/](README.md)                | Guides, reference pages, architecture notes, dated audits and plans. Start at the index.                                      |
-| [scripts/](../scripts/)           | Repository checks, the root command runner (`run.mjs`) and the CI selector.                                                   |
-| [tools/](../tools/)               | Developer tools, such as the [introspection MCP server](mcp-introspect.md).                                                   |
-| [.github/](../.github/)           | CI workflows, issue forms and the pull request template.                                                                      |
-| [.githooks/](../.githooks/)       | Git hooks. See [Git hooks](#git-hooks-recommended).                                                                           |
-| `.claude/`, `.codex/`, `.agents/` | Setup for AI coding agents. Also `AGENTS.md`, `CLAUDE.md` files and `.no-mistakes.yaml`. Human contributors can ignore these. |
-| [.superpowers/](../.superpowers/) | The shared bug-hunt findings ledger and its renderer.                                                                         |
+| Folder                            | What it is                                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [Server/](../Server/README.md)    | Go REST and WebSocket server over SQLite, with LiveKit voice. Has a package map.                                                                       |
+| [Client/](../Client/README.md)    | Tauri v2 desktop app: TypeScript frontend and a thin Rust backend.                                                                                     |
+| [protocol/](../protocol/)         | `schema.json`, the source of truth for WebSocket message types. Generated code comes from it.                                                          |
+| [deploy/](../deploy/)             | Deployment files: the systemd unit and the Unraid template.                                                                                            |
+| [docs/](README.md)                | Guides, reference pages, architecture notes, dated audits and plans. Start at the index.                                                               |
+| [scripts/](../scripts/)           | Repository checks, the root command runner (`run.mjs`) and the CI selector.                                                                            |
+| [tools/](../tools/)               | Developer tools: the [introspection MCP server](mcp-introspect.md).                                                                                    |
+| [.github/](../.github/)           | CI workflows, issue forms and the pull request template.                                                                                               |
+| [.githooks/](../.githooks/)       | Git hooks. See [Git hooks](#git-hooks-recommended).                                                                                                    |
+| `.claude/`, `.codex/`, `.agents/` | Setup for AI coding agents, plus `.no-mistakes.yaml`. Human contributors can ignore these. The rules in `AGENTS.md` and `CLAUDE.md` apply to everyone. |
+| [.superpowers/](../.superpowers/) | The shared bug-hunt findings ledger and its renderer.                                                                                                  |
 
 ## Development Setup
 

@@ -3,7 +3,7 @@
 The OwnCord desktop app. It uses Tauri v2: a TypeScript frontend built with
 Vite (plain TypeScript, no React or Vue) and a deliberately thin Rust backend
 in `src-tauri/`. The Rust side only does what a web page cannot, such as
-native voice, the system tray, credential storage and update installs. Voice
+native voice on Linux, the system tray, credential storage and update installs. Voice
 and video go through LiveKit.
 
 For the detail agents and maintainers need (rules, gotchas), read
@@ -12,26 +12,26 @@ For the detail agents and maintainers need (rules, gotchas), read
 
 ## Folder map
 
-| Folder                   | What is in it                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `src/main.ts`            | Frontend entry point.                                                          |
-| `src/stores/`            | Observable state stores.                                                       |
-| `src/lib/`               | Protocol, WebSocket, voice and E2EE modules. `protocolTypes.ts` is generated.  |
-| `src/pages/`             | Top-level pages (connect page, main page).                                     |
-| `src/components/`        | UI components.                                                                 |
-| `src/features/`          | Feature modules, such as voice, messaging, moderation and navigation.          |
-| `src/platform/`          | The desktop/browser seam. Only `platform/desktop/` may import `@tauri-apps`.   |
-| `src/i18n/`              | English text catalogs. New UI text goes here.                                  |
-| `src/styles/`            | CSS. `app.css` imports the fragments in `app/`; the import order matters.      |
-| `src/assets/`, `public/` | Static assets.                                                                 |
-| `src-tauri/`             | Rust backend, Tauri config (`tauri.conf.json`), icons and installer packaging. |
-| `tests/unit/`            | Vitest unit tests (jsdom). Some unit tests sit next to the code in `src/`.     |
-| `tests/integration/`     | Vitest integration tests.                                                      |
-| `tests/contract/`        | Tests that read or run `Server/`-owned files, such as the admin panel.         |
-| `tests/browser/`         | Vitest browser-mode tests.                                                     |
-| `tests/e2e/`             | Playwright end-to-end tests, including `admin/` and `native/`.                 |
-| `scripts/`               | Build and check scripts: bundle budget, mutation shards, Linux toolchain.      |
-| `patches/`               | `patch-package` patches applied on `npm install`.                              |
+| Folder                   | What is in it                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| `src/main.ts`            | Frontend entry point.                                                                   |
+| `src/stores/`            | Observable state stores. Server events reach them only through `src/lib/dispatcher.ts`. |
+| `src/lib/`               | Protocol, WebSocket, voice and E2EE modules. `protocolTypes.ts` is generated.           |
+| `src/pages/`             | Top-level pages (connect page, main page).                                              |
+| `src/components/`        | UI components.                                                                          |
+| `src/features/`          | Feature modules, such as voice, messaging, moderation and navigation.                   |
+| `src/platform/`          | The desktop/browser seam. Only `platform/desktop/` may import `@tauri-apps`.            |
+| `src/i18n/`              | English text catalogs. New UI text goes here.                                           |
+| `src/styles/`            | CSS. `app.css` imports the fragments in `app/`; the import order matters.               |
+| `src/assets/`, `public/` | Static assets.                                                                          |
+| `src-tauri/`             | Rust backend, Tauri config (`tauri.conf.json`), icons and installer packaging.          |
+| `tests/unit/`            | Vitest unit tests (jsdom). Some unit tests sit next to the code in `src/`.              |
+| `tests/integration/`     | Vitest integration tests.                                                               |
+| `tests/contract/`        | Tests that read or run `Server/`-owned files, such as the admin panel.                  |
+| `tests/browser/`         | Vitest browser-mode tests.                                                              |
+| `tests/e2e/`             | Playwright end-to-end tests, including `admin/` and `native/`.                          |
+| `scripts/`               | Build and check scripts: bundle budget, mutation shards, Linux toolchain.               |
+| `patches/`               | `patch-package` patches applied on `npm install`.                                       |
 
 `src/lib/protocolTypes.ts` is generated from `protocol/schema.json`. Do not
 edit it by hand. Use the `protocol-change` skill.
@@ -51,7 +51,7 @@ npm run tauri build   # release installer
 
 **Linux Rust builds need a toolchain first.** The Linux client links LiveKit's
 Rust SDK, which needs clang 21 or newer and a prebuilt libwebrtc. Run this in
-each shell before `cargo test`, `cargo clippy` or `tauri build`:
+each shell before `npm run tauri dev`, `cargo test`, `cargo clippy` or `tauri build`:
 
 ```bash
 eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
@@ -75,5 +75,5 @@ npm run lint             # oxlint, import cycles, ESLint
 ```
 
 Formatting is done once at the repository root with `npm run format`. To run
-the client's full CI gate from the root, use `npm run check:client`. For the
+the main client CI checks from the root, use `npm run check:client`. For the
 Rust side, use `npm run check:rust`.

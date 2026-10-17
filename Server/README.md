@@ -10,31 +10,31 @@ For the detail agents and maintainers need (rules, build tags, gotchas), read
 
 ## Folder map
 
-| Folder                | What is in it                                                                   |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `main.go`             | Entry point. Also the `healthcheck`, `token` and `restore` subcommands.         |
-| `api/`                | REST handlers.                                                                  |
-| `ws/`                 | WebSocket hub: fan-out, send queues, replay and voice state.                    |
-| `auth/`               | Sessions, passwords and TOTP.                                                   |
-| `permissions/`        | Role and permission checks. The only place that reads raw permission bits.      |
-| `service/`            | Domain logic shared by the REST and WebSocket entry points.                     |
-| `db/`                 | Hand-written query wrappers over SQLite.                                        |
-| `db/dbgen/`           | **Generated** by sqlc. Do not edit. Use the `db-change` skill.                  |
-| `migrations/`         | SQL migrations. They only go forward.                                           |
-| `rollback/`           | Hand-run SQL that reverses later migrations, and the order to run it in.        |
-| `config/`             | Loads `config.yaml` and environment overrides.                                  |
-| `storage/`            | Validates and stores file uploads.                                              |
-| `admin/`              | The web admin panel (`admin/static/`, plain JS, no build step).                 |
-| `updater/`            | Self-update and signature checks.                                               |
-| `plugin/`             | WASM plugin runtime (build tag `wazero`).                                       |
-| `telemetry/`          | OpenTelemetry (build tag `otel`).                                               |
-| `safefetch/`          | The one bounded path for outbound fetches of content the server did not choose. |
-| `invariants/`         | Tests that enforce architecture rules, such as the `db` import boundary.        |
-| `cmd/`                | Extra programs: `genprotocol`, `gendocs`, `dbinventory`, `seed`, `smoke`.       |
-| `scripts/`            | Shell and JS tooling: coverage floor, Docker smoke, k6 and load scripts.        |
-| `testdata/`           | Test fixtures, including the SQLite snapshots.                                  |
-| `internal/app/`       | Server wiring and start-up, called from `main.go`.                              |
-| `internal/alphasnap/` | Gives tests a private copy of the committed alpha dataset.                      |
+| Folder                | What is in it                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| `main.go`             | Entry point. Also the `healthcheck`, `token` and `restore` subcommands.                       |
+| `api/`                | REST handlers.                                                                                |
+| `ws/`                 | WebSocket hub: fan-out, send queues, replay and voice state.                                  |
+| `auth/`               | Sessions, passwords and TOTP.                                                                 |
+| `permissions/`        | Role and permission checks. The only place that reads raw permission bits.                    |
+| `service/`            | Domain logic shared by the REST and WebSocket entry points.                                   |
+| `db/`                 | Hand-written query wrappers over SQLite.                                                      |
+| `db/dbgen/`           | **Generated** by sqlc. Do not edit. Use the `db-change` skill.                                |
+| `migrations/`         | SQL migrations. They only go forward.                                                         |
+| `rollback/`           | Hand-run SQL that reverses later migrations, and the order to run it in.                      |
+| `config/`             | Loads `config.yaml` and environment overrides.                                                |
+| `storage/`            | Validates and stores file uploads.                                                            |
+| `admin/`              | The web admin panel (`admin/static/`, plain JS, no build step).                               |
+| `updater/`            | Self-update and signature checks.                                                             |
+| `plugin/`             | WASM plugin runtime. The real sandbox needs build tag `wazero`; the default build has a stub. |
+| `telemetry/`          | OpenTelemetry. The SDK wiring needs build tag `otel`; the default build has a stub.           |
+| `safefetch/`          | The one bounded path for outbound fetches of content the server did not choose.               |
+| `invariants/`         | Tests that enforce architecture rules, such as the `db` import boundary.                      |
+| `cmd/`                | Extra programs: `genprotocol`, `gendocs`, `dbinventory`, `seed`, `smoke`.                     |
+| `scripts/`            | Shell and JS tooling: coverage floor, Docker smoke, k6 and load scripts.                      |
+| `testdata/`           | Test fixtures, including the SQLite snapshots.                                                |
+| `internal/app/`       | Server wiring and start-up, called from `main.go`.                                            |
+| `internal/alphasnap/` | Gives tests a private copy of the committed alpha dataset.                                    |
 
 Small helper packages, all imported by the packages above:
 
@@ -43,7 +43,7 @@ Small helper packages, all imported by the packages above:
 | `clientip/`  | Works out the real client IP of a request, behind trusted proxies.      |
 | `logctx/`    | A `slog` handler that adds request context to every log record.         |
 | `syncutil/`  | Mutex types that detect deadlocks under `-tags deadlock`.               |
-| `stackutil/` | Panic recovery helpers: when a panic must end the process.              |
+| `stackutil/` | Goroutine stack capture that is safe to log, and panic helpers.         |
 | `diskutil/`  | Free disk space for a path, per operating system.                       |
 | `netclass/`  | Classifies an IP address by how far it can be reached. Opens no socket. |
 | `metrics/`   | Small in-process counters that work without the OpenTelemetry SDK.      |
@@ -51,7 +51,7 @@ Small helper packages, all imported by the packages above:
 These helpers stay at the top level on purpose. Moving them would change every
 import path.
 
-Other files at this level: `Dockerfile`, `docker-compose.yml`,
+Other notable files at this level: `.env.example`, `Dockerfile`, `docker-compose.yml`,
 `docker-compose.otel.yml`, `prometheus.dev.yml`, `config.yaml.example`,
 `livekit.yaml.example`, `Makefile`, `sqlc.yaml` and `coverage-floor.json`.
 
@@ -82,7 +82,7 @@ go test ./...       # quick run
 ```
 
 CI also builds four tag variants: default, `-tags otel`, `-tags wazero` and
-`-tags otel,wazero`. To run the full local mirror of CI from the repository
+`-tags otel,wazero`. To run the main server CI checks from the repository
 root, use `npm run check:server`.
 
 Other `make` targets (`sqlc-generate`, `protocol-generate`, `docs-verify` and
