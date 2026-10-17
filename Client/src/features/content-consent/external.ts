@@ -15,6 +15,7 @@
  */
 
 import { loadPref, savePref } from "@lib/preferences";
+import { registerSessionReset } from "@lib/sessionRegistry";
 
 export type ExternalConsentChoice = "auto" | "ask";
 
@@ -69,6 +70,7 @@ export function resetExternalConsent(): void {
 export function forgetAdmittedItems(): void {
   forget();
 }
+void registerSessionReset("consent:admitted-items", forgetAdmittedItems, { phase: "cache" }); // app-lifetime
 
 /** Whether `key` may be fetched: the server is on "auto", or the viewer
  *  activated this item. */

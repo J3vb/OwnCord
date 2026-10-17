@@ -1580,13 +1580,14 @@ describe("MessageInput", () => {
 
   // ── Emoji picker ──
 
-  it("clicking emoji button opens emoji picker", () => {
+  it("clicking emoji button opens emoji picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     const picker = container.querySelector(".emoji-picker");
     expect(picker).not.toBeNull();
@@ -1594,7 +1595,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting emoji inserts it into textarea at cursor position", () => {
+  it("selecting emoji inserts it into textarea at cursor position", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1607,6 +1608,7 @@ describe("MessageInput", () => {
     // Open picker
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     expect(lastEmojiPickerOptions).not.toBeNull();
     lastEmojiPickerOptions!.onSelect("🎉");
@@ -1617,10 +1619,11 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("a plain pick closes the emoji picker", () => {
+  it("a plain pick closes the emoji picker", async () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     (container.querySelector(".emoji-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
 
     lastEmojiPickerOptions!.onSelect("🎉");
 
@@ -1628,13 +1631,14 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("a Shift-pick inserts at the caret and keeps the picker open for the next one", () => {
+  it("a Shift-pick inserts at the caret and keeps the picker open for the next one", async () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "ab";
     textarea.selectionStart = textarea.selectionEnd = 1;
     (container.querySelector(".emoji-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
 
     lastEmojiPickerOptions!.onSelect("🎉", { keepOpen: true });
     lastEmojiPickerOptions!.onSelect("🔥", { keepOpen: true });
@@ -1645,28 +1649,33 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("togglePicker opens and closes the emoji and GIF pickers like their buttons", () => {
+  it("togglePicker opens and closes the emoji and GIF pickers like their buttons", async () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
 
     comp.togglePicker("emoji");
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).not.toBeNull();
     comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).toBeNull();
     expect(container.querySelector(".gif-picker")).not.toBeNull();
     comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".gif-picker")).toBeNull();
 
     comp.destroy?.();
   });
 
-  it("togglePicker does nothing while the composer is disabled", () => {
+  it("togglePicker does nothing while the composer is disabled", async () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     comp.setDisabled("No permission");
 
     comp.togglePicker("emoji");
+    await vi.dynamicImportSettled();
     comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
 
     expect(container.querySelector(".emoji-picker")).toBeNull();
     expect(container.querySelector(".gif-picker")).toBeNull();
@@ -1675,13 +1684,14 @@ describe("MessageInput", () => {
 
   // ── GIF picker ──
 
-  it("clicking GIF button opens GIF picker", () => {
+  it("clicking GIF button opens GIF picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     const picker = container.querySelector(".gif-picker");
     expect(picker).not.toBeNull();
@@ -1689,13 +1699,14 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting a GIF sends it as a message immediately", () => {
+  it("selecting a GIF sends it as a message immediately", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
@@ -1711,13 +1722,14 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting a GIF under a slow-mode send gate is refused with the reason", () => {
+  it("selecting a GIF under a slow-mode send gate is refused with the reason", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     comp.setSendGate("Slow mode — 5s");
     (container.querySelector(".gif-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
@@ -1727,7 +1739,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting a GIF sends it without discarding a typed draft", () => {
+  it("selecting a GIF sends it without discarding a typed draft", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1737,6 +1749,7 @@ describe("MessageInput", () => {
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
@@ -1755,7 +1768,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("opening GIF picker closes emoji picker", () => {
+  it("opening GIF picker closes emoji picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1763,11 +1776,13 @@ describe("MessageInput", () => {
     // Open emoji picker first
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).not.toBeNull();
 
     // Open GIF picker
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     // Emoji picker should be removed
     expect(container.querySelector(".emoji-picker")).toBeNull();
@@ -1781,6 +1796,7 @@ describe("MessageInput", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     (container.querySelector(".gif-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
     await new Promise((r) => setTimeout(r, 0));
 
     const overlay = document.createElement("div");
@@ -1798,7 +1814,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("opening emoji picker closes GIF picker", () => {
+  it("opening emoji picker closes GIF picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1806,11 +1822,13 @@ describe("MessageInput", () => {
     // Open GIF picker first
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".gif-picker")).not.toBeNull();
 
     // Open emoji picker
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     // GIF picker should be removed
     expect(container.querySelector(".gif-picker")).toBeNull();
@@ -1822,7 +1840,7 @@ describe("MessageInput", () => {
 
   // ── Destroy cleans up ──
 
-  it("destroy removes DOM and cleans up pickers", () => {
+  it("destroy removes DOM and cleans up pickers", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1830,6 +1848,7 @@ describe("MessageInput", () => {
     // Open a picker so there's state to clean up
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     comp.destroy?.();
 
@@ -2069,7 +2088,7 @@ describe("MessageInput", () => {
 
   // ── Toggling emoji picker closed ──
 
-  it("clicking emoji button again closes the picker", () => {
+  it("clicking emoji button again closes the picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -2078,10 +2097,12 @@ describe("MessageInput", () => {
 
     // Open
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).not.toBeNull();
 
     // Close
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).toBeNull();
 
     comp.destroy?.();
@@ -2112,22 +2133,24 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("does not open a picker when no gifApi is wired", () => {
+    it("does not open a picker when no gifApi is wired", async () => {
       const comp = createMessageInput(makeOptions({ gifApi: undefined }));
       comp.mount(container);
 
       (container.querySelector(".gif-btn") as HTMLElement).click();
+      await vi.dynamicImportSettled();
       expect(container.querySelector(".gif-picker")).toBeNull();
 
       comp.destroy?.();
     });
 
-    it("disables the GIF button when the picker reports the server has GIFs off", () => {
+    it("disables the GIF button when the picker reports the server has GIFs off", async () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);
 
       const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
       gifBtn.click();
+      await vi.dynamicImportSettled();
       lastGifPickerOptions!.onUnavailable!("GIFs are not enabled on this server");
 
       expect(gifBtn.hasAttribute("disabled")).toBe(true);

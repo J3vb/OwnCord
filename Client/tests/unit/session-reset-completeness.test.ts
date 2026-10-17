@@ -9,8 +9,34 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
+// The attachment cache is probed through its own fetch path: a second fetch of
+// the same file is a cache miss, which is how a reset shows.
+vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
+vi.mock("@lib/httpProxy", () => ({
+  ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
+}));
 import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
+import { emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
+import {
+  externalPartition,
+  fetchMediaAsObjectUrl,
+  setServerHost,
+} from "../../src/components/message-list/attachments";
+import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
+import { renderInlineImage } from "../../src/components/message-list/media";
+import {
+  EXTERNAL_CONSENT_PREF,
+  admitDerived,
+  externalAllowed,
+  setExternalConsentChoice,
+} from "../../src/features/content-consent/external";
+import { handleMentionCount } from "../../src/features/channels/wsHandlers";
+import type { Channel } from "../../src/stores/channels.store";
+import { savePref } from "../../src/lib/preferences";
+import { expectConsole } from "../helpers/console";
 import { voiceStore } from "../../src/stores/voice.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -34,8 +60,8 @@ import type { ReadyMember } from "../../src/lib/types";
 interface Probe {
   /** The registry name this probe covers. */
   readonly name: string;
-  mutate(): void;
-  isInitial(): boolean;
+  mutate(): void | Promise<void>;
+  isInitial(): boolean | Promise<boolean>;
 }
 
 const member = {
@@ -62,6 +88,48 @@ const dm = {
 let roleRevBefore = 0;
 let snapshotRevBefore = 0;
 const COLLAPSED_KEY = "owncord:collapsed:a.example";
+
+let emojiRevBefore = 0;
+let partitionBefore = "";
+const FILE_URL = "https://chat.example/api/v1/files/1";
+const LINK_URL = "https://news.example/story";
+const IMAGE_URL = "https://cdn.example/cat.png";
+
+/** Let a fetch and the `.then` chains hanging off it settle. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+}
+
+/** An element's `offsetHeight` is 0 in jsdom; the image-height cache needs a size. */
+function withOffsetHeight<T>(height: number, run: () => T): T {
+  const proto = HTMLElement.prototype;
+  const saved = Object.getOwnPropertyDescriptor(proto, "offsetHeight");
+  Object.defineProperty(proto, "offsetHeight", { configurable: true, get: () => height });
+  try {
+    return run();
+  } finally {
+    if (saved !== undefined) Object.defineProperty(proto, "offsetHeight", saved);
+    else delete (proto as { offsetHeight?: number }).offsetHeight;
+  }
+}
+
+const mentionChannel: Channel = {
+  id: 77,
+  name: "general",
+  type: "text",
+  category: null,
+  position: 0,
+  unreadCount: 0,
+  mentionCount: 0,
+  lastMessageId: null,
+  canSend: true,
+  topic: "",
+  slowMode: 0,
+  nsfw: false,
+  isPrivate: false,
+  voiceMaxUsers: 0,
+  voiceMaxVideo: 0,
+};
 
 const PROBES: readonly Probe[] = [
   {
@@ -129,6 +197,93 @@ const PROBES: readonly Probe[] = [
     isInitial: () => dmStore.getState().channels.length === 0,
   },
   {
+    // Bumped, not reset to INITIAL (OC-0362): a late GET /emoji from the old
+    // session must not match the next session's snapshot.
+    name: "emoji:store",
+    mutate: () => {
+      emojiRevBefore = emojiStore.getState().rev ?? 0;
+      setCustomEmoji([{ id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" }]);
+    },
+    isInitial: () =>
+      emojiStore.getState().emoji.length === 0 && (emojiStore.getState().rev ?? 0) > emojiRevBefore,
+  },
+  {
+    name: "attachments:caches",
+    mutate: async () => {
+      setServerHost("chat.example");
+      URL.createObjectURL = vi.fn(() => "blob:test/1");
+      URL.revokeObjectURL = vi.fn();
+      fetchMock.mockReset().mockResolvedValue({
+        ok: true,
+        headers: { get: () => "video/mp4" },
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+      });
+      await fetchMediaAsObjectUrl(FILE_URL);
+      await fetchMediaAsObjectUrl(FILE_URL);
+      expect(fetchMock).toHaveBeenCalledTimes(1); // cached: the probe can fail
+    },
+    isInitial: async () => {
+      await fetchMediaAsObjectUrl(FILE_URL);
+      return fetchMock.mock.calls.length === 2; // refetched, so the cache was dropped
+    },
+  },
+  {
+    // Before the cache probes: its pref write fires owncord:pref-change, which
+    // clears the embed, media and external-image caches on its own.
+    name: "consent:admitted-items",
+    mutate: () => {
+      setExternalConsentChoice("auto");
+      admitDerived("parent", "admitted-child");
+      // Back to "no choice yet", so only the one-by-one admission could allow it.
+      savePref(EXTERNAL_CONSENT_PREF, {});
+      expect(externalAllowed("admitted-child")).toBe(true);
+    },
+    isInitial: () => !externalAllowed("admitted-child"),
+  },
+  {
+    name: "attachments:external-images",
+    mutate: () => {
+      partitionBefore = externalPartition();
+    },
+    // The broker partition is renamed so its cache is dropped with the session.
+    isInitial: () => externalPartition() !== partitionBefore,
+  },
+  {
+    name: "embeds:caches",
+    mutate: async () => {
+      // No consent for the link: the preview settles at once as a cached refusal.
+      renderGenericLinkPreview(LINK_URL);
+      await flush();
+      expect(renderGenericLinkPreview(LINK_URL).dataset.embedState).not.toBe("loading");
+    },
+    isInitial: () => renderGenericLinkPreview(LINK_URL).dataset.embedState === "loading",
+  },
+  {
+    name: "media:caches",
+    mutate: () => {
+      withOffsetHeight(333, () => {
+        const wrap = renderInlineImage(IMAGE_URL);
+        wrap.querySelector("img")!.dispatchEvent(new Event("load"));
+      });
+      expect(renderInlineImage(IMAGE_URL).style.minHeight).toBe("333px");
+    },
+    isInitial: () => renderInlineImage(IMAGE_URL).style.minHeight === "200px",
+  },
+  {
+    // A mention alert is a pending timer keyed by this server's channel id.
+    name: "channels:activity",
+    mutate: () => {
+      channelsStore.setState((s) => ({
+        ...s,
+        channels: new Map([[77, mentionChannel]]),
+        activeChannelId: null,
+      }));
+      handleMentionCount({ channel_id: 77, count: 1 });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+    },
+    isInitial: () => vi.getTimerCount() === 0,
+  },
+  {
     name: "safety:store",
     mutate: () =>
       setReadyNotices([
@@ -180,17 +335,25 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
+const { createObjectURL, revokeObjectURL } = URL;
+
 afterEach(() => {
   vi.useRealTimers();
+  URL.createObjectURL = createObjectURL;
+  URL.revokeObjectURL = revokeObjectURL;
 });
 
 describe("session reset completeness", () => {
-  it("server_switch resets every per-server store and cache to its initial state", () => {
-    for (const probe of PROBES) probe.mutate();
+  it("server_switch resets every per-server store and cache to its initial state", async () => {
+    for (const probe of PROBES) await probe.mutate();
 
     clearAuth("server_switch");
 
-    const stale = PROBES.filter((p) => !p.isInitial()).map((p) => p.name);
+    const stale: string[] = [];
+    for (const probe of PROBES) if (!(await probe.isInitial())) stale.push(probe.name);
+    // The media probe renders its image without consent: each render logs the
+    // refusal (mutate renders twice, the check once).
+    for (let i = 0; i < 3; i++) expectConsole("error", /Image failed to load/);
     expect(stale).toEqual([]);
     expect(authStore.getState().logoutReason).toBe("server_switch");
   });

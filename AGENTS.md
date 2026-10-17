@@ -128,7 +128,7 @@ go test -tags otel -count=1 ./telemetry/... ./api/...
 golangci-lint run
 ```
 
-Rust (from `Client/src-tauri/`): `cargo fmt --all -- --check`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`. A Linux Rust build first needs, in each shell, `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` run from the repository root (from `Client/src-tauri/` the path is `../scripts/linux-webrtc-toolchain.sh`). It uses `CC`/`CXX` or an installed clang >= 21, installs clang-21 from apt.llvm.org only on Debian/Ubuntu (elsewhere, install clang >= 21 yourself), and fetches a pinned libwebrtc. Windows and server-only work need none of this ([Client/CLAUDE.md](Client/CLAUDE.md)).
+Rust (from `Client/src-tauri/`): `cargo fmt --all -- --check`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`. A Linux Rust build first needs, in each shell, `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` run from the repository root (from `Client/src-tauri/` the path is `../scripts/linux-webrtc-toolchain.sh`). It uses `CC`/`CXX` or an installed clang >= 21, installs clang-21 from apt.llvm.org only on Debian/Ubuntu (elsewhere, install clang >= 21 yourself), and fetches a pinned libwebrtc and the CUDA headers that build NVENC. Windows and server-only work need none of this ([Client/CLAUDE.md](Client/CLAUDE.md)).
 
 `Server/Makefile` wraps the generators (`sqlc-generate`, `protocol-generate`, `docs-generate`) and their `*-verify` twins, but `make` is not on a stock Windows PATH. Every `*-verify` target is its generator followed by `git diff --exit-code` on the generated paths.
 

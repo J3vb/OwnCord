@@ -4,7 +4,7 @@
  */
 
 import { createElement } from "@lib/dom";
-import { createEmojiPicker } from "@components/EmojiPicker";
+import { createLazyScreen } from "@components/lazyScreen";
 import {
   atReactionLimit,
   channelCanReact,
@@ -15,6 +15,9 @@ import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
 import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
+
+// The picker loads on its first open, so its code stays out of the main-page chunk.
+const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +74,12 @@ export function createReactionController(opts: ReactionControllerOptions): React
 
   let activePickerDestroy: (() => void) | null = null;
 
+  // Set while the picker's code loads. A click on the same message's react
+  // button cancels it (the button toggles), as does any close or destroy().
+  let pendingPicker: { readonly ticket: object; readonly msgId: number } | null = null;
+
   function closePicker(): void {
+    pendingPicker = null;
     activePickerDestroy?.();
     activePickerDestroy = null;
     const wrap = document.querySelector(".reaction-picker-wrap");
@@ -85,6 +93,11 @@ export function createReactionController(opts: ReactionControllerOptions): React
     // Close any existing reaction picker (including proper cleanup). A picker
     // on the SAME message toggles closed and returns; one on a DIFFERENT
     // message is replaced by the new one rather than swallowing the click.
+    if (pendingPicker !== null) {
+      const sameMessage = pendingPicker.msgId === msgId;
+      pendingPicker = null;
+      if (sameMessage) return;
+    }
     const existingWrap = document.querySelector(".reaction-picker-wrap");
     if (existingWrap !== null) {
       const sameMessage = existingWrap.getAttribute("data-message-id") === String(msgId);
@@ -98,6 +111,21 @@ export function createReactionController(opts: ReactionControllerOptions): React
       return;
     }
 
+    const ticket = {};
+    pendingPicker = { ticket, msgId };
+    void emojiPickerScreen
+      .load(() => pendingPicker?.ticket === ticket)
+      .then((screen) => {
+        if (pendingPicker?.ticket !== ticket) return;
+        pendingPicker = null;
+        if (screen !== null) mountPicker(screen, msgId);
+      });
+  }
+
+  function mountPicker(screen: typeof import("@components/EmojiPicker"), msgId: number): void {
+    // The row may have re-rendered or gone while the code loaded.
+    const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+    if (reactBtn === null) return;
     const wrap = createElement("div", { class: "reaction-picker-wrap" });
     wrap.setAttribute("data-message-id", String(msgId));
 
@@ -109,7 +137,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
       closePicker();
     });
 
-    const picker = createEmojiPicker({
+    const picker = screen.createEmojiPicker({
       // Read the set at open time, not at controller construction: an
       // emoji_update while the app is alive must be in the next picker the
       // user opens (matches MessageInput.ts's composer picker).

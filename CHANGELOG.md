@@ -110,8 +110,10 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
 - Linux: a 120 fps screen share now gives up some sharpness before smoothness when the connection or CPU cannot keep up, as on Windows, and holds its frame rate more steadily. Settings → Voice & Video notes that Wayland limits a screen share to 60 fps.
+- Linux (X11): the screen share picker greys out **120 fps** for a screen whose monitor runs below 120 Hz, and says the monitor's rate. Picking a faster screen brings your 120 fps choice back.
 - Linux: OwnCord now tells the call it can play VP9 video, so a Windows VP9 camera or screen share no longer drops to VP8 when a Linux user joins.
 - Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
+- Linux: on NVIDIA graphics cards, picking H.264 now encodes your camera and screen share on the graphics card instead of the CPU, and H.264 video from others is decoded there too. Other machines keep the software encoder.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
 - Linux (Wayland): push to talk and the Mute and Deafen shortcuts now work while another app is in front on GNOME 48 or newer and KDE Plasma. Settings → Keybinds has **Set up global shortcuts**, which opens your desktop's own dialog, then shows the keys it set; your desktop reserves those keys for OwnCord in every app, and push to talk is limited to function keys. GNOME 47 and older, Sway and other desktops without this service keep the note that global keys are unavailable, and the tray items still work.
 - Windows: unread mentions and DMs now also show on the tray icon as a red dot, as on Linux, and the dot comes back on the next update if the first swap failed.
@@ -184,6 +186,7 @@ and only when it changes something a contributor or fork holder must do
 - Alt+Shift+Up/Down now also reaches unread channels inside collapsed categories, and skips muted channels unless they have a mention.
 - A collapsed category no longer shows a dot for hidden muted channels with unread messages, since those channels now look read.
 - Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
+- The emoji and GIF pickers, Ctrl+K, message search, the Invite Manager, pinned messages, Create Channel and the new-DM picker now load the first time you open them instead of at startup, so the app loads less up front. If one cannot load, a "Couldn't open that. Try again." message shows and the next try tries again.
 
 **Accounts & profiles**
 

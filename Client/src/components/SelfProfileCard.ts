@@ -40,12 +40,15 @@ import {
   statusTimerLine,
   type StatusDef,
 } from "@components/statusDefs";
-import { createEmojiPicker } from "@components/EmojiPicker";
+import { createLazyScreen } from "@components/lazyScreen";
 import { createAvatarElement } from "@components/message-list/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
 import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
+
+// The picker loads on its first open, so its code stays out of the main-page chunk.
+const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
 
 export interface SelfProfileCardOptions {
   /** The button that opens the card; the card anchors above it and hands
@@ -124,6 +127,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     let lastCommittedCustom = options.getCustomStatus();
     let enabled = options.canSetStatus();
     let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
+    // Set while the picker's code loads: a second click cancels it, and so
+    // does closing the card (the load resolving later mounts nothing).
+    let emojiPending: object | null = null;
 
     const card = createElement("div", {
       class: "self-profile-card",
@@ -341,6 +347,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
 
     // ---- Emoji picker for the custom status ---------------------------------
     function closeEmojiPicker(refocus: boolean): void {
+      emojiPending = null;
       if (emojiPicker === null) return;
       emojiPicker.element.remove();
       emojiPicker.destroy();
@@ -388,22 +395,38 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
           closeEmojiPicker(true);
           return;
         }
-        emojiPicker = createEmojiPicker({
-          // Custom statuses render as plain text, so a server emoji would show
-          // as ":shortcode:".
-          customEmoji: [],
-          onSelect: (emoji, select) => {
-            insertEmoji(emoji);
-            if (select?.keepOpen !== true) closeEmojiPicker(true);
-          },
-          onClose: () => closeEmojiPicker(true),
-        });
-        emojiPicker.element.classList.add("spc-emoji-picker");
-        card.appendChild(emojiPicker.element);
-        emojiBtn.setAttribute("aria-expanded", "true");
+        if (emojiPending !== null) {
+          emojiPending = null;
+          return;
+        }
+        const ticket = {};
+        emojiPending = ticket;
+        void emojiPickerScreen
+          .load(() => emojiPending === ticket)
+          .then((screen) => {
+            if (emojiPending !== ticket || signal.aborted) return;
+            emojiPending = null;
+            if (screen !== null) openEmojiPicker(screen);
+          });
       },
       { signal },
     );
+
+    function openEmojiPicker(screen: typeof import("@components/EmojiPicker")): void {
+      emojiPicker = screen.createEmojiPicker({
+        // Custom statuses render as plain text, so a server emoji would show
+        // as ":shortcode:".
+        customEmoji: [],
+        onSelect: (emoji, select) => {
+          insertEmoji(emoji);
+          if (select?.keepOpen !== true) closeEmojiPicker(true);
+        },
+        onClose: () => closeEmojiPicker(true),
+      });
+      emojiPicker.element.classList.add("spc-emoji-picker");
+      card.appendChild(emojiPicker.element);
+      emojiBtn.setAttribute("aria-expanded", "true");
+    }
     // Keep the caret where it is: a press on the button must not blur the
     // input (and so must not commit half-typed text) before the picker opens.
     emojiBtn.addEventListener("mousedown", (e: MouseEvent) => e.preventDefault(), { signal });

@@ -364,13 +364,14 @@ describe("SidebarArea - server name menu", () => {
     expect(uiStore.getState().settingsTab).toBe("Notifications");
   });
 
-  it("Create Channel opens the create modal for no category", () => {
+  it("Create Channel opens the create modal for no category", async () => {
     grant(Permission.MANAGE_CHANNELS);
     createModal.mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
     mount();
     open();
 
     item("server-menu-create-channel").click();
+    await vi.dynamicImportSettled();
 
     expect(createModal).toHaveBeenCalledOnce();
     expect(createModal.mock.calls[0]![0]).toMatchObject({ category: "" });

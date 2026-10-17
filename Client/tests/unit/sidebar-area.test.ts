@@ -171,6 +171,9 @@ import { createMemberList } from "@components/MemberList";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
+// The member picker now loads on first use. Load it up front so its module-level
+// listeners register before each test, as they did when it was a static import.
+import "../../src/pages/main-page/MemberPickerModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
@@ -924,12 +927,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("add DM button opens member picker", () => {
+    it("add DM button opens member picker", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const modal = document.querySelector(".dm-member-picker-modal");
       expect(modal).not.toBeNull();
@@ -1259,7 +1263,7 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("member picker modal", () => {
-    it("shows member picker with non-current-user members", () => {
+    it("shows member picker with non-current-user members", async () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
@@ -1280,6 +1284,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const items = document.querySelectorAll(".dm-member-picker-item");
       expect(items.length).toBe(2);
@@ -1287,13 +1292,15 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("does not open a second picker if one is already open", () => {
+    it("does not open a second picker if one is already open", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const modals = document.querySelectorAll(".modal-overlay");
       expect(modals.length).toBe(1);
@@ -1301,12 +1308,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("closes picker on cancel button click", () => {
+    it("closes picker on cancel button click", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const cancelBtn = document.querySelector(".btn-secondary") as HTMLElement;
       cancelBtn.click();
@@ -1316,12 +1324,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("closes picker when clicking the overlay background", () => {
+    it("closes picker when clicking the overlay background", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const overlay = document.querySelector(".modal-overlay") as HTMLElement;
       overlay.click();
@@ -1352,6 +1361,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       // The picker is multi-select since group DMs: a click selects, and the
       // confirm button (labelled for the selection size) commits.
@@ -1370,7 +1380,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("shows member avatar initial and status in picker", () => {
+    it("shows member avatar initial and status in picker", async () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
@@ -1387,6 +1397,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const avatar = document.querySelector(".dm-avatar");
       expect(avatar!.textContent).toBe("A");
@@ -2200,7 +2211,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onNewDm opens member picker from DMs mode", () => {
+    it("onNewDm opens member picker from DMs mode", async () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
@@ -2209,6 +2220,7 @@ describe("SidebarArea", () => {
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
       lastCall.onNewDm();
+      await vi.dynamicImportSettled();
 
       const modal = document.querySelector(".dm-member-picker-modal");
       expect(modal).not.toBeNull();
@@ -2280,25 +2292,28 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onCreateChannel opens create channel modal", () => {
+    it("onCreateChannel opens create channel modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       expect(createCreateChannelModal).toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onCreateChannel does not open a second modal if one is active", () => {
+    it("onCreateChannel does not open a second modal if one is active", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
       callArgs.onCreateChannel("Another");
+      await vi.dynamicImportSettled();
 
       expect(createCreateChannelModal).toHaveBeenCalledTimes(1);
 
@@ -2631,6 +2646,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       // Get the createCreateChannelModal call args
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
@@ -2655,6 +2671,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toThrow(
@@ -2679,6 +2696,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toBe(
@@ -2690,18 +2708,20 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onClose callback destroys create modal", () => {
+    it("onClose callback destroys create modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       modalCallArgs.onClose();
 
       // After close, should be able to open another modal
       channelCallArgs.onCreateChannel("Another");
+      await vi.dynamicImportSettled();
       expect(createCreateChannelModal).toHaveBeenCalledTimes(2);
 
       cleanup(result);
@@ -3391,6 +3411,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
       (document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement).click();
@@ -3408,13 +3429,14 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("cleanup", () => {
-    it("calling all unsubscribers cleans up active modal", () => {
+    it("calling all unsubscribers cleans up active modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       // Open a modal
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const destroyFn = getMockDestroy(createCreateChannelModal as MockedFn);
 

@@ -34,7 +34,11 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	if stats.UserCount, err = d.q.CountUsers(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats users: %w", err)
 	}
-	if stats.MessageCount, err = d.q.CountActiveMessages(ctx); err != nil {
+	// CountActiveMessages is a full scan; the dashboard tolerates a minute of
+	// staleness (SV-07).
+	if stats.MessageCount, err = d.activeMessagesCache.Get(statsCacheTTL, func() (int64, error) {
+		return d.q.CountActiveMessages(ctx)
+	}); err != nil {
 		return nil, fmt.Errorf("GetServerStats messages: %w", err)
 	}
 	if stats.ChannelCount, err = d.q.CountChannels(ctx); err != nil {

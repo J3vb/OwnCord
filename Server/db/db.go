@@ -14,6 +14,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/migrations"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 
@@ -50,6 +51,11 @@ type DB struct {
 
 	// Loaded from the durable sidecar before serving a restored database.
 	messageDeliveryFloor atomic.Int64
+
+	// attachmentBytesCache and activeMessagesCache hold the two whole-table
+	// aggregates the metrics scrape and admin stats read (SV-07).
+	attachmentBytesCache syncutil.TTLCache[int64]
+	activeMessagesCache  syncutil.TTLCache[int64]
 
 	// closed is set by Close. A backup restore closes the handle while the
 	// lifecycle is still up; teardown steps read it through Closed.

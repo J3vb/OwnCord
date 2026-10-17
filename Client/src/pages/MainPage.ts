@@ -47,7 +47,6 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { clearCustomEmoji } from "@stores/emoji.store";
 import {
   cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
@@ -65,14 +64,10 @@ import {
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
-  clearAttachmentCaches,
-  clearExternalImageCache,
   pruneAttachmentCacheScope,
   setAttachmentCacheScope,
 } from "@components/message-list/attachments";
-import { clearEmbedCaches } from "@components/message-list/embeds";
-import { clearMediaCaches, closeActiveLightbox } from "@components/message-list/media";
-import { forgetAdmittedItems } from "../features/content-consent/external";
+import { closeActiveLightbox } from "@components/message-list/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -2065,50 +2060,53 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function destroy(): void {
     log.info("MainPage destroying");
     tornDown = true;
-    cancelPendingRing();
+    // Each step is isolated: a throw is logged and the rest still run, so a
+    // failing step can never skip the store unsubscriptions below. The module
+    // caches this page used to clear here reset with the session instead
+    // (sessionRegistry, cache phase).
+    const step = (name: string, fn: () => void): void => {
+      try {
+        fn();
+      } catch (err) {
+        log.error("MainPage teardown step failed", { name, error: String(err) });
+      }
+    };
+    step("cancelPendingRing", cancelPendingRing);
     try {
       // closeSettings() is otherwise only ever called from the overlay's own
       // onClose — a non-user-initiated unmount (401, ban, server shutdown)
       // left `settingsOpen` stale, and the next page to mount an (initially
       // hidden) SettingsOverlay off that flag — ConnectPage, after logout —
       // would show it over the login screen.
-      closeSettings();
+      step("closeSettings", closeSettings);
       // Before the chat teardown below: the view and its private content go
       // first, and the next page starts with no view open.
-      contentNav?.destroy();
-      contentNav = null;
-      teardownToast();
+      step("contentNav", () => {
+        contentNav?.destroy();
+        contentNav = null;
+      });
+      step("teardownToast", teardownToast);
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
-      voiceCleanupAll();
-      // Custom emoji belong to the server this page was connected to. The set
-      // is module-global, so without this a switch to another server would keep
-      // rendering the previous one's shortcodes until its own list arrived.
-      clearCustomEmoji();
-      // Image/video/audio caches are module-global too — without this every
-      // clip viewed this session stays pinned (as a blob: URL or a cached
-      // data: URI) past logout.
-      clearAttachmentCaches();
-      unsubCacheScope();
-      // External content (link previews, YouTube titles, image heights, and
-      // broker-fetched images) was fetched for this server. Clearing it here
-      // — and moving the broker to a fresh partition — is what keeps one
-      // server's previews from being served on the next (B7-16).
-      clearEmbedCaches();
-      clearMediaCaches();
-      clearExternalImageCache();
-      forgetAdmittedItems();
+      step("voiceCleanupAll", voiceCleanupAll);
+      step("unsubCacheScope", unsubCacheScope);
       // The lightbox is a module-level overlay appended straight to
       // document.body — renderPage only clears #app, so a forced logout with
       // it open would otherwise leave it floating over the login screen with
       // live document listeners and a since-revoked blob URL (B6-15).
-      closeActiveLightbox();
-      autoIdle?.destroy();
-      autoIdle = null;
-      statusTimerWatcher?.destroy();
-      statusTimerWatcher = null;
-      presenceSender.destroy();
-      setActivePresenceSender(null);
+      step("closeActiveLightbox", closeActiveLightbox);
+      step("autoIdle", () => {
+        autoIdle?.destroy();
+        autoIdle = null;
+      });
+      step("statusTimerWatcher", () => {
+        statusTimerWatcher?.destroy();
+        statusTimerWatcher = null;
+      });
+      step("presenceSender", () => {
+        presenceSender.destroy();
+        setActivePresenceSender(null);
+      });
       // Drop the mark-read sender (and, via setMarkReadSender's own
       // cancelPendingMarkAll, any still-armed "Mark All as Read" burst
       // timers) at the moment this connection is abandoned. Without this,
@@ -2116,28 +2114,33 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // is live when its timer elapses — channel ids are per-server, so
       // that can silently mark an unrelated channel read on the NEXT
       // connection (OC-0418).
-      setMarkReadSender(null);
-      setMarkUnreadSender(null);
+      step("markReadSender", () => setMarkReadSender(null));
+      step("markUnreadSender", () => setMarkUnreadSender(null));
       // The native screen-share picker is registered per page; drop it so a
       // torn-down connection cannot leave the next page's dialog pointed at a
       // dead one (a share with none registered resolves to cancelled).
-      setScreenSourcePicker(null);
-      channelCtrl?.destroy();
-      channelCtrl = null;
-
-      reactionCtrl?.destroy();
-      reactionCtrl = null;
-      msgCtrl = null;
-      videoModeCtrl?.destroy();
-      videoModeCtrl = null;
-
-      videoGrid = null;
-
-      closeDmProfile();
-      groupPanelCtrl?.destroy();
-      groupPanelCtrl = null;
-      dmMembersBtn = null;
-      dmProfileSlot = null;
+      step("screenSourcePicker", () => setScreenSourcePicker(null));
+      step("channelCtrl", () => {
+        channelCtrl?.destroy();
+        channelCtrl = null;
+      });
+      step("reactionCtrl", () => {
+        reactionCtrl?.destroy();
+        reactionCtrl = null;
+        msgCtrl = null;
+      });
+      step("videoModeCtrl", () => {
+        videoModeCtrl?.destroy();
+        videoModeCtrl = null;
+        videoGrid = null;
+      });
+      step("closeDmProfile", closeDmProfile);
+      step("groupPanelCtrl", () => {
+        groupPanelCtrl?.destroy();
+        groupPanelCtrl = null;
+        dmMembersBtn = null;
+        dmProfileSlot = null;
+      });
 
       for (const child of children) {
         try {
@@ -2157,10 +2160,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }
       unsubscribers = [];
 
-      if (banner !== null) {
-        banner.destroy();
+      step("banner", () => {
+        banner?.destroy();
         banner = null;
-      }
+      });
     } finally {
       if (root !== null) {
         root.remove();

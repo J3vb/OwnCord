@@ -326,6 +326,12 @@ func extractEventType(payload []byte) string {
 	return string(t)
 }
 
+// sequenceable reports whether wrapWithSeq stamps msg: a non-empty JSON object
+// no larger than config.MaxMessageBytes. Anything else passes through as is.
+func sequenceable(msg []byte) bool {
+	return len(msg) >= 2 && len(msg) <= config.MaxMessageBytes && msg[0] == '{'
+}
+
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
 func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
@@ -334,7 +340,7 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Frames above config.MaxMessageBytes pass through unsequenced, like a
 	// non-object frame: every server-built envelope is far smaller, and the
 	// bound keeps the capacity arithmetic below provably overflow-free.
-	if len(msg) < 2 || len(msg) > config.MaxMessageBytes || msg[0] != '{' {
+	if !sequenceable(msg) {
 		return msg
 	}
 	// `{"seq":` + up-to-20-digit uint64 + `,` = at most 28 extra bytes; the

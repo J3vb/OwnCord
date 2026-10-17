@@ -14,6 +14,7 @@ import {
 } from "./attachments";
 import { admitDerived } from "../../features/content-consent/external";
 import { contentText as t } from "../../i18n/content";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type {
   ExternalContentFailure,
   ExternalImageHandle,
@@ -41,8 +42,8 @@ type OgLoad =
   | { readonly ok: true; readonly meta: OgMeta }
   | { readonly ok: false; readonly failure: ExternalContentFailure };
 
-/** Cache for OG metadata to avoid re-fetching on re-render. Cleared on page
- *  teardown (MainPage) as well as by the manual "clear cache" action, so one
+/** Cache for OG metadata to avoid re-fetching on re-render. Cleared with the
+ *  session (sessionRegistry) as well as by the manual "clear cache" action, so one
  *  server's previews are never shown on the next. */
 const ogCache = new Map<string, OgLoad>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
@@ -79,6 +80,7 @@ export function clearEmbedCaches(): void {
   ogInFlight.clear();
   ogReasked.clear();
 }
+void registerSessionReset("embeds:caches", clearEmbedCaches, { phase: "cache" }); // app-lifetime
 
 // -- OG fetch -----------------------------------------------------------------
 

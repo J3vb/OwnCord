@@ -146,7 +146,7 @@ the frame socket, `mod.rs` the Tauri commands and state). The Linux build
 prerequisites — clang >= 21, a prebuilt libwebrtc, and, for the camera, the
 GStreamer `-dev` headers — are documented in
 [contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
-installs clang and fetches libwebrtc.
+installs clang and fetches libwebrtc and the CUDA headers.
 
 ### Phase 1: audio
 
@@ -552,7 +552,7 @@ visible and in front the whole time.
     (`libgstreamer1.0-dev` and `libgstreamer-plugins-base1.0-dev`): the CI and
     release jobs install them in their Linux system-dependency step, and a
     local Linux build installs them by hand (`linux-webrtc-toolchain.sh`
-    fetches only clang and libwebrtc). The crate tree got a cargo-deny/osv
+    fetches only clang, libwebrtc and the CUDA headers). The crate tree got a cargo-deny/osv
     review.
   - Capture no longer depends on the window being visible, and the camera
     frames' second trip through WebKit's network process (about 10% of a

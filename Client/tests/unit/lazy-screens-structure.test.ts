@@ -1,0 +1,48 @@
+/**
+ * The screens that open on first use (O-6a) stay out of the main-page chunk:
+ * no always-loaded module imports them statically. A value import of one of
+ * these files drags it back into MainPage; a type import and a dynamic
+ * `import()` do not.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const SRC = resolve(__dirname, "../../src");
+
+const LAZY = [
+  "QuickSwitcher",
+  "InviteManager",
+  "PinnedMessages",
+  "SearchOverlay",
+  "CreateChannelModal",
+  "EmojiPicker",
+  "GifPicker",
+] as const;
+
+// Modules in the main-page chunk that used to import them.
+const EAGER_SITES = [
+  "pages/main-page/OverlayManagers.ts",
+  "pages/main-page/SidebarArea.ts",
+  "pages/main-page/ReactionController.ts",
+  "components/MessageInput.ts",
+  "components/SelfProfileCard.ts",
+  "components/EditChannelModal.ts",
+  "components/message-list/quick-reactions.ts",
+] as const;
+
+describe("lazy screens stay out of the main-page chunk", () => {
+  for (const site of EAGER_SITES) {
+    it(`${site} has no static value import of a lazy screen`, () => {
+      const source = readFileSync(resolve(SRC, site), "utf8");
+      const staticImports = [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gms)];
+      const offenders = staticImports
+        .map((m) => m[1]!)
+        .filter((spec) => LAZY.some((name) => spec.endsWith(`/${name}`) || spec === name))
+        .concat(
+          staticImports.map((m) => m[1]!).filter((spec) => spec.endsWith("/MemberPickerModal")),
+        );
+      expect(offenders).toEqual([]);
+    });
+  }
+});

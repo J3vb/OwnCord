@@ -115,6 +115,11 @@ jobs:
         working-directory: Client
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
+      - name: Check the binary has the NVIDIA encoder
+        if: runner.os == 'Linux'
+        working-directory: Client
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
+
       # The same strip the release applies before re-signing, so the nightly
       # boots the image an owner would download.
       - name: Strip host-incompatible libs from AppImage
