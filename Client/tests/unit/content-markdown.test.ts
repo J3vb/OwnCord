@@ -707,6 +707,93 @@ describe("syntax highlighting", () => {
     expect(tokens[0]).toEqual({ text: "func", cls: "keyword" });
   });
 
+  it("highlights each added language's keyword, string and comment", () => {
+    const cases: [string, string, string, string, string][] = [
+      [
+        "c",
+        '#include <stdio.h>\nint main() { return 0; } // c\nchar *s = "x";',
+        "int",
+        '"x"',
+        "// c",
+      ],
+      ["cpp", 'namespace a { auto s = "x"; } /* c */', "namespace", '"x"', "/* c */"],
+      ["java", 'public class A { String s = "x"; } // c', "class", '"x"', "// c"],
+      ["csharp", 'using System; var s = "x"; // c', "using", '"x"', "// c"],
+      ["sql", "SELECT 'x' FROM t; -- c", "SELECT", "'x'", "-- c"],
+      ["yaml", 'name: "x" # c\nok: true', "true", '"x"', "# c"],
+    ];
+    for (const [lang, code, keyword, str, comment] of cases) {
+      const tokens = highlightCode(code, lang);
+      expect(tokens).toContainEqual({ text: keyword, cls: "keyword" });
+      expect(tokens).toContainEqual({ text: str, cls: "string" });
+      expect(tokens).toContainEqual({ text: comment, cls: "comment" });
+      expect(tokens.map((t) => t.text).join("")).toBe(code);
+    }
+  });
+
+  it("highlights yaml keys", () => {
+    expect(highlightCode("name: x", "yaml")[0]).toEqual({ text: "name", cls: "keyword" });
+  });
+
+  it("resolves aliases for the added languages", () => {
+    expect(resolveLanguage("c")).toBe("c");
+    expect(resolveLanguage("h")).toBe("c");
+    expect(resolveLanguage("cpp")).toBe("cpp");
+    expect(resolveLanguage("c++")).toBe("cpp");
+    expect(resolveLanguage("hpp")).toBe("cpp");
+    expect(resolveLanguage("cs")).toBe("csharp");
+    expect(resolveLanguage("c#")).toBe("csharp");
+    expect(resolveLanguage("yml")).toBe("yaml");
+    expect(resolveLanguage("postgres")).toBe("sql");
+    expect(resolveLanguage("mysql")).toBe("sql");
+  });
+
+  it("keeps c++ and c# fence tags intact through the fence parser", () => {
+    expect(splitCodeFences("```c++\nint x;\n```")[0]).toMatchObject({ lang: "c++" });
+    expect(splitCodeFences("```c#\nint x;\n```")[0]).toMatchObject({ lang: "c#" });
+  });
+
+  it("matches SQL keywords case-insensitively", () => {
+    expect(highlightCode("SELECT", "sql")[0]).toEqual({ text: "SELECT", cls: "keyword" });
+    expect(highlightCode("select", "sql")[0]).toEqual({ text: "select", cls: "keyword" });
+  });
+
+  it("does not start a SQL string inside a -- comment", () => {
+    const tokens = highlightCode("-- don't stop\nselect 1", "sql");
+    expect(tokens[0]).toEqual({ text: "-- don't stop", cls: "comment" });
+    expect(tokens.filter((t) => t.cls === "string")).toEqual([]);
+  });
+
+  it("keeps yaml #, apostrophes and quoted values in their place", () => {
+    const url = highlightCode("url: http://x.com/#frag", "yaml");
+    expect(url.filter((t) => t.cls === "comment")).toEqual([]);
+    const plain = highlightCode("title: don't stop # note", "yaml");
+    expect(plain.filter((t) => t.cls === "string")).toEqual([]);
+    expect(plain).toContainEqual({ text: "# note", cls: "comment" });
+    expect(highlightCode("a: 'it''s'", "yaml")).toContainEqual({ text: "'it''s'", cls: "string" });
+    expect(highlightCode("- 'x'", "yaml")).toContainEqual({ text: "'x'", cls: "string" });
+  });
+
+  it("closes SQL, C# verbatim and Java text-block strings correctly", () => {
+    expect(highlightCode("'C:\\' -- c", "sql")).toContainEqual({ text: "-- c", cls: "comment" });
+    const cs = highlightCode('@"C:\\dir\\" + x; // c', "csharp");
+    expect(cs[0]).toEqual({ text: '@"C:\\dir\\"', cls: "string" });
+    expect(cs).toContainEqual({ text: "// c", cls: "comment" });
+    const java = highlightCode('"""\nreturn if\n""" + x', "java");
+    expect(java[0]).toEqual({ text: '"""\nreturn if\n"""', cls: "string" });
+  });
+
+  it("highlights a hostile 40,000-character yaml run in linear time", () => {
+    // A key that rescans a run of key characters from every position is
+    // O(n^2): ~50 ms at the 4000-rune cap and seconds at 40k.
+    const src = "-".repeat(40_000);
+    const start = performance.now();
+    const tokens = highlightCode(src, "yaml");
+    const elapsed = performance.now() - start;
+    expect(tokens.map((t) => t.text).join("")).toBe(src);
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("does not treat a keyword-prefixed identifier as a keyword", () => {
     const tokens = highlightCode("constant = 1", "javascript");
     expect(tokens[0]!.cls).toBeNull();

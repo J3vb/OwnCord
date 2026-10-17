@@ -173,17 +173,90 @@ describe("updateChatHeaderForDm", () => {
     container.remove();
   });
 
-  it("sets @ prefix and username for DM recipient", () => {
+  it("shows the partner's avatar in place of the @ prefix for a 1:1 DM", () => {
     const { element, refs } = buildChatHeader({
       onTogglePins: vi.fn(),
     });
     container.appendChild(element);
 
+    const avatar = document.createElement("div");
+    avatar.dataset["testid"] = "partner-avatar";
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online", avatar });
+
+    expect(refs.avatarEl.style.display).toBe("");
+    expect(refs.avatarEl.contains(avatar)).toBe(true);
+    expect(refs.hashEl.style.display).toBe("none");
+    expect(refs.nameEl.textContent).toBe("Alice");
+    expect(refs.topicEl.textContent).toBe("online");
+  });
+
+  it("shows the @ prefix when no avatar is given", () => {
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+
     updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
 
     expect(refs.hashEl.textContent).toBe("@");
-    expect(refs.nameEl.textContent).toBe("Alice");
-    expect(refs.topicEl.textContent).toBe("online");
+    expect(refs.hashEl.style.display).toBe("");
+    expect(refs.avatarEl.style.display).toBe("none");
+  });
+
+  it("shows the video call button only in DM mode", () => {
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+
+    expect(refs.videoCallBtn.style.display).toBe("none");
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
+    expect(refs.videoCallBtn.style.display).toBe("");
+    expect(refs.callBtn.style.display).toBe("");
+    updateChatHeaderForDm(refs, null);
+    expect(refs.videoCallBtn.style.display).toBe("none");
+    expect(refs.avatarEl.style.display).toBe("none");
+  });
+
+  it("calls onStartVideoCall, not onStartCall, from the video button", () => {
+    const onStartCall = vi.fn();
+    const onStartVideoCall = vi.fn();
+    const { element, refs } = buildChatHeader({
+      onTogglePins: vi.fn(),
+      onStartCall,
+      onStartVideoCall,
+    });
+    container.appendChild(element);
+
+    refs.videoCallBtn.click();
+
+    expect(onStartVideoCall).toHaveBeenCalledTimes(1);
+    expect(onStartCall).not.toHaveBeenCalled();
+  });
+
+  it("clicking a group's name renames it; a 1:1's name opens the profile", () => {
+    const onToggleDmProfile = vi.fn();
+    const onRenameGroup = vi.fn();
+    const { element, refs } = buildChatHeader({
+      onTogglePins: vi.fn(),
+      onToggleDmProfile,
+      onRenameGroup,
+    });
+    container.appendChild(element);
+
+    const stack = document.createElement("div");
+    stack.dataset["testid"] = "group-stack";
+    updateChatHeaderForDm(refs, {
+      username: "Crew",
+      status: "3 members",
+      avatar: stack,
+      isGroup: true,
+    });
+    expect(refs.avatarEl.contains(stack)).toBe(true);
+    refs.nameGroupEl.click();
+    expect(onRenameGroup).toHaveBeenCalledTimes(1);
+    expect(onToggleDmProfile).not.toHaveBeenCalled();
+
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online", isGroup: false });
+    refs.nameGroupEl.click();
+    expect(onToggleDmProfile).toHaveBeenCalledTimes(1);
+    expect(onRenameGroup).toHaveBeenCalledTimes(1);
   });
 
   it("sets status text as topic for DM", () => {
