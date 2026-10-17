@@ -38,7 +38,7 @@ import {
   globalKeysErrorCode,
   portalBoundBefore,
 } from "@lib/globalKeys";
-import { loadPref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
@@ -159,6 +159,9 @@ function personName(userId: number): string | undefined {
  * refresh below so the two can never disagree on how a status/name is
  * derived.
  */
+/** Saved preference: the 1:1 DM profile panel opens with the conversation. */
+const DM_PROFILE_PREF = "dmProfileOpen";
+
 function buildDmProfileUser(channelId: number): DmProfileData | null {
   const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
   // A group has no single "recipient" — dm.store.ts documents .recipient as
@@ -323,6 +326,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM profile sidebar (right panel, toggled via DM header click)
   let dmProfileSidebar: DmProfileSidebarComponent | null = null;
   let dmProfileSlot: HTMLDivElement | null = null;
+  /** The header's "Show User Profile" toggle; its aria-pressed follows the panel. */
+  let dmProfileBtn: HTMLButtonElement | null = null;
   /** Tears down the store subscriptions that keep an open profile panel's
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
@@ -406,20 +411,52 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // If already open (or loading), close it
     if (dmProfileSidebar !== null || dmProfileLoad !== null) {
-      closeDmProfile();
+      closeDmProfileByUser();
       return;
     }
 
     // Only open in DM mode
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
+    if (openDmProfileFor(active.id)) savePref(DM_PROFILE_PREF, true);
+  }
 
-    const channelId = active.id;
+  /** A close the user asked for (the X, Escape, the header button): remembered. */
+  function closeDmProfileByUser(): void {
+    closeDmProfile();
+    savePref(DM_PROFILE_PREF, false);
+  }
+
+  /** Mirror the panel's state on the header's "Show User Profile" toggle. */
+  function syncDmProfileButton(): void {
+    dmProfileBtn?.setAttribute(
+      "aria-pressed",
+      String(dmProfileSidebar !== null || dmProfileLoad !== null),
+    );
+  }
+
+  /**
+   * Make the panel match the active conversation, without touching the saved
+   * preference: a 1:1 DM shows it while the preference is on (updated for the
+   * new person on a DM-to-DM switch), a group or a server channel hides it.
+   */
+  function syncDmProfileToActive(): void {
+    closeDmProfile();
+    const active = getActiveChannel();
+    if (active === null || active.type !== "dm") return;
+    if (!loadPref<boolean>(DM_PROFILE_PREF, true)) return;
+    openDmProfileFor(active.id);
+  }
+
+  /** Mount the panel for a 1:1 DM; false (nothing opened) for a group or an unknown DM. */
+  function openDmProfileFor(channelId: number): boolean {
+    if (dmProfileSlot === null) return false;
     const profileUser = buildDmProfileUser(channelId);
-    if (profileUser === null) return;
+    if (profileUser === null) return false;
 
     const load = {};
     dmProfileLoad = load;
+    syncDmProfileButton();
     void import("@components/DmProfileSidebar").then(
       ({ createDmProfileSidebar }) => {
         // A close (or teardown) since the click supersedes this import: drop it.
@@ -430,7 +467,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           user: profileUser,
           host: apiConfig.host ?? "",
           onClose: () => {
-            closeDmProfile();
+            closeDmProfileByUser();
           },
           onToggleBlock: (userId, block) => {
             void import("../features/blocks/blockActions").then(
@@ -450,6 +487,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           },
         });
         dmProfileSidebar.mount(dmProfileSlot);
+        syncDmProfileButton();
 
         // Keep the panel's status and name live across presence/rename/
         // nickname changes for as long as it stays open on this DM --
@@ -478,8 +516,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       () => {
         // The panel could not load; a later click may retry.
         if (dmProfileLoad === load) dmProfileLoad = null;
+        syncDmProfileButton();
       },
     );
+    return true;
   }
 
   /** Join a DM's live call: the call panel's Join strip and a call log row's Join button. */
@@ -674,6 +714,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       dmProfileSidebar.destroy?.();
       dmProfileSidebar = null;
     }
+    syncDmProfileButton();
   }
 
   // ---------------------------------------------------------------------------
@@ -855,9 +896,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // its call through this, the same startCall the DM header uses (BUG-05).
       onStartCall: () => startCall(),
       // The DM row menu's Profile: select the DM, then show its panel fresh
-      // (a panel already open for another DM is replaced, not toggled away).
-      // Deferred a microtask: the store's active-channel listener (which closes
-      // the panel on any DM switch) runs in the microtask selecting the DM queued.
+      // (a panel already open for another DM is replaced, not toggled away) and
+      // remember it as open. Deferred a microtask: the store's active-channel
+      // listener (which re-syncs the panel on any DM switch) runs in the
+      // microtask selecting the DM queued.
       onOpenDmProfile: () => {
         queueMicrotask(() => {
           closeDmProfile();
@@ -889,6 +931,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
     });
     dmProfileSlot = chatAreaResult.dmProfileSlot;
+    dmProfileBtn = chatAreaResult.chatHeaderRefs.profileBtn;
     children.push(...chatAreaResult.children);
     unsubscribers.push(...chatAreaResult.unsubscribers);
     videoGrid = chatAreaResult.videoGrid;
@@ -1786,13 +1829,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           const active = getActiveChannel();
           if (active !== null) {
             showChatFor(active);
-            // Close DM profile sidebar when switching channels
-            if (active.type !== "dm") {
-              closeDmProfile();
-            } else {
-              // Also close when switching to a different DM
-              closeDmProfile();
-            }
+            // The profile panel follows the conversation: a 1:1 DM keeps it
+            // (rebuilt for the new person) while the saved preference is on, a
+            // group or a server channel hides it without changing the preference.
+            syncDmProfileToActive();
             channelCtrl?.mountChannel(
               active.id,
               resolveChannelName(active.id, active.name, active.type),
@@ -1820,6 +1860,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         resolveChannelName(active.id, active.name, active.type),
         active.type,
       );
+      // A 1:1 DM already active at mount opens its remembered panel.
+      syncDmProfileToActive();
     }
   }
 

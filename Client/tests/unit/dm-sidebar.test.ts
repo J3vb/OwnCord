@@ -905,6 +905,57 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector('[data-testid="dm-mentions-7"]')).toBeNull();
   });
 
+  describe("empty state (WP 3B-3)", () => {
+    const empty = (): HTMLElement | null =>
+      container.querySelector<HTMLElement>("[data-testid='dm-empty-state']");
+
+    it("shows 'No direct messages yet' with a Start one button that calls onNewDm", () => {
+      const onNewDm = vi.fn();
+      const sidebar = createDmSidebar({
+        conversations: [],
+        onSelectConversation: vi.fn(),
+        onNewDm,
+      });
+      sidebar.mount(container);
+
+      expect(empty()?.hidden).toBe(false);
+      expect(empty()?.textContent).toContain("No direct messages yet");
+      const start = container.querySelector<HTMLButtonElement>("[data-testid='dm-empty-start']");
+      expect(start?.textContent).toBe("Start one");
+      start?.click();
+      expect(onNewDm).toHaveBeenCalledOnce();
+      sidebar.destroy?.();
+    });
+
+    it("hides once a DM is added and returns when the list empties again", () => {
+      const sidebar = createDmSidebar({
+        conversations: [],
+        onSelectConversation: vi.fn(),
+        onNewDm: vi.fn(),
+      });
+      sidebar.mount(container);
+      expect(empty()?.hidden).toBe(false);
+
+      sidebar.update([makeConvo()]);
+      expect(empty()?.hidden).toBe(true);
+
+      sidebar.update([]);
+      expect(empty()?.hidden).toBe(false);
+      sidebar.destroy?.();
+    });
+
+    it("is not shown when conversations exist at mount", () => {
+      const sidebar = createDmSidebar({
+        conversations: [makeConvo()],
+        onSelectConversation: vi.fn(),
+        onNewDm: vi.fn(),
+      });
+      sidebar.mount(container);
+      expect(empty()?.hidden).toBe(true);
+      sidebar.destroy?.();
+    });
+  });
+
   describe("row menu items (WP 3B-2)", () => {
     const labels = (): string[] =>
       [...document.querySelectorAll(".dm-context-menu .context-menu-item")].map(

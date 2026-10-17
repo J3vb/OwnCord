@@ -12,12 +12,23 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { isChannelMuted } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, isChannelMuted } from "@lib/channel-mutes";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
-import { dmPreviewText } from "./SidebarDmHelpers";
+import { voiceStore } from "@stores/voice.store";
+import { createIcon } from "@lib/icons";
+import { openMenuOnKeyboard } from "@lib/context-menu";
+import type { ModalInstance } from "@lib/modalFactory";
+import {
+  openDmContextMenu,
+  openLeaveConfirm,
+  type DmMenuActions,
+  type DmMenuConvo,
+} from "@components/dmContextMenu";
+import { voiceText } from "../../i18n/voice";
+import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +47,8 @@ export interface SidebarDmSectionOptions {
    * DM row yet, so without one the reader has nothing to click but the badge.
    */
   readonly onOpenRequests?: (opener: HTMLElement) => void;
+  /** The row context menu's actions: the same set DmSidebar's rows offer. */
+  readonly menu?: DmMenuActions;
 }
 
 export interface SidebarDmSectionResult {
@@ -58,6 +71,7 @@ function dmRowSignature(dm: DmChannel): string {
     dm.isGroup ? "g" : "1",
     dm.recipient.status,
     isChannelMuted(dm.channelId) ? "m" : "",
+    isDmInCall(dm.channelId) ? "c" : "",
     dm.mentionCount,
     dm.unreadCount,
     dmPreviewText(dm),
@@ -65,8 +79,23 @@ function dmRowSignature(dm: DmChannel): string {
   ].join("|");
 }
 
+function menuConvo(dm: DmChannel): DmMenuConvo {
+  return {
+    channelId: dm.channelId,
+    userId: dm.recipient.id,
+    username: dmDisplayName(dm),
+    isGroup: dm.isGroup,
+    unread: dm.unreadCount > 0 || dm.mentionCount > 0,
+    muted: isChannelMuted(dm.channelId),
+  };
+}
+
 export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDmSectionResult {
   const unsubs: Array<() => void> = [];
+  const listLifecycle = new Disposable();
+  // Each row's menu listeners die with the row, not with the section.
+  const rowOwners = new Map<Element, Disposable>();
+  let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
 
   // --- Root container ---
   const dmSection = createElement("div", { class: "sidebar-dm-section" });
@@ -175,7 +204,14 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
   // --- Render logic ---
 
-  function buildDmRow(dm: DmChannel): HTMLDivElement {
+  function confirmLeave(convo: DmMenuConvo, onClose: (channelId: number) => void): void {
+    leavePrompt = {
+      channelId: convo.channelId,
+      modal: openLeaveConfirm(convo, onClose, listLifecycle.signal),
+    };
+  }
+
+  function buildDmRow(dm: DmChannel, signal: AbortSignal): HTMLDivElement {
     const muted = isChannelMuted(dm.channelId);
     const dmItem = createElement("div", {
       class: muted ? "channel-item muted" : "channel-item",
@@ -212,6 +248,18 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       formatDmRowTime(dm.lastMessageAt),
     );
     const parts: Element[] = [statusDot, body, time];
+    // A live call is visible without opening the DM, as in the full list.
+    if (isDmInCall(dm.channelId)) {
+      const glyph = createElement("span", {
+        class: "dm-in-call",
+        role: "img",
+        "aria-label": voiceText("call.inProgress"),
+        title: voiceText("call.inProgress"),
+        "data-testid": `dm-in-call-${dm.channelId}`,
+      });
+      glyph.appendChild(createIcon("phone", 14));
+      parts.push(glyph);
+    }
     // A mention badge outranks the plain unread badge, and a mute never
     // dims or suppresses it: a mute silences chatter, never something
     // addressed to the reader directly (see lib/channel-mutes.ts).
@@ -242,6 +290,31 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmItem.addEventListener("click", () => {
       opts.onSelectDm(dmStore.getState().channels.find((c) => c.channelId === dm.channelId) ?? dm);
     });
+    const menuActions = opts.menu;
+    if (menuActions !== undefined) {
+      const openMenu = (x: number, y: number): void => {
+        // The row may have changed since it was built: read the live channel.
+        const live = dmStore.getState().channels.find((c) => c.channelId === dm.channelId);
+        if (live === undefined) return;
+        openDmContextMenu({
+          convo: menuConvo(live),
+          actions: menuActions,
+          confirmLeave,
+          x,
+          y,
+          signal,
+        });
+      };
+      dmItem.addEventListener(
+        "contextmenu",
+        (e: MouseEvent) => {
+          e.preventDefault();
+          openMenu(e.clientX, e.clientY);
+        },
+        { signal },
+      );
+      openMenuOnKeyboard(dmItem, openMenu, signal);
+    }
     return dmItem;
   }
 
@@ -251,8 +324,21 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     reconcileChildren(dmList, displayChannels, {
       key: (dm) => String(dm.channelId),
       signature: dmRowSignature,
-      create: buildDmRow,
+      create: (dm) => {
+        const owner = new Disposable();
+        const el = buildDmRow(dm, owner.signal);
+        rowOwners.set(el, owner);
+        return el;
+      },
+      dispose: (el) => {
+        rowOwners.get(el)?.destroy();
+        rowOwners.delete(el);
+      },
     });
+    if (leavePrompt !== null && !dmChannels.some((c) => c.channelId === leavePrompt?.channelId)) {
+      leavePrompt.modal.close();
+      leavePrompt = null;
+    }
     // One Tab stop; arrows/Home/End step within the preview list.
     setRovingTabindex(dmList, "[data-testid='dm-entry']");
 
@@ -290,7 +376,6 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // One Tab stop for the preview list; ArrowUp/Down step through the rows and
   // Enter/Space open one (B9-21: nothing is hover-only). The listener lives on
   // the list, which survives every keyed re-render.
-  const listLifecycle = new Disposable();
   enableRovingNavigation(dmList, "[data-testid='dm-entry']", listLifecycle.signal, "vertical");
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.
   atEachMidnight(listLifecycle.signal, renderDmListItems);
@@ -301,6 +386,23 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       if (e.detail.key === "timeFormat") renderDmListItems();
     }) as EventListener,
     { signal: listLifecycle.signal },
+  );
+
+  // A mute toggled from a row menu (or Settings) is not in a store.
+  window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {
+    signal: listLifecycle.signal,
+  });
+  // The live-call glyph follows who is in each DM's voice channel. Occupied
+  // channels only: a speaking tick replaces voiceUsers too and must not redraw.
+  unsubs.push(
+    voiceStore.subscribeSelector(
+      (s) =>
+        [...s.voiceUsers]
+          .filter(([, users]) => users.size > 0)
+          .map(([id]) => id)
+          .join(","),
+      () => renderDmListItems(),
+    ),
   );
 
   // --- Store subscription ---
@@ -338,6 +440,8 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     update: renderDmListItems,
     destroy: () => {
       listLifecycle.destroy();
+      for (const owner of rowOwners.values()) owner.destroy();
+      rowOwners.clear();
       for (const unsub of unsubs) {
         unsub();
       }

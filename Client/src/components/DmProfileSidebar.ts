@@ -11,6 +11,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
@@ -159,6 +160,11 @@ export function createDmProfileSidebar(
   // these are repainted in place instead of the whole panel being rebuilt.
   let nameNode: HTMLDivElement | null = null;
   let avatarLetterNode: HTMLSpanElement | null = null;
+  let avatarWrapperNode: HTMLDivElement | null = null;
+  // The avatar value the face was last painted from, and a counter that drops a
+  // stale fetch when a newer paint has started.
+  let avatarSource: string | null | undefined;
+  let avatarGen = 0;
   let statusDotNode: HTMLDivElement | null = null;
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
@@ -167,27 +173,33 @@ export function createDmProfileSidebar(
     return open;
   }
 
-  function buildAvatar(): HTMLDivElement {
-    const wrapper = createElement("div", {
-      class: "dps-avatar",
-      "data-testid": "dps-avatar",
-    });
-    // The letter draws immediately; the picture (if any) is fetched through
-    // the same cert-pinned, bearer-token path attachments use and swapped in
-    // once the bytes arrive. `<img src>` cannot carry the auth header an
-    // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
-    const initial = avatarInitial(user);
-    const letter = createElement("span", {}, initial);
+  /**
+   * Draw the avatar face (letter, then the fetched picture) at the front of
+   * `wrapper`, replacing whatever face it held. The letter draws immediately;
+   * the picture (if any) is fetched through the same cert-pinned, bearer-token
+   * path attachments use and swapped in once the bytes arrive. `<img src>`
+   * cannot carry the auth header an `/api/v1/files/{id}` avatar needs, so the
+   * URL is never assigned raw. A fetch that resolves after the avatar changed
+   * again is dropped (`avatarGen`).
+   */
+  function paintAvatarFace(wrapper: HTMLDivElement): void {
+    const gen = ++avatarGen;
+    avatarSource = user.avatar;
+    wrapper.querySelector(":scope > img.dps-avatar-img")?.remove();
+    avatarLetterNode?.remove();
+    wrapper.style.background = "";
+    const letter = createElement("span", {}, avatarInitial(user));
     avatarLetterNode = letter;
-    wrapper.appendChild(letter);
+    wrapper.insertBefore(letter, wrapper.firstChild);
 
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
+      const name = resolveDisplayName(user);
       void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-        if (objectUrl === null || !wrapper.isConnected) return;
+        if (objectUrl === null || !wrapper.isConnected || gen !== avatarGen) return;
         const img = createElement("img", {
           src: objectUrl,
-          alt: resolveDisplayName(user),
+          alt: name,
           class: "dps-avatar-img",
         });
         recoverEvictedImage(img, { url: resolved });
@@ -196,6 +208,15 @@ export function createDmProfileSidebar(
         wrapper.insertBefore(img, wrapper.firstChild);
       });
     }
+  }
+
+  function buildAvatar(): HTMLDivElement {
+    const wrapper = createElement("div", {
+      class: "dps-avatar",
+      "data-testid": "dps-avatar",
+    });
+    avatarWrapperNode = wrapper;
+    paintAvatarFace(wrapper);
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
@@ -378,6 +399,8 @@ export function createDmProfileSidebar(
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && open) {
+          // A confirm (leave group, block) is on top: Escape belongs to it.
+          if (dialogOpen()) return;
           e.preventDefault();
           onClose();
         }
@@ -395,6 +418,8 @@ export function createDmProfileSidebar(
     }
     nameNode = null;
     avatarLetterNode = null;
+    avatarWrapperNode = null;
+    avatarGen++;
     statusDotNode = null;
     statusDotInlineNode = null;
     statusTextNode = null;
@@ -420,11 +445,12 @@ export function createDmProfileSidebar(
     }
     if (statusTextNode !== null) setText(statusTextNode, label);
 
-    // Only repaint the fallback letter if it is still showing -- once the
-    // fetched avatar image swaps in, buildAvatar() removes the letter node
-    // from the DOM (see above), and a stale identity's initial no longer
-    // matters (or exists) to update.
-    if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
+    // A changed avatar swaps the face (letter or picture); an unchanged one
+    // only refreshes the fallback letter, if it is still showing, since the
+    // name it comes from may have changed.
+    if (avatarWrapperNode !== null && user.avatar !== avatarSource) {
+      paintAvatarFace(avatarWrapperNode);
+    } else if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
       setText(avatarLetterNode, avatarInitial(user));
     }
   }

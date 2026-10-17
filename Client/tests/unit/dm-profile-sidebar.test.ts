@@ -503,4 +503,63 @@ describe("DmProfileSidebar", () => {
       sidebar.destroy?.();
     });
   });
+
+  describe("avatar repaint and modal-aware Escape (WP 3B-3)", () => {
+    it("swaps the picture for the new one when update() changes the avatar", async () => {
+      fetchImageAsObjectUrl.mockImplementation((url: string) =>
+        Promise.resolve(`data:image/png;base64,${url.endsWith("a.png") ? "AAA" : "BBB"}`),
+      );
+      const sidebar = createDmProfileSidebar(
+        makeOptions({ user: makeUser({ avatar: "https://example.com/a.png" }) }),
+      );
+      sidebar.mount(container);
+      const face = () => container.querySelector<HTMLImageElement>(".dps-avatar-img");
+      await vi.waitFor(() => expect(face()?.src).toBe("data:image/png;base64,AAA"));
+
+      sidebar.update(makeUser({ avatar: "https://example.com/b.png" }));
+      await vi.waitFor(() => expect(face()?.src).toBe("data:image/png;base64,BBB"));
+      expect(container.querySelectorAll(".dps-avatar-img")).toHaveLength(1);
+      sidebar.destroy?.();
+    });
+
+    it("falls back to the letter when the avatar is removed, and drops a stale fetch", async () => {
+      let resolveOld: (url: string) => void = () => {};
+      fetchImageAsObjectUrl.mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveOld = resolve;
+        }),
+      );
+      const sidebar = createDmProfileSidebar(
+        makeOptions({ user: makeUser({ avatar: "https://example.com/a.png" }) }),
+      );
+      sidebar.mount(container);
+
+      sidebar.update(makeUser({ avatar: null }));
+      resolveOld("data:image/png;base64,OLD");
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const avatarEl = container.querySelector('[data-testid="dps-avatar"]') as HTMLDivElement;
+      expect(avatarEl.querySelector("img")).toBeNull();
+      expect(avatarEl.textContent).toContain("A");
+      sidebar.destroy?.();
+    });
+
+    it("leaves Escape to an open confirm: the panel stays, then closes once the confirm is gone", () => {
+      const onClose = vi.fn();
+      const sidebar = createDmProfileSidebar(makeOptions({ onClose }));
+      sidebar.mount(container);
+      const confirm = document.createElement("div");
+      confirm.className = "modal-overlay";
+      document.body.appendChild(confirm);
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).not.toHaveBeenCalled();
+
+      confirm.remove();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      sidebar.destroy?.();
+    });
+  });
 });

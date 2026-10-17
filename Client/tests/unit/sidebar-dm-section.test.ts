@@ -12,6 +12,8 @@ import {
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
+import { resetVoiceStore, setVoiceStates } from "../../src/stores/voice.store";
+import { setConnectionStatus } from "../../src/stores/ui.store";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -886,6 +888,86 @@ describe("SidebarDmSection", () => {
       // The section element is still in the DOM (we just unsubscribed)
       // but no new entries should have been rendered
       expect(container.querySelectorAll("[data-testid='dm-entry']").length).toBe(0);
+    });
+  });
+  describe("in-call glyph and row menu (WP 3B-3)", () => {
+    afterEach(() => {
+      resetVoiceStore();
+      document.querySelectorAll(".context-menu").forEach((m) => m.remove());
+    });
+
+    const joinCall = (channelId: number, userId: number): void =>
+      setVoiceStates([{ channel_id: channelId, user_id: userId, muted: false, deafened: false }]);
+
+    it("shows the phone glyph while someone is in that DM's room, and drops it after", async () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+        }),
+      );
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+      expect(container.querySelector("[data-testid='dm-in-call-100']")).toBeNull();
+
+      joinCall(100, 10);
+      await vi.waitFor(() =>
+        expect(container.querySelector("[data-testid='dm-in-call-100']")).not.toBeNull(),
+      );
+      const glyph = container.querySelector("[data-testid='dm-in-call-100']");
+      expect(glyph?.getAttribute("aria-label")).toBe("Call in progress");
+      expect(container.querySelector("[data-testid='dm-in-call-101']")).toBeNull();
+
+      resetVoiceStore();
+      await vi.waitFor(() =>
+        expect(container.querySelector("[data-testid='dm-in-call-100']")).toBeNull(),
+      );
+      section.destroy();
+    });
+
+    it("opens the shared DM menu on right-click and runs its actions", () => {
+      setConnectionStatus("connected");
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 2 }));
+      const menu = {
+        onMarkRead: vi.fn(),
+        onOpenProfile: vi.fn(),
+        onCall: vi.fn(),
+        onToggleBlock: vi.fn(),
+        onToggleMute: vi.fn(),
+        onCloseDm: vi.fn(),
+      };
+      const section = createSidebarDmSection(defaultOpts({ menu }));
+      container.appendChild(section.element);
+
+      container
+        .querySelector("[data-testid='dm-entry']")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      const labels = [...document.querySelectorAll(".dm-context-menu .context-menu-item")].map(
+        (el) => el.textContent,
+      );
+      expect(labels).toEqual([
+        "Mark As Read",
+        "Profile",
+        "Call",
+        "Mute Conversation",
+        "Block",
+        "Close DM",
+      ]);
+      document.querySelector<HTMLElement>("[data-testid='dm-profile-100']")?.click();
+      expect(menu.onOpenProfile).toHaveBeenCalledWith(100);
+      section.destroy();
+    });
+
+    it("has no menu when none is wired", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+      container
+        .querySelector("[data-testid='dm-entry']")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      expect(document.querySelector(".dm-context-menu")).toBeNull();
+      section.destroy();
     });
   });
 });
