@@ -10,10 +10,45 @@
 .member-column {
   display: flex;
   flex-direction: column;
+  position: relative;
   width: 240px;
+  /* Keeps the chat usable whatever width is stored (MemberColumn sets it). */
+  max-width: max(200px, calc(100vw - 640px));
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-glow, var(--border));
+}
+.member-column-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.member-column-resize:hover,
+.member-column-resize:focus-visible {
+  background: var(--accent-primary, var(--accent));
+}
+/* Below 900px the column is an overlay on the drawer's layer, opened by the
+   header toggle (MemberColumn tracks the same query). */
+@media (max-width: 899px) {
+  .member-column {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    /* Beats the width MemberColumn sets inline for the in-flow column. */
+    width: min(280px, 85vw) !important;
+    max-width: none;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+  }
+  .member-column-resize {
+    display: none;
+  }
 }
 .member-column[hidden] {
   display: none;

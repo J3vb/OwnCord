@@ -1103,7 +1103,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         sidebar: sidebar.sidebarWrapper,
         toggle: chatAreaResult.sidebarToggle,
         fallbackFocus: focusReachable,
-        onOpen: chatAreaResult.closePinnedPanel,
+        onOpen: () => {
+          chatAreaResult.closePinnedPanel();
+          memberColumn?.closeOverlay();
+        },
       });
     });
     unsubscribers.push(() => {

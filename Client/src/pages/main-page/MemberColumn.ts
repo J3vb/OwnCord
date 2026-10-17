@@ -9,6 +9,10 @@
  * handler in MainPage destroys the outgoing host's panel before this one
  * builds its own.
  *
+ * 3C-6c adds the width handle (200-360 px, dragged or keyboard, saved) and the
+ * narrow-window overlay: below 900 CSS px the column is a fixed panel the
+ * toggle opens for the moment (never saved), so the chat keeps its room.
+ *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
  */
@@ -18,7 +22,20 @@ import { loadPref, savePref } from "@lib/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { MemberPanel } from "../../features/members/memberPanel";
-import { loadMemberLayout, MEMBER_OPEN_PREF } from "../../features/members/memberLayout";
+import {
+  clampMemberWidth,
+  loadMemberLayout,
+  MEMBER_OPEN_PREF,
+  MEMBER_WIDTH_DEFAULT,
+  MEMBER_WIDTH_MAX,
+  MEMBER_WIDTH_MIN,
+  MEMBER_WIDTH_PREF,
+} from "../../features/members/memberLayout";
+import { shellText } from "../../i18n/shell";
+
+/** Below this the column is an overlay. Keep in step with `member-list.css`. */
+const NARROW_QUERY = "(max-width: 899px)";
+const KEY_STEP = 16;
 
 export interface MemberColumnOptions {
   /** The `<aside id="member-column">`. */
@@ -37,8 +54,11 @@ export interface MemberColumnOptions {
 export interface MemberColumn {
   /** Re-read the layout, the open pref and the screen state, then show or hide. */
   sync(): void;
-  /** Flip and remember the open pref. */
+  /** Flip and remember the open pref; in the narrow overlay, flip the
+   *  transient state and save nothing. */
   toggle(): void;
+  /** Close the narrow overlay (the sidebar drawer opening). No-op otherwise. */
+  closeOverlay(): void;
   destroy(): void;
 }
 
@@ -53,16 +73,87 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   const owner = new Disposable();
   let panel: MemberPanel | null = null;
   let destroyed = false;
+  // jsdom has no matchMedia; without one the column is never an overlay.
+  const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
+  let narrowOpen = false;
+
+  // --- Width handle ---
+  let width = clampMemberWidth(loadPref<number>(MEMBER_WIDTH_PREF, MEMBER_WIDTH_DEFAULT));
+  const handle = document.createElement("div");
+  handle.className = "member-column-resize";
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.setAttribute("aria-label", shellText("members.resize"));
+  handle.setAttribute("aria-valuemin", String(MEMBER_WIDTH_MIN));
+  handle.setAttribute("aria-valuemax", String(MEMBER_WIDTH_MAX));
+  handle.tabIndex = 0;
+  column.prepend(handle);
+
+  function applyWidth(next: number): void {
+    width = clampMemberWidth(next);
+    column.style.width = `${width}px`;
+    handle.setAttribute("aria-valuenow", String(width));
+  }
+  applyWidth(width);
+
+  let dragStartX = 0;
+  let dragStartWidth = 0;
+  let dragPointer: number | null = null;
+
+  function endDrag(e: PointerEvent): void {
+    if (dragPointer === null || e.pointerId !== dragPointer) return;
+    dragPointer = null;
+    try {
+      handle.releasePointerCapture(e.pointerId);
+    } catch {
+      // Capture was already released (the pointer went away).
+    }
+    savePref(MEMBER_WIDTH_PREF, width);
+  }
+
+  owner.onEvent(handle, "pointerdown", (e) => {
+    if (e.button !== 0 || dragPointer !== null) return;
+    e.preventDefault();
+    dragPointer = e.pointerId;
+    dragStartX = e.clientX;
+    dragStartWidth = width;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      // No capture available: the drag still tracks moves over the handle.
+    }
+  });
+  owner.onEvent(handle, "pointermove", (e) => {
+    if (dragPointer === null || e.pointerId !== dragPointer) return;
+    // Dragging left makes the column wider.
+    applyWidth(dragStartWidth + dragStartX - e.clientX);
+  });
+  owner.onEvent(handle, "pointerup", endDrag);
+  owner.onEvent(handle, "pointercancel", endDrag);
+  owner.onEvent(handle, "keydown", (e) => {
+    let next: number;
+    if (e.key === "ArrowLeft") next = width + KEY_STEP;
+    else if (e.key === "ArrowRight") next = width - KEY_STEP;
+    else if (e.key === "Home") next = MEMBER_WIDTH_MAX;
+    else if (e.key === "End") next = MEMBER_WIDTH_MIN;
+    else return;
+    e.preventDefault();
+    applyWidth(next);
+    savePref(MEMBER_WIDTH_PREF, width);
+  });
+
+  function focusSearch(): void {
+    body.querySelector<HTMLElement>('[data-testid="member-search"]')?.focus();
+  }
 
   function sync(): void {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
     const onScreen = guildChannelOnScreen();
-    const shown =
-      right &&
-      onScreen &&
-      uiStore.getState().activeView === null &&
-      loadPref<boolean>(MEMBER_OPEN_PREF, true);
+    const overlay = narrow?.matches === true;
+    if (!right || !onScreen) narrowOpen = false;
+    const wanted = overlay ? narrowOpen : loadPref<boolean>(MEMBER_OPEN_PREF, true);
+    const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
     if (shown) {
@@ -85,15 +176,22 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     column.hidden = true;
   }
 
+  // A channel or DM switch, or a mode change, dismisses the overlay.
   owner.onStoreChange(
     channelsStore,
     (s) => s.activeChannelId,
-    () => sync(),
+    () => {
+      narrowOpen = false;
+      sync();
+    },
   );
   owner.onStoreChange(
     uiStore,
     (s) => s.sidebarMode,
-    () => sync(),
+    () => {
+      narrowOpen = false;
+      sync();
+    },
   );
   owner.onStoreChange(
     uiStore,
@@ -111,10 +209,48 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     { signal: owner.signal },
   );
 
+  narrow?.addEventListener(
+    "change",
+    () => {
+      narrowOpen = false;
+      sync();
+    },
+    { signal: owner.signal },
+  );
+  // Capture phase: the member search clears itself on Escape, and this must
+  // read it before that, so a first Escape clears and a second one closes.
+  owner.onEvent(
+    column,
+    "keydown",
+    (e) => {
+      if (e.key !== "Escape" || e.isComposing || narrow?.matches !== true || !narrowOpen) return;
+      const search = body.querySelector<HTMLInputElement>('[data-testid="member-search"]');
+      if (search !== null && search.value !== "") return;
+      e.preventDefault();
+      e.stopPropagation();
+      narrowOpen = false;
+      // Focus first, so the hide does not also run the fallback.
+      button.focus();
+      sync();
+    },
+    { capture: true },
+  );
+
   return {
     sync,
+    closeOverlay(): void {
+      if (destroyed || !narrowOpen) return;
+      narrowOpen = false;
+      sync();
+    },
     toggle(): void {
       if (destroyed) return;
+      if (narrow?.matches === true) {
+        narrowOpen = !narrowOpen;
+        sync();
+        if (narrowOpen) focusSearch();
+        return;
+      }
       savePref(MEMBER_OPEN_PREF, !loadPref<boolean>(MEMBER_OPEN_PREF, true));
       // savePref dispatched pref-change, which already ran sync(); this one is
       // a no-op unless storage is unavailable, where the pref cannot change.
@@ -127,6 +263,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       panel?.element.remove();
       panel = null;
       owner.destroy();
+      handle.remove();
     },
   };
 }
