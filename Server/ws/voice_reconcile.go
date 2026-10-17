@@ -202,7 +202,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	txn := h.begin(userID)
 	defer txn.end()
 	if c := h.GetClient(userID); c != nil {
-		if _, matched := txn.clearExact(c, channelID, joinedAt); matched {
+		if txn.clearExact(c, channelID, joinedAt) {
 			tailCtx, cancelTail := h.sweepTailCtx(ctx)
 			defer cancelTail()
 			h.finishVoiceLeave(tailCtx, c, channelID, joinedAt, voiceLeaveReasonReconciled)

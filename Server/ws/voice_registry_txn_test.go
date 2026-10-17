@@ -211,7 +211,7 @@ func TestVoiceRegistry_ClearAlwaysUnsubscribes(t *testing.T) {
 			return ok
 		}},
 		{"clearExact", func(txn *voiceTxn, f *txnFixture, token string) bool {
-			_, ok := txn.clearExact(f.c, f.chID, token)
+			ok := txn.clearExact(f.c, f.chID, token)
 			return ok
 		}},
 	}

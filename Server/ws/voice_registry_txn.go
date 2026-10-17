@@ -150,16 +150,15 @@ func (t *voiceTxn) clearIfChannel(c *Client, chID int64) (slotSnap, bool) {
 // matches. It resets the completed flag along with the rest: the LiveKit
 // webhook's clear used to leave it set, so a later reconnect could hand a new
 // socket completed=true with channel 0.
-func (t *voiceTxn) clearExact(c *Client, chID int64, token string) (slotSnap, bool) {
+func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 	if token == "" {
-		return slotSnap{}, false
+		return false
 	}
-	completed, ok := c.clearExact(chID, token)
-	if !ok {
-		return slotSnap{}, false
+	if _, ok := c.clearExact(chID, token); !ok {
+		return false
 	}
 	t.h.pubsub.Unsubscribe(c, VoiceTopic(chID))
-	return slotSnap{chID: chID, joinToken: token, completed: completed}, true
+	return true
 }
 
 // deleteRow removes the voice_states row for the join instance (chID,

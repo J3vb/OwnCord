@@ -85,7 +85,7 @@ func voiceMutatorCalls(f *ast.File) map[string][]token.Pos {
 		}
 		sel, ok := x.Fun.(*ast.SelectorExpr)
 		if ok && voiceSlotMutators[sel.Sel.Name] &&
-			!(voiceTxnShared[sel.Sel.Name] && isOwnTxnReceiver(sel.X)) {
+			(!voiceTxnShared[sel.Sel.Name] || !isOwnTxnReceiver(sel.X)) {
 			out[sel.Sel.Name] = append(out[sel.Sel.Name], x.Pos())
 		}
 		return true
