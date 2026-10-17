@@ -4,7 +4,7 @@ package ws
 // P-256 public key (base64), the identity-key signature over it (F3 TOFU; ""
 // for legacy announces) and the sanitized video decode list (WP M-4; nil when
 // absent). It is stored, replayed and carried across resume and the grace
-// window as one value so no path can drop a field. Guarded by Client.voiceMu.
+// window as one value so no path can drop a field. Guarded by voiceSlot.voiceMu.
 type e2eeAnnounce struct {
 	key         string
 	sig         string
@@ -22,16 +22,11 @@ func (a e2eeAnnounce) clone() e2eeAnnounce {
 // setE2EEAnnounce stores the announce for voice E2EE key exchange, replacing
 // any earlier one (an announce without a video decode list clears it).
 func (c *Client) setE2EEAnnounce(a e2eeAnnounce) {
-	a = a.clone()
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.e2ee = a
+	c.voiceSlot.setE2EE(a.clone())
 }
 
 // getE2EEAnnounce returns a copy of the stored announce; callers cannot
 // mutate the stored video decode list.
 func (c *Client) getE2EEAnnounce() e2eeAnnounce {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.e2ee.clone()
+	return c.voiceSlot.e2eeCopy()
 }

@@ -139,7 +139,7 @@ type Hub struct {
 	voiceReconcileInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
-	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
+	voiceRegistry                      // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 
@@ -215,8 +215,7 @@ type Hub struct {
 	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod    *userLocks
-	voiceMember userLocks // per-user voice membership lock (voiceLock); see user_locks.go
+	voiceMod *userLocks
 
 	settingsMu         syncutil.RWMutex
 	settingsName       string

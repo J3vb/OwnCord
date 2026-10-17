@@ -234,17 +234,10 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 // join instance (channel AND token), reporting whether it did. Token-scoped
 // unlike clearVoiceStateIfMatch: a same-channel rejoin between the reconcile
 // snapshot and this call has a new token, and its membership must survive.
-// Inlined under voiceMu the same way webhookLeftCleanupClient does.
+// The compare and the clear run in one voiceMu critical section
+// (voiceSlot.clearExact).
 func (h *Hub) clearExactJoin(c *Client, channelID int64, joinedAt string) bool {
-	c.voiceMu.Lock()
-	matched := c.voiceChID == channelID && c.voiceJoinToken == joinedAt
-	if matched {
-		c.voiceChID = 0
-		c.voiceJoinToken = ""
-		c.voiceJoinCompleted = false
-		c.e2ee = e2eeAnnounce{}
-	}
-	c.voiceMu.Unlock()
+	matched := c.voiceSlot.clearExact(channelID, joinedAt)
 	if matched {
 		h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
 	}

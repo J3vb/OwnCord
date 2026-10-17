@@ -24,45 +24,20 @@ const SessionCheckInterval = 10
 // Client represents a single authenticated WebSocket connection.
 // The underlying transport (conn) is set by ServeWS; in tests it remains nil.
 type Client struct {
-	hub            *Hub
-	conn           wsConn          // interface — nil in unit tests
-	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
-	userID         int64
-	user           *db.User
-	channelID      int64  // currently viewed channel for channel-scoped broadcasts
-	voiceChID      int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	voiceJoinToken string // opaque join-instance token for the current voice session; guarded by voiceMu
-	// voiceJoinCompleted is true once voiceJoinComplete's supersession guard
-	// has passed for the current (voiceChID, voiceJoinToken) pair — i.e. the
-	// join actually reached the SFU handoff (token sent, voice topic
-	// subscribed, voice_state broadcast). It starts false the moment
-	// voiceJoinPersist calls setVoiceState (BUG-088, immediately after the DB
-	// row commits but well before completion) and is reset to false by every
-	// state change, so it is true only while a real, deliverable membership
-	// is live. registerNow reads it (via clearVoiceState) to decide whether a
-	// network reconnect's replaced connection had a completed join to hand
-	// off, or only a persisted-but-not-yet-delivered one still racing its own
-	// supersession guards in voice_join.go — transferring the latter makes
-	// those guards misread the transfer as an eviction and abandon the join
-	// while its voice_states row stays behind for nothing to reap (OC-0270).
-	// Guarded by voiceMu.
-	voiceJoinCompleted bool
-	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list); guarded by voiceMu
-	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
-	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
-	// the voice_states row those flags normally live in before the target's
-	// own re-join can read them back. Guarded by voiceMu; see
-	// setPendingModFlags/takePendingModFlags.
-	pendingModServerMuted    bool
-	pendingModServerDeafened bool
-	// pendingModServerMutedBy is the stashed mute's owner (round 5, Codex
-	// review P2) — nil for a manual mute; carried the same way as the two
-	// booleans above so the re-join's restore can tell a timeout-owned mute
-	// from a manual one.
-	pendingModServerMutedBy *int64
-	roleName                string // cached role name for chat_message broadcasts
-	tokenHash               string // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq                 uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	hub       *Hub
+	conn      wsConn          // interface — nil in unit tests
+	ctx       context.Context // derived from WS upgrade request; cancelled on disconnect
+	userID    int64
+	user      *db.User
+	channelID int64 // currently viewed channel for channel-scoped broadcasts
+	// voiceSlot is this connection's voice membership (voice_registry.go):
+	// channel, join token, completed flag, E2EE announce and the moderator
+	// stash, all guarded by voiceSlot.voiceMu. Embedded so its fields keep
+	// their names (c.voiceChID, c.voiceMu) until 5.3d renames them.
+	voiceSlot
+	roleName  string // cached role name for chat_message broadcasts
+	tokenHash string // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq   uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -105,7 +80,6 @@ type Client struct {
 	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	cseq          cseqState      // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
-	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
 
 	// focusMu serialises every channel_focus APPLY (the readPump applier and the
 	// deferred-focus drain goroutine), so an older deferred intent can never land
@@ -202,106 +176,40 @@ func (c *Client) setLivePresence(status string, customStatus *string, expiresAt 
 	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
 }
 
+// The voice accessors below are one-line delegators to the slot
+// (voice_registry.go), kept so existing callers and tests compile unchanged
+// (WP 5.3a); 5.3d removes them.
+
 // getVoiceChID returns the voice channel ID under voiceMu.
-func (c *Client) getVoiceChID() int64 {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceChID
-}
+func (c *Client) getVoiceChID() int64 { return c.voiceSlot.channel() }
 
-func (c *Client) getVoiceState() (int64, string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceChID, c.voiceJoinToken
-}
+// getVoiceState returns the voice channel ID and join token under voiceMu.
+func (c *Client) getVoiceState() (int64, string) { return c.voiceSlot.state() }
 
-func (c *Client) setVoiceState(chID int64, joinToken string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = chID
-	c.voiceJoinToken = joinToken
-	// A new join instance starts (BUG-088 sets this before the token round
-	// trip and completion guard even run); only voiceJoinComplete may mark it
-	// done, via markVoiceJoinCompleteIfMatch.
-	c.voiceJoinCompleted = false
-}
+// setVoiceState starts a new join instance; see voiceSlot.setState.
+func (c *Client) setVoiceState(chID int64, joinToken string) { c.voiceSlot.setState(chID, joinToken) }
 
-// markVoiceJoinCompleteIfMatch records that the join for (chID, joinToken) has
-// passed voiceJoinComplete's supersession guard, but only if the client is
-// still in exactly that join instance — re-checked under this same lock
-// acquisition so nothing can land between voiceJoinComplete's guard check and
-// this call and have it silently mark a superseded/cleared state as done.
-// Returns whether it matched and was recorded.
+// markVoiceJoinCompleteIfMatch; see voiceSlot.markCompletedIfMatch.
 func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	if c.voiceChID != chID || c.voiceJoinToken != joinToken {
-		return false
-	}
-	c.voiceJoinCompleted = true
-	return true
+	return c.voiceSlot.markCompletedIfMatch(chID, joinToken)
 }
 
-// clearVoiceState clears the client's voice state and returns the old channel
-// ID, join token, and whether that join had completed (see
-// voiceJoinCompleted) — the last is what registerNow consults before handing
-// a resuming connection this state (OC-0270).
-func (c *Client) clearVoiceState() (int64, string, bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	oldChID := c.voiceChID
-	oldJoinToken := c.voiceJoinToken
-	oldCompleted := c.voiceJoinCompleted
-	c.voiceChID = 0
-	c.voiceJoinToken = ""
-	c.voiceJoinCompleted = false
-	c.e2ee = e2eeAnnounce{}
-	return oldChID, oldJoinToken, oldCompleted
-}
+// clearVoiceState; see voiceSlot.clearState.
+func (c *Client) clearVoiceState() (int64, string, bool) { return c.voiceSlot.clearState() }
 
-// clearVoiceStateIfMatch clears the voice state only when the current channel
-// is chID, returning the join token and whether it cleared. Delayed evictions
-// decided against a snapshotted channel use it so a membership committed after
-// the snapshot survives — the in-memory analogue of LeaveVoiceChannelIfMatch.
+// clearVoiceStateIfMatch; see voiceSlot.clearIfChannel.
 func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	if c.voiceChID != chID {
-		return "", false
-	}
-	oldJoinToken := c.voiceJoinToken
-	c.voiceChID = 0
-	c.voiceJoinToken = ""
-	c.voiceJoinCompleted = false
-	c.e2ee = e2eeAnnounce{}
-	return oldJoinToken, true
+	return c.voiceSlot.clearIfChannel(chID)
 }
 
-// setPendingModFlags stashes a moderator-imposed mute/deafen on this client
-// before a server-driven leave (voice_mod_move) deletes the voice_states row
-// those flags live in. Guarded by voiceMu, the same lock
-// clearVoiceStateIfMatch takes for the delete, so the stash can never
-// interleave with it. Paired with takePendingModFlags, which the client's own
-// subsequent voice_join consults when there is no live row left to read the
-// flags back from (currentChID == 0).
+// setPendingModFlags; see voiceSlot.stashModFlags.
 func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.pendingModServerMuted = serverMuted
-	c.pendingModServerDeafened = serverDeafened
-	c.pendingModServerMutedBy = serverMutedBy
+	c.voiceSlot.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
 }
 
-// takePendingModFlags reads and clears the flags stashed by
-// setPendingModFlags. Take-and-clear so an ordinary later join — one not
-// preceded by a moderator move — is unaffected by a stash nobody consumed.
+// takePendingModFlags; see voiceSlot.takeModFlags.
 func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	serverMuted, serverDeafened, serverMutedBy = c.pendingModServerMuted, c.pendingModServerDeafened, c.pendingModServerMutedBy
-	c.pendingModServerMuted = false
-	c.pendingModServerDeafened = false
-	c.pendingModServerMutedBy = nil
+	serverMuted, serverDeafened, serverMutedBy = c.voiceSlot.takeModFlags()
 	return serverMuted, serverDeafened, serverMutedBy
 }
 
