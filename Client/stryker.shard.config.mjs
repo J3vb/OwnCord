@@ -304,6 +304,8 @@ export const shards = {
     "src/features/moderation/Evidence.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/moderation/roleAssignment.ts",
+    "src/features/members/memberLayout.ts",
+    "src/features/members/memberPanel.ts",
     "src/features/moderation/api.ts",
     "src/features/messaging/emojiStill.ts",
     "src/features/profiles/openUserProfilePopup.ts",

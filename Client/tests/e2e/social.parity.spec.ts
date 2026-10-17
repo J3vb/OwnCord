@@ -5,7 +5,7 @@
  * Both flows are HTTP-only from the client's side (no ws_send involved):
  *   - Group DM create:  POST /api/v1/dms/group   (SidebarDmHelpers.handleCreateGroupDm)
  *   - Group DM leave:   DELETE /api/v1/dms/{id}  (SidebarArea.closeOrLeaveDm → api.closeDm)
- *   - Change Role:      PATCH /api/v1/moderation/members/{id} { role_id }  (SidebarMemberSection.onChangeRole)
+ *   - Change Role:      PATCH /api/v1/moderation/members/{id} { role_id }  (features/members/memberPanel onChangeRole)
  *
  * A `wrappers` entry wraps window.__TAURI_INTERNALS__.invoke (run inside the
  * init script buildTauriMockScript installs) to record every HTTP fetch
