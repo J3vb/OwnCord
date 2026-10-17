@@ -217,3 +217,11 @@ func StubRestartCapture() (reasons func() []string, restore func()) {
 			ResetRestartState()
 		}
 }
+
+// SetInstallWritable replaces the install-directory probe and returns a
+// restore func, so tests can simulate a read-only install.
+func SetInstallWritable(f func() error) (restore func()) {
+	prev := installWritable
+	installWritable = f
+	return func() { installWritable = prev }
+}
