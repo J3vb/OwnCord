@@ -153,92 +153,21 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
-    it("Ban asks for a reason before it fires", () => {
-      const onBan = vi.fn(async () => {});
-      const { result } = makeMenu({ onBan });
-
-      const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
-      const banItem = Array.from(dangerItems).find(
-        (i) => i.textContent === "Ban",
-      ) as HTMLDivElement;
-
-      banItem.click();
-      expect(onBan).not.toHaveBeenCalled();
-
-      const reasonInput = result.element.querySelector(
-        "[data-testid='ban-reason-input']",
-      ) as HTMLInputElement;
-      expect(reasonInput).not.toBeNull();
-      reasonInput.value = "  spamming  ";
-
-      const confirm = result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement;
-      confirm.click();
-
-      // The server stores and displays the reason, so it's trimmed, not raw.
-      // Default duration is 0 (permanent).
-      expect(onBan).toHaveBeenCalledWith("spamming", 0);
-      result.destroy();
-    });
-
-    it("Ban passes the selected duration in hours", () => {
-      const onBan = vi.fn(async () => {});
+    it("Ban hands off to the dialog on one click, without an inline form", () => {
+      const onBan = vi.fn();
       const { result } = makeMenu({ onBan });
 
       const banItem = Array.from(
         result.element.querySelectorAll(".context-menu__item--danger"),
       ).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      expect(result.element.querySelector("[data-testid='ban-reason-input']")).toBeNull();
+      expect(result.element.querySelector("[data-testid='ban-confirm']")).toBeNull();
+
       banItem.click();
 
-      const durationSelect = result.element.querySelector(
-        "[data-testid='ban-duration-select']",
-      ) as HTMLSelectElement;
-      expect(durationSelect).not.toBeNull();
-      // No visible label sits next to it, so screen readers need this name.
-      expect(durationSelect.getAttribute("aria-label")).toBe("Ban duration");
-      durationSelect.value = "24";
-
-      (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
-
-      expect(onBan).toHaveBeenCalledWith("", 24);
-      result.destroy();
-    });
-
-    it("Ban sends an empty reason when none is typed", () => {
-      const onBan = vi.fn(async () => {});
-      const { result } = makeMenu({ onBan });
-
-      const banItem = Array.from(
-        result.element.querySelectorAll(".context-menu__item--danger"),
-      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
-      banItem.click();
-      (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
-
-      expect(onBan).toHaveBeenCalledWith("", 0);
-      result.destroy();
-    });
-
-    it("Ban ignores a second click while the request is in flight", () => {
-      let release: (() => void) | null = null;
-      const onBan = vi.fn(
-        () =>
-          new Promise<void>((resolve) => {
-            release = resolve;
-          }),
-      );
-      const { result } = makeMenu({ onBan });
-
-      const banItem = Array.from(
-        result.element.querySelectorAll(".context-menu__item--danger"),
-      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
-      banItem.click();
-      const confirm = result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement;
-      confirm.click();
-      expect(confirm.textContent).toBe("Banning...");
-      confirm.click();
-
+      // The dialog (not this menu) collects the reason, so the menu is gone.
       expect(onBan).toHaveBeenCalledTimes(1);
-      release!();
-      result.destroy();
+      expect(result.element.isConnected).toBe(false);
     });
 
     it("Force Logout shows an in-flight state and disarms after a pause", async () => {

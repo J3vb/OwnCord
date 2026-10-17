@@ -11,13 +11,18 @@
 
 import { authStore } from "../../stores/auth.store";
 import { membersStore, memberDisplayName, type Member } from "../../stores/members.store";
-import type { UserProfilePopupComponent } from "../../components/UserProfilePopup";
+import type {
+  ProfileRoleControl,
+  UserProfilePopupComponent,
+} from "../../components/UserProfilePopup";
 import { showToast } from "../../lib/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";
 import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
+import { channelsStore } from "../../stores/channels.store";
+import { roleChangeChoices } from "../moderation/roleAssignment";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
  *  handler for it, and all are withheld for the signed-in user's own card. */
@@ -28,6 +33,9 @@ export interface UserProfilePopupCallbacks {
   readonly onReport?: (userId: number, name: string) => void;
   /** Block (`block` true) or Unblock, with the display name for the confirm. */
   readonly onToggleBlock?: (userId: number, name: string, block: boolean) => void;
+  /** Change the member's role (MANAGE_ROLES). Omitted: no role picker. It
+   *  reports its own failures; the card follows the roster, not this call. */
+  readonly onChangeRole?: (userId: number, username: string, newRole: string) => Promise<void>;
 }
 
 export interface OpenUserProfilePopupOptions {
@@ -99,9 +107,41 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   const onCall = isSelf ? undefined : callbacks?.onCall;
   const onReport = isSelf ? undefined : callbacks?.onReport;
   const onToggleBlock = isSelf ? undefined : callbacks?.onToggleBlock;
+  const onChangeRole = callbacks?.onChangeRole;
   const blocked = blocksStore.getState().blockedByMe.has(userId);
   const unavailableReason = callUnavailableReason(userId);
   const fallbackFocus = options.fallbackFocus;
+  // Read from the stores every time, so a role change on either side (the
+  // member's, or the viewer's own, or the role list) re-filters or removes the
+  // picker while the card is open.
+  const roleControl: ProfileRoleControl = {
+    read: () => {
+      const member = membersStore.getState().members.get(userId);
+      const role = member?.role ?? live.role;
+      // A member who left or was banned while the card is open has no role to change.
+      return {
+        role,
+        choices:
+          onChangeRole === undefined || member === undefined
+            ? null
+            : roleChangeChoices(userId, role),
+      };
+    },
+    subscribe: (listener) => {
+      const unsubs = [
+        membersStore.subscribeSelector((st) => st.members.get(userId)?.role, listener),
+        authStore.subscribeSelector((st) => st.user?.role, listener),
+        channelsStore.subscribeSelector((st) => st.roles, listener),
+      ];
+      return () => {
+        for (const unsub of unsubs) unsub();
+      };
+    },
+    change: async (role) => {
+      const username = membersStore.getState().members.get(userId)?.username ?? live.username;
+      await onChangeRole?.(userId, username, role);
+    },
+  };
   const seq = ++popupSeq;
 
   import("../../components/UserProfilePopup").then(
@@ -122,6 +162,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         },
         anchorX,
         anchorY,
+        roleControl,
         ...(onMessage === undefined ? {} : { onMessage: (id: number) => onMessage(id) }),
         ...(onCall === undefined ? {} : { onCall: (id: number) => onCall(id) }),
         ...(onReport === undefined

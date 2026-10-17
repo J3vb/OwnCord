@@ -20,6 +20,7 @@ import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { withMemberMenu } from "./member-menu-loader";
+import { assignableRoleNames, outranksPosition } from "../features/moderation/roleAssignment";
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
@@ -37,12 +38,8 @@ export interface MemberListOptions {
   readonly currentUserRole: string;
   /** Force logout: revokes the target's sessions (KICK_MEMBERS). */
   readonly onKick: (userId: number, username: string) => Promise<void>;
-  readonly onBan: (
-    userId: number,
-    username: string,
-    reason: string,
-    durationHours: number,
-  ) => Promise<void>;
+  /** Open the Ban dialog for a member; `displayName` names them in its title. */
+  readonly onBan: (userId: number, username: string, displayName: string) => void;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Block / Unblock from the profile popup, which confirms a Block in a
@@ -66,28 +63,6 @@ export interface MemberListOptions {
     channelId: number,
     user: VoiceUser,
   ) => VoiceModMenuOptions | string | undefined;
-}
-
-/** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
-// i18n-exempt: built-in role names, matched case-insensitively against the server list
-const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["Admin", "Moderator", "Member"];
-
-/**
- * Role names an admin can assign, taken from the server's role list. "owner" is
- * excluded — ownership transfer isn't a context-menu action.
- */
-function assignableRoleNames(actorPosition: number | undefined): readonly string[] {
-  const all = channelsStore.getState().roles;
-  if (all.length === 0) return FALLBACK_ASSIGNABLE_ROLES;
-  return all
-    .filter(
-      // The server refuses a role at or above the actor's own rank; with no
-      // positions to compare it stays the authority.
-      (r) =>
-        r.name.toLowerCase() !== "owner" &&
-        (actorPosition === undefined || r.position === undefined || r.position < actorPosition),
-    )
-    .map((r) => r.name);
 }
 
 /** Which moderation menu items the signed-in user may see. */
@@ -339,6 +314,7 @@ function createMemberItem(
         ...(opts.onCallUser === undefined ? {} : { onCall: opts.onCallUser }),
         ...(opts.onReportUser === undefined ? {} : { onReport: opts.onReportUser }),
         ...(opts.onBlockFromPopup === undefined ? {} : { onToggleBlock: opts.onBlockFromPopup }),
+        onChangeRole: opts.onChangeRole,
       },
       fallbackFocus: () =>
         list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
@@ -380,8 +356,7 @@ function createMemberItem(
     // (an older server) leave the decision to the server.
     const actorPosition = positionForRole(actorRole);
     const targetPosition = positionForRole(member.role);
-    const outranks =
-      actorPosition === undefined || targetPosition === undefined || actorPosition > targetPosition;
+    const outranks = outranksPosition(actorPosition, targetPosition);
     // Roles come from the server's `ready` payload — a hardcoded list made
     // custom roles unreachable and, worse, unresolvable to a role id, so
     // picking one silently did nothing.
@@ -440,8 +415,7 @@ function createMemberItem(
           : { onRemoveTimeout: () => onRemoveTimeout(member.id, member.username) }),
         onToggleBlock: () => opts.onToggleBlock(member.id, memberDisplayName(member), !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),
-        onBan: (reason: string, durationHours: number) =>
-          opts.onBan(member.id, member.username, reason, durationHours),
+        onBan: () => opts.onBan(member.id, member.username, memberDisplayName(member)),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
         onClosed: () => {
           if (activeMenu !== created) return;
