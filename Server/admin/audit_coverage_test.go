@@ -22,7 +22,7 @@ import (
 // admin-owned security-sensitive mutations: channel permission edits (role
 // and user layer), API-token create/revoke, settings changes and the setup
 // wizard's config write. The closing subtest runs the detail denylist over
-// the recorded corpus (plan docs/plans/b2-protocol-trust-compat-2026-08-28.md
+// the recorded corpus (plan docs/archive/plans/b2-protocol-trust-compat-2026-08-28.md
 // § B2-6).
 func TestAuditCoverage_AdminMutations(t *testing.T) {
 

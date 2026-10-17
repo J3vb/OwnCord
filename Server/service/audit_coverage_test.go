@@ -17,7 +17,7 @@ import (
 // service-owned security-sensitive mutations: each row performs one mutation
 // against a fake db.AuditStore and asserts the expected action arrives. The
 // closing subtest runs the detail denylist over everything the rows recorded
-// (plan docs/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
+// (plan docs/archive/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
 func TestAuditCoverage_ServiceMutations(t *testing.T) {
 	rows := []struct {
 		name   string

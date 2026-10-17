@@ -194,7 +194,7 @@ over WebView2 in `client-native` (`tests/e2e/native/long-session.spec.ts`), and
 200 cycles plus 30 idle-connected minutes, in which every count must hold
 exactly and heap grow at most 100 KB per minute, through `npm run test:e2e:soak` (the `long-session-soak` job in
 `nightly-test-depth.yml`). The recorded runs are in
-[b7-0-client-baseline-2026-09-19.md](../plans/b7-0-client-baseline-2026-09-19.md).
+[b7-0-client-baseline-2026-09-19.md](../archive/plans/b7-0-client-baseline-2026-09-19.md).
 
 A **native voice backend** (Linux, LiveKit in `src-tauri/`) keeps the same rules
 on the TypeScript side, plus three that exist because the resource lives across

@@ -11,7 +11,7 @@
 #                 only: it shows headroom, and its thresholds do not fail the
 #                 job. Quoting it as capacity is the exact mistake B6-9 exists
 #                 to prevent, and so is quoting the 16-core bench baseline in
-#                 docs/plans/b3-bench-baseline-2026-09-01.md.
+#                 docs/archive/plans/b3-bench-baseline-2026-09-01.md.
 #
 # --cpuset-cpus is the flag that matters, not --cpus. --cpus is a CFS quota;
 # runtime.NumCPU() reads the CPU affinity mask, so under --cpus alone the

@@ -86,7 +86,7 @@ runs from the click to "Voice Connected" with the peer's audio decoding. It
 holds the median to `Client/voice-join-budget.json`.
 
 Change the budget only with a CI measurement recorded in
-`docs/plans/b7-0-client-baseline-2026-09-19.md`.
+`docs/archive/plans/b7-0-client-baseline-2026-09-19.md`.
 
 ### Server update tests
 

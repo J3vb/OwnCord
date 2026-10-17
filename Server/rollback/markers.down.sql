@@ -4,7 +4,7 @@
 -- clear and reverses a file, not a migration.
 --
 -- Extends the deletion_markers draft's down file
--- (docs/plans/hp-4-drafts/deletion_markers.down.sql), which predates the two
+-- (docs/archive/plans/hp-4-drafts/deletion_markers.down.sql), which predates the two
 -- tables the applied schema added: sequence_floors, holding the AUTOINCREMENT
 -- counters the markers' tokens are computed against, and floor_probes,
 -- recording that a floor was recovered by probing.

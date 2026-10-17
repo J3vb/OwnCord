@@ -4,7 +4,7 @@
 // from an in-memory channel into the audit_log table. It is modeled on
 // ws.EventPersister: it must never block the request path, so when the queue
 // is full the entry is dropped and a counter is incremented. Per the D8
-// policy decision (docs/plans/audit-2026-07-19-decisions.md) a drop is never
+// policy decision (docs/archive/plans/audit-2026-07-19-decisions.md) a drop is never
 // silent — it is logged with the actor/action/target context (never the
 // detail string, which can carry sensitive text), and flush losses are
 // logged the same way.

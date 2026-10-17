@@ -222,7 +222,7 @@ whose Tauri build step leaves them out.
 - `Client/scripts/check-mutation-shards.mjs` proves the shards together still
   cover the whole surface. It runs in Client Static Checks on every PR, so a
   new file cannot sit outside every shard until the nightly fails.
-- The measured score is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
+- The measured score is recorded in `docs/archive/plans/b7-8-mutation-baseline-*.md`.
 
 **Type checking and linting**
 
