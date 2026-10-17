@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalVideoTrack } from "livekit-client";
 import type { PublishCodec } from "./videoCodec";
+import type { ShareSenderSample } from "./shareSenderStats";
 import type { CameraTrackState, ScreenTrackState, VideoTrackDeps } from "../../lib/screenShare";
 
 const republish = vi.hoisted(() => vi.fn());
@@ -22,6 +23,7 @@ const { resolveCodecChoice } = await import("./videoCodec");
 const { channelPeerDecode } = await import("./peerDecode");
 const {
   CodecSwitchController,
+  SOFTWARE_CHECK_MS,
   SWITCH_BUSY_RETRY_MS,
   SWITCH_DOWN_MS,
   SWITCH_UP_MIN_GAP_MS,
@@ -71,6 +73,8 @@ function rig(
     camera?: PublishCodec;
     delayed?: boolean;
     preferred?: PublishCodec;
+    /** What the screen share's sender reports; none reads as null. */
+    sample?: ShareSenderSample | null;
   } = {},
 ): Rig {
   const preferred = opts.preferred ?? "vp9";
@@ -117,6 +121,7 @@ function rig(
     getCameraState: () => camera,
     getScreenState: () => screen,
     getDeps: () => ({}) as VideoTrackDeps,
+    readScreenSenderSample: () => Promise.resolve(opts.sample === undefined ? null : opts.sample),
     onSwitchError: () => {},
   });
   made.push(controller);
@@ -153,6 +158,113 @@ afterEach(() => {
   localStorage.clear();
   for (const controller of made.splice(0)) controller.stop();
   vi.useRealTimers();
+});
+
+function h264Rig(sample: ShareSenderSample | null): ReturnType<typeof rig> {
+  const r = rig({ screen: "h264", preferred: "h264", sample });
+  r.controller.kick();
+  return r;
+}
+
+describe("CodecSwitchController software H.264 check", () => {
+  it("republishes an OpenH264 share as VP8 after SOFTWARE_CHECK_MS", async () => {
+    const r = h264Rig({ encoder: "OpenH264", codec: "video/H264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS - 1);
+    expect(r.calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    // The pick stays VP8: nothing flips the share back.
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS * 2);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it.each(["ExternalEncoder", "MediaFoundationVideoEncodeAccelerator"])(
+    "leaves a share on the hardware encoder %s alone",
+    async (encoder) => {
+      const r = h264Rig({ encoder });
+      await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+      expect(r.calls).toEqual([]);
+    },
+  );
+
+  it("does nothing without a sample or an encoder name", async () => {
+    const none = h264Rig(null);
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(none.calls).toEqual([]);
+    none.controller.stop();
+    const unnamed = h264Rig({ sentFps: 30 });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(unnamed.calls).toEqual([]);
+  });
+
+  it("is cancelled by stop before the timer fires", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS - 1);
+    r.controller.stop();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("does not stack a second check on a second kick", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS / 2);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS / 2);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("checks a hardware share once, not again on later kicks", async () => {
+    const r = h264Rig({ encoder: "ExternalEncoder" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    r.controller.kick();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("looks once more when the first sample names no encoder", async () => {
+    const opts: { screen: PublishCodec; preferred: PublishCodec; sample: ShareSenderSample } = {
+      screen: "h264",
+      preferred: "h264",
+      sample: { sentFps: 2 },
+    };
+    const r = rig(opts);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual([]);
+    opts.sample = { encoder: "OpenH264" };
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not carry an OpenH264 share's VP8 over to the next share", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    const next = {} as LocalVideoTrack;
+    r.screen.manualScreenTracks = [next];
+    r.screen.announced = next;
+    r.screen.preferred = "vp9";
+    r.screen.published = "vp9";
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS * 2);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not check on the Linux desktop", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    const r = h264Rig({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("does not check a VP8 share", async () => {
+    const r = rig({ screen: "vp8", preferred: "vp8", sample: { encoder: "OpenH264" } });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(r.calls).toEqual([]);
+  });
 });
 
 describe("CodecSwitchController", () => {

@@ -337,6 +337,57 @@ test.describe("B9-18 connect and shell text", () => {
     await expect(addDialog).toHaveCount(0);
   });
 
+  test("keeps the right-hand member column's expanded text whole, named and operable at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    // The default layout (3C-6c): 940 px is above the 900 px overlay
+    // breakpoint, so the column sits beside the chat.
+    await startAtLargestText(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+    await navigateToMainPageReady(page);
+
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+    await expect(column).toBeInViewport({ ratio: 1 });
+    await expect(toggle).toHaveAccessibleName(expanded("Member List"));
+    await expectWhole(toggle);
+    await expect(column.locator(".member-column-resize")).toHaveAccessibleName(
+      expanded("Resize member list"),
+    );
+    const search = column.locator(".member-search");
+    // An empty input shows only its placeholder, which may truncate; the
+    // full text is in its name, so only the box is checked for clipping.
+    await expect(search).toHaveAccessibleName(expanded("Search members"));
+    await expectWhole(search);
+    // The chat beside the open column keeps its channel name whole.
+    await expectWhole(page.locator("[data-testid='chat-header-name']"));
+
+    const groups = column.locator(".member-role-group");
+    await expect(groups.first()).toBeVisible();
+    for (const group of await groups.all()) {
+      await expect(group).toHaveText(/^⟦.+⟧$/);
+      await expectWhole(group);
+    }
+    expect(await findUnnamedControls(column)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("member-column-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+
+    // The toggle closes and reopens the column from the keyboard, keeping focus.
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(column).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(column).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeFocused();
+  });
+
   test("keeps an incompatible server's expanded badge whole in its row at 940×500 with 20px text", async ({
     page,
   }, testInfo) => {
