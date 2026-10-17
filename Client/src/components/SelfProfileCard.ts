@@ -193,6 +193,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     );
     input.addEventListener("input", syncClearVisibility, { signal });
     input.addEventListener("blur", commitCustom, { signal });
+    // Keep focus in the input so the press does not blur-commit half-typed
+    // text before the clear sends "" (one frame, not two).
+    clearBtn.addEventListener("mousedown", (e: MouseEvent) => e.preventDefault(), { signal });
     clearBtn.addEventListener(
       "click",
       () => {
@@ -207,15 +210,16 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     // ---- Status options -----------------------------------------------------
     const group = createElement("div", {
       class: "spc-status-group",
-      role: "radiogroup",
+      role: "menu",
       "aria-label": shellText("status.change"),
     });
-    const radios = new Map<UserStatus, HTMLButtonElement>();
+    const items = new Map<UserStatus, HTMLButtonElement>();
 
     function paintStatus(): void {
-      for (const [value, el] of radios) {
+      for (const [value, el] of items) {
         const on = value === status;
         el.setAttribute("aria-checked", String(on));
+        el.tabIndex = on ? 0 : -1;
         el.classList.toggle("spc-status--current", on);
       }
     }
@@ -224,8 +228,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       const btn = createElement("button", {
         class: "spc-status",
         type: "button",
-        role: "radio",
+        role: "menuitemradio",
         "aria-checked": "false",
+        tabindex: "-1",
         "data-testid": `spc-status-${def.value}`,
       });
       const dot = createElement("span", { class: "spc-status-dot" });
@@ -257,14 +262,31 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         },
         { signal },
       );
-      radios.set(def.value, btn);
+      items.set(def.value, btn);
       return btn;
     }
     for (const def of STATUS_DEFS) group.appendChild(buildStatusRadio(def));
     paintStatus();
 
+    group.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        const list = [...items.values()];
+        const at = list.findIndex((el) => el === document.activeElement);
+        let next: number;
+        if (e.key === "ArrowDown") next = (at + 1) % list.length;
+        else if (e.key === "ArrowUp") next = (at <= 0 ? list.length : at) - 1;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = list.length - 1;
+        else return;
+        e.preventDefault();
+        list[next]?.focus();
+      },
+      { signal },
+    );
+
     function paintEnabled(): void {
-      for (const btn of radios.values()) btn.disabled = !enabled;
+      for (const btn of items.values()) btn.disabled = !enabled;
       input.disabled = !enabled;
       clearBtn.disabled = !enabled;
     }
@@ -398,8 +420,22 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       },
     );
 
+    d.onStoreChange(
+      uiStore,
+      (s) => s.settingsOpen,
+      (opened) => {
+        if (opened) close();
+      },
+    );
+    d.onStoreChange(
+      uiStore,
+      (s) => s.activeView,
+      () => close(),
+    );
+
     closeActive = close;
-    (radios.get(status) ?? card).focus();
+    const first = enabled ? items.get(status) : undefined;
+    (first ?? card).focus();
   }
 
   function toggle(): void {

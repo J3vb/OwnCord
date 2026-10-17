@@ -55,10 +55,10 @@ test.describe("User Bar", () => {
     await page.locator("[data-testid='user-bar-name']").click();
     const card = page.locator("[data-testid='self-profile-card']");
     await expect(card).toBeVisible();
-    await expect(card.getByRole("radio", { name: /Do Not Disturb/ })).toContainText(
+    await expect(card.getByRole("menuitemradio", { name: /Do Not Disturb/ })).toContainText(
       "You will not receive desktop notifications",
     );
-    await expect(card.getByRole("radio", { name: /Online/ })).toHaveAttribute(
+    await expect(card.getByRole("menuitemradio", { name: /Online/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );

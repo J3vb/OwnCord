@@ -50,6 +50,12 @@ describe("SelfProfileCard from the user bar", () => {
     localStorage.clear();
     setConnectionStatus("connected");
     setUser();
+    // Our own member entry, as the ready/member_list payload leaves it.
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
+    }));
+    membersStore.flush();
     ws = mockWs();
     comp = createUserBar({ ws, presenceSender: createPresenceSender(ws, createPresenceLimiter()) });
     comp.mount(container);
@@ -58,6 +64,7 @@ describe("SelfProfileCard from the user bar", () => {
   afterEach(() => {
     comp.destroy?.();
     container.remove();
+    membersStore.setState((p) => ({ ...p, members: new Map() }));
     setConnectionStatus("disconnected");
     authStore.setState(() => ({
       token: null,
@@ -122,13 +129,92 @@ describe("SelfProfileCard from the user bar", () => {
     expect(sent.payload.custom_status).toBe("heads down");
     expect(card()).toBeNull();
 
-    // Reopen with the status standing, then clear it.
-    setUser("heads down");
+    // Reopen: the text set through the card is still there, and clearable.
     trigger().click();
     expect(q("[data-testid='spc-custom-line']")?.textContent).toBe("heads down");
-    q<HTMLButtonElement>("[data-testid='spc-custom-clear']")!.click();
-    // Saved at once; the frame itself waits on the shared presence limiter.
+    expect(q<HTMLInputElement>("[data-testid='spc-custom-input']")!.value).toBe("heads down");
+    const clear = q<HTMLButtonElement>("[data-testid='spc-custom-clear']")!;
+    expect(clear.hidden).toBe(false);
+    clear.click();
     expect(loadCustomStatus()).toBe("");
+  });
+
+  it("clearing after typing sends a single save, not a blur commit first", () => {
+    trigger().click();
+    const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
+    input.focus();
+    input.value = "half typ";
+    const clear = q<HTMLButtonElement>("[data-testid='spc-custom-clear']")!;
+    const md = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    clear.dispatchEvent(md);
+    expect(md.defaultPrevented).toBe(true);
+    clear.click();
+    expect(loadCustomStatus()).toBe("");
+    expect(
+      (ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => c[0].payload.custom_status === "half typ",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("status items are a menu of menuitemradio with a roving tabindex", () => {
+    saveUserStatus("idle");
+    trigger().click();
+    expect(q("[role='menu']")).not.toBeNull();
+    const items = [...document.body.querySelectorAll<HTMLElement>("[role='menuitemradio']")];
+    expect(items.length).toBe(4);
+    expect(items.map((i) => i.tabIndex)).toEqual([-1, 0, -1, -1]);
+    expect(document.activeElement).toBe(items[1]);
+  });
+
+  it("arrows (wrapping), Home and End move focus without saving; Enter commits", () => {
+    trigger().click();
+    const items = [...document.body.querySelectorAll<HTMLElement>("[role='menuitemradio']")];
+    const key = (k: string): void => {
+      document.activeElement!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }),
+      );
+    };
+    expect(document.activeElement).toBe(items[0]);
+    key("ArrowUp");
+    expect(document.activeElement).toBe(items[3]);
+    key("ArrowDown");
+    expect(document.activeElement).toBe(items[0]);
+    key("End");
+    expect(document.activeElement).toBe(items[3]);
+    key("Home");
+    expect(document.activeElement).toBe(items[0]);
+    key("ArrowDown");
+    key("ArrowDown");
+    expect(document.activeElement).toBe(items[2]);
+    expect(loadUserStatus()).toBe("online");
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(card()).not.toBeNull();
+    // Enter on a button is its click.
+    (document.activeElement as HTMLElement).click();
+    expect(loadUserStatus()).toBe("dnd");
+    expect(card()).toBeNull();
+  });
+
+  it("opening offline puts focus on the card, not a disabled item", () => {
+    setConnectionStatus("disconnected");
+    trigger().click();
+    expect(document.activeElement).toBe(card());
+  });
+
+  it("opening Settings or changing the view closes the card", () => {
+    trigger().click();
+    uiStore.setState((p) => ({ ...p, settingsOpen: true }));
+    uiStore.flush();
+    expect(card()).toBeNull();
+    uiStore.setState((p) => ({ ...p, settingsOpen: false }));
+    uiStore.flush();
+
+    trigger().click();
+    uiStore.setState((p) => ({ ...p, activeView: "friends" as never }));
+    uiStore.flush();
+    expect(card()).toBeNull();
+    uiStore.setState((p) => ({ ...p, activeView: null }));
   });
 
   it("Edit Profile opens Settings on the Account tab", () => {
@@ -216,12 +302,7 @@ describe("SelfProfileCard from the user bar", () => {
     expect(q("[data-testid='spc-status-dnd']")?.getAttribute("aria-checked")).toBe("true");
     expect(q("[data-testid='spc-status-online']")?.getAttribute("aria-checked")).toBe("false");
 
-    setUser("on a call");
-    authStore.flush();
-    expect(q("[data-testid='spc-custom-line']")?.textContent).toBe("on a call");
-    expect(q<HTMLInputElement>("[data-testid='spc-custom-input']")!.value).toBe("on a call");
-
-    // A presence rollback through the members store reaches the card too.
+    // The server echo (another device) lands in the members store.
     membersStore.setState((p) => ({
       ...p,
       members: new Map(p.members).set(7, {
@@ -231,6 +312,7 @@ describe("SelfProfileCard from the user bar", () => {
     }));
     membersStore.flush();
     expect(q<HTMLInputElement>("[data-testid='spc-custom-input']")!.value).toBe("back at 3");
+    expect(q("[data-testid='spc-custom-line']")?.textContent).toBe("back at 3");
   });
 
   // Edge case (b): the bar goes away (or is rebuilt) while the card is open.

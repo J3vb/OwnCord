@@ -264,7 +264,6 @@ export const shellText = defineCatalog("shell", {
   "status.invisibleNote": "You will appear offline",
   "status.clearCustom": "Clear custom status",
   "status.editProfile": "Edit Profile",
-  "status.openProfile": "Open your profile",
   "status.profileLabel": "Your profile",
 
   "sidebar.open": "Open navigation",

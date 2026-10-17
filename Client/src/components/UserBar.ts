@@ -239,7 +239,6 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       type: "button",
       "aria-haspopup": "dialog",
       "aria-expanded": "false",
-      "aria-label": shellText("status.openProfile"),
       "data-testid": "user-bar-profile",
     });
     const info = createElement("div", { class: "ub-info" });
@@ -297,7 +296,16 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     profileCard = createSelfProfileCard({
       trigger: profileBtn,
       canSetStatus,
-      getCustomStatus: () => serverCustomStatus() ?? loadCustomStatus(),
+      // Our own member entry first: the optimistic apply and the server echo
+      // write it, while authStore.user.custom_status only moves at auth_ok
+      // and on a rollback.
+      getCustomStatus: () => {
+        const id = authStore.getState().user?.id;
+        const m = id === undefined ? undefined : membersStore.getState().members.get(id);
+        return m !== undefined
+          ? (m.customStatus ?? "")
+          : (serverCustomStatus() ?? loadCustomStatus());
+      },
       onStatusChange: applyStatus,
       onCustomStatusChange: applyCustomStatus,
     });

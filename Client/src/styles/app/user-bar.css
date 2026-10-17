@@ -218,7 +218,8 @@
 /* ── Self profile card (opened from the user bar's avatar/name) ── */
 .self-profile-card {
   position: fixed;
-  z-index: 1000;
+  /* Same layer as the profile popup: under Settings and modals. */
+  z-index: 200;
   width: 300px;
   max-width: calc(100vw - 16px);
   box-sizing: border-box;
