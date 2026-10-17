@@ -187,6 +187,17 @@ test("tauri.conf.json runs the server job, because a Go test reads it", () => {
   assert.equal(sel.native, true);
 });
 
+test("client files carrying the LiveKit pin run the server job", () => {
+  // Server/docker_image_test.go fails when either pin drifts from
+  // ws.DefaultLiveKitVersion, so a client-only bump must run it.
+  for (const path of [
+    "Client/tests/e2e/scripts/install-livekit.mjs",
+    "Client/voice-join-budget.json",
+  ]) {
+    assert.equal(picked(`M\t${path}`).server, true, path);
+  }
+});
+
 test("the shared classifier corpus runs the Rust suite as well as the server", () => {
   // Server/safefetch/classify_test.go and Client/src-tauri/src/external_content.rs
   // both read it; a server-only PR that adds a vector must not merge with the

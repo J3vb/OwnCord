@@ -97,13 +97,15 @@ func TestLiveKitPinsAgreeEverywhere(t *testing.T) {
 			t.Errorf("%s: cannot read pinned-version file: %v", p.file, err)
 			continue
 		}
-		m := regexp.MustCompile(p.re).FindStringSubmatch(string(b))
-		if len(m) < 2 {
+		matches := regexp.MustCompile(p.re).FindAllStringSubmatch(string(b), -1)
+		if len(matches) == 0 {
 			t.Errorf("%s: LiveKit version pattern %q not found; update the pattern in TestLiveKitPinsAgreeEverywhere if the file was reformatted", p.file, p.re)
 			continue
 		}
-		if m[1] != ws.DefaultLiveKitVersion {
-			t.Errorf("%s: LiveKit version is %q, expected %q (ws.DefaultLiveKitVersion)", p.file, m[1], ws.DefaultLiveKitVersion)
+		for _, m := range matches {
+			if m[1] != ws.DefaultLiveKitVersion {
+				t.Errorf("%s: LiveKit version is %q, expected %q (ws.DefaultLiveKitVersion)", p.file, m[1], ws.DefaultLiveKitVersion)
+			}
 		}
 	}
 }
