@@ -114,7 +114,7 @@ happens to that use — one of four dispositions from the
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
 | `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |    0 |
 | `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   44 |
-| `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   27 |
+| `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   28 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
 
 The rows live in code, not only here: `Server/invariants/db_import_boundary.go`
@@ -164,7 +164,7 @@ split the ready payload's shared member read into
 `ws/serve_ready_members_cache.go`, a type-only `adapter` (`db.MemberSummary`
 only; it reads through `ReadySnapshotReader`) — and P5-O01 split the ready
 frame's encoding into `ws/serve_ready_encode.go`, an `adapter` (row types and
-`db.ValidStatuses` only) — so the table is up from 57 rows to 71,
+`db.ValidStatuses` only) — so the table is up from 57 rows to 72,
 and every row left is an `adapter` (db types, no persistence call) or a
 `boundary` that owns a handle on purpose. A future `move` row is a
 deliberate statement that something is on its way out, not a parking
@@ -204,7 +204,7 @@ its package declares a `*db.DB` field **or** a function that returns one,
 because such a file can reach the handle through the field (`h.db`) or from
 the package's own opener (`database, err := openDatabase(cfg)`) and an
 import-keyed inventory would never see it:
-2 of the 71 rows use the handle without importing `db`. Each row's calls and
+2 of the 72 rows use the handle without importing `db`. Each row's calls and
 hand-offs are pinned in `DBImportAllow` as exact multisets, so a new call in
 a `boundary` file is an allowlist edit and a call in an `adapter` file is a
 gate failure.
@@ -244,7 +244,7 @@ read seams (`ws/readers.go`): the consumer rows name their seam, `DBReaders`
 wires the handle behind them at the composition root, and the seam
 interfaces are the authoritative list of what those files may read — they
 show up as a row with an import and no recorded calls, which is a row worth
-reading. 35 of the 71 rows are type-only, 32 of them `adapter`.
+reading. 35 of the 72 rows are type-only, 32 of them `adapter`.
 
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
