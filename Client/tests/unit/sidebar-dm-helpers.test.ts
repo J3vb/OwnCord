@@ -1,3 +1,4 @@
+import { muteChannel, unmuteChannel } from "@lib/channel-mutes";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   selectDmConversation,
@@ -409,6 +410,25 @@ describe("SidebarDmHelpers", () => {
     it("returns empty array when no DM channels exist", () => {
       const result = buildDmConversations(null);
       expect(result).toEqual([]);
+    });
+
+    it("carries the end of a timed mute and nothing for a plain one", () => {
+      addDmChannel(makeDmChannel({ channelId: 100 }));
+      addDmChannel(makeDmChannel({ channelId: 101 }));
+      muteChannel(100, 3_600_000);
+      muteChannel(101);
+      try {
+        const rows = buildDmConversations(null);
+        const timed = rows.find((r) => r.channelId === 100);
+        const plain = rows.find((r) => r.channelId === 101);
+        expect(timed!.muted).toBe(true);
+        expect(timed!.mutedUntil).toBeGreaterThan(Date.now());
+        expect(plain!.muted).toBe(true);
+        expect("mutedUntil" in plain!).toBe(false);
+      } finally {
+        unmuteChannel(100);
+        unmuteChannel(101);
+      }
     });
 
     it("maps DM channels to DmConversation objects", () => {

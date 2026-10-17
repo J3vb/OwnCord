@@ -2544,4 +2544,142 @@ describe("notifyIncomingMessage", () => {
       }
     });
   });
+
+  describe("per-channel level (WP 3D-3b)", () => {
+    const HOST = "level.example";
+    const mention = { content: "hey @Me", mentions: [1], mentions_everyone: false };
+
+    /** Every channel on this server's alert surfaces, counted together. */
+    async function alerts(): Promise<{ count: () => number; clear: () => void }> {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      const clear = (): void => {
+        (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+        (invoke as ReturnType<typeof vi.fn>).mockClear();
+        (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+        mockOscillator.start.mockClear();
+      };
+      clear();
+      return {
+        clear,
+        count: () =>
+          (sendNotification as ReturnType<typeof vi.fn>).mock.calls.length +
+          (invoke as ReturnType<typeof vi.fn>).mock.calls.length +
+          (win.requestUserAttention as ReturnType<typeof vi.fn>).mock.calls.length +
+          mockOscillator.start.mock.calls.length,
+      };
+    }
+
+    const setOverride = (level: string): void => {
+      testPrefs.set(`channelNotificationLevels:${HOST}`, { "1": level });
+    };
+
+    beforeEach(() => {
+      setChannelMutesHost(HOST);
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    });
+    afterEach(() => {
+      setChannelMutesHost(null);
+    });
+
+    it("a channel at Nothing silences a mention in all three notify paths", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "all");
+      setOverride("nothing");
+
+      notifyIncomingMessage(makePayload(mention));
+      notifyMention(1);
+      notifyChannelActivity({
+        channel_id: 1,
+        message_id: 42,
+        author_id: 2,
+        mentions_you: true,
+        mentions_everyone: false,
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(seen.count()).toBe(0);
+    });
+
+    it("a channel at All notifies in a server at Nothing", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "nothing");
+      setOverride("all");
+
+      notifyIncomingMessage(makePayload({ content: "plain" }));
+
+      await vi.waitFor(() => {
+        expect(seen.count()).toBeGreaterThan(0);
+      });
+    });
+
+    it("a channel at Only @mentions drops plain chatter in a server at All", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "all");
+      setOverride("mentions");
+
+      notifyIncomingMessage(makePayload({ content: "plain" }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(seen.count()).toBe(0);
+    });
+
+    it("a channel without an override follows the server level", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "nothing");
+      testPrefs.set(`channelNotificationLevels:${HOST}`, { "99": "all" });
+
+      notifyIncomingMessage(makePayload(mention));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(seen.count()).toBe(0);
+    });
+
+    it("a channel at Only @mentions with a mute still notifies a mention", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "nothing");
+      setOverride("mentions");
+      muteChannel(1);
+
+      try {
+        notifyIncomingMessage(makePayload(mention));
+
+        await vi.waitFor(() => {
+          expect(seen.count()).toBeGreaterThan(0);
+        });
+      } finally {
+        unmuteChannel(1);
+      }
+    });
+
+    it("a DM ignores the level, including a stray override on its id", async () => {
+      const seen = await alerts();
+      testPrefs.set("notificationLevel", "nothing");
+      testPrefs.set(`channelNotificationLevels:${HOST}`, { "55": "nothing" });
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+      notifyIncomingMessage(makePayload({ channel_id: 55, content: "psst" }));
+
+      await vi.waitFor(() => {
+        expect(seen.count()).toBeGreaterThan(0);
+      });
+    });
+  });
 });
