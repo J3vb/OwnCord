@@ -28,8 +28,10 @@
 //! gone.
 //! `--simulcast` (with `--video`) publishes that camera simulcast, as the app
 //! does for every camera quality but "source".
-//! `--codec h264` (with `--video`) publishes the camera as H.264 instead of
-//! the default VP8 (WP LP-7c).
+//! `--codec h264` or `--codec vp9` (with `--video`) publishes the camera as
+//! H.264 or VP9 (one L1T3 SVC layer, never simulcast) instead of the default
+//! VP8 (WP LP-7c, M-11b). `--screen-codec vp9` (with `--screen`) does the same
+//! for the share.
 //! `--probe-codecs` prints `{"event":{"type":"codecs","h264":bool,"vp9":bool,
 //! "decode":[..]}}` and exits:
 //! whether this build's libwebrtc can encode H.264 or VP9 and which codecs it
@@ -365,9 +367,10 @@ mod linux {
         session: &mut NativeSession,
         width: u32,
         height: u32,
+        codec: PublishCodec,
     ) -> Result<(u64, String), String> {
         let capture = start_screen_capture(session, width, height).await?;
-        let sid = publish_screen_video(session, capture, width, height).await?;
+        let sid = publish_screen_video(session, capture, width, height, codec).await?;
         Ok((capture, sid))
     }
 
@@ -398,6 +401,7 @@ mod linux {
         capture: u64,
         width: u32,
         height: u32,
+        codec: PublishCodec,
     ) -> Result<String, String> {
         session
             .publish_screen(
@@ -408,7 +412,7 @@ mod linux {
                     max_bitrate: 3_000_000,
                     max_framerate: 15.0,
                     simulcast: false,
-                    codec: PublishCodec::default(),
+                    codec,
                 },
             )
             .await
@@ -459,7 +463,13 @@ mod linux {
         let codec = match arg("--codec").as_deref() {
             None | Some("vp8") => PublishCodec::Vp8,
             Some("h264") => PublishCodec::H264,
-            Some(_) => return Err("--codec must be vp8 or h264".into()),
+            Some("vp9") => PublishCodec::Vp9,
+            Some(_) => return Err("--codec must be vp8, h264 or vp9".into()),
+        };
+        let screen_codec = match arg("--screen-codec").as_deref() {
+            None | Some("vp8") => PublishCodec::Vp8,
+            Some("vp9") => PublishCodec::Vp9,
+            Some(_) => return Err("--screen-codec must be vp8 or vp9".into()),
         };
 
         if cycles > 0 {
@@ -556,7 +566,8 @@ mod linux {
         let mut preview = None;
         let mut stereo = None;
         if let Some((width, height)) = screen_size {
-            let (mut capture, mut screen_sid) = share_screen(&mut session, width, height).await?;
+            let (mut capture, mut screen_sid) =
+                share_screen(&mut session, width, height, screen_codec).await?;
             let screen_cycles: u32 = arg("--screen-cycles")
                 .as_deref()
                 .unwrap_or("0")
@@ -569,7 +580,8 @@ mod linux {
                 for _ in 0..screen_cycles {
                     session.stop_screen(capture).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    let (fresh, fresh_sid) = share_screen(&mut session, width, height).await?;
+                    let (fresh, fresh_sid) =
+                        share_screen(&mut session, width, height, screen_codec).await?;
                     screen_sid = fresh_sid;
                     let stale = std::mem::replace(&mut capture, fresh);
                     // A late stop of the replaced capture must leave the
@@ -616,7 +628,8 @@ mod linux {
                     tokio::time::sleep(Duration::from_secs(6)).await;
                     session.unpublish_screen_keep_capture(capture).await;
                     tokio::time::sleep(Duration::from_millis(300)).await;
-                    publish_screen_video(&mut session, capture, width, height).await?;
+                    publish_screen_video(&mut session, capture, width, height, screen_codec)
+                        .await?;
                     emit(
                         serde_json::json!({ "event": { "type": "screenAudio", "phase": "after-republish", "sid": sid } }),
                     );

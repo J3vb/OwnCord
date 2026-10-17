@@ -1415,8 +1415,8 @@ describe("NativeRoom camera", () => {
     for (const [videoCodec, codec] of [
       ["h264", "h264"],
       ["vp8", "vp8"],
-      // The native engine has no VP9 or H.265: anything else is VP8.
-      ["vp9", "vp8"],
+      ["vp9", "vp9"],
+      // The native engine has no H.265: anything else is VP8.
       ["h265", "vp8"],
     ] as const) {
       host.calls.length = 0;
@@ -1783,10 +1783,22 @@ describe("NativeRoom screen share", () => {
       "publishScreen",
       [1, 4, expect.objectContaining({ codec: "h264" })],
     ]);
-    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "vp9" });
+    // H.265 is not a native codec: it publishes VP8.
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "h265" });
     expect(host.calls.at(-1)).toEqual([
       "publishScreen",
       [1, 4, expect.objectContaining({ codec: "vp8" })],
+    ]);
+  });
+
+  it("publishScreen passes vp9", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, { ...screenOptions, videoCodec: "vp9" });
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [1, 4, expect.objectContaining({ codec: "vp9" })],
     ]);
   });
 

@@ -85,6 +85,7 @@ and only when it changes something a contributor or fork holder must do
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
 - Linux: a 120 fps screen share now gives up some sharpness before smoothness when the connection or CPU cannot keep up, as on Windows, and holds its frame rate more steadily. Settings → Voice & Video notes that Wayland limits a screen share to 60 fps.
 - Linux: OwnCord now tells the call it can play VP9 video, so a Windows VP9 camera or screen share no longer drops to VP8 when a Linux user joins.
+- Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
 - Linux (Wayland): push to talk and the Mute and Deafen shortcuts now work while another app is in front on GNOME 48 or newer and KDE Plasma. Settings → Keybinds has **Set up global shortcuts**, which opens your desktop's own dialog, then shows the keys it set; your desktop reserves those keys for OwnCord in every app, and push to talk is limited to function keys. GNOME 47 and older, Sway and other desktops without this service keep the note that global keys are unavailable, and the tray items still work.
 

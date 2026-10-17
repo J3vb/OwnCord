@@ -6,8 +6,10 @@ vi.mock("./native/platform", () => ({
 }));
 
 const nativeH264 = vi.hoisted(() => ({ value: false }));
+const nativeVp9 = vi.hoisted(() => ({ value: false }));
 vi.mock("./native/videoCodecs", () => ({
-  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value, vp9: false, decode: [] }),
+  nativeVideoCodecs: () =>
+    Promise.resolve({ h264: nativeH264.value, vp9: nativeVp9.value, decode: [] }),
 }));
 
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
@@ -25,6 +27,7 @@ const {
   pickAutoCodec,
   resolveCodecChoice,
   resolveVideoCodec,
+  vp9Available,
   vp9Offered,
 } = await import("./videoCodec");
 const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
@@ -70,6 +73,7 @@ beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
   nativeH264.value = false;
+  nativeVp9.value = false;
   supportsVP9.mockReset();
   supportsVP9.mockReturnValue(true);
   supportsH265.mockReset();
@@ -288,6 +292,51 @@ describe("vp9Offered", () => {
   it("is false on Linux", () => {
     isLinuxDesktop.mockReturnValue(true);
     expect(vp9Offered()).toBe(false);
+  });
+});
+
+describe("vp9Available (WP M-11b)", () => {
+  it("is the webview's answer off Linux", async () => {
+    await expect(vp9Available()).resolves.toBe(true);
+    supportsVP9.mockReturnValue(false);
+    await expect(vp9Available()).resolves.toBe(false);
+  });
+
+  it("follows the native encoder on Linux, not the webview", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    supportsVP9.mockReturnValue(false);
+    nativeVp9.value = true;
+    await expect(vp9Available()).resolves.toBe(true);
+    nativeVp9.value = false;
+    await expect(vp9Available()).resolves.toBe(false);
+  });
+});
+
+describe("Linux VP9 choice (WP M-11b)", () => {
+  beforeEach(() => {
+    isLinuxDesktop.mockReturnValue(true);
+    savePref("vp9");
+  });
+
+  afterEach(() => {
+    nativeVp9.value = false;
+  });
+
+  it("publishes VP9 when chosen and the native encoder has it", async () => {
+    nativeVp9.value = true;
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp9");
+  });
+
+  it("publishes VP8 for a saved VP9 when the native encoder lacks it, and keeps the pref", async () => {
+    nativeVp9.value = false;
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(getVideoCodecPref()).toBe("vp9");
+  });
+
+  it("keeps Auto on VP8 even when the native encoder has VP9", async () => {
+    nativeVp9.value = true;
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 });
 
