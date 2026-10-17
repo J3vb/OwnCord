@@ -210,7 +210,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// Snapshot voice state BEFORE unregister, mirroring readPump's defer
 	// (serve_pumps.go): once unregisterNow removes c, there is no way to tell
 	// whether it still owned a (possibly just-transferred) voice session.
-	unlockVoice := h.voiceLock(c.userID)
+	txn := h.begin(c.userID)
 	voiceChID := c.getVoiceChID()
 	replaced := h.unregisterNow(c)
 	if !replaced {
@@ -225,7 +225,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 			h.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonHandshake)
 		}
 	}
-	unlockVoice()
+	txn.end()
 	// shouldMarkOffline re-checks h.clients rather than trusting the
 	// `replaced` snapshot alone: it was sampled before handleVoiceLeave,
 	// which can block for seconds, so a reconnect landing during that window

@@ -550,9 +550,9 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	}
 	// U4: an atomic re-check under h.mu. A device connecting between the check
 	// above and here would otherwise be displaced; refuse instead.
-	unlockVoice := h.voiceLock(c.userID)
+	txn := h.begin(c.userID)
 	refused := h.registerNow(c, allowedChannelIDs)
-	unlockVoice()
+	txn.end()
 	if refused {
 		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
@@ -617,7 +617,8 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 // taken again for registerNow; every row deleter also drops the grace entry,
 // so the gap is safe.
 func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
-	defer h.voiceLock(c.userID)()
+	txn := h.begin(c.userID)
+	defer txn.end()
 	// RT-8: a fresh connect ends any parked grace window (registerNow drops
 	// it); a replay-failure fallback may inherit one only while its row
 	// still exists.
@@ -667,7 +668,8 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	h.voiceGrace.take(c.userID)
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
-	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+	txn := h.heldTxn(c.userID)
+	if _, delErr := txn.deleteRow(ctx, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
 	// The DB row is gone, but the still-registered OLD *Client (if any) is
@@ -682,9 +684,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// own replacedVoiceChID re-election later becomes a redundant no-op
 	// (clearVoiceState finds nothing left to clear), not a conflict.
 	if old := h.GetClient(c.userID); old != nil {
-		if _, cleared := old.clearVoiceStateIfMatch(vs.ChannelID); cleared {
-			h.pubsub.Unsubscribe(old, VoiceTopic(vs.ChannelID))
-		}
+		txn.clearIfChannel(old, vs.ChannelID)
 	}
 	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))

@@ -102,16 +102,10 @@ func (v *userLocks) refsForTest(userID int64) int {
 	return 0
 }
 
-// voiceLock takes userID's voice membership lock and returns its release.
-// See voice_registry.go for the lock order; callers hold none of the hub's
-// locks.
-func (h *Hub) voiceLock(userID int64) func() {
-	return h.lock(userID)
-}
-
 // leaveVoiceLocked runs a client-requested voice leave under c's voice lock.
 func (h *Hub) leaveVoiceLocked(c *Client, reason string) {
-	defer h.voiceLock(c.userID)()
+	txn := h.begin(c.userID)
+	defer txn.end()
 	h.handleVoiceLeave(c.ctx, c, reason)
 }
 
@@ -119,7 +113,8 @@ func (h *Hub) leaveVoiceLocked(c *Client, reason string) {
 // the voice lock. Taking the lock first means a teardown that is parking the
 // membership right now finishes before the take looks for it.
 func (h *Hub) leaveParkedVoiceLocked(userID int64, reason string) {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), reason)
 }
 

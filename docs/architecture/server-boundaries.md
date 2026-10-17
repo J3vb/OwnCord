@@ -113,7 +113,7 @@ happens to that use — one of four dispositions from the
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
 | `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |    0 |
-| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   44 |
+| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   45 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   28 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
 
@@ -164,7 +164,7 @@ split the ready payload's shared member read into
 `ws/serve_ready_members_cache.go`, a type-only `adapter` (`db.MemberSummary`
 only; it reads through `ReadySnapshotReader`) — and P5-O01 split the ready
 frame's encoding into `ws/serve_ready_encode.go`, an `adapter` (row types and
-`db.ValidStatuses` only) — so the table is up from 57 rows to 72,
+`db.ValidStatuses` only) — so the table is up from 57 rows to 73,
 and every row left is an `adapter` (db types, no persistence call) or a
 `boundary` that owns a handle on purpose. A future `move` row is a
 deliberate statement that something is on its way out, not a parking
@@ -204,7 +204,7 @@ its package declares a `*db.DB` field **or** a function that returns one,
 because such a file can reach the handle through the field (`h.db`) or from
 the package's own opener (`database, err := openDatabase(cfg)`) and an
 import-keyed inventory would never see it:
-2 of the 72 rows use the handle without importing `db`. Each row's calls and
+2 of the 73 rows use the handle without importing `db`. Each row's calls and
 hand-offs are pinned in `DBImportAllow` as exact multisets, so a new call in
 a `boundary` file is an allowlist edit and a call in an `adapter` file is a
 gate failure.
@@ -244,7 +244,7 @@ read seams (`ws/readers.go`): the consumer rows name their seam, `DBReaders`
 wires the handle behind them at the composition root, and the seam
 interfaces are the authoritative list of what those files may read — they
 show up as a row with an import and no recorded calls, which is a row worth
-reading. 35 of the 72 rows are type-only, 32 of them `adapter`.
+reading. 36 of the 73 rows are type-only, 33 of them `adapter`.
 
 Type-only is a shape, not a verdict, and while `move` was still populated the
 table kept the two apart — `admin/middleware.go` was type-only and still a
@@ -343,14 +343,15 @@ handle-backed read seams.
 | `ws/serve_ready_members_cache.go`    | `MemberSummary×2`                                                                                                                                                                                       | —                                                                                                                                                                                  | —                                                                                                                                                                               | —                                                                                                                                                                   | type-only | adapter     | —      | the ready payload's shared member-list read (DP-37), through ReadySnapshotReader; MemberSummary type                                                                                                 |
 | `ws/voice_join.go`                   | `Channel×2` `ChannelOverride` `VoiceState×6`                                                                                                                                                            | —                                                                                                                                                                                  | —                                                                                                                                                                               | —                                                                                                                                                                   | type-only | adapter     | —      | Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes                                                                                   |
 | `ws/voice_moderation.go`             | `Role` `VoiceState×2`                                                                                                                                                                                   | —                                                                                                                                                                                  | —                                                                                                                                                                               | —                                                                                                                                                                   | type-only | adapter     | —      | Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row                                                                                           |
+| `ws/voice_registry_txn.go`           | `VoiceState`                                                                                                                                                                                            | —                                                                                                                                                                                  | —                                                                                                                                                                               | —                                                                                                                                                                   | type-only | adapter     | —      | VoiceState type in persistJoin's signature; VoiceService owns the voice_states reads and writes                                                                                                      |
 
-72 files use `db` outside `db/` and `service/` (. 3, admin 16, api 16, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 8, plugin 1, ws 23); 70 import it, 2 use the handle without importing it; 35 are type-only; 0 unlisted.
-Dispositions: adapter 44, boundary 28. Move targets: .
+73 files use `db` outside `db/` and `service/` (. 3, admin 16, api 16, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 8, plugin 1, ws 24); 71 import it, 2 use the handle without importing it; 36 are type-only; 0 unlisted.
+Dispositions: adapter 45, boundary 28. Move targets: .
 <!-- dbinventory:end -->
 
 Reading the table:
 
-- **Type-only rows (35, of which 32 are `adapter`)** mostly need no service: the `db` types they use are the wire and response shapes. Whether those
+- **Type-only rows (36, of which 33 are `adapter`)** mostly need no service: the `db` types they use are the wire and response shapes. Whether those
   types should live outside `db` is a B3-8 question per family, not a
   boundary violation. The count was 14 at B3-0 and rose as families moved
   their calls behind services and left their types behind. No row carries a

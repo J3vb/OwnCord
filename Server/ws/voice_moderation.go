@@ -621,7 +621,8 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 // disconnect and channel-switch paths. Reports false when the user has no
 // connection on this node.
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
@@ -633,14 +634,15 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 // DisconnectFromVoiceInChannel is DisconnectFromVoice conditioned on the
 // channel the caller authorized against, satisfying voiceChannelDisconnector.
 // The comparison and the clear happen together under the client's voiceMu
-// (handleVoiceLeaveIfStillIn -> clearVoiceStateIfMatch), so a channel switch
+// (handleVoiceLeaveIfStillIn -> voiceTxn.clearIfChannel), so a channel switch
 // committed on the target's own goroutine after the moderator's checks either
 // loses the race outright or is left untouched — never evicted in place of the
 // channel that was checked. Reports false in both of those cases, which the
 // callers already treat as "user is not connected". reason is the caller's
 // voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)

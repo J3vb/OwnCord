@@ -172,6 +172,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/serve_ready_members_cache.go": {Disposition: "adapter", Note: "the ready payload's shared member-list read (DP-37), through ReadySnapshotReader; MemberSummary type"},
 	"ws/voice_join.go":                {Disposition: "adapter", Note: "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
 	"ws/voice_moderation.go":          {Disposition: "adapter", Note: "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},
+	"ws/voice_registry_txn.go":        {Disposition: "adapter", Note: "VoiceState type in persistJoin's signature; VoiceService owns the voice_states reads and writes"},
 }
 
 // dbImportBoundary fails on any production file above the domain layer that

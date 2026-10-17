@@ -48,35 +48,21 @@ const (
 	voiceLeaveReasonGraceExpired = "grace_expired"
 )
 
-// clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic
-// subscription, returning the cleared channel ID and join token. Every path
-// that takes a client out of voice while its WS stays up must use this pair:
-// clearing state without unsubscribing leaves the socket receiving that room's
-// voice_e2ee_announce relays (which carry no channel_id to filter on) for the
-// connection's lifetime, polluting a later session's peer-key store.
-func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
-	oldChID, oldJoinToken, _ := c.clearVoiceState()
-	if oldChID != 0 {
-		h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
-	}
-	return oldChID, oldJoinToken
-}
-
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
-// 1. Gets old voiceChID from clearVoiceAndUnsubscribe.
+// 1. Clears the slot and the voice-topic subscription (voiceTxn.clear).
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Remove the LiveKit participant in the background (best-effort).
 //
 // reason is the machine-readable cause, logged on the "voice leave" line; it is
 // one of the voiceLeaveReason* constants (SRE-M2). Callers must never pass "".
-// The caller holds h.voiceLock(c.userID).
+// The caller holds Hub.begin(c.userID).
 func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client, reason string) {
-	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
-	if oldChID == 0 {
+	snap := h.heldTxn(c.userID).clear(c)
+	if snap.chID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID, "reason", reason)
 		return
 	}
-	h.finishVoiceLeave(ctx, c, oldChID, oldJoinToken, reason)
+	h.finishVoiceLeave(ctx, c, snap.chID, snap.joinToken, reason)
 }
 
 // handleVoiceLeaveIfStillIn is handleVoiceLeave conditioned on the channel: it
@@ -85,14 +71,13 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client, reason string) {
 // revocation sweep's DB-backed permission check) must not clear a newer
 // membership committed while the decision was in flight — the same rule
 // LeaveVoiceChannelIfMatch applies to the DB row.
-// The caller holds h.voiceLock(c.userID).
+// The caller holds Hub.begin(c.userID).
 func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64, reason string) bool {
-	oldJoinToken, ok := c.clearVoiceStateIfMatch(chID)
+	snap, ok := h.heldTxn(c.userID).clearIfChannel(c, chID)
 	if !ok {
 		return false
 	}
-	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
-	h.finishVoiceLeave(ctx, c, chID, oldJoinToken, reason)
+	h.finishVoiceLeave(ctx, c, chID, snap.joinToken, reason)
 	return true
 }
 
@@ -100,7 +85,7 @@ func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int
 // client's voice state and topic subscription are cleared: DB row removal
 // (with retry), voice_leave broadcast, key-holder re-election and LiveKit
 // participant removal.
-// The caller holds h.voiceLock(c.userID).
+// The caller holds Hub.begin(c.userID).
 func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken, reason string) {
 	username := ""
 	if c.user != nil {
@@ -189,8 +174,11 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 		return nil
 	}
 
-	// Synchronous first attempt — channel-conditional delete.
-	if _, err := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken); err != nil {
+	// Synchronous first attempt — channel-conditional delete. deleteRow is
+	// scoped to this join instance, so the retries below may run it after the
+	// caller's lock is released (a borrowed handle; see Hub.heldTxn).
+	txn := h.heldTxn(userID)
+	if _, err := txn.deleteRow(ctx, channelID, joinToken); err != nil {
 		slog.Warn("LeaveVoiceChannelIfMatch failed, retrying in background",
 			"err", err, "user_id", userID, "channel_id", channelID,
 			"attempt", 1, "max_retries", 3)
@@ -217,7 +205,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 				delay *= 2
 
 				attemptCtx, cancel := context.WithTimeout(retryCtx, attemptTimeout)
-				_, retryErr := h.voice.LeaveIfMatch(attemptCtx, userID, channelID, joinToken)
+				_, retryErr := txn.deleteRow(attemptCtx, channelID, joinToken)
 				cancel()
 				if retryErr != nil {
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",

@@ -24,7 +24,7 @@ func TestVoiceSlot_ZeroValueIsNotInVoice(t *testing.T) {
 	if c.markVoiceJoinCompleteIfMatch(1, "tok") {
 		t.Fatal("zero client marked a join complete it never started")
 	}
-	if c.clearExact(1, "tok") || c.clearExactKeepCompleted(0, "") {
+	if c.clearExact(1, "tok") {
 		t.Fatal("zero client matched an exact-join clear")
 	}
 	if ch, tok, completed := c.clearVoiceState(); ch != 0 || tok != "" || completed {
@@ -32,7 +32,7 @@ func TestVoiceSlot_ZeroValueIsNotInVoice(t *testing.T) {
 	}
 
 	var r voiceRegistry
-	r.lock(1)()
+	r.voiceMember.lock(1)()
 	if r.voiceGrace.get(1) != nil || r.voiceGrace.has(1, 0) || len(r.voiceGrace.snapshot()) != 0 {
 		t.Fatal("zero registry has a parked membership")
 	}

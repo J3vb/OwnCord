@@ -42,7 +42,7 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
-// The handshake callers hold h.voiceLock(c.userID); the test-only Register
+// The handshake callers hold Hub.begin(c.userID); the test-only Register
 // event path on the hub goroutine does not.
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,

@@ -233,11 +233,9 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		c.setE2EEAnnounce(*result.SetE2EEAnnounce)
 	}
 	if result.SetVoiceJoinToken != nil {
-		unlock := h.voiceLock(c.userID)
-		if chID := c.getVoiceChID(); chID != 0 {
-			c.setVoiceState(chID, *result.SetVoiceJoinToken)
-		}
-		unlock()
+		txn := h.begin(c.userID)
+		txn.setJoinToken(c, *result.SetVoiceJoinToken)
+		txn.end()
 	}
 	if result.Reply != nil {
 		c.sendMsg(result.Reply)
