@@ -94,7 +94,7 @@ and proceeds, so a reviewer can see what was assumed.
 - **Wrap every error you pass up with `%w`:** `fmt.Errorf("<op>: %w", err)`
   for context, `fmt.Errorf("%w: <detail>", ErrX)` for a sentinel. Callers
   use `errors.Is`/`errors.As`. `errorlint` fails `%v`/`%s` on an error and
-  `==` on a wrapped one (CODE_STYLE.md, "Error wrapping").
+  `==` on a wrapped one (docs/code-style.md, "Error wrapping").
 - **Every new goroutine takes a `context.Context` and exits on `ctx.Done()`.**
   Bounded work gets `context.WithTimeout`/`WithDeadline` with its `cancel`
   deferred; a long-lived loop takes its owner's lifecycle context

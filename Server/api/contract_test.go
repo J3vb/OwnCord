@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// ─── Contract tests: verify REST responses match API.md shapes ──────────────
+// ─── Contract tests: verify REST responses match docs/api.md shapes ──────────────
 // These tests assert that responses include all documented fields with the
 // correct types, catching drift between implementation and specification.
 
@@ -41,7 +41,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 		t.Fatal("expected at least 1 message")
 	}
 
-	// Parse the first message and verify all API.md fields are present.
+	// Parse the first message and verify all docs/api.md fields are present.
 	var msg map[string]any
 	if err := json.Unmarshal(resp.Messages[0], &msg); err != nil {
 		t.Fatalf("decode message: %v", err)
@@ -54,7 +54,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 	}
 	for _, field := range requiredFields {
 		if _, ok := msg[field]; !ok {
-			t.Errorf("message missing required field %q (per API.md)", field)
+			t.Errorf("message missing required field %q (per docs/api.md)", field)
 		}
 	}
 
@@ -81,7 +81,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 }
 
 // TestContract_Messages_ReactionsHaveMeFlag verifies that when a reaction
-// exists, the response includes the 'me' boolean per API.md.
+// exists, the response includes the 'me' boolean per docs/api.md.
 func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
@@ -122,7 +122,7 @@ func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 		t.Errorf("count = %d, want 1", r.Count)
 	}
 	if r.Me == nil {
-		t.Error("reaction missing 'me' boolean field (per API.md)")
+		t.Error("reaction missing 'me' boolean field (per docs/api.md)")
 	} else if !*r.Me {
 		t.Error("me = false, want true (requesting user added the reaction)")
 	}
@@ -158,14 +158,14 @@ func TestContract_Search_HasRequiredFields(t *testing.T) {
 		t.Fatalf("decode result: %v", err)
 	}
 
-	// Per API.md, search results must have these fields.
+	// Per docs/api.md, search results must have these fields.
 	requiredFields := []string{
 		"message_id", "channel_id", "channel_name", "user",
 		"content", "timestamp",
 	}
 	for _, field := range requiredFields {
 		if _, ok := result[field]; !ok {
-			t.Errorf("search result missing required field %q (per API.md)", field)
+			t.Errorf("search result missing required field %q (per docs/api.md)", field)
 		}
 	}
 

@@ -315,11 +315,14 @@ history.
 
 ### Files for AI coding agents
 
-These short files at the repository root give an AI agent, or a new
-contributor, the key context: [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
-[ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md),
-[CODE_STYLE.md](CODE_STYLE.md), [DATABASE.md](DATABASE.md), [API.md](API.md)
-and [SECURITY.md](SECURITY.md). Each one lists its sources. If they disagree,
+These short files give an AI agent, or a new contributor, the key context:
+[AGENTS.md](AGENTS.md) and [SECURITY.md](SECURITY.md) at the repository root, and
+the overviews in [docs/summaries/](docs/summaries/README.md)
+([product](docs/summaries/product.md),
+[architecture](docs/summaries/architecture.md),
+[design system](docs/summaries/design-system.md),
+[database](docs/summaries/database.md) and [API](docs/summaries/api.md)), plus
+[docs/code-style.md](docs/code-style.md). Each one lists its sources. If they disagree,
 the code wins, then those sources.
 
 Human contributors can ignore the agent tool folders `.claude/`, `.codex/` and
