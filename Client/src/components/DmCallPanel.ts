@@ -36,7 +36,7 @@ import type { DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
-import { formatElapsed, headerStatusText, isConnecting } from "@components/VoiceWidget";
+import { formatElapsed, headerStatusText, isConnecting } from "@components/voiceStatusText";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";

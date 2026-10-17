@@ -23,7 +23,7 @@ import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/v
 import type { VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
-import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
+import { createLazyScreen } from "./lazyScreen";
 import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
@@ -39,6 +39,14 @@ import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
+
+// The per-user volume menu loads on its first open (O-6b).
+const volumeMenuScreen = createLazyScreen(
+  "user-volume-menu",
+  () => import("./channel-sidebar/volume-menu"),
+);
+/** Latest open request; an earlier one still loading is dropped. */
+let volumeMenuAttempt = 0;
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -547,17 +555,23 @@ function renderVoiceChannelItem(
       // Right-click for per-user volume (skip for own user)
       if (currentUser === null || currentUser.id !== user.userId) {
         const openVolumeMenu = (x: number, y: number): void => {
-          showUserVolumeMenu(
-            user.userId,
-            user.username || shellText("common.unknown"),
-            x,
-            y,
-            // lifetimeSignal (not the per-render `signal`): the menu is
-            // mounted on document.body, independent of this row's render,
-            // and must not be torn down by an unrelated re-render (OC-0282).
-            lifetimeSignal,
-            buildVoiceModOptions(channel.id, user, onVoiceModerate),
-          );
+          // The options snapshot is taken now, at click time; the menu code
+          // loads on its first open.
+          const mod = buildVoiceModOptions(channel.id, user, onVoiceModerate);
+          const username = user.username || shellText("common.unknown");
+          const attempt = ++volumeMenuAttempt;
+          void volumeMenuScreen
+            .load(() => !lifetimeSignal.aborted)
+            .then((m) => {
+              // A newer open supersedes this one (so a double open mounts one
+              // menu), and a destroyed sidebar mounts nothing.
+              if (m === null || attempt !== volumeMenuAttempt || lifetimeSignal.aborted) return;
+              // lifetimeSignal (not the per-render `signal`): the menu is
+              // mounted on document.body, independent of this row's render,
+              // and must not be torn down by an unrelated re-render (OC-0282).
+              m.showUserVolumeMenu(user.userId, username, x, y, lifetimeSignal, mod);
+              return;
+            });
         };
         row.addEventListener(
           "contextmenu",

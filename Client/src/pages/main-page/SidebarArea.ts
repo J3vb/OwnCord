@@ -21,9 +21,9 @@ import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import type { DmMenuActions } from "@components/dmContextMenu";
 import { createLazyScreen } from "@components/lazyScreen";
+import type { VoiceWidgetOptions } from "@components/VoiceWidget";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
-import { createVoiceWidget } from "@components/VoiceWidget";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import {
@@ -1177,7 +1177,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     ws,
     limiters,
   );
-  const voiceWidget = createVoiceWidget({
+  const voiceWidgetOptions: VoiceWidgetOptions = {
     onDisconnect,
     onCameraToggle,
     onScreenshareToggle,
@@ -1198,10 +1198,46 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // channel's chat and would close a call view opened before it.
       queueMicrotask(() => opts.onOpenCall?.());
     },
-  });
-  voiceWidget.mount(voiceWidgetSlot);
-  children.push(voiceWidget);
+  };
   sidebarWrapper.appendChild(voiceWidgetSlot);
+
+  // The widget subscribes to the store when it mounts and renders the current
+  // state, so a late mount shows a session that is already under way. It stays
+  // mounted once loaded: it hides itself when the user is not in voice.
+  // One loader per sidebar; the browser's module cache shares the code itself.
+  const voiceWidgetScreen = createLazyScreen(
+    "voice-widget",
+    () => import("@components/VoiceWidget"),
+  );
+  let voiceWidgetRequested = false;
+  function loadVoiceWidget(): void {
+    if (voiceWidgetRequested || tornDown) return;
+    voiceWidgetRequested = true;
+    void voiceWidgetScreen
+      .load(() => !tornDown)
+      .then((mod) => {
+        if (mod === null) {
+          // Failed (toasted once by the loader): the next voice change retries.
+          voiceWidgetRequested = false;
+          return;
+        }
+        if (tornDown) return;
+        const voiceWidget = mod.createVoiceWidget(voiceWidgetOptions);
+        voiceWidget.mount(voiceWidgetSlot);
+        children.push(voiceWidget);
+        return;
+      });
+  }
+  unsubscribers.push(
+    voiceStore.subscribeSelector(
+      (state) => state.currentChannelId !== null,
+      (inVoice) => {
+        if (inVoice) loadVoiceWidget();
+      },
+    ),
+  );
+  // autoJoin can set the channel before this sidebar is built.
+  if (voiceStore.getState().currentChannelId !== null) loadVoiceWidget();
 
   // ---------------------------------------------------------------------------
   // Quick-switch overlay
