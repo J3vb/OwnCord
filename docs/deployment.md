@@ -239,10 +239,14 @@ tls:
 ```
 
 **Compose mounts `config.yaml` read-only.** Nothing inside the container can
-change it. The admin panel and the setup wizard cannot save a startup setting
-to it. If they try, you see a warning and an `ERROR` line in the container log.
-To change a startup setting, edit the file on the host and recreate the
-container.
+change it. In a container, the admin panel and the setup wizard save startup
+settings into `config-overrides.json` in the data volume instead, so they
+survive a recreate. `config.yaml` stays as you wrote it, and a saved setting
+overrides it only for the keys you changed there. The panel's **Reset**
+button returns a key to what `config.yaml` says. The wizard cannot change the
+port in a container, because the published port mapping fixes it; change the
+mapping in your compose file or `docker run` command. To change any other
+startup setting from the file, edit it on the host and recreate the container.
 
 If a setting saved from the admin panel keeps you out of the panel, stop the
 server and run `docker compose run --rm --no-deps owncord config reset-overrides`
@@ -330,7 +334,10 @@ docker run -d -v owncord-data:/app/data \
 The image also sets `OWNCORD_VOICE_UDP_PORT=7882`. All voice media then uses
 that one UDP port instead of the `50000-60000` range. Override either variable
 to change this. LiveKit's credentials and its `livekit.yaml` are kept in
-`/app/data`, the volume.
+`/app/data`, the volume. Credentials the setup wizard generates are saved there
+too (in `config-overrides.json`). The pair is saved only when neither half is
+supplied by `config.yaml` or the environment, so they persist once the wizard
+has run.
 
 **Two containers (the compose stack).** The shipped `docker-compose.yml` runs
 `livekit/livekit-server:v1.13.7` as its own container. For the server it
@@ -434,7 +441,9 @@ re-open setup ([security.md](security.md#first-run-setup)).
 - It asks for the basics: server name, port, TLS mode, upload limit, voice,
   registration, welcome message, and the Owner's recovery kit.
 - It saves your choices. Live settings go into the database. Startup settings
-  go into `config.yaml`. Comments and your own edits in the file are kept.
+  go into `config.yaml`, with comments and your own edits kept. In a Docker
+  container they go into `config-overrides.json` in the data volume instead,
+  and only the ones you changed.
 - It saves the generated LiveKit credentials, so voice keeps working across
   restarts.
 - If you changed the port or TLS mode, the server restarts once. The wizard

@@ -85,8 +85,10 @@ says exactly what the beta does and does not claim about who can read what.
   upgrade _from_ yet. See
   [How this procedure is checked](deployment.md#how-this-procedure-is-checked).
 - **In Docker, `config.yaml` is read-only.** The compose file mounts it
-  read-only. So the admin panel and setup wizard cannot save a start-up
-  setting there. Edit the file on the host and recreate the container. See
+  read-only. So the admin panel and setup wizard save start-up settings into
+  `config-overrides.json` in the data volume, and the setup wizard cannot
+  change the port. To change anything else from the file, edit it on the host
+  and recreate the container. See
   [config.yaml for Docker](deployment.md#configyaml-for-docker).
 
 ## Client
