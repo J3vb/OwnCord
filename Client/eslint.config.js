@@ -130,7 +130,7 @@ export default tseslint.config(
   },
   {
     // Warn, not error: the 46 bare invokes that predate the rule are wrapped as
-    // their files are touched (CODE_STYLE.md, "Custom ESLint rules").
+    // their files are touched (docs/code-style.md, "Custom ESLint rules").
     files: ["src/platform/desktop/**/*.ts"],
     plugins: { local: localRules },
     rules: {

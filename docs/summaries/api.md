@@ -2,7 +2,7 @@
 
 Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the code wins, then the source documents.
 
-OwnCord exposes two surfaces: a REST API for CRUD and admin operations, and a single WebSocket connection for real-time chat, presence and voice signalling. This file is a map of both. The full generated route table and every request/response shape live in [docs/api.md](docs/api.md) and [docs/protocol.md](docs/protocol.md).
+OwnCord exposes two surfaces: a REST API for CRUD and admin operations, and a single WebSocket connection for real-time chat, presence and voice signalling. This file is a map of both. The full generated route table and every request/response shape live in [docs/api.md](../api.md) and [docs/protocol.md](../protocol.md).
 
 ## Base URL and versioning
 
@@ -36,7 +36,7 @@ Standard REST error envelope:
 
 Exceptions answer in plain text via `http.Error`: the plugin admin endpoints, `GET /api/v1/client-update/…` (400/502), `POST /api/v1/livekit/webhook` (401/503), and the WebSocket upgrade's 503 at `server.max_ws_connections`. A recovered handler panic is an empty-bodied 500.
 
-Representative codes (full table: [docs/api.md § Standard Error Response](docs/api.md#standard-error-response)):
+Representative codes (full table: [docs/api.md § Standard Error Response](../api.md#standard-error-response)):
 
 | Code                             | HTTP | Meaning                                                                                                                                                                                                                                                         |
 | -------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,11 +67,11 @@ Rate limiting is per route, backed by one shared `auth.RateLimiter` instance (al
 | `GET /api/v1/ws` (upgrade)         | 60/min per IP, before auth; until auth succeeds a frame may be at most 8 KiB                                                       |
 | Client auto-update poll            | A dedicated bucket, so it cannot 429 a user's own 2FA or password-change calls                                                     |
 
-WebSocket-side limits are keyed by user id, on a sliding window over the shared limiter: `chat_send`/`chat_edit`/`chat_delete` 10/sec each (plus channel slow mode → `SLOW_MODE`), `reaction_add`/`remove` 5/sec combined, `typing_start` 1 per 3 s per channel, `presence_update` 1 per 10 s, `voice_join`/`voice_leave` 5/sec, `voice_mute`/`voice_deafen` 2/sec, `voice_camera`/`voice_screenshare` 2/sec, `voice_token_refresh` 1 per 60 s, voice moderation 5/sec, `call_ring`/`call_decline` 1 per 3 s, `chat_command` 5/sec, `voice_e2ee_announce` 5/sec, `voice_e2ee_offer` 64/sec. Exceeding one returns an `error` frame with code `RATE_LIMITED` (no `Retry-After`); only `typing_start`, `channel_focus`/`mark_read` (5/sec each) and `ping` (2/sec) are silently dropped, while `mark_unread` (5/sec) answers `RATE_LIMITED` (see the Rate Limits section of [docs/protocol.md](docs/protocol.md)).
+WebSocket-side limits are keyed by user id, on a sliding window over the shared limiter: `chat_send`/`chat_edit`/`chat_delete` 10/sec each (plus channel slow mode → `SLOW_MODE`), `reaction_add`/`remove` 5/sec combined, `typing_start` 1 per 3 s per channel, `presence_update` 1 per 10 s, `voice_join`/`voice_leave` 5/sec, `voice_mute`/`voice_deafen` 2/sec, `voice_camera`/`voice_screenshare` 2/sec, `voice_token_refresh` 1 per 60 s, voice moderation 5/sec, `call_ring`/`call_decline` 1 per 3 s, `chat_command` 5/sec, `voice_e2ee_announce` 5/sec, `voice_e2ee_offer` 64/sec. Exceeding one returns an `error` frame with code `RATE_LIMITED` (no `Retry-After`); only `typing_start`, `channel_focus`/`mark_read` (5/sec each) and `ping` (2/sec) are silently dropped, while `mark_unread` (5/sec) answers `RATE_LIMITED` (see the Rate Limits section of [docs/protocol.md](../protocol.md)).
 
 ## REST endpoint groups
 
-Routes are registered in the `Mount*Routes` function of the owning `Server/api/*_handler.go` (admin routes in `Server/admin/api.go`); `NewRouter` in `Server/api/router.go` composes them and holds the global middleware. This table is a representative sample per group; [docs/api.md](docs/api.md) has every route, with the current count.
+Routes are registered in the `Mount*Routes` function of the owning `Server/api/*_handler.go` (admin routes in `Server/admin/api.go`); `NewRouter` in `Server/api/router.go` composes them and holds the global middleware. This table is a representative sample per group; [docs/api.md](../api.md) has every route, with the current count.
 
 | Group                      | Representative routes                                                                                                                                                                                               | Required auth / permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -159,7 +159,7 @@ The schema declares wire names, plus the wire values of one enum (`server_restar
 | Moderation queue/actions/appeals | —                                                                                                                     | `mod_queue`, `mod_action`, `appeal_status`                                                                                                                                     |
 | Plugins                          | `chat_command`                                                                                                        | `command_reply`, `plugin_broadcast` (built in `Server/ws/handlers_command.go`)                                                                                                 |
 
-Full per-type payloads, permission gates and rate limits are in [docs/protocol.md](docs/protocol.md).
+Full per-type payloads, permission gates and rate limits are in [docs/protocol.md](../protocol.md).
 
 ### Sequencing, reconnect and replay
 
@@ -184,7 +184,7 @@ Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `u
 - `sendHigh` (64): unsequenced user-targeted frames only (DM-channel opens, DM requests, call signals); when full it spills into `send`.
 - `sendLow` (64): typing indicators and targeted moderation/appeal/mention-badge notices, unsequenced and never replayed.
 
-A full `send` queue **disconnects the client**, forcing it through the replay pipeline to restore consistency, except for a presence frame, which is dropped and repaired by a full presence snapshot; a full `sendLow` **silently drops**. The global broadcast channel (capacity 1024) drops with a counted metric when saturated. Details: [docs/architecture/websocket.md](docs/architecture/websocket.md).
+A full `send` queue **disconnects the client**, forcing it through the replay pipeline to restore consistency, except for a presence frame, which is dropped and repaired by a full presence snapshot; a full `sendLow` **silently drops**. The global broadcast channel (capacity 1024) drops with a counted metric when saturated. Details: [docs/architecture/websocket.md](../architecture/websocket.md).
 
 ## Protocol epoch and compatibility
 
@@ -216,7 +216,7 @@ A full `send` queue **disconnects the client**, forcing it through the replay pi
 - **`api_request`**: a generic passthrough, any HTTP method against any path on the local instance, authenticated with a bearer API token, returning `{status, headers, body}`. It has no write allowlist, so it can call destructive admin routes.
 - **`server_logs`**: reads the server's in-memory log ring buffer (last 2000 records) via a ticketed Server-Sent-Events stream (`POST /admin/api/logs/ticket`, then `GET /admin/api/logs/stream?ticket=...`), with optional `level`/`source` filters and a `follow_ms` live-tail window.
 
-Setup: mint a token with `server token create --label mcp-introspect` (defaults to the owner account), set `OWNCORD_API_TOKEN`, and the server is registered in `.mcp.json`. TLS is handled by pinning the server's self-signed certificate (`Server/data/cert.pem`) rather than trusting a CA, since the certificate has no SAN. Full detail, troubleshooting and the API-token schema: [docs/mcp-introspect.md](docs/mcp-introspect.md).
+Setup: mint a token with `server token create --label mcp-introspect` (defaults to the owner account), set `OWNCORD_API_TOKEN`, and the server is registered in `.mcp.json`. TLS is handled by pinning the server's self-signed certificate (`Server/data/cert.pem`) rather than trusting a CA, since the certificate has no SAN. Full detail, troubleshooting and the API-token schema: [docs/mcp-introspect.md](../mcp-introspect.md).
 
 ## Changing the API
 
@@ -242,8 +242,8 @@ The schema entry alone does not make a type work. A new client→server type als
 
 ## Sources
 
-- [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md), [docs/architecture/websocket.md](docs/architecture/websocket.md), [docs/mcp-introspect.md](docs/mcp-introspect.md)
-- [protocol/schema.json](protocol/schema.json), [Server/api/router.go](Server/api/router.go), [Server/api/auth_posture_test.go](Server/api/auth_posture_test.go), [Server/api/middleware.go](Server/api/middleware.go), [Server/api/auth_handler.go](Server/api/auth_handler.go), [Server/api/constants.go](Server/api/constants.go)
-- [Server/admin/api.go](Server/admin/api.go), [Server/admin/middleware.go](Server/admin/middleware.go), [Server/permissions/permissions.go](Server/permissions/permissions.go)
-- [Server/ws/serve_auth.go](Server/ws/serve_auth.go), [Server/ws/hub.go](Server/ws/hub.go), [Server/ws/hub_broadcast.go](Server/ws/hub_broadcast.go), [Server/ws/emit.go](Server/ws/emit.go), [Server/ws/client.go](Server/ws/client.go), [Server/ws/messages.go](Server/ws/messages.go), [Server/ws/command.go](Server/ws/command.go)
-- [Client/src/lib/types.ts](Client/src/lib/types.ts), [Client/src/lib/dispatcher.ts](Client/src/lib/dispatcher.ts), [.claude/skills/protocol-change/SKILL.md](.claude/skills/protocol-change/SKILL.md), [Server/CLAUDE.md](Server/CLAUDE.md)
+- [docs/api.md](../api.md), [docs/protocol.md](../protocol.md), [docs/architecture/websocket.md](../architecture/websocket.md), [docs/mcp-introspect.md](../mcp-introspect.md)
+- [protocol/schema.json](../../protocol/schema.json), [Server/api/router.go](../../Server/api/router.go), [Server/api/auth_posture_test.go](../../Server/api/auth_posture_test.go), [Server/api/middleware.go](../../Server/api/middleware.go), [Server/api/auth_handler.go](../../Server/api/auth_handler.go), [Server/api/constants.go](../../Server/api/constants.go)
+- [Server/admin/api.go](../../Server/admin/api.go), [Server/admin/middleware.go](../../Server/admin/middleware.go), [Server/permissions/permissions.go](../../Server/permissions/permissions.go)
+- [Server/ws/serve_auth.go](../../Server/ws/serve_auth.go), [Server/ws/hub.go](../../Server/ws/hub.go), [Server/ws/hub_broadcast.go](../../Server/ws/hub_broadcast.go), [Server/ws/emit.go](../../Server/ws/emit.go), [Server/ws/client.go](../../Server/ws/client.go), [Server/ws/messages.go](../../Server/ws/messages.go), [Server/ws/command.go](../../Server/ws/command.go)
+- [Client/src/lib/types.ts](../../Client/src/lib/types.ts), [Client/src/lib/dispatcher.ts](../../Client/src/lib/dispatcher.ts), [.claude/skills/protocol-change/SKILL.md](../../.claude/skills/protocol-change/SKILL.md), [Server/CLAUDE.md](../../Server/CLAUDE.md)

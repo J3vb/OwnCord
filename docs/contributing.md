@@ -426,7 +426,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
 4. **Update user-facing status text if it changed.** If the release changes
    what platforms are published or the project stage, update the platform
    table in `docs/quick-start.md` and the status wording in the README badge
-   and text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md` and `PRD.md`. The
+   and text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md` and `docs/summaries/product.md`. The
    hobby-project disclaimer stays.
 
 5. **Open the release PR from `dev` into `main`.** Every CI job runs on a PR
@@ -634,7 +634,7 @@ lanes, see [testing-behavior.md](testing-behavior.md).
 ## Code Style
 
 The full rules, and the tool that enforces each one, are in
-[CODE_STYLE.md](../CODE_STYLE.md). In short:
+[code-style.md](code-style.md). In short:
 
 - **TypeScript:** Prettier, ESLint, oxlint and knip. Layout:
   [Client Architecture](architecture/client.md).

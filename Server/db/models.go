@@ -257,7 +257,7 @@ type UserPublic struct {
 	Avatar   *string `json:"avatar,omitempty"`
 }
 
-// MessageAPIResponse matches the API.md shape for GET /channels/{id}/messages.
+// MessageAPIResponse matches the docs/api.md shape for GET /channels/{id}/messages.
 type MessageAPIResponse struct {
 	ID          int64            `json:"id"`
 	ChannelID   int64            `json:"channel_id"`

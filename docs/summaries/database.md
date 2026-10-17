@@ -57,7 +57,7 @@ A second, separate SQLite file, `data/erasure/markers.sqlite`, holds deletion ma
 
 ## Schema overview
 
-The generated table index in [docs/schema.md](docs/schema.md) lists every table (57 at this commit, including `sqlite_sequence` and the FTS5 shadow tables behind `messages_fts`). It is a generated block owned by `cmd/gendocs`, so it is not copied here; read `docs/schema.md` for exact columns and indexes. Grouped by domain:
+The generated table index in [docs/schema.md](../schema.md) lists every table (57 at this commit, including `sqlite_sequence` and the FTS5 shadow tables behind `messages_fts`). It is a generated block owned by `cmd/gendocs`, so it is not copied here; read `docs/schema.md` for exact columns and indexes. Grouped by domain:
 
 | Domain               | Representative tables                                                                                                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -74,7 +74,7 @@ The generated table index in [docs/schema.md](docs/schema.md) lists every table 
 | Push notifications   | `push_subscriptions`                                                                                                                                                                | One row per user/endpoint.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Ops / misc           | `settings`, `audit_log`, `schema_versions`, `member_generation`                                                                                                                     | `settings` is a generic KV store; `audit_log` records actor/target actions; `schema_versions` tracks applied migrations; `member_generation` is a one-row counter that triggers on `users` and `roles` bump whenever the member list could change, so the ready path can share one member-list read across a reconnect herd.                                                                                                                                                                                 |
 
-The deletion-marker file (`data/erasure/markers.sqlite`) holds its own small schema: `deletion_markers`, `sequence_floors`, `floor_probes`, `marker_meta`. See [docs/schema.md](docs/schema.md#the-deletion-marker-file-dataerasuremarkerssqlite) for the DDL and semantics.
+The deletion-marker file (`data/erasure/markers.sqlite`) holds its own small schema: `deletion_markers`, `sequence_floors`, `floor_probes`, `marker_meta`. See [docs/schema.md](../schema.md#the-deletion-marker-file-dataerasuremarkerssqlite) for the DDL and semantics.
 
 ## Migrations and rollback
 
@@ -104,7 +104,7 @@ Run the commands from `Server/`. `npm run generate` from the repo root runs step
 
 ## Data lifecycle and retention
 
-Destructive and retention operations are documented in detail in [docs/architecture/data-lifecycle.md](docs/architecture/data-lifecycle.md). The main paths:
+Destructive and retention operations are documented in detail in [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md). The main paths:
 
 - **Account erasure** (`DELETE /api/v1/auth/account`, `DELETE /admin/api/users/{id}`) runs `db.EraseAccount` in one writer transaction. It hard-deletes the subject's rows across sessions, tokens, messages, mentions, reactions, DM state and more (children before parents), reassigns server-wide `emoji` ownership, and writes an `erasure_jobs` row journaling the uploaded files still to remove after commit. A **deletion marker** is recorded in the separate `data/erasure/markers.sqlite` file, so restoring an older backup re-erases the account on the next server open: the marker file survives a database restore precisely because it is a different file.
 - **Message deletion** is a soft delete (`messages.deleted = 1`), and so is a moderation purge (`PurgeChannelMessages`); the row and content stay. Messages are hard-deleted only by the author's account erasure, the retention sweep, or deleting their channel (`messages.channel_id … ON DELETE CASCADE`).
@@ -113,7 +113,7 @@ Destructive and retention operations are documented in detail in [docs/architect
 
 ## File and upload storage, quotas
 
-Configuration keys, from [docs/server-configuration.md](docs/server-configuration.md):
+Configuration keys, from [docs/server-configuration.md](../server-configuration.md):
 
 | Key                    | Default         | Purpose                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -125,7 +125,7 @@ Attachments use UUID primary keys (`attachments.id`). The row and the file on di
 
 ## Backups and restore
 
-From [docs/deployment.md](docs/deployment.md), [docs/server-configuration.md](docs/server-configuration.md) and [docs/architecture/data-lifecycle.md](docs/architecture/data-lifecycle.md):
+From [docs/deployment.md](../deployment.md), [docs/server-configuration.md](../server-configuration.md) and [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md):
 
 - **Backup directory:** `backup.dir`, default `data/backups`. Point it at another disk or an off-host mount so backups are not a single point of failure with the live database.
 - **Taking a backup** (`POST /admin/api/backup`, Owner-only, or the scheduled job) runs SQLite's `VACUUM INTO` on a reader connection (writes keep serving) into a `.tmp` file renamed into place only once complete, so a killed backup never leaves a restorable-looking `.db`; new backups are owner-only (`0600`). It then runs `integrity_check` on the result and removes it on failure.
@@ -137,8 +137,8 @@ From [docs/deployment.md](docs/deployment.md), [docs/server-configuration.md](do
 
 ## Sources
 
-- [docs/schema.md](docs/schema.md), [docs/architecture/data-model.md](docs/architecture/data-model.md), [docs/architecture/data-lifecycle.md](docs/architecture/data-lifecycle.md), [docs/server-configuration.md](docs/server-configuration.md), [docs/deployment.md](docs/deployment.md)
-- [Server/db/db.go](Server/db/db.go), [Server/db/migrate.go](Server/db/migrate.go), [Server/db/erasure.go](Server/db/erasure.go), [Server/db/inventory.go](Server/db/inventory.go), [Server/db/markers.go](Server/db/markers.go), [Server/db/retention.go](Server/db/retention.go), [Server/db/message_queries.go](Server/db/message_queries.go)
-- [Server/sqlc.yaml](Server/sqlc.yaml), [Server/rollback/rollback.go](Server/rollback/rollback.go), [Server/rollback/README.md](Server/rollback/README.md), [Server/permissions/permissions.go](Server/permissions/permissions.go), [scripts/check-migrations.mjs](scripts/check-migrations.mjs)
-- [Server/admin/api.go](Server/admin/api.go), [Server/admin/backup_maintenance.go](Server/admin/backup_maintenance.go), [Server/admin/handlers_backup.go](Server/admin/handlers_backup.go), [Server/storage/storage.go](Server/storage/storage.go)
-- [Server/CLAUDE.md](Server/CLAUDE.md), [.claude/skills/db-change/SKILL.md](.claude/skills/db-change/SKILL.md), [.claude/rules/db-change.md](.claude/rules/db-change.md)
+- [docs/schema.md](../schema.md), [docs/architecture/data-model.md](../architecture/data-model.md), [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md), [docs/server-configuration.md](../server-configuration.md), [docs/deployment.md](../deployment.md)
+- [Server/db/db.go](../../Server/db/db.go), [Server/db/migrate.go](../../Server/db/migrate.go), [Server/db/erasure.go](../../Server/db/erasure.go), [Server/db/inventory.go](../../Server/db/inventory.go), [Server/db/markers.go](../../Server/db/markers.go), [Server/db/retention.go](../../Server/db/retention.go), [Server/db/message_queries.go](../../Server/db/message_queries.go)
+- [Server/sqlc.yaml](../../Server/sqlc.yaml), [Server/rollback/rollback.go](../../Server/rollback/rollback.go), [Server/rollback/README.md](../../Server/rollback/README.md), [Server/permissions/permissions.go](../../Server/permissions/permissions.go), [scripts/check-migrations.mjs](../../scripts/check-migrations.mjs)
+- [Server/admin/api.go](../../Server/admin/api.go), [Server/admin/backup_maintenance.go](../../Server/admin/backup_maintenance.go), [Server/admin/handlers_backup.go](../../Server/admin/handlers_backup.go), [Server/storage/storage.go](../../Server/storage/storage.go)
+- [Server/CLAUDE.md](../../Server/CLAUDE.md), [.claude/skills/db-change/SKILL.md](../../.claude/skills/db-change/SKILL.md), [.claude/rules/db-change.md](../../.claude/rules/db-change.md)

@@ -515,7 +515,7 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
-// GetMessagesForAPI returns messages in the API.md response shape, including
+// GetMessagesForAPI returns messages in the docs/api.md response shape, including
 // user object, reactions (with me flag), and attachments.
 func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var (
