@@ -11,6 +11,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
@@ -59,6 +60,12 @@ export interface DmProfileSidebarOptions {
    * exactly (including any note already saved under the old key).
    */
   readonly host?: string;
+  /**
+   * Move focus to the panel on mount. True (the default) when the user opened
+   * it; false when it opened by itself with the conversation, so it never takes
+   * focus from the composer or whatever the user was typing in.
+   */
+  readonly focus?: boolean;
 }
 
 export type DmProfileSidebarComponent = MountableComponent & {
@@ -158,7 +165,14 @@ export function createDmProfileSidebar(
   // -- see the `update()` doc comment on DmProfileSidebarComponent for why
   // these are repainted in place instead of the whole panel being rebuilt.
   let nameNode: HTMLDivElement | null = null;
+  let contentNode: HTMLDivElement | null = null;
+  let contentOwner: Disposable | null = null;
   let avatarLetterNode: HTMLSpanElement | null = null;
+  let avatarWrapperNode: HTMLDivElement | null = null;
+  // The avatar value the face was last painted from, and a counter that drops a
+  // stale fetch when a newer paint has started.
+  let avatarSource: string | null | undefined;
+  let avatarGen = 0;
   let statusDotNode: HTMLDivElement | null = null;
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
@@ -167,27 +181,33 @@ export function createDmProfileSidebar(
     return open;
   }
 
-  function buildAvatar(): HTMLDivElement {
-    const wrapper = createElement("div", {
-      class: "dps-avatar",
-      "data-testid": "dps-avatar",
-    });
-    // The letter draws immediately; the picture (if any) is fetched through
-    // the same cert-pinned, bearer-token path attachments use and swapped in
-    // once the bytes arrive. `<img src>` cannot carry the auth header an
-    // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
-    const initial = avatarInitial(user);
-    const letter = createElement("span", {}, initial);
+  /**
+   * Draw the avatar face (letter, then the fetched picture) at the front of
+   * `wrapper`, replacing whatever face it held. The letter draws immediately;
+   * the picture (if any) is fetched through the same cert-pinned, bearer-token
+   * path attachments use and swapped in once the bytes arrive. `<img src>`
+   * cannot carry the auth header an `/api/v1/files/{id}` avatar needs, so the
+   * URL is never assigned raw. A fetch that resolves after the avatar changed
+   * again is dropped (`avatarGen`).
+   */
+  function paintAvatarFace(wrapper: HTMLDivElement): void {
+    const gen = ++avatarGen;
+    avatarSource = user.avatar;
+    wrapper.querySelector(":scope > img.dps-avatar-img")?.remove();
+    avatarLetterNode?.remove();
+    wrapper.style.background = "";
+    const letter = createElement("span", {}, avatarInitial(user));
     avatarLetterNode = letter;
-    wrapper.appendChild(letter);
+    wrapper.insertBefore(letter, wrapper.firstChild);
 
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
+      const name = resolveDisplayName(user);
       void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-        if (objectUrl === null || !wrapper.isConnected) return;
+        if (objectUrl === null || !wrapper.isConnected || gen !== avatarGen) return;
         const img = createElement("img", {
           src: objectUrl,
-          alt: resolveDisplayName(user),
+          alt: name,
           class: "dps-avatar-img",
         });
         recoverEvictedImage(img, { url: resolved });
@@ -196,6 +216,15 @@ export function createDmProfileSidebar(
         wrapper.insertBefore(img, wrapper.firstChild);
       });
     }
+  }
+
+  function buildAvatar(): HTMLDivElement {
+    const wrapper = createElement("div", {
+      class: "dps-avatar",
+      "data-testid": "dps-avatar",
+    });
+    avatarWrapperNode = wrapper;
+    paintAvatarFace(wrapper);
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
@@ -207,40 +236,11 @@ export function createDmProfileSidebar(
     return wrapper;
   }
 
-  function mount(container: Element): void {
-    open = true;
-
-    panel = createElement("div", {
-      class: "dm-profile-sidebar",
-      role: "complementary",
-      "aria-label": requestsText("profile.label"),
-      tabindex: "-1",
-      "data-testid": "dm-profile-sidebar",
-    });
-
-    // Slide-in animation: start offscreen then animate. Width and the
-    // transition duration are static (see .dm-profile-sidebar in app.css);
-    // the margin itself is the one genuinely animated value, kept in sync
-    // with the CSS width via the same SIDEBAR_WIDTH constant.
-    panel.style.marginRight = `-${SIDEBAR_WIDTH}px`;
-
-    // --- Close button ---
-    const closeBtn = createElement("button", {
-      class: "dps-close",
-      "aria-label": requestsText("profile.close"),
-      "data-testid": "dps-close",
-    });
-    closeBtn.textContent = "\u2715";
-    closeBtn.addEventListener(
-      "click",
-      () => {
-        onClose();
-      },
-      { signal },
-    );
-    panel.appendChild(closeBtn);
-
-    // --- Scrollable content ---
+  /** The scrollable body for the current `user`. Its listeners die with `contentOwner`. */
+  function buildContent(): HTMLDivElement {
+    contentOwner?.destroy();
+    contentOwner = new Disposable();
+    const contentSignal = contentOwner.signal;
     const content = createElement("div", { class: "dps-content" });
 
     // Avatar
@@ -327,7 +327,7 @@ export function createDmProfileSidebar(
       () => {
         saveNote(user.id, host, noteInput.value);
       },
-      { signal },
+      { signal: contentSignal },
     );
 
     appendChildren(content, noteTitle, noteInput);
@@ -353,14 +353,51 @@ export function createDmProfileSidebar(
       blockBtn.addEventListener(
         "click",
         () => onToggleBlock(user.id, !blocksStore.getState().blockedByMe.has(user.id)),
-        { signal },
+        { signal: contentSignal },
       );
       const unsub = blocksStore.subscribe(paint);
-      signal.addEventListener("abort", unsub, { once: true });
+      contentSignal.addEventListener("abort", unsub, { once: true });
       content.append(makeDivider(), blockBtn);
     }
 
-    panel.appendChild(content);
+    return content;
+  }
+
+  function mount(container: Element): void {
+    open = true;
+
+    panel = createElement("div", {
+      class: "dm-profile-sidebar",
+      role: "complementary",
+      "aria-label": requestsText("profile.label"),
+      tabindex: "-1",
+      "data-testid": "dm-profile-sidebar",
+    });
+
+    // Slide-in animation: start offscreen then animate. Width and the
+    // transition duration are static (see .dm-profile-sidebar in app.css);
+    // the margin itself is the one genuinely animated value, kept in sync
+    // with the CSS width via the same SIDEBAR_WIDTH constant.
+    panel.style.marginRight = `-${SIDEBAR_WIDTH}px`;
+
+    // --- Close button ---
+    const closeBtn = createElement("button", {
+      class: "dps-close",
+      "aria-label": requestsText("profile.close"),
+      "data-testid": "dps-close",
+    });
+    closeBtn.textContent = "\u2715";
+    closeBtn.addEventListener(
+      "click",
+      () => {
+        onClose();
+      },
+      { signal },
+    );
+    panel.appendChild(closeBtn);
+
+    contentNode = buildContent();
+    panel.appendChild(contentNode);
     container.appendChild(panel);
 
     // Trigger slide-in animation
@@ -370,17 +407,32 @@ export function createDmProfileSidebar(
       }
     });
 
-    // Focus panel for a11y
-    panel.focus();
+    // Focus panel for a11y, when the user asked for it
+    if (options.focus !== false) panel.focus();
 
-    // Close on Escape
+    // Close on Escape, only for a key meant for the panel. A dialog on top, or
+    // a field that already used the key (preventDefault), owns it; and with
+    // focus outside the panel (the composer, say) Escape is not this panel's.
+    // What was open is read in the capture phase, before any listener closes
+    // it, so the decision does not depend on listener order.
+    let escapeTaken = false;
+    window.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape") escapeTaken = dialogOpen();
+      },
+      { capture: true, signal },
+    );
+    // The bubble listener sits on `document`, ahead of the window-level global
+    // Escape (mark channel read), which skips a key already handled here.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && open) {
-          e.preventDefault();
-          onClose();
-        }
+        if (e.key !== "Escape" || !open) return;
+        if (escapeTaken || e.defaultPrevented) return;
+        if (panel === null || !panel.contains(document.activeElement)) return;
+        e.preventDefault();
+        onClose();
       },
       { signal },
     );
@@ -395,16 +447,34 @@ export function createDmProfileSidebar(
     }
     nameNode = null;
     avatarLetterNode = null;
+    avatarWrapperNode = null;
+    contentNode = null;
+    contentOwner?.destroy();
+    contentOwner = null;
+    avatarGen++;
     statusDotNode = null;
     statusDotInlineNode = null;
     statusTextNode = null;
   }
 
   function update(nextUser: DmProfileData): void {
+    const identityChanged = nextUser.id !== user.id;
     user = nextUser;
     // Not mounted (or already torn down) -- nothing to repaint. mount() will
     // paint the fresh `user` from scratch if it is called afterwards.
     if (panel === null) return;
+
+    // A different person (a DM-to-DM switch): swap the body -- avatar, about,
+    // join date, this person's note, Block -- but keep the panel element, so
+    // it does not slide in again and an outside focus is left alone.
+    if (identityChanged && contentNode !== null) {
+      const hadFocus = contentNode.contains(document.activeElement);
+      const next = buildContent();
+      contentNode.replaceWith(next);
+      contentNode = next;
+      if (hadFocus) panel.focus();
+      return;
+    }
 
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
 
@@ -420,11 +490,12 @@ export function createDmProfileSidebar(
     }
     if (statusTextNode !== null) setText(statusTextNode, label);
 
-    // Only repaint the fallback letter if it is still showing -- once the
-    // fetched avatar image swaps in, buildAvatar() removes the letter node
-    // from the DOM (see above), and a stale identity's initial no longer
-    // matters (or exists) to update.
-    if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
+    // A changed avatar swaps the face (letter or picture); an unchanged one
+    // only refreshes the fallback letter, if it is still showing, since the
+    // name it comes from may have changed.
+    if (avatarWrapperNode !== null && user.avatar !== avatarSource) {
+      paintAvatarFace(avatarWrapperNode);
+    } else if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
       setText(avatarLetterNode, avatarInitial(user));
     }
   }

@@ -503,4 +503,108 @@ describe("DmProfileSidebar", () => {
       sidebar.destroy?.();
     });
   });
+
+  describe("avatar repaint and modal-aware Escape (WP 3B-3)", () => {
+    it("swaps the picture for the new one when update() changes the avatar", async () => {
+      fetchImageAsObjectUrl.mockImplementation((url: string) =>
+        Promise.resolve(`data:image/png;base64,${url.endsWith("a.png") ? "AAA" : "BBB"}`),
+      );
+      const sidebar = createDmProfileSidebar(
+        makeOptions({ user: makeUser({ avatar: "https://example.com/a.png" }) }),
+      );
+      sidebar.mount(container);
+      const face = () => container.querySelector<HTMLImageElement>(".dps-avatar-img");
+      await vi.waitFor(() => expect(face()?.src).toBe("data:image/png;base64,AAA"));
+
+      sidebar.update(makeUser({ avatar: "https://example.com/b.png" }));
+      await vi.waitFor(() => expect(face()?.src).toBe("data:image/png;base64,BBB"));
+      expect(container.querySelectorAll(".dps-avatar-img")).toHaveLength(1);
+      sidebar.destroy?.();
+    });
+
+    it("falls back to the letter when the avatar is removed, and drops a stale fetch", async () => {
+      let resolveOld: (url: string) => void = () => {};
+      fetchImageAsObjectUrl.mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveOld = resolve;
+        }),
+      );
+      const sidebar = createDmProfileSidebar(
+        makeOptions({ user: makeUser({ avatar: "https://example.com/a.png" }) }),
+      );
+      sidebar.mount(container);
+
+      sidebar.update(makeUser({ avatar: null }));
+      resolveOld("data:image/png;base64,OLD");
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const avatarEl = container.querySelector('[data-testid="dps-avatar"]') as HTMLDivElement;
+      expect(avatarEl.querySelector("img")).toBeNull();
+      expect(avatarEl.textContent).toContain("A");
+      sidebar.destroy?.();
+    });
+
+    it("update() for a different person keeps the panel node and swaps their note, about and Block target", () => {
+      localStorage.setItem("owncord:dm-note:2", "bob's note");
+      const onToggleBlock = vi.fn();
+      const sidebar = createDmProfileSidebar(makeOptions({ onToggleBlock }));
+      sidebar.mount(container);
+      const panel = container.querySelector('[data-testid="dm-profile-sidebar"]');
+
+      sidebar.update(makeUser({ id: 2, username: "Bob", about: "Bob about" }));
+
+      expect(container.querySelector('[data-testid="dm-profile-sidebar"]')).toBe(panel);
+      expect(container.querySelector('[data-testid="dps-username"]')?.textContent).toBe("Bob");
+      expect(container.querySelector('[data-testid="dps-about"]')?.textContent).toBe("Bob about");
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="dps-note"]')?.value).toBe(
+        "bob's note",
+      );
+      container.querySelector<HTMLElement>('[data-testid="dps-block-btn"]')?.click();
+      expect(onToggleBlock).toHaveBeenCalledExactlyOnceWith(2, true);
+      sidebar.destroy?.();
+      localStorage.removeItem("owncord:dm-note:2");
+    });
+
+    it("update() for a different person moves focus from a swapped control to the panel", () => {
+      const sidebar = createDmProfileSidebar(makeOptions({ onToggleBlock: vi.fn() }));
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-testid="dps-block-btn"]')?.focus();
+
+      sidebar.update(makeUser({ id: 2, username: "Bob" }));
+
+      expect(document.activeElement).toBe(
+        container.querySelector('[data-testid="dm-profile-sidebar"]'),
+      );
+      sidebar.destroy?.();
+    });
+
+    it("does not take focus when mounted with focus: false", () => {
+      const other = document.createElement("textarea");
+      document.body.appendChild(other);
+      other.focus();
+      const sidebar = createDmProfileSidebar(makeOptions({ focus: false }));
+      sidebar.mount(container);
+      expect(document.activeElement).toBe(other);
+      sidebar.destroy?.();
+      other.remove();
+    });
+
+    it("leaves Escape to an open confirm: the panel stays, then closes once the confirm is gone", () => {
+      const onClose = vi.fn();
+      const sidebar = createDmProfileSidebar(makeOptions({ onClose }));
+      sidebar.mount(container);
+      const confirm = document.createElement("div");
+      confirm.className = "modal-overlay";
+      document.body.appendChild(confirm);
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).not.toHaveBeenCalled();
+
+      confirm.remove();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      sidebar.destroy?.();
+    });
+  });
 });

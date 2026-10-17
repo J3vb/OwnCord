@@ -18,8 +18,8 @@ import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatti
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
+import type { ModalInstance } from "@lib/modalFactory";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "./message-list/avatar";
 import {
@@ -29,10 +29,7 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
-import { shellText } from "../i18n/shell";
-import { blocksStore } from "@stores/blocks.store";
-import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
-import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
+import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -186,70 +183,22 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   return avatar;
 }
 
-/**
- * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
- * first and focused, Escape and the backdrop cancel, focus returns to the
- * opener. Tied to the sidebar's lifetime, not the row's: a row is rebuilt on
- * every new message or call change, and that must not dismiss the prompt. The
- * sidebar closes it instead when the row leaves the list.
- */
-function openLeaveConfirm(
-  convo: DmConversation,
-  onClose: (channelId: number) => void,
-  sidebarSignal: AbortSignal,
-): ModalInstance {
-  const owner = new Disposable();
-  const titleId = `dm-leave-title-${convo.channelId}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, requestsText("dm.leaveConfirmTitle")));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(
-    createElement(
-      "p",
-      { class: "modal-danger-text" },
-      requestsText("dm.leaveConfirmBody", { name: convo.username }),
-    ),
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "dm-leave-cancel" },
-    shellText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "dm-leave-confirm" },
-    requestsText("dm.leaveConfirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "dm-leave-modal" },
-    signal: sidebarSignal,
-    // The modal owns its own listeners; drop this prompt's with it.
-    onClose: () => owner.destroy(),
-  });
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  confirm.addEventListener(
-    "click",
-    () => {
-      modal.close();
-      onClose(convo.channelId);
-    },
-    { signal: owner.signal },
-  );
-  return modal;
+function menuConvo(convo: DmConversation): DmMenuConvo {
+  return {
+    channelId: convo.channelId,
+    userId: convo.userId,
+    username: convo.username,
+    isGroup: convo.isGroup === true,
+    unread: convo.unread,
+    muted: convo.muted === true,
+  };
 }
 
 function renderDmItem(
   convo: DmConversation,
   options: DmSidebarOptions,
   signal: AbortSignal,
-  confirmLeave: (convo: DmConversation, onClose: (channelId: number) => void) => void,
+  confirmLeave: (convo: DmMenuConvo, onClose: (channelId: number) => void) => void,
 ): HTMLDivElement {
   const item = createElement("div", {
     class: "dm-item",
@@ -327,7 +276,7 @@ function renderDmItem(
       // the prompt, as Discord's delete confirm does. A 1:1 close is only a
       // hide, so it stays one click.
       if (convo.isGroup === true && !(e instanceof MouseEvent && e.shiftKey)) {
-        confirmLeave(convo, close);
+        confirmLeave(menuConvo(convo), close);
         return;
       }
       close(convo.channelId);
@@ -387,89 +336,13 @@ function renderDmItem(
   );
 
   const openDmMenu = (x: number, y: number): void => {
-    const items = [];
-    const isGroup = convo.isGroup === true;
-    const id = convo.channelId;
-    if (convo.unread && options.onMarkRead !== undefined) {
-      const markRead = options.onMarkRead;
-      items.push({
-        label: requestsText("dm.markRead"),
-        testId: `dm-mark-read-${id}`,
-        onClick: () => markRead(id),
-      });
-    }
-    if (!isGroup && options.onOpenProfile !== undefined) {
-      const openProfile = options.onOpenProfile;
-      items.push({
-        label: requestsText("dm.profile"),
-        testId: `dm-profile-${id}`,
-        onClick: () => openProfile(id),
-      });
-    }
-    // Someone you blocked (or who blocked you) cannot be called, and nothing
-    // can be dialled while the socket is down: show Call greyed with why.
-    const blockedByMe = blocksStore.getState().blockedByMe.has(convo.userId);
-    if (!isGroup && options.onCall !== undefined) {
-      const call = options.onCall;
-      const reason = callUnavailableReason(convo.userId);
-      items.push({
-        label: requestsText("dm.call"),
-        testId: `dm-call-${id}`,
-        ...(reason === undefined ? {} : { disabled: true, title: reason }),
-        onClick: () => call(id),
-      });
-    }
-    if (options.onToggleMute !== undefined) {
-      const toggle = options.onToggleMute;
-      items.push({
-        label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
-        testId: `dm-mute-${convo.channelId}`,
-        onClick: () => toggle(convo.channelId),
-      });
-    }
-    if (convo.isGroup === true && options.onRenameGroup !== undefined) {
-      const rename = options.onRenameGroup;
-      items.push({
-        label: requestsText("dm.renameGroup"),
-        testId: `dm-rename-${convo.channelId}`,
-        onClick: () => rename(convo.channelId),
-      });
-    }
-    if (!isGroup && options.onToggleBlock !== undefined) {
-      const toggleBlock = options.onToggleBlock;
-      items.push({
-        label: shellText(blockedByMe ? "member.unblock" : "member.block"),
-        danger: !blockedByMe,
-        testId: `dm-block-${id}`,
-        onClick: () => toggleBlock(convo.userId, convo.username, !blockedByMe),
-      });
-    }
-    if (!isGroup && isDeveloperMode()) {
-      items.push({
-        label: shellText("member.copyId"),
-        testId: `dm-copy-id-${id}`,
-        onClick: () =>
-          copyWithToast(String(convo.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
-      });
-    }
-    if (options.onCloseDm !== undefined) {
-      const close = options.onCloseDm;
-      items.push({
-        label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
-        danger: true,
-        testId: `dm-close-${convo.channelId}`,
-        // The menu item has no Shift modifier, so a group always confirms here
-        // too — the destructive action is destructive whichever path opens it.
-        onClick: () => (isGroup ? confirmLeave(convo, close) : close(convo.channelId)),
-      });
-    }
-    if (items.length === 0) return;
-    showContextMenu({
+    openDmContextMenu({
+      convo: menuConvo(convo),
+      actions: options,
+      confirmLeave,
       x,
       y,
-      items,
       signal,
-      className: "dm-context-menu",
     });
   };
   item.addEventListener(
@@ -536,6 +409,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let list: HTMLDivElement | null = null;
+  let emptyState: HTMLDivElement | null = null;
   let searchInput: HTMLInputElement | null = null;
   // The sorted list the current filter runs over, kept in sync with the DOM.
   let rendered: readonly DmConversation[] = [];
@@ -545,7 +419,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   const rowOwners = new Map<Element, Disposable>();
   let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
 
-  function confirmLeave(convo: DmConversation, onClose: (channelId: number) => void): void {
+  function confirmLeave(convo: DmMenuConvo, onClose: (channelId: number) => void): void {
     leavePrompt = {
       channelId: convo.channelId,
       modal: openLeaveConfirm(convo, onClose, disposable.signal),
@@ -588,6 +462,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       leavePrompt = null;
     }
     applyFilter();
+    if (emptyState !== null) emptyState.hidden = rendered.length > 0;
   }
 
   function mount(container: Element): void {
@@ -679,7 +554,25 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       { signal: disposable.signal },
     );
 
-    appendChildren(root, header, sectionLabel, list);
+    // Nothing to list: say so, with the way to start (Discord's DM list does).
+    emptyState = createElement("div", {
+      class: "dm-empty",
+      "data-testid": "dm-empty-state",
+    });
+    emptyState.hidden = true;
+    const startBtn = createElement(
+      "button",
+      { type: "button", class: "dm-empty-start", "data-testid": "dm-empty-start" },
+      requestsText("dm.emptyStart"),
+    );
+    startBtn.addEventListener("click", () => options.onNewDm(), { signal: disposable.signal });
+    appendChildren(
+      emptyState,
+      createElement("p", { class: "dm-empty-text" }, requestsText("dm.empty")),
+      startBtn,
+    );
+
+    appendChildren(root, header, sectionLabel, list, emptyState);
     container.appendChild(root);
 
     update(options.conversations);
@@ -694,6 +587,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       root = null;
     }
     list = null;
+    emptyState = null;
     searchInput = null;
     rendered = [];
   }

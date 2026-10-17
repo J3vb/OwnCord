@@ -1,0 +1,201 @@
+/**
+ * The DM row context menu, shared by the full DM list (DmSidebar) and the
+ * compact preview above the channels (SidebarDmSection) so the two never drift.
+ * Also owns the destructive group-leave confirm both menus open.
+ */
+
+import { Disposable } from "@lib/disposable";
+import { createElement } from "@lib/dom";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
+import { requestsText } from "../i18n/requests";
+import { shellText } from "../i18n/shell";
+import { blocksStore } from "@stores/blocks.store";
+import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
+import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
+
+/** What a DM row's menu needs to know about its conversation. */
+export interface DmMenuConvo {
+  readonly channelId: number;
+  /** The other party of a 1:1 DM; for a group, the first participant. */
+  readonly userId: number;
+  readonly username: string;
+  readonly isGroup: boolean;
+  readonly unread: boolean;
+  readonly muted: boolean;
+}
+
+/** The actions a menu can offer. An item whose callback is absent is omitted. */
+export interface DmMenuActions {
+  /** Close a 1:1 DM / leave a group. */
+  readonly onCloseDm?: (channelId: number) => void;
+  readonly onToggleMute?: (channelId: number) => void;
+  /** Offered only while the conversation is unread. */
+  readonly onMarkRead?: (channelId: number) => void;
+  /** 1:1 only: open this person's profile panel. */
+  readonly onOpenProfile?: (channelId: number) => void;
+  /** 1:1 only: start a call in this DM. */
+  readonly onCall?: (channelId: number) => void;
+  /** 1:1 only: Block (`block` true) or Unblock the other person. */
+  readonly onToggleBlock?: (userId: number, username: string, block: boolean) => void;
+  readonly onRenameGroup?: (channelId: number) => void;
+}
+
+export type DmConfirmLeave = (convo: DmMenuConvo, onClose: (channelId: number) => void) => void;
+
+/**
+ * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
+ * first and focused, Escape and the backdrop cancel, focus returns to the
+ * opener. Tied to the sidebar's lifetime, not the row's: a row is rebuilt on
+ * every new message or call change, and that must not dismiss the prompt. The
+ * sidebar closes it instead when the row leaves the list.
+ */
+export function openLeaveConfirm(
+  convo: DmMenuConvo,
+  onClose: (channelId: number) => void,
+  sidebarSignal: AbortSignal,
+): ModalInstance {
+  const owner = new Disposable();
+  const titleId = `dm-leave-title-${convo.channelId}`;
+  const content = createElement("div");
+  const header = createElement("div", { class: "modal-header" });
+  header.appendChild(createElement("h3", { id: titleId }, requestsText("dm.leaveConfirmTitle")));
+  const body = createElement("div", { class: "modal-body" });
+  body.appendChild(
+    createElement(
+      "p",
+      { class: "modal-danger-text" },
+      requestsText("dm.leaveConfirmBody", { name: convo.username }),
+    ),
+  );
+  const footer = createElement("div", { class: "modal-footer" });
+  const cancel = createElement(
+    "button",
+    { class: "btn-modal-cancel", type: "button", "data-testid": "dm-leave-cancel" },
+    shellText("common.cancel"),
+  );
+  const confirm = createElement(
+    "button",
+    { class: "btn-danger", type: "button", "data-testid": "dm-leave-confirm" },
+    requestsText("dm.leaveConfirm"),
+  );
+  footer.append(cancel, confirm);
+  content.append(header, body, footer);
+
+  const modal = createModal({
+    content,
+    ariaLabelledBy: titleId,
+    overlayAttrs: { "data-testid": "dm-leave-modal" },
+    signal: sidebarSignal,
+    // The modal owns its own listeners; drop this prompt's with it.
+    onClose: () => owner.destroy(),
+  });
+  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
+  confirm.addEventListener(
+    "click",
+    () => {
+      modal.close();
+      onClose(convo.channelId);
+    },
+    { signal: owner.signal },
+  );
+  return modal;
+}
+
+export interface DmContextMenuRequest {
+  readonly convo: DmMenuConvo;
+  readonly actions: DmMenuActions;
+  readonly confirmLeave: DmConfirmLeave;
+  readonly x: number;
+  readonly y: number;
+  readonly signal: AbortSignal;
+}
+
+/** Open the menu for one DM row at (x, y). Opens nothing when it would be empty. */
+export function openDmContextMenu(req: DmContextMenuRequest): void {
+  const { convo, actions, confirmLeave, signal } = req;
+  const items: ContextMenuItem[] = [];
+  const isGroup = convo.isGroup;
+  const id = convo.channelId;
+  if (convo.unread && actions.onMarkRead !== undefined) {
+    const markRead = actions.onMarkRead;
+    items.push({
+      label: requestsText("dm.markRead"),
+      testId: `dm-mark-read-${id}`,
+      onClick: () => markRead(id),
+    });
+  }
+  if (!isGroup && actions.onOpenProfile !== undefined) {
+    const openProfile = actions.onOpenProfile;
+    items.push({
+      label: requestsText("dm.profile"),
+      testId: `dm-profile-${id}`,
+      onClick: () => openProfile(id),
+    });
+  }
+  // Someone you blocked (or who blocked you) cannot be called, and nothing
+  // can be dialled while the socket is down: show Call greyed with why.
+  const blockedByMe = blocksStore.getState().blockedByMe.has(convo.userId);
+  if (!isGroup && actions.onCall !== undefined) {
+    const call = actions.onCall;
+    const reason = callUnavailableReason(convo.userId);
+    items.push({
+      label: requestsText("dm.call"),
+      testId: `dm-call-${id}`,
+      ...(reason === undefined ? {} : { disabled: true, title: reason }),
+      onClick: () => call(id),
+    });
+  }
+  if (actions.onToggleMute !== undefined) {
+    const toggle = actions.onToggleMute;
+    items.push({
+      label: convo.muted ? requestsText("dm.unmute") : requestsText("dm.mute"),
+      testId: `dm-mute-${id}`,
+      onClick: () => toggle(id),
+    });
+  }
+  if (isGroup && actions.onRenameGroup !== undefined) {
+    const rename = actions.onRenameGroup;
+    items.push({
+      label: requestsText("dm.renameGroup"),
+      testId: `dm-rename-${id}`,
+      onClick: () => rename(id),
+    });
+  }
+  if (!isGroup && actions.onToggleBlock !== undefined) {
+    const toggleBlock = actions.onToggleBlock;
+    items.push({
+      label: shellText(blockedByMe ? "member.unblock" : "member.block"),
+      danger: !blockedByMe,
+      testId: `dm-block-${id}`,
+      onClick: () => toggleBlock(convo.userId, convo.username, !blockedByMe),
+    });
+  }
+  if (!isGroup && isDeveloperMode()) {
+    items.push({
+      label: shellText("member.copyId"),
+      testId: `dm-copy-id-${id}`,
+      onClick: () =>
+        copyWithToast(String(convo.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
+    });
+  }
+  if (actions.onCloseDm !== undefined) {
+    const close = actions.onCloseDm;
+    items.push({
+      label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
+      danger: true,
+      testId: `dm-close-${id}`,
+      // The menu item has no Shift modifier, so a group always confirms here
+      // too — the destructive action is destructive whichever path opens it.
+      onClick: () => (isGroup ? confirmLeave(convo, close) : close(id)),
+    });
+  }
+  if (items.length === 0) return;
+  showContextMenu({
+    x: req.x,
+    y: req.y,
+    items,
+    signal,
+    className: "dm-context-menu",
+  });
+}
