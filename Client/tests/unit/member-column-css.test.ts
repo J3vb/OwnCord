@@ -72,6 +72,13 @@ describe("member column CSS (3C-6b)", () => {
     expect(cascadedDeclaration(".member-column .member-list", "width")).toBeDefined();
   });
 
+  it("the column's search row is as tall as the chat header beside it", () => {
+    expect(
+      JSON.stringify(cascadedDeclaration(".member-column .member-search-wrap", "height")?.value),
+    ).toContain("48");
+    expect(JSON.stringify(cascadedDeclaration(".chat-header", "height")?.value)).toContain("48");
+  });
+
   it("the sidebar copy keeps filling its section", () => {
     expect(cascadedDeclaration(".sidebar-members-section .member-list", "width")).toBeDefined();
   });

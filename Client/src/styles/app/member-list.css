@@ -27,6 +27,14 @@
 .member-column .member-list {
   width: auto;
 }
+/* The search row lines up with the 48px chat header beside it. */
+.member-column .member-search-wrap {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  margin-top: -8px;
+  box-shadow: var(--elevation-low);
+}
 .sidebar-members-section {
   border-top: 1px solid var(--border-glow, var(--border));
   overflow: hidden;
