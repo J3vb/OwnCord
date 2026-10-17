@@ -14,6 +14,7 @@ import { isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
+import { ChatMessageKind } from "./protocolTypes";
 import { mentionsCurrentUser } from "./mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
@@ -105,6 +106,10 @@ function chimeEnabled(mentioned: boolean): boolean {
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const currentUser = authStore.getState().user;
+
+  // A call log row is a record, not a message: the ring was the live signal, so
+  // it gets no chime and no toast (the unread badge still counts it).
+  if (payload.kind === ChatMessageKind.CALL) return;
 
   // Don't notify for own messages
   if (currentUser !== null && payload.user.id === currentUser.id) return;

@@ -99,6 +99,18 @@ function buildItems(
   const items: (ContextMenuItem | ContextMenuSeparator)[] = [];
   const sep: ContextMenuSeparator = { separator: true };
 
+  // A call log row offers nothing but Copy ID (developer mode).
+  if (msg.kind === "call") {
+    if (gates.copyId.shown) {
+      items.push({
+        label: messageMenuText("copyId"),
+        testId: "msg-menu-copy-id",
+        onClick: () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
+      });
+    }
+    return { items, group: null };
+  }
+
   /** The message as it is now; null once it is gone or deleted. */
   const live = (): Message | null => {
     const found = findMessage(msg.channelId, msg.id);
@@ -354,6 +366,8 @@ export function openMessageMenu(req: MessageMenuRequest): void {
   if (signal.aborted) return;
   const current = findMessage(msg.channelId, msg.id);
   if (current === undefined || current.deleted) return;
+  // Nothing to offer on a call row outside developer mode: no empty menu.
+  if (current.kind === "call" && !messageActionGates(current, req.opts).copyId.shown) return;
   closeMessageMenu();
 
   const row = rowOf(msg.id);

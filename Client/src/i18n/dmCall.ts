@@ -45,4 +45,19 @@ export const dmCallText = defineCatalog("dmCall", {
   join: "Join call",
   switch: "Switch to this call",
   speaking: "{name} is speaking",
+  // The call log row in the chat (WP 3B-9c).
+  rowLive: "{name} started a call",
+  rowJoin: "Join",
+  rowJoinLabel: "Join the call",
+  rowLastedMinutes: {
+    one: "{name} started a call that lasted {count} minute",
+    other: "{name} started a call that lasted {count} minutes",
+  },
+  rowLastedSeconds: "{name} started a call that lasted a few seconds",
+  rowMissed: "You missed a call from {name}",
+  rowMissedMinutes: {
+    one: "You missed a call from {name} that lasted {count} minute",
+    other: "You missed a call from {name} that lasted {count} minutes",
+  },
+  rowMissedSeconds: "You missed a call from {name} that lasted a few seconds",
 });

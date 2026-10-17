@@ -137,6 +137,8 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
+  readonly onJoinCall?: (channelId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------

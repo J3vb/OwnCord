@@ -118,6 +118,8 @@ export interface ChannelControllerOptions {
   /** Move focus somewhere reachable after the NSFW gate that held it is
    *  removed (accepted, declined or dismissed with Escape). */
   readonly focusFallback?: () => void;
+  /** Join the DM call a live call log row stands for (WP 3B-9c). */
+  readonly onJoinCall?: (channelId: number) => void;
 }
 
 export interface ChannelController {
@@ -1335,6 +1337,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelName,
       channelType,
       currentUserId: userId,
+      ...(opts.onJoinCall !== undefined && { onJoinCall: opts.onJoinCall }),
       onScrollTop: () => {
         if (channelAbort !== null) {
           return msgCtrl.loadOlderMessages(channelId, channelAbort.signal);

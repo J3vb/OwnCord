@@ -178,6 +178,8 @@ export function isSameDay(a: string, b: string): boolean {
 }
 
 export function shouldGroup(prev: Message, curr: Message): boolean {
+  // A call log row is its own block: it never joins a run, and nothing joins it.
+  if (prev.kind === "call" || curr.kind === "call") return false;
   if (prev.user.id !== curr.user.id) return false;
   if (prev.deleted || curr.deleted) return false;
   // A reply carries its quoted-parent header, so it starts a new block.
