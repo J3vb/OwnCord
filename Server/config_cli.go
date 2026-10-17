@@ -39,7 +39,7 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	defer slog.SetDefault(prev)
 
 	if len(args) == 0 || args[0] != "reset-overrides" {
-		fmt.Fprintln(stderr, "error: config takes one subcommand: reset-overrides")
+		sayln(stderr, "error: config takes one subcommand: reset-overrides")
 		configUsage(stderr)
 		return 2
 	}
@@ -56,13 +56,13 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	}
 	keys := fs.Args()
 	if *all && len(keys) > 0 {
-		fmt.Fprintln(stderr, "error: --all cannot be combined with key names")
+		sayln(stderr, "error: --all cannot be combined with key names")
 		configUsage(stderr)
 		return 2
 	}
 	for _, key := range keys {
 		if !config.IsEditable(key) {
-			fmt.Fprintf(stderr, "error: %q is not a setting saved from the admin panel (see docs/server-configuration.md for the editable keys)\n", key)
+			sayf(stderr, "error: %q is not a setting saved from the admin panel (see docs/server-configuration.md for the editable keys)\n", key)
 			return 2
 		}
 	}
@@ -71,42 +71,24 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	// it without reading the file this command is about to change.
 	base, err := config.BaseConfig(cfgPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: load config: %v\n", err)
+		sayf(stderr, "error: load config: %v\n", err)
 		return 1
 	}
 	overridesPath := config.OverridesPath(base.Server.DataDir)
 
 	if _, err := os.Stat(overridesPath); errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(stdout, "no saved panel settings (%s does not exist); nothing to reset\n", overridesPath)
+		sayf(stdout, "no saved panel settings (%s does not exist); nothing to reset\n", overridesPath)
 		return 0
 	} else if err != nil {
-		fmt.Fprintf(stderr, "error: could not read %s: %v\n", config.OverridesFileName, err)
+		sayf(stderr, "error: could not read %s: %v\n", config.OverridesFileName, err)
 		return 1
 	}
 
-	// The panel can move database.path, and a running server holds the lock at
-	// the path it booted with, which is the base path unless an earlier save
-	// has since been applied by a restart. Lock both the base path and the
-	// path the overrides now name (base first, always), so a pending move
-	// cannot let this command rewrite the file under a live server. A saved
-	// chain A -> B -> C with no restart in between is not covered: the server
-	// does not record the path it is running on. When the file does not parse,
-	// no server can have booted on it, so only the base path applies.
-	lockPaths := []string{lockTarget(base.Database.Path)}
-	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {
-		// One file can be named two ways (relative and absolute); a second
-		// lock on it would fail against our own first one.
-		if p := lockTarget(effective.Database.Path); p != lockPaths[0] {
-			lockPaths = append(lockPaths, p)
-		}
+	release, ok := lockServerPaths(stderr, cfgPath, overridesPath, base.Database.Path)
+	if !ok {
+		return 1
 	}
-	for _, p := range lockPaths {
-		release, ok := lockDatabase(stderr, p)
-		if !ok {
-			return 1
-		}
-		defer release()
-	}
+	defer release()
 
 	// Read under the lock, so the file cannot change between the read and the
 	// write.
@@ -115,12 +97,47 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 		return resetAll(stdout, stderr, overridesPath, current, readErr)
 	}
 	if readErr != nil {
-		fmt.Fprintf(stderr, "error: %s cannot be read as saved settings, so single keys cannot be removed from it.\n"+
+		sayf(stderr, "error: %s cannot be read as saved settings, so single keys cannot be removed from it.\n"+
 			"Run \"chatserver config reset-overrides --all\" to move it aside and drop every saved panel setting.\n",
 			config.OverridesFileName)
 		return 1
 	}
 	return resetKeys(stdout, stderr, overridesPath, current, keys)
+}
+
+// lockServerPaths takes the process lock at every database path a running
+// server may hold. The panel can move database.path, and a running server
+// holds the lock at the path it booted with, which is the base path unless an
+// earlier save has since been applied by a restart. Both the base path and the
+// path the overrides now name are locked (base first, always), so a pending
+// move cannot let this command rewrite the file under a live server. A saved
+// chain A -> B -> C with no restart in between is not covered: the server does
+// not record the path it is running on. When the file does not parse, no
+// server can have booted on it, so only the base path applies.
+func lockServerPaths(stderr io.Writer, cfgPath, overridesPath, baseDBPath string) (release func(), ok bool) {
+	lockPaths := []string{lockTarget(baseDBPath)}
+	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {
+		// One file can be named two ways (relative and absolute); a second
+		// lock on it would fail against our own first one.
+		if p := lockTarget(effective.Database.Path); p != lockPaths[0] {
+			lockPaths = append(lockPaths, p)
+		}
+	}
+	var releases []func()
+	releaseAll := func() {
+		for _, r := range slices.Backward(releases) {
+			r()
+		}
+	}
+	for _, p := range lockPaths {
+		r, held := lockDatabase(stderr, p)
+		if !held {
+			releaseAll()
+			return nil, false
+		}
+		releases = append(releases, r)
+	}
+	return releaseAll, true
 }
 
 // lockTarget is the absolute, cleaned database path the lock is taken for,
@@ -146,11 +163,11 @@ func lockDatabase(stderr io.Writer, dbPath string) (release func(), ok bool) {
 	}
 	if !errors.Is(err, db.ErrAlreadyLocked) {
 		if _, statErr := os.Stat(filepath.Dir(dbPath)); errors.Is(statErr, os.ErrNotExist) {
-			fmt.Fprintf(stderr, "note: %s does not exist, so no server can be using %s\n", filepath.Dir(dbPath), dbPath)
+			sayf(stderr, "note: %s does not exist, so no server can be using %s\n", filepath.Dir(dbPath), dbPath)
 			return func() {}, true
 		}
 	}
-	fmt.Fprintf(stderr, "error: %v\n", err)
+	sayf(stderr, "error: %v\n", err)
 	return nil, false
 }
 
@@ -177,22 +194,22 @@ func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[strin
 		}
 	}
 	if len(changes) == 0 {
-		fmt.Fprintf(stdout, "none of those settings is saved in %s; nothing to reset\n", overridesPath)
+		sayf(stdout, "none of those settings is saved in %s; nothing to reset\n", overridesPath)
 		return 0
 	}
 	if err := config.SaveOverrides(overridesPath, changes); err != nil {
-		fmt.Fprintf(stderr, "error: could not update %s: %v\n", config.OverridesFileName, err)
+		sayf(stderr, "error: could not update %s: %v\n", config.OverridesFileName, err)
 		return 1
 	}
 
 	removed := sortedKeys(changes)
-	fmt.Fprintf(stdout, "checked %s\n", overridesPath)
-	fmt.Fprintf(stdout, "reset %d saved panel setting(s); config.yaml and the environment apply again for:\n", len(removed))
+	sayf(stdout, "checked %s\n", overridesPath)
+	sayf(stdout, "reset %d saved panel setting(s); config.yaml and the environment apply again for:\n", len(removed))
 	for _, key := range removed {
-		fmt.Fprintf(stdout, "  %s\n", key)
+		sayf(stdout, "  %s\n", key)
 	}
 	if len(named) > 0 && len(absent) > 0 {
-		fmt.Fprintf(stdout, "not saved in the overrides file: %s\n", strings.Join(absent, ", "))
+		sayf(stdout, "not saved in the overrides file: %s\n", strings.Join(absent, ", "))
 	}
 	return 0
 }
@@ -209,32 +226,32 @@ func resetAll(stdout, stderr io.Writer, overridesPath string, current map[string
 				break
 			}
 			if err != nil || n > 100 {
-				fmt.Fprintf(stderr, "error: could not choose a name to move %s aside to\n", config.OverridesFileName)
+				sayf(stderr, "error: could not choose a name to move %s aside to\n", config.OverridesFileName)
 				return 1
 			}
 			aside = fmt.Sprintf("%s.unreadable-%s-%d", overridesPath, time.Now().UTC().Format("20060102T150405Z"), n)
 		}
 		if err := os.Rename(overridesPath, aside); err != nil {
-			fmt.Fprintf(stderr, "error: could not move %s aside: %v\n", config.OverridesFileName, err)
+			sayf(stderr, "error: could not move %s aside: %v\n", config.OverridesFileName, err)
 			return 1
 		}
 		if err := os.Chmod(aside, 0o600); err != nil {
-			fmt.Fprintf(stderr, "warning: could not restrict %s to its owner: %v\n", aside, err)
+			sayf(stderr, "warning: could not restrict %s to its owner: %v\n", aside, err)
 		}
-		fmt.Fprintf(stdout, "%s could not be read, so it was moved to %s (it may hold secrets; delete it once you no longer need it)\n",
+		sayf(stdout, "%s could not be read, so it was moved to %s (it may hold secrets; delete it once you no longer need it)\n",
 			config.OverridesFileName, aside)
-		fmt.Fprintln(stdout, "every saved panel setting is dropped; config.yaml and the environment apply again")
+		sayln(stdout, "every saved panel setting is dropped; config.yaml and the environment apply again")
 		return 0
 	}
 	if err := os.Remove(overridesPath); err != nil {
-		fmt.Fprintf(stderr, "error: could not remove %s: %v\n", config.OverridesFileName, err)
+		sayf(stderr, "error: could not remove %s: %v\n", config.OverridesFileName, err)
 		return 1
 	}
 	removed := sortedKeys(current)
-	fmt.Fprintf(stdout, "removed %s (%d saved panel setting(s)); config.yaml and the environment apply again\n",
+	sayf(stdout, "removed %s (%d saved panel setting(s)); config.yaml and the environment apply again\n",
 		config.OverridesFileName, len(removed))
 	for _, key := range removed {
-		fmt.Fprintf(stdout, "  %s\n", key)
+		sayf(stdout, "  %s\n", key)
 	}
 	return 0
 }
@@ -249,7 +266,7 @@ func sortedKeys(m map[string]any) []string {
 }
 
 func configUsage(w io.Writer) {
-	fmt.Fprint(w, `usage: chatserver config reset-overrides [--all] [key ...]
+	say(w, `usage: chatserver config reset-overrides [--all] [key ...]
 
 Drop settings saved from the admin panel, so config.yaml and the environment
 apply again. Run it with the server stopped; it refuses while one is running.
@@ -264,3 +281,11 @@ apply again. Run it with the server stopped; it refuses while one is running.
 It prints the names of the keys it removed, never their values.
 `)
 }
+
+// sayf, sayln and say write the command's output. A failed write to the
+// terminal leaves nothing more useful to report, so their errors are dropped.
+func sayf(w io.Writer, format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
+
+func sayln(w io.Writer, a ...any) { _, _ = fmt.Fprintln(w, a...) }
+
+func say(w io.Writer, a ...any) { _, _ = fmt.Fprint(w, a...) }
