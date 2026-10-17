@@ -12,7 +12,7 @@ The register's C-16 and every B7 document since call the Stryker score "stale
 at 67.04 %". The plan's first job is to say plainly what that number is: it is
 **not** a score for `src/lib/**` + `src/stores/**`. It is one pass over **13
 risky modules** in a pre-fix tree, on **2026-08-19**, and it was never re-run
-(`docs/audit-test-coverage-2026-08-19.md:12,137`). B7-0 recorded the
+(`docs/audits/2026-08-19-test-audit.md:12,137`). B7-0 recorded the
 _harness cost_, not a score: a dry run in **2 m 48 s**
 (`docs/plans/b7-0-client-baseline-2026-09-19.md:48`). Nothing in the repo
 records a score for the surface B7-9/B7-10 will decompose.
@@ -74,7 +74,7 @@ Numbers in B7-0's baseline file are re-derived here because two of them moved.
 | 7   | `nightly-test-depth.yml` runs the **narrow** `stryker.ci.config.mjs` (`src/lib/permissions.ts`, thresholds 100/95/90) with a 25-minute job timeout and 7-day artifact retention        | read `.github/workflows/nightly-test-depth.yml:16-38`; `Client/stryker.ci.config.mjs:5-6`                                                                                                                  | yes — `.github/workflows/nightly-test-depth.yml:31`, `:19`, `:37-38`                                          |
 | 8   | The file is on `dev` but **not** `main`; the default branch is `main`; a schedule from it 404s and it has never run                                                                    | `git cat-file -e origin/main:.github/workflows/nightly-test-depth.yml` → fatal; `gh api repos/J3vb/OwnCord --jq .default_branch` → `main`; `gh workflow run nightly-test-depth.yml --ref dev` → `HTTP 404` | yes — `MISSING` on `origin/main`; default branch `main`; dispatch 404s                                        |
 | 9   | The only CI reference to Stryker outside that workflow is a comment about a transitive advisory                                                                                        | `git grep -n "stryker\|mutat" -- .github/workflows/`                                                                                                                                                       | yes — `.github/workflows/ci.yml:436` only                                                                     |
-| 10  | The 67.04 % provenance is 13 client modules on 2026-08-19, **not** the full surface, and it was not re-run after the round-2 fixes                                                     | `docs/audit-test-coverage-2026-08-19.md:12,137`                                                                                                                                                            | yes — `mutation testing over 13 risky client modules — score 67.04 %`, `Stryker was not re-run after round 2` |
+| 10  | The 67.04 % provenance is 13 client modules on 2026-08-19, **not** the full surface, and it was not re-run after the round-2 fixes                                                     | `docs/audits/2026-08-19-test-audit.md:12,137`                                                                                                                                                              | yes — `mutation testing over 13 risky client modules — score 67.04 %`, `Stryker was not re-run after round 2` |
 | 11  | `reports/` and `.stryker-tmp/` are gitignored, so a recorded baseline must be a **written file**, not the HTML artifact                                                                | `grep -n "stryker-tmp\|reports" .gitignore`                                                                                                                                                                | yes — `.gitignore:47-48`                                                                                      |
 | 12  | PR CI currently runs **no** mutation job; `stryker.ci.config.mjs` is exercised only by the never-run nightly                                                                           | row 9 + read `Client/package.json:39-40`                                                                                                                                                                   | yes — `Client/package.json:39-40` are scripts, not CI steps                                                   |
 
@@ -134,7 +134,7 @@ commit, no `Co-Authored-By` trailer.
 - **Action:** reproduce rows 2–5 at HEAD and record them in the
   `Verify before you implement` table of this plan's own PR. Re-run
   `cd Client && npm run test:mutate:dry` and record files/mutants/tests/time.
-  Record the 67.04 % provenance sentence from `audit-test-coverage-2026-08-19.md`
+  Record the 67.04 % provenance sentence from `2026-08-19-test-audit.md`
   so no later document repeats it as a full-surface score.
 - **Validate:** dry run exits 0; the three counts match this table or the
   discrepancy is written into the PR description. **No number is copied from

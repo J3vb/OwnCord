@@ -101,7 +101,7 @@ historical only:
   `tests/unit/toast-coverage.test.ts`).
 - The 229/255 breakage found by the 2026-07-25 coverage audit
   (T-2026-07-25-21) postdated the old file and never appeared in it; it is
-  recorded and now closed in `docs/audit-test-coverage-2026-07-25.md`.
+  recorded and now closed in `docs/audits/2026-07-25-test-coverage.md`.
 
 ## Environment notes for local runs
 

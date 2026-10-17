@@ -86,7 +86,7 @@ dated audit reports, which are snapshots by design.
   These blueprints describe _structure and flow_, not payload shapes. Older
   drift between the specs and the code is listed in the dated audit reports,
   for example
-  [audit-2026-08-04-docs-and-coverage.md](../audit-2026-08-04-docs-and-coverage.md).
+  [2026-08-04-docs-and-ui-coverage.md](../audits/2026-08-04-docs-and-ui-coverage.md).
 - [trust-model.md](../trust-model.md) says who can read what, and why.
 - `docs/client-architecture.md` is a redirect page kept for old links.
   [client.md](client.md) is the client architecture document.

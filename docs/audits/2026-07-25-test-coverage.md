@@ -2,7 +2,7 @@
 **Date:** 2026-07-25
 **Branch:** claude/test-coverage-audit-tvp07j (audited tree: `70caa6c` = main)
 **Scope:** "does everything that should have a test have a test?" — measured, not estimated, across all three surfaces (Go server, TypeScript client, Rust Tauri backend), plus the CI configuration that decides which of those tests actually run.
-**Relationship to prior audits:** narrower and newer than [audit-2026-07-19.md](audit-2026-07-19.md), which remains the closure tracker for architectural findings. Prior test-related items (#6 `store/` untested, #7 client unit coverage, A-2026-07-04 client suite red) are closed there and are not restated.
+**Relationship to prior audits:** narrower and newer than [2026-07-19-architecture-spec-conformance.md](2026-07-19-architecture-spec-conformance.md), which remains the closure tracker for architectural findings. Prior test-related items (#6 `store/` untested, #7 client unit coverage, A-2026-07-04 client suite red) are closed there and are not restated.
 
 Unlike the prior audits, this one shipped its fixes: the findings below are recorded together with the change that closed them.
 

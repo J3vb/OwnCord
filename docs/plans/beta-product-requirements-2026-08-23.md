@@ -14,7 +14,7 @@ Companion documents:
 
 - [repository-health issue register](repo-health-issue-register-2026-08-23.md);
 - [server-first beta roadmap](repo-health-roadmap-2026-08-23.md);
-- [repository-layout audit](../audit-2026-08-23-repository-layout.md).
+- [repository-layout audit](../audits/2026-08-23-repository-layout.md).
 
 ## Release and scope
 

@@ -46,7 +46,7 @@ Primary inputs:
 
 - [beta product requirements](beta-product-requirements-2026-08-23.md)
 - [requirement traceability](beta-requirements-traceability-2026-08-23.md)
-- [repository-layout audit](../audit-2026-08-23-repository-layout.md)
+- [repository-layout audit](../audits/2026-08-23-repository-layout.md)
 - [repository-health issue register](repo-health-issue-register-2026-08-23.md)
 
 ## Decision

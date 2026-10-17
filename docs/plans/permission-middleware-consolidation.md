@@ -74,7 +74,7 @@ see Non-goals.
 - `Server/service/channel.go` — `ListVisibleChannels` fails closed.
 - `Server/service/message.go` — `GetAccessibleChannelIDs` delegates to
   `VisibleChannelIDs`.
-- Docs: `docs/audit-2026-07-19.md` — new §1 + §3 rows for A-2026-07-16
+- Docs: `docs/audits/2026-07-19-architecture-spec-conformance.md` — new §1 + §3 rows for A-2026-07-16
   (RESOLVED 2026-07-23 (D13)); amend the A-2026-07-07 rows to record the missed
   fifth site; row 12 untouched. `docs/plans/audit-2026-07-19-decisions.md` — D13
   row + status clause. `docs/architecture/server.md` — D3 prose (§"enforced

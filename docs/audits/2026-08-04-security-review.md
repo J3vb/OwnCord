@@ -5,7 +5,7 @@
 **Scope:** whole-codebase security review — Go server, admin panel, WASM plugin host,
 LiveKit voice, Tauri desktop client. Read-only; no code changes ship with this audit.
 **Relationship to prior audits:** successor to
-[audit-2026-07-19.md](audit-2026-07-19.md), which remains the closure tracker for its
+[2026-07-19-architecture-spec-conformance.md](2026-07-19-architecture-spec-conformance.md), which remains the closure tracker for its
 own findings. This review is security-only and does not re-open architectural items.
 
 > **Note on scope selection:** this branch carries no diff against `dev`, so a

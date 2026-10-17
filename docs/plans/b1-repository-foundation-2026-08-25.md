@@ -14,7 +14,7 @@ re-testing against a moved base.
 Primary inputs:
 
 - [B0 measured baseline](b0-baseline-2026-08-25.md)
-- [repository-layout audit](../audit-2026-08-23-repository-layout.md) (RL-01…RL-22)
+- [repository-layout audit](../audits/2026-08-23-repository-layout.md) (RL-01…RL-22)
 - [beta roadmap](repo-health-roadmap-2026-08-23.md), B1 section and HP-1
 - [issue register](repo-health-issue-register-2026-08-23.md) (L-01…L-16)
 

@@ -112,11 +112,11 @@ restore, rollback, security, accessibility, capacity, and release scorecard.
 
 ## Audit artifacts
 
-- [Beta product requirements](plans/beta-product-requirements-2026-08-23.md)
-- [Exhaustive issue register](plans/repo-health-issue-register-2026-08-23.md)
-- [Server-first roadmap](plans/repo-health-roadmap-2026-08-23.md)
-- [Requirement traceability](plans/beta-requirements-traceability-2026-08-23.md)
-- [Repository-layout audit](audit-2026-08-23-repository-layout.md)
+- [Beta product requirements](../plans/beta-product-requirements-2026-08-23.md)
+- [Exhaustive issue register](../plans/repo-health-issue-register-2026-08-23.md)
+- [Server-first roadmap](../plans/repo-health-roadmap-2026-08-23.md)
+- [Requirement traceability](../plans/beta-requirements-traceability-2026-08-23.md)
+- [Repository-layout audit](2026-08-23-repository-layout.md)
 
 The detailed reports under `docs/security-findings/` are intentionally
 untracked/private and must not be committed to a public repository before

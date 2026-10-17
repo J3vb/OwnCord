@@ -55,7 +55,7 @@ site through the checker, not to invent a new abstraction:
 - `Server/ws/serve.go` — `buildReady`, `computeAllowedChannels` delegate; drop
   the "mirrors …" comments.
 - `Server/ws/hub.go` — `RefreshChannelVisibility` uses `HasChannelPerm`.
-- Docs: `docs/audit-2026-07-19.md` (A-2026-07-07 → RESOLVED),
+- Docs: `docs/audits/2026-07-19-architecture-spec-conformance.md` (A-2026-07-07 → RESOLVED),
   `docs/architecture/server.md`/`websocket.md` if a visibility callout names the
   duplication.
 

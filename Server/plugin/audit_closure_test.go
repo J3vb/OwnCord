@@ -1,7 +1,7 @@
 // Audit 2026-04-07 plugin CRITICAL closure invariants.
 //
 // Each test here pins a property the closure table in
-// docs/audit-2026-04-07.md cites as the reason a CRITICAL is closed. They live
+// docs/audits/2026-04-07-project-audit.md cites as the reason a CRITICAL is closed. They live
 // in the default-build file set on purpose so they run on every
 // `go test ./...`, not only under -tags wazero.
 

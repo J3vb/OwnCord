@@ -10,7 +10,7 @@ approved beta bar.
 Companion documents:
 
 - [Beta product requirements](beta-product-requirements-2026-08-23.md)
-- [Repository-layout audit](../audit-2026-08-23-repository-layout.md)
+- [Repository-layout audit](../audits/2026-08-23-repository-layout.md)
 - [Phased beta roadmap](repo-health-roadmap-2026-08-23.md)
 
 This document is a planning view, not a replacement for
