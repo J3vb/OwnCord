@@ -138,6 +138,8 @@ export function showScreenSharePicker(
     let selectedSource: string | null = null;
     let selectedQuality: StreamQuality = opts.defaultQuality;
     let selectedFps: number = opts.defaultFps;
+    /** Re-applies the frame-rate gates; set once the Quality step is built. */
+    let syncFpsGates: () => void = () => {};
     let selectedAudio = true;
     /** Set once the footer is built; the source list is built first, so a
      *  source pre-selection before then is a safe no-op. */
@@ -220,6 +222,7 @@ export function showScreenSharePicker(
         function selectSource(id: string): void {
           selectedSource = id;
           tabSelection.set(activeTab, id);
+          syncFpsGates();
           for (const card of panel.querySelectorAll<HTMLButtonElement>(".ssp-source")) {
             const on = card.dataset["sourceId"] === id;
             card.setAttribute("aria-checked", String(on));
@@ -375,17 +378,42 @@ export function showScreenSharePicker(
       // The portal's PipeWire stream is negotiated at 60 fps at most, and the
       // native capturer cannot ask for more.
       const maxFps = opts.portal ? 60 : Infinity;
+      const fpsOptions = new Map<number, HTMLOptionElement>();
       for (const fps of FPS_OPTIONS) {
         const option = createElement("option", { value: String(fps) }, t("picker.fps", { fps }));
-        if (fps > maxFps) {
-          option.disabled = true;
-          option.title = t("picker.fpsWaylandLimit");
-        }
+        fpsOptions.set(fps, option);
         fpsSelect.appendChild(option);
       }
       if (!FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
-      else if (selectedFps > maxFps) selectedFps = maxFps;
-      fpsSelect.value = String(selectedFps);
+      /** The rate the user asked for; a gate lowers selectedFps but keeps this,
+       *  so picking a faster screen again restores it. */
+      let requestedFps = selectedFps;
+      /** The rate the chosen source's monitor cannot reach, or null. An unknown
+       *  rate (a window, or XRandR unreadable) never gates. */
+      const monitorHz = (): number | null => {
+        const hz = opts.sources.find((s) => s.id === selectedSource)?.refreshHz;
+        return hz !== undefined && hz !== null && hz > 0 ? hz : null;
+      };
+      // Greys out what the capture cannot deliver, showing 60 in place of a
+      // requested rate that is unavailable on this source.
+      syncFpsGates = (): void => {
+        const hz = monitorHz();
+        for (const [fps, option] of fpsOptions) {
+          option.disabled = false;
+          option.title = "";
+          if (fps > maxFps) {
+            option.disabled = true;
+            option.title = t("picker.fpsWaylandLimit");
+          } else if (fps === 120 && hz !== null && hz < 120) {
+            option.disabled = true;
+            option.title = t("picker.fpsMonitorLimit", { hz });
+          }
+        }
+        selectedFps =
+          fpsOptions.get(requestedFps)?.disabled === true ? Math.min(60, maxFps) : requestedFps;
+        fpsSelect.value = String(selectedFps);
+        syncFpsHint();
+      };
       // Windows (M-2): what 120 fps needs, while it is chosen.
       const fps120Hint =
         opts.osPicker === true
@@ -399,9 +427,10 @@ export function showScreenSharePicker(
       const syncFpsHint = (): void => {
         if (fps120Hint !== null) fps120Hint.hidden = selectedFps !== 120;
       };
-      syncFpsHint();
+      syncFpsGates();
       fpsSelect.addEventListener("change", () => {
         selectedFps = Number(fpsSelect.value);
+        requestedFps = selectedFps;
         syncFpsHint();
       });
 

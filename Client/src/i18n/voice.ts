@@ -187,6 +187,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.fps": "{fps} fps",
   "picker.fpsDefault": "Default ({fps} fps)",
   "picker.fpsWaylandLimit": "Wayland screen capture is limited to 60 fps",
+  "picker.fpsMonitorLimit": "Your monitor runs at {hz} Hz",
   "picker.fps120Hint":
     "120 fps needs a 120 Hz or faster monitor. It uses H.264 on your graphics card where it can, even if you picked VP8.",
   "picker.goLive": "Go Live",

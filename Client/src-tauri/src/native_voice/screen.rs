@@ -131,6 +131,10 @@ pub struct Source {
     /// A `data:image/png` URL of the source as it looks now, when it could
     /// be captured.
     pub thumbnail: Option<String>,
+    /// The refresh rate in Hz of the monitor a `screen` source is, when XRandR
+    /// reports it. `None` for windows and whenever it cannot be read; the
+    /// webview never gates on an unknown rate. Always serialised (`null`).
+    pub refresh_hz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,6 +159,7 @@ pub fn list_sources() -> Sources {
         };
     }
     let mut sources = Vec::new();
+    let rates = x11_refresh::monitor_rates();
     for (kind, ty) in [
         ("screen", DesktopCaptureSourceType::Screen),
         ("window", DesktopCaptureSourceType::Window),
@@ -171,6 +176,9 @@ pub fn list_sources() -> Sources {
                 id: format!("{kind}:{}", source.id()),
                 kind,
                 title,
+                refresh_hz: (kind == "screen")
+                    .then(|| rates.get(&source.id()).copied())
+                    .flatten(),
                 thumbnail: thumbnail(ty, source),
             });
         }
@@ -179,6 +187,178 @@ pub fn list_sources() -> Sources {
         portal: false,
         sources,
         audio: super::share_audio::available(),
+    }
+}
+
+/// Refresh rates of the X11 monitors, read through XRandR.
+///
+/// libwebrtc's `ScreenCapturerX11` (RandR monitor mode) lists one source per
+/// `XRRGetMonitors` entry and uses the monitor's `name` atom as the source id,
+/// so the rate is looked up by that atom. Xlib and libXrandr are loaded at
+/// runtime (`x11-dl`), like `mouse_buttons`; any failure yields no rates.
+mod x11_refresh {
+    use std::collections::HashMap;
+    use std::os::raw::c_int;
+    use std::ptr;
+
+    use x11_dl::xlib::Xlib;
+    use x11_dl::xrandr::{RR_DoubleScan, RR_Interlace, Xrandr};
+
+    /// The refresh rate in Hz of an XRandR mode, rounded to the nearest
+    /// integer. `None` for a mode with no timing (zero clock or totals).
+    /// Double-scan modes draw each line twice and interlaced modes draw half
+    /// the lines per field, the same correction `xrandr` makes.
+    pub(super) fn mode_refresh_hz(
+        dot_clock: u64,
+        h_total: u32,
+        v_total: u32,
+        flags: u64,
+    ) -> Option<u32> {
+        if dot_clock == 0 || h_total == 0 || v_total == 0 {
+            return None;
+        }
+        let mut v = f64::from(v_total);
+        if flags & RR_DoubleScan as u64 != 0 {
+            v *= 2.0;
+        }
+        if flags & RR_Interlace as u64 != 0 {
+            v /= 2.0;
+        }
+        let hz = (dot_clock as f64 / (f64::from(h_total) * v)).round();
+        (hz >= 1.0 && hz <= f64::from(u32::MAX)).then_some(hz as u32)
+    }
+
+    /// Monitor `name` atom -> refresh rate of its fastest output. Empty when
+    /// Xlib/XRandR cannot be loaded or no display is reachable.
+    pub(super) fn monitor_rates() -> HashMap<u64, u32> {
+        read_rates().unwrap_or_default()
+    }
+
+    fn read_rates() -> Option<HashMap<u64, u32>> {
+        let xlib = Xlib::open().ok()?;
+        let xr = Xrandr::open().ok()?;
+        // SAFETY: a null name opens $DISPLAY; a null result is handled.
+        let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
+        if display.is_null() {
+            return None;
+        }
+        // SAFETY: display is a live connection until the XCloseDisplay below,
+        // and every XRR allocation is freed before it.
+        let rates = unsafe {
+            let root = (xlib.XDefaultRootWindow)(display);
+            let mut rates = HashMap::new();
+            let res = (xr.XRRGetScreenResourcesCurrent)(display, root);
+            if !res.is_null() {
+                let mut n: c_int = 0;
+                let monitors = (xr.XRRGetMonitors)(display, root, 1, &mut n);
+                if !monitors.is_null() {
+                    for i in 0..usize::try_from(n).unwrap_or(0) {
+                        let m = &*monitors.add(i);
+                        if m.noutput < 1 || m.outputs.is_null() {
+                            continue;
+                        }
+                        // A user-defined monitor can span several outputs:
+                        // take the fastest, so a slow one never gates it.
+                        let outputs = std::slice::from_raw_parts(
+                            m.outputs,
+                            usize::try_from(m.noutput).unwrap_or(0),
+                        );
+                        if let Some(hz) = outputs
+                            .iter()
+                            .filter_map(|&o| output_hz(&xr, display, res, o))
+                            .max()
+                        {
+                            rates.insert(m.name as u64, hz);
+                        }
+                    }
+                    (xr.XRRFreeMonitors)(monitors);
+                }
+                (xr.XRRFreeScreenResources)(res);
+            }
+            rates
+        };
+        // SAFETY: display came from XOpenDisplay and is closed once.
+        unsafe { (xlib.XCloseDisplay)(display) };
+        Some(rates)
+    }
+
+    /// # Safety
+    /// `display` and `res` must be live; `output` an id from them.
+    unsafe fn output_hz(
+        xr: &Xrandr,
+        display: *mut x11_dl::xlib::Display,
+        res: *mut x11_dl::xrandr::XRRScreenResources,
+        output: x11_dl::xlib::XID,
+    ) -> Option<u32> {
+        // SAFETY: the caller guarantees display, res and output are live;
+        // each XRR allocation is read, then freed before return.
+        unsafe {
+            let info = (xr.XRRGetOutputInfo)(display, res, output);
+            if info.is_null() {
+                return None;
+            }
+            let crtc = (*info).crtc;
+            (xr.XRRFreeOutputInfo)(info);
+            if crtc == 0 {
+                return None;
+            }
+            let crtc_info = (xr.XRRGetCrtcInfo)(display, res, crtc);
+            if crtc_info.is_null() {
+                return None;
+            }
+            let mode = (*crtc_info).mode;
+            (xr.XRRFreeCrtcInfo)(crtc_info);
+            if (*res).modes.is_null() {
+                return None;
+            }
+            let modes =
+                std::slice::from_raw_parts((*res).modes, usize::try_from((*res).nmode).ok()?);
+            let m = modes.iter().find(|m| m.id == mode)?;
+            mode_refresh_hz(m.dotClock, m.hTotal, m.vTotal, m.modeFlags as u64)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn standard_1080p60() {
+            assert_eq!(mode_refresh_hz(148_500_000, 2200, 1125, 0), Some(60));
+        }
+
+        #[test]
+        fn mode_144hz() {
+            // 1080p144 CVT-RB: 332.4 MHz, 2080 x 1111.
+            assert_eq!(mode_refresh_hz(332_400_000, 2080, 1111, 0), Some(144));
+        }
+
+        #[test]
+        fn ntsc_rate_rounds_up() {
+            // 119.88 Hz rounds to 120, so it is not gated.
+            assert_eq!(mode_refresh_hz(296_703_000, 2200, 1125, 0), Some(120));
+        }
+
+        #[test]
+        fn zero_timing_is_none() {
+            assert_eq!(mode_refresh_hz(0, 2200, 1125, 0), None);
+            assert_eq!(mode_refresh_hz(148_500_000, 0, 1125, 0), None);
+            assert_eq!(mode_refresh_hz(148_500_000, 2200, 0, 0), None);
+        }
+
+        #[test]
+        fn interlace_and_doublescan() {
+            // 1080i: 74.25 MHz, 2200 x 1125 is 60 fields per second.
+            assert_eq!(
+                mode_refresh_hz(74_250_000, 2200, 1125, RR_Interlace as u64),
+                Some(60)
+            );
+            // A double-scanned mode halves the rate.
+            assert_eq!(
+                mode_refresh_hz(148_500_000, 2200, 1125, RR_DoubleScan as u64),
+                Some(30)
+            );
+        }
     }
 }
 

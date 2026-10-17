@@ -200,6 +200,9 @@ export interface NativeVoiceScreenSource {
   title: string;
   /** An image URL of the source as it looks now, when it could be read. */
   thumbnail: string | null;
+  /** Refresh rate in Hz of the monitor a `screen` source is (X11, from
+   *  XRandR). `null` for windows and when it could not be read. */
+  readonly refreshHz?: number | null;
 }
 
 /** What can be shared. `portal`: the desktop portal's dialog picks

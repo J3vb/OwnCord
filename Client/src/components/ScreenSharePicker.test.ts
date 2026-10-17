@@ -306,6 +306,83 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toBeNull();
   });
 
+  describe("monitor refresh gate on 120 fps", () => {
+    const monitors: NativeVoiceScreenSource[] = [
+      { id: "screen:1", kind: "screen", title: "Slow", thumbnail: null, refreshHz: 60 },
+      { id: "screen:2", kind: "screen", title: "Fast", thumbnail: null, refreshHz: 144 },
+      { id: "screen:3", kind: "screen", title: "Unknown", thumbnail: null, refreshHz: null },
+      { id: "window:9", kind: "window", title: "Code", thumbnail: null, refreshHz: null },
+    ];
+    const open = async (defaultFps: number) => {
+      const picking = showScreenSharePicker({
+        sources: monitors,
+        portal: false,
+        defaultQuality: "source",
+        defaultFps,
+      });
+      const root = await mounted();
+      const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+      const option120 = [...fps.options].find((o) => o.value === "120")!;
+      const pick = (id: string) =>
+        root.querySelector<HTMLButtonElement>(`[data-source-id="${id}"]`)!.click();
+      return { picking, root, fps, option120, pick };
+    };
+
+    it("disables 120 with the monitor rate on a 60 Hz screen", async () => {
+      const { picking, fps, option120 } = await open(120);
+      expect(option120.disabled).toBe(true);
+      expect(option120.title).toBe("Your monitor runs at 60 Hz");
+      expect(fps.value).toBe("60");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await expect(picking).resolves.toBeNull();
+    });
+
+    it("allows 120 on a 144 Hz screen", async () => {
+      const { picking, fps, option120, pick } = await open(120);
+      pick("screen:2");
+      expect(option120.disabled).toBe(false);
+      expect(option120.title).toBe("");
+      fps.value = "120";
+      fps.dispatchEvent(new Event("change"));
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:2", fps: 120 });
+    });
+
+    it("never gates on an unknown rate or a window", async () => {
+      const { picking, option120, pick, root } = await open(120);
+      pick("screen:3");
+      expect(option120.disabled).toBe(false);
+      pick("screen:1");
+      expect(option120.disabled).toBe(true);
+      clickTab(root, "Applications");
+      expect(option120.disabled).toBe(false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await expect(picking).resolves.toBeNull();
+    });
+
+    it("drops a chosen 120 to 60 when switching to a 60 Hz screen", async () => {
+      const { picking, fps, option120, pick } = await open(60);
+      pick("screen:2");
+      fps.value = "120";
+      fps.dispatchEvent(new Event("change"));
+      expect(fps.value).toBe("120");
+      pick("screen:1");
+      expect(option120.disabled).toBe(true);
+      expect(fps.value).toBe("60");
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:1", fps: 60 });
+    });
+
+    it("restores a saved 120 when moving from a 60 Hz screen to a 144 Hz one", async () => {
+      const { picking, fps, pick } = await open(120);
+      expect(fps.value).toBe("60");
+      pick("screen:2");
+      expect(fps.value).toBe("120");
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:2", fps: 120 });
+    });
+  });
+
   it("shows only the quality step before the Windows picker and resolves the OS pick", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141",

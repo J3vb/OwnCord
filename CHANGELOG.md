@@ -110,6 +110,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
 - Linux: a 120 fps screen share now gives up some sharpness before smoothness when the connection or CPU cannot keep up, as on Windows, and holds its frame rate more steadily. Settings → Voice & Video notes that Wayland limits a screen share to 60 fps.
+- Linux (X11): the screen share picker greys out **120 fps** for a screen whose monitor runs below 120 Hz, and says the monitor's rate. Picking a faster screen brings your 120 fps choice back.
 - Linux: OwnCord now tells the call it can play VP9 video, so a Windows VP9 camera or screen share no longer drops to VP8 when a Linux user joins.
 - Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
