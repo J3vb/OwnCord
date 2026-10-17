@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
-import { dmDisplayName } from "@stores/dm.store";
+import { dmDisplayName, dmStore } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
 
 // ---------------------------------------------------------------------------
@@ -399,6 +399,81 @@ describe("IncomingCallBanner", () => {
     banner.destroy?.();
   });
 
+  describe("3B-4: avatar, video join and group naming", () => {
+    afterEach(() => {
+      dmStore.setState(() => ({ channels: [] }));
+    });
+
+    it("draws the caller's avatar in place of the phone icon", () => {
+      const banner = createIncomingCallBanner({ onAccept: vi.fn(), onDecline: vi.fn() });
+      banner.mount(container);
+      banner.setRing({ channelId: 3, fromUserId: 9, fromUsername: "alice" });
+
+      const avatar = container.querySelector('[data-testid="incoming-call-avatar"]')!;
+      expect(avatar).not.toBeNull();
+      expect(avatar.textContent).toBe("A");
+      expect(container.querySelector("svg")).toBeNull();
+
+      banner.setRing(null);
+      expect(container.querySelector('[data-testid="incoming-call-avatar"]')).toBeNull();
+      banner.destroy?.();
+    });
+
+    it("titles a group call with the group name and says who is calling underneath", () => {
+      dmStore.setState(() => ({
+        channels: [
+          makeDm({
+            channelId: 3,
+            isGroup: true,
+            name: "Game night",
+            participants: [user(2, "bob"), user(9, "alice")],
+          }),
+        ],
+      }));
+      const banner = createIncomingCallBanner({ onAccept: vi.fn(), onDecline: vi.fn() });
+      banner.mount(container);
+      banner.setRing({ channelId: 3, fromUserId: 9, fromUsername: "alice" });
+
+      expect(container.querySelector('[data-testid="incoming-call-title"]')!.textContent).toBe(
+        "Game night",
+      );
+      expect(container.querySelector(".incoming-call-subtitle")!.textContent).toBe(
+        "alice is calling",
+      );
+      banner.destroy?.();
+    });
+
+    it("keeps the caller's name as the title of a 1:1 call", () => {
+      dmStore.setState(() => ({ channels: [makeDm({ channelId: 3 })] }));
+      const banner = createIncomingCallBanner({ onAccept: vi.fn(), onDecline: vi.fn() });
+      banner.mount(container);
+      banner.setRing({ channelId: 3, fromUserId: 2, fromUsername: "bob" });
+
+      expect(container.querySelector('[data-testid="incoming-call-title"]')!.textContent).toBe(
+        "bob is calling",
+      );
+      expect(container.querySelector(".incoming-call-subtitle")!.textContent).toBe("Incoming call");
+      banner.destroy?.();
+    });
+
+    it("Accept passes false and Join with video passes true", () => {
+      const onAccept = vi.fn();
+      const banner = createIncomingCallBanner({ onAccept, onDecline: vi.fn() });
+      banner.mount(container);
+      banner.setRing({ channelId: 3, fromUserId: 9, fromUsername: "alice" });
+
+      const video = container.querySelector(
+        '[data-testid="incoming-call-accept-video"]',
+      ) as HTMLElement;
+      expect(video.textContent).toBe("Join with video");
+      video.click();
+      (container.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement).click();
+
+      expect(onAccept.mock.calls).toEqual([[true], [false]]);
+      banner.destroy?.();
+    });
+  });
+
   it("reports accept and decline", () => {
     const onAccept = vi.fn();
     const onDecline = vi.fn();
@@ -407,7 +482,7 @@ describe("IncomingCallBanner", () => {
     banner.setRing({ channelId: 3, fromUserId: 9, fromUsername: "alice" });
 
     (container.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement).click();
-    expect(onAccept).toHaveBeenCalledOnce();
+    expect(onAccept).toHaveBeenCalledExactlyOnceWith(false);
     (container.querySelector('[data-testid="incoming-call-decline"]') as HTMLElement).click();
     expect(onDecline).toHaveBeenCalledOnce();
 

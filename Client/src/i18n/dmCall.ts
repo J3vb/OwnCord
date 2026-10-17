@@ -33,6 +33,7 @@ export const dmCallText = defineCatalog("dmCall", {
   isCalling: "{name} is calling…",
   notifyIncoming: "{name} is calling you",
   missed: "Missed call from {name}",
+  missedGroup: "Missed call in {name}",
   voiceCall: "Voice call",
   accept: "Accept call",
   acceptVideo: "Join with video",
