@@ -113,11 +113,13 @@ export function createReactionController(opts: ReactionControllerOptions): React
 
     const ticket = {};
     pendingPicker = { ticket, msgId };
-    void emojiPickerScreen.load().then((screen) => {
-      if (pendingPicker?.ticket !== ticket) return;
-      pendingPicker = null;
-      if (screen !== null) mountPicker(screen, msgId);
-    });
+    void emojiPickerScreen
+      .load(() => pendingPicker?.ticket === ticket)
+      .then((screen) => {
+        if (pendingPicker?.ticket !== ticket) return;
+        pendingPicker = null;
+        if (screen !== null) mountPicker(screen, msgId);
+      });
   }
 
   function mountPicker(screen: typeof import("@components/EmojiPicker"), msgId: number): void {

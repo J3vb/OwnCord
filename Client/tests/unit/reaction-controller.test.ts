@@ -393,6 +393,53 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
+    function addReactButton(id: number): HTMLElement {
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", `msg-react-${id}`);
+      document.body.appendChild(btn);
+      return btn;
+    }
+
+    it("a second click on the same message's react button while the code loads cancels", async () => {
+      const btn = addReactButton(1);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.handleReaction(1, ""); // before the picker's code arrives
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      expect(mockCreateEmojiPicker).not.toHaveBeenCalled();
+      btn.remove();
+    });
+
+    it("a click on a different message while the code loads replaces the pending open", async () => {
+      const btn1 = addReactButton(1);
+      const btn2 = addReactButton(2);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.handleReaction(2, "");
+      await vi.dynamicImportSettled();
+      const wraps = document.querySelectorAll(".reaction-picker-wrap");
+      expect(wraps).toHaveLength(1);
+      expect(wraps[0]!.getAttribute("data-message-id")).toBe("2");
+      expect(mockCreateEmojiPicker).toHaveBeenCalledOnce();
+      ctrl.destroy();
+      btn1.remove();
+      btn2.remove();
+    });
+
+    it("destroy during the load mounts nothing", async () => {
+      const btn = addReactButton(1);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.destroy();
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      btn.remove();
+    });
+
     it("sends reaction when emoji is selected from picker", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const btn = document.createElement("button");

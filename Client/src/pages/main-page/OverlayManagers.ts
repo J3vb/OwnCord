@@ -173,15 +173,20 @@ export function createQuickSwitcherManager(
     if (instance !== null || pendingOpen !== null || root === null) return;
     const ticket = {};
     pendingOpen = ticket;
-    void quickSwitcherScreen.load().then((screen) => {
-      if (pendingOpen !== ticket) return;
-      pendingOpen = null;
-      if (screen === null) return;
-      // Re-derive the root: a page teardown during the load nulls it.
-      const liveRoot = getRoot();
-      if (liveRoot === null || instance !== null) return;
-      mountSwitcher(screen, liveRoot);
-    });
+    void quickSwitcherScreen
+      .load(() => pendingOpen === ticket)
+      .then((screen) => {
+        if (pendingOpen !== ticket) return;
+        pendingOpen = null;
+        if (screen === null) return;
+        // Re-derive the root: a page teardown during the load nulls it.
+        const liveRoot = getRoot();
+        if (liveRoot === null || instance !== null) return;
+        // The keydown handler's gates held when the key was pressed; Settings or
+        // a dialog may have opened since, and the switcher must not stack on it.
+        if (isSuspended?.() === true || dialogOpen()) return;
+        mountSwitcher(screen, liveRoot);
+      });
   }
 
   function mountSwitcher(
@@ -712,15 +717,17 @@ export function createSearchOverlayController(opts: {
     if (instance !== null || pendingOpen !== null || root === null) return;
     const ticket = {};
     pendingOpen = ticket;
-    void searchOverlayScreen.load().then((screen) => {
-      if (pendingOpen !== ticket) return;
-      pendingOpen = null;
-      if (screen === null) return;
-      // Re-derive the root: a page teardown during the load nulls it.
-      const liveRoot = opts.getRoot();
-      if (liveRoot === null || instance !== null) return;
-      mountOverlay(screen, liveRoot);
-    });
+    void searchOverlayScreen
+      .load(() => pendingOpen === ticket)
+      .then((screen) => {
+        if (pendingOpen !== ticket) return;
+        pendingOpen = null;
+        if (screen === null) return;
+        // Re-derive the root: a page teardown during the load nulls it.
+        const liveRoot = opts.getRoot();
+        if (liveRoot === null || instance !== null) return;
+        mountOverlay(screen, liveRoot);
+      });
   }
 
   function mountOverlay(

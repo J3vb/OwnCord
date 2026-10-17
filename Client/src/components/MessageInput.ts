@@ -1672,11 +1672,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
       const ticket = {};
       emojiPending = ticket;
-      void emojiPickerScreen.load().then((screen) => {
-        if (emojiPending !== ticket || signal.aborted) return;
-        emojiPending = null;
-        if (screen !== null) openEmojiPicker(screen);
-      });
+      void emojiPickerScreen
+        .load(() => emojiPending === ticket)
+        .then((screen) => {
+          if (emojiPending !== ticket || signal.aborted) return;
+          emojiPending = null;
+          if (screen !== null) openEmojiPicker(screen);
+        });
     }
 
     function openEmojiPicker(screen: typeof import("@components/EmojiPicker")): void {
@@ -1750,11 +1752,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
       const ticket = {};
       gifPending = ticket;
-      void gifPickerScreen.load().then((screen) => {
-        if (gifPending !== ticket || signal.aborted) return;
-        gifPending = null;
-        if (screen !== null) openGifPicker(screen, gifApi);
-      });
+      void gifPickerScreen
+        .load(() => gifPending === ticket)
+        .then((screen) => {
+          if (gifPending !== ticket || signal.aborted) return;
+          gifPending = null;
+          if (screen !== null) openGifPicker(screen, gifApi);
+        });
     }
 
     function openGifPicker(

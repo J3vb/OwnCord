@@ -401,11 +401,13 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         }
         const ticket = {};
         emojiPending = ticket;
-        void emojiPickerScreen.load().then((screen) => {
-          if (emojiPending !== ticket || signal.aborted) return;
-          emojiPending = null;
-          if (screen !== null) openEmojiPicker(screen);
-        });
+        void emojiPickerScreen
+          .load(() => emojiPending === ticket)
+          .then((screen) => {
+            if (emojiPending !== ticket || signal.aborted) return;
+            emojiPending = null;
+            if (screen !== null) openEmojiPicker(screen);
+          });
       },
       { signal },
     );

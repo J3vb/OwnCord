@@ -56,4 +56,25 @@ describe("createLazyScreen", () => {
     expect(showToast).not.toHaveBeenCalled();
     await expect(screen.loadOrThrow()).resolves.toBe("ok");
   });
+
+  it("toasts once when two callers share one failed attempt", async () => {
+    const importer = vi.fn<() => Promise<string>>().mockRejectedValue(new Error("chunk 404"));
+    const screen = createLazyScreen("test-screen", importer);
+    const [a, b] = await Promise.all([screen.load(), screen.load()]);
+    expect(a).toBeNull();
+    expect(b).toBeNull();
+    expect(importer).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expectConsole("error", /Failed to load test-screen/);
+  });
+
+  it("does not toast for a caller that already cancelled", async () => {
+    const importer = vi.fn<() => Promise<string>>().mockRejectedValue(new Error("chunk 404"));
+    const screen = createLazyScreen("test-screen", importer);
+    let wanted = true;
+    const pending = screen.load(() => wanted);
+    wanted = false;
+    expect(await pending).toBeNull();
+    expect(showToast).not.toHaveBeenCalled();
+  });
 });

@@ -1006,5 +1006,22 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(card()).toBeNull();
       expect(document.body.querySelector(".emoji-picker")).toBeNull();
     });
+
+    it("closing the card while the picker is still loading mounts nothing", async () => {
+      trigger().click();
+      byId<HTMLButtonElement>("spc-custom-emoji").click();
+      trigger().click(); // the card goes away before the picker's code arrives
+      await vi.dynamicImportSettled();
+      expect(card()).toBeNull();
+      expect(document.body.querySelector(".emoji-picker")).toBeNull();
+    });
+
+    it("a second click on the emoji button while it loads cancels the open", async () => {
+      trigger().click();
+      byId<HTMLButtonElement>("spc-custom-emoji").click();
+      byId<HTMLButtonElement>("spc-custom-emoji").click();
+      await vi.dynamicImportSettled();
+      expect(card()!.querySelector(".emoji-picker")).toBeNull();
+    });
   });
 });

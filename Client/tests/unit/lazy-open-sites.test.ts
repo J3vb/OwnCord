@@ -1,7 +1,7 @@
 /**
  * Screens that load on first use (O-6a): a second trigger while the code loads
  * opens once, a teardown before it resolves mounts nothing, and a failed load
- * shows the generic toast and loads again on the next try.
+ * shows the generic toast and tries again on the next try.
  *
  * The loaders cache a loaded module (as the module system does), so each screen
  * is exercised by one test that drives its whole first-use sequence through a
@@ -70,16 +70,15 @@ beforeEach(() => {
 afterEach(() => root.remove());
 
 describe("search overlay loads on first use", () => {
-  it("a failed first load toasts once and mounts nothing, then the next open loads again", async () => {
+  it("a failed first load toasts once and mounts nothing, then the next open tries again", async () => {
     const c = createSearchOverlayController({
       api: { search: vi.fn() } as never,
       getRoot: () => root,
       getCurrentChannelId: () => 1,
     });
-    // Two opens and a cleanup while the code is still loading.
+    // Two opens while the code is still loading.
     c.open();
     c.open();
-    c.cleanup();
     h.gates.search.release();
     await vi.waitFor(() => {
       expect(h.showToast).toHaveBeenCalledWith(shellText("common.openFailed"), "error");
@@ -97,6 +96,22 @@ describe("search overlay loads on first use", () => {
     });
     expect(h.mount).toHaveBeenCalledOnce();
     c.cleanup();
+  });
+});
+
+describe("search overlay cleanup during the load", () => {
+  it("mounts nothing when cleanup runs before the code arrives", async () => {
+    h.gates.search.release();
+    const c = createSearchOverlayController({
+      api: { search: vi.fn() } as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 1,
+    });
+    c.open();
+    c.open(); // ignored while pending
+    c.cleanup();
+    await vi.dynamicImportSettled();
+    expect(h.createSearchOverlay).not.toHaveBeenCalled();
   });
 });
 
@@ -129,5 +144,29 @@ describe("quick switcher loads on first use", () => {
     });
     expect(h.mount).toHaveBeenCalledOnce();
     detachC();
+  });
+
+  it("Settings or a dialog opening during the load stops the switcher mounting", async () => {
+    h.gates.quick.release();
+    let suspended = false;
+    const detach = createQuickSwitcherManager(
+      () => root,
+      () => suspended,
+    ).attach();
+
+    ctrlK();
+    suspended = true; // e.g. Settings opened while the code loaded
+    await vi.dynamicImportSettled();
+    expect(h.createQuickSwitcher).not.toHaveBeenCalled();
+
+    suspended = false;
+    ctrlK();
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay visible";
+    document.body.appendChild(modal);
+    await vi.dynamicImportSettled();
+    expect(h.createQuickSwitcher).not.toHaveBeenCalled();
+    modal.remove();
+    detach();
   });
 });

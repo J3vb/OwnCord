@@ -462,35 +462,37 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     // late one (the same shape as the edit dialog below).
     const pending: MountableComponent = { mount: () => {} };
     activeModal = pending;
-    void createChannelModalScreen.load().then((screen) => {
-      if (screen === null) {
-        if (activeModal === pending) activeModal = null;
-        return;
-      }
-      if (activeModal !== pending) return;
-      const modal = screen.createCreateChannelModal({
-        category,
-        onCreate: async (data) => {
-          try {
-            await api.adminCreateChannel(data);
+    void createChannelModalScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
+        }
+        if (activeModal !== pending) return;
+        const modal = screen.createCreateChannelModal({
+          category,
+          onCreate: async (data) => {
+            try {
+              await api.adminCreateChannel(data);
+              modal.destroy?.();
+              activeModal = null;
+            } catch (err) {
+              const msg = errorText(err, shellText("channel.createFailed"));
+              getToast()?.show(msg, "error");
+              // The modal's own catch re-enables its submit button and renders
+              // the inline error, so the failure must propagate to it.
+              throw err;
+            }
+          },
+          onClose: () => {
             modal.destroy?.();
             activeModal = null;
-          } catch (err) {
-            const msg = errorText(err, shellText("channel.createFailed"));
-            getToast()?.show(msg, "error");
-            // The modal's own catch re-enables its submit button and renders
-            // the inline error, so the failure must propagate to it.
-            throw err;
-          }
-        },
-        onClose: () => {
-          modal.destroy?.();
-          activeModal = null;
-        },
+          },
+        });
+        activeModal = modal;
+        modal.mount(document.body);
       });
-      activeModal = modal;
-      modal.mount(document.body);
-    });
   }
 
   // ---------------------------------------------------------------------------
@@ -662,28 +664,30 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (activeModal !== null) return;
     const pending: MountableComponent = { mount: () => {} };
     activeModal = pending;
-    void memberPickerScreen.load().then((screen) => {
-      if (screen === null) {
-        if (activeModal === pending) activeModal = null;
-        return;
-      }
-      if (activeModal !== pending) return;
-      const picker = screen.createMemberPickerModal({
-        onSelect: (userId) => {
-          closePickerModal();
-          void handleCreateDm(userId, dmDeps);
-        },
-        onSelectGroup: (userIds, name) => {
-          closePickerModal();
-          void handleCreateGroupDm(userIds, name, dmDeps);
-        },
-        onClose: () => {
-          activeModal = null;
-        },
+    void memberPickerScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
+        }
+        if (activeModal !== pending) return;
+        const picker = screen.createMemberPickerModal({
+          onSelect: (userId) => {
+            closePickerModal();
+            void handleCreateDm(userId, dmDeps);
+          },
+          onSelectGroup: (userIds, name) => {
+            closePickerModal();
+            void handleCreateGroupDm(userIds, name, dmDeps);
+          },
+          onClose: () => {
+            activeModal = null;
+          },
+        });
+        activeModal = picker;
+        picker.mount(document.body);
       });
-      activeModal = picker;
-      picker.mount(document.body);
-    });
   }
 
   function closePickerModal(): void {
