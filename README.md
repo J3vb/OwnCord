@@ -322,6 +322,10 @@ contributor, the key context: [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
 and [SECURITY.md](SECURITY.md). Each one lists its sources. If they disagree,
 the code wins, then those sources.
 
+Human contributors can ignore the agent tool folders `.claude/`, `.codex/` and
+`.agents/` and the file `.no-mistakes.yaml`. `AGENTS.md` and the `CLAUDE.md`
+files are written for agents, but the rules in them apply to everyone.
+
 ## Update signing (maintainers)
 
 The desktop app and the server use separate update signing keys.
