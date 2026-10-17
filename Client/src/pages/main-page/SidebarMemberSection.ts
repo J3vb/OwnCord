@@ -125,11 +125,15 @@ export function createSidebarMemberSection(
   let isDragging = false;
   let startY = 0;
   let startHeight = 0;
+  // Latest height of the drag in progress; persisted once on mouseup instead
+  // of on every mousemove (a synchronous storage write per move).
+  let pendingHeight: number | null = null;
 
   resizeHandle.addEventListener(
     "mousedown",
     (e: MouseEvent) => {
       isDragging = true;
+      pendingHeight = null;
       startY = e.clientY;
       startHeight = memberListContainer.getBoundingClientRect().height;
       e.preventDefault();
@@ -145,7 +149,7 @@ export function createSidebarMemberSection(
       const maxH = window.innerHeight * 0.65;
       const newHeight = Math.max(80, Math.min(startHeight + delta, Math.max(maxH, startHeight)));
       applyMemberHeight(`${newHeight}px`);
-      localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
+      pendingHeight = newHeight;
     },
     { signal: resizeOwner.signal },
   );
@@ -153,7 +157,17 @@ export function createSidebarMemberSection(
   document.addEventListener(
     "mouseup",
     () => {
+      const wasDragging = isDragging;
       isDragging = false;
+      if (!wasDragging || pendingHeight === null) return;
+      const height = pendingHeight;
+      pendingHeight = null;
+      try {
+        localStorage.setItem(LS_KEY_HEIGHT, String(height));
+      } catch {
+        // Storage unavailable or full: the height still applies for this
+        // session, it just is not remembered.
+      }
     },
     { signal: resizeOwner.signal },
   );

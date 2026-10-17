@@ -35,6 +35,10 @@ export const settingsText = defineCatalog("settings", {
   "logout.confirm.body": "Are you sure you want to log out?",
   "logout.confirm.button": "Log Out",
   "shell.esc": "ESC",
+  "search.label": "Search settings",
+  "search.placeholder": "Search",
+  "search.clear": "Clear search",
+  "search.noResults": "No results",
 
   "accessibility.reducedMotion.label": "Reduce Motion",
   "accessibility.reducedMotion.desc": "Disable animations and transitions",

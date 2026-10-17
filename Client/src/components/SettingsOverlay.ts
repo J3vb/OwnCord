@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -31,6 +32,7 @@ import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
+import { highlightMatches, normalizeQuery, tabMatches } from "./settings/settingsSearch";
 import { confirmLogout } from "../features/settings/logoutConfirm";
 import { readAppVersion } from "../features/whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
@@ -183,6 +185,13 @@ export function createSettingsOverlay(
   /** Puts focus back on whatever opened the panel; null while closed. */
   let restoreFocus: (() => void) | null = null;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
+  /** The normalized search query; "" when the box is empty. */
+  let query = "";
+  let searchInput: HTMLInputElement | null = null;
+  let searchClear: HTMLButtonElement | null = null;
+  let searchEmpty: HTMLElement | null = null;
+  let userSettingsCat: HTMLElement | null = null;
+  let appSettingsCat: HTMLElement | null = null;
   let unsubUi: (() => void) | null = null;
   let unsubTabRequest: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
@@ -255,7 +264,10 @@ export function createSettingsOverlay(
       const host = createElement("div", { class: "settings-pane active" });
       void import("./settings/AboutTab").then(
         ({ buildAboutTab }) => {
-          if (!signal.aborted) host.replaceWith(buildAboutTab(signal));
+          if (signal.aborted) return;
+          host.replaceWith(buildAboutTab(signal));
+          // The real tab arrived after renderActiveTab's pass: mark it too.
+          markSearchHits();
         },
         (err: unknown) => {
           log.warn("About tab failed to load", { error: String(err) });
@@ -281,6 +293,72 @@ export function createSettingsOverlay(
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder(buildSignal));
     contentLive = true;
+    markSearchHits();
+  }
+
+  // ---- Search ---------------------------------------------------------------
+
+  /** The tab buttons the current query leaves on screen, in nav order. */
+  function visibleTabs(): TabName[] {
+    return [...tabButtons.keys()].filter((name) => tabButtons.get(name)?.hidden !== true);
+  }
+
+  /** Highlight the query in the open tab and bring the first hit into view. */
+  function markSearchHits(): void {
+    if (contentArea === null) return;
+    highlightMatches(contentArea, query);
+    const hit = Array.from(
+      contentArea.querySelectorAll<HTMLElement>("mark.settings-search-hit"),
+    ).find((m) => isDisplayed(m));
+    hit?.scrollIntoView?.({ block: "center" });
+  }
+
+  /** Hide the tabs (and headings) the query rules out; show the rest. */
+  function applySearch(): void {
+    let any = false;
+    for (const [name, btn] of tabButtons) {
+      const match = tabMatches(name, tabLabel(name), query);
+      btn.hidden = !match;
+      any ||= match;
+    }
+    if (userSettingsCat !== null) {
+      userSettingsCat.hidden = !visibleTabs().some((n) => n === ACCOUNT || n === SAFETY);
+    }
+    if (appSettingsCat !== null) {
+      appSettingsCat.hidden = !visibleTabs().some((n) => n !== ACCOUNT && n !== SAFETY);
+    }
+    if (searchEmpty !== null) searchEmpty.hidden = any;
+    if (searchClear !== null) searchClear.hidden = searchInput?.value === "";
+    // Keep one tab in the page Tab order when the open one was filtered out.
+    const shown = visibleTabs();
+    const stop = tabButtons.get(activeTab)?.hidden === false ? activeTab : shown[0];
+    for (const [name, btn] of tabButtons) btn.setAttribute("tabindex", name === stop ? "0" : "-1");
+    markSearchHits();
+  }
+
+  function setQuery(raw: string): void {
+    query = normalizeQuery(raw);
+    applySearch();
+  }
+
+  function clearSearch(): void {
+    if (searchInput !== null) searchInput.value = "";
+    setQuery("");
+  }
+
+  /** Move onto a visible tab from the search box (Up/Down/Enter). */
+  function enterTabs(pick: "first" | "last"): void {
+    if (query === "") {
+      // Nothing to pick from: just move onto the open tab.
+      const btn = tabButtons.get(activeTab);
+      if (btn?.hidden === false) btn.focus();
+      return;
+    }
+    const shown = visibleTabs();
+    const name = pick === "first" ? shown[0] : shown[shown.length - 1];
+    if (name === undefined) return;
+    setActiveTab(name);
+    if (secretRequests === 0) tabButtons.get(name)?.focus();
   }
 
   /** Release resources held by the tab currently on screen. */
@@ -311,6 +389,8 @@ export function createSettingsOverlay(
   function applyRequestedTab(): void {
     const requested = uiStore.getState().settingsTab;
     if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
+      // A hidden requested tab would strand the only tab stop: reset search.
+      clearSearch();
       setActiveTab(requested);
     }
   }
@@ -327,6 +407,9 @@ export function createSettingsOverlay(
     // would otherwise capture an element inside the panel as the "opener".
     if (!wasOpen && panel !== null) {
       restoreFocus = focusDialog(panel, options.fallbackFocus);
+      // The search box is the first control, but opening should not park
+      // the caret there: focus lands on the active tab instead.
+      if (document.activeElement === searchInput) tabButtons.get(activeTab)?.focus();
     }
   }
 
@@ -346,6 +429,8 @@ export function createSettingsOverlay(
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;
+    // A reopened panel starts with an empty search.
+    if (query !== "" || searchInput?.value !== "") clearSearch();
     // Hand focus back to whatever opened the panel.
     restoreFocus?.();
     restoreFocus = null;
@@ -377,7 +462,7 @@ export function createSettingsOverlay(
         if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") {
           return;
         }
-        const order = [...tabButtons.keys()];
+        const order = visibleTabs();
         const current = order.findIndex((name) => tabButtons.get(name) === e.target);
         if (current === -1) return; // e.g. the Log Out button — not a tab
         e.preventDefault();
@@ -393,6 +478,69 @@ export function createSettingsOverlay(
       },
       { signal: disposable.signal },
     );
+
+    // Search box above everything else in the nav (3E-3b).
+    const searchWrap = createElement("div", { class: "settings-search" });
+    searchInput = createElement("input", {
+      class: "settings-search-input",
+      type: "text",
+      placeholder: settingsText("search.placeholder"),
+      "aria-label": settingsText("search.label"),
+      autocomplete: "off",
+      spellcheck: "false",
+      "data-testid": "settings-search",
+    });
+    searchClear = createElement("button", {
+      class: "settings-search-clear",
+      type: "button",
+      "aria-label": settingsText("search.clear"),
+      "data-testid": "settings-search-clear",
+    });
+    searchClear.hidden = true;
+    searchClear.appendChild(createIcon("x", 14));
+    searchEmpty = createElement(
+      "div",
+      { class: "settings-search-empty", role: "status", "data-testid": "settings-search-empty" },
+      settingsText("search.noResults"),
+    );
+    searchEmpty.hidden = true;
+    const searchBox = searchInput;
+    searchBox.addEventListener("input", () => setQuery(searchBox.value), {
+      signal: disposable.signal,
+    });
+    searchBox.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        // An IME composition owns its keys (Enter commits, Escape cancels).
+        if (e.isComposing || e.keyCode === 229) {
+          // Keep the page's Escape-to-close from seeing the IME's key.
+          e.stopPropagation();
+          return;
+        }
+        if (e.key === "Escape" && searchBox.value !== "") {
+          // The first Escape only clears; the next one closes the panel.
+          e.preventDefault();
+          e.stopPropagation();
+          clearSearch();
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
+          e.preventDefault();
+          if (e.key === "Enter" && query === "") return;
+          enterTabs(e.key === "ArrowUp" ? "last" : "first");
+        }
+      },
+      { signal: disposable.signal },
+    );
+    searchClear.addEventListener(
+      "click",
+      () => {
+        clearSearch();
+        searchBox.focus();
+      },
+      { signal: disposable.signal },
+    );
+    appendChildren(searchWrap, searchBox, searchClear);
+    sidebar.appendChild(searchWrap);
+    sidebar.appendChild(searchEmpty);
 
     // User profile section at top of sidebar
     const user = authStore.getState().user;
@@ -421,9 +569,14 @@ export function createSettingsOverlay(
       settingsText("shell.editProfile"),
     );
     if (authenticated) {
-      editProfileLink.addEventListener("click", () => setActiveTab(ACCOUNT), {
-        signal: disposable.signal,
-      });
+      editProfileLink.addEventListener(
+        "click",
+        () => {
+          clearSearch();
+          setActiveTab(ACCOUNT);
+        },
+        { signal: disposable.signal },
+      );
     } else {
       editProfileLink.style.display = "none";
     }
@@ -446,7 +599,7 @@ export function createSettingsOverlay(
 
     // "User Settings" category — only Account belongs here (hidden when not authenticated)
     if (authenticated) {
-      const userSettingsCat = createElement(
+      userSettingsCat = createElement(
         "div",
         { class: "settings-cat" },
         settingsText("shell.userSettings"),
@@ -487,7 +640,7 @@ export function createSettingsOverlay(
     }
 
     // "App Settings" category — remaining tabs
-    const appSettingsCat = createElement(
+    appSettingsCat = createElement(
       "div",
       { class: "settings-cat" },
       settingsText("shell.appSettings"),
@@ -591,6 +744,18 @@ export function createSettingsOverlay(
         // The Log Out prompt owns Escape while it is open.
         if (e.key === "Escape" && closeLogoutPrompt === null && root?.classList.contains("open")) {
           requestClose();
+        } else if (
+          closeLogoutPrompt === null &&
+          root?.classList.contains("open") === true &&
+          (e.ctrlKey || e.metaKey) &&
+          !e.shiftKey &&
+          !e.altKey &&
+          e.key.toLowerCase() === "f"
+        ) {
+          // The page's Ctrl+F (message search) stands down while a dialog is up.
+          e.preventDefault();
+          searchInput?.focus();
+          searchInput?.select();
         }
       },
       { signal: disposable.signal },
@@ -686,6 +851,11 @@ export function createSettingsOverlay(
     panel = null;
     contentArea = null;
     pageTitle = null;
+    searchInput = null;
+    searchClear = null;
+    searchEmpty = null;
+    userSettingsCat = null;
+    appSettingsCat = null;
   }
 
   function open(): void {

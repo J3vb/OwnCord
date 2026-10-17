@@ -11,5 +11,6 @@ func init() {
 		"DMService.OpenForRing OpenDM":  "dmservice_openforring_opendm",
 		"DMService.OpenForRing summary": "dmservice_openforring_summary",
 		"DMService.OpenForRing history": "dmservice_openforring_history",
+		"MessageService.SendMessage GetGroupDMOwner failed, the open carries no owner_id": "messageservice_sendmessage_getgroupdmowner",
 	})
 }

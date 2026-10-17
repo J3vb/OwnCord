@@ -4,21 +4,26 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 )
 
 // ─── Group DM mutation ──────────────────────────────────────────────────────
 
 // CreateGroupDMChannel creates a new group DM channel with the given
 // participants (creator included in participantIDs) and opens it for all of
-// them. It always creates: unlike a 1:1 DM there is no canonical "the DM
+// them. ownerID names the group's owner and must be one of them. It always
+// creates: unlike a 1:1 DM there is no canonical "the DM
 // between these people", because the same set of people may reasonably want
 // two separate groups.
 //
 // The whole insert runs in one transaction so a crash cannot leave a channel
 // with no participants — which would be an unreachable, undeletable row.
-func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*Channel, error) {
+func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*Channel, error) {
 	if len(participantIDs) < 3 {
 		return nil, fmt.Errorf("CreateGroupDMChannel: need at least 3 participants, got %d", len(participantIDs))
+	}
+	if !slices.Contains(participantIDs, ownerID) {
+		return nil, fmt.Errorf("CreateGroupDMChannel: owner %d is not a participant", ownerID)
 	}
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -26,7 +31,7 @@ func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, participantI
 	}
 	defer func() { _ = tx.Rollback() }() //nolint:errcheck // no-op after a successful Commit
 
-	res, err := tx.ExecContext(ctx, `INSERT INTO channels (name, type, is_group) VALUES (?, 'dm', 1)`, name)
+	res, err := tx.ExecContext(ctx, `INSERT INTO channels (name, type, is_group, dm_owner_id) VALUES (?, 'dm', 1, ?)`, name, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("CreateGroupDMChannel insert channel: %w", err)
 	}
@@ -87,6 +92,13 @@ func (d *DB) LeaveGroupDM(ctx context.Context, userID, channelID int64) (deleted
 		return false, fmt.Errorf("LeaveGroupDM close dm: %w", err)
 	}
 
+	// The owner invariant: a group with members has an owner who is a member.
+	// When the leaver was the owner this is the hand-off to the lowest
+	// remaining member id; for anyone else it changes nothing.
+	if err = ensureGroupDMOwner(ctx, tx, channelID); err != nil {
+		return false, fmt.Errorf("LeaveGroupDM owner: %w", err)
+	}
+
 	var remaining int
 	if err = tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?`, channelID,
@@ -118,4 +130,21 @@ func (d *DB) LeaveGroupDM(ctx context.Context, userID, channelID int64) (deleted
 		return false, fmt.Errorf("LeaveGroupDM commit: %w", err)
 	}
 	return deleted, nil
+}
+
+// ensureGroupDMOwner keeps the group owner invariant inside the caller's
+// transaction: a group with at least one member has dm_owner_id naming a
+// member. A missing or departed owner becomes the lowest remaining member id,
+// which is deterministic and needs no input. Every transaction that changes a
+// group's membership runs it last. A group with no member left keeps NULL.
+func ensureGroupDMOwner(ctx context.Context, tx *sql.Tx, channelID int64) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE channels SET dm_owner_id = (SELECT MIN(user_id) FROM dm_participants WHERE channel_id = ?1)
+		  WHERE id = ?1 AND is_group = 1
+		    AND (dm_owner_id IS NULL OR dm_owner_id NOT IN (SELECT user_id FROM dm_participants WHERE channel_id = ?1))`,
+		channelID,
+	); err != nil {
+		return fmt.Errorf("ensureGroupDMOwner: %w", err)
+	}
+	return nil
 }

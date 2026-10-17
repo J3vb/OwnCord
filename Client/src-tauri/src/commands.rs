@@ -29,8 +29,14 @@ fn is_settings_key_allowed(key: &str) -> bool {
 // ---------------------------------------------------------------------------
 // Settings commands
 // ---------------------------------------------------------------------------
+//
+// Every command here is `#[tauri::command(async)]` (as in `credentials.rs`):
+// a plain sync command runs on the main thread, and these touch the JSON
+// stores — the first open reads the file and a save is a write,
+// fsync and rename. None takes a window or webview handle, so none needs the
+// main thread. `JsonStore` serializes its own writes behind a mutex.
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_settings(app: tauri::AppHandle) -> Result<Value, String> {
     let store = crate::json_store::open(&app, SETTINGS_STORE)
         .map_err(|e| format!("failed to open settings store: {e}"))?;
@@ -52,7 +58,7 @@ fn log_cmd_err(cmd: &str, msg: String) -> String {
     msg
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result<(), String> {
     if !is_settings_key_allowed(&key) {
         return Err(format!("unknown settings key: {key}"));
@@ -76,7 +82,7 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
 // Certificate fingerprint commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Option<String>, String> {
     read_cert_pin(&app, &host)
 }
@@ -125,7 +131,7 @@ fn identity_pin_key(host: &str, user_id: &str) -> String {
     format!("{host}:{user_id}")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn store_identity_pin(
     app: tauri::AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
@@ -190,7 +196,7 @@ pub fn store_identity_pin(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_identity_pin(
     app: tauri::AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,

@@ -9,6 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
+import { prefetchMainPage } from "@pages/mainPagePrefetch";
 import { setOwnedTimeout, wantsNativeMenu } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { installFileDropGuard } from "./features/messaging/fileDropGuard";
@@ -589,6 +590,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     autoConnect = false,
   ): void {
     log.info("Post-auth wiring", { host, username });
+    // Start downloading/parsing the MainPage chunk now so it overlaps the
+    // socket handshake; the import at "connected" and the mount hit the cache.
+    prefetchMainPage();
     // Tear down any prior session wiring so listeners and the connected
     // overlay never stack across a retry (a second wirePostAuth without an
     // intervening logout).
@@ -741,10 +745,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // Stop listening once connected so a later transition can't fire this
         // handler again.
         unsubState();
-        // Pre-warm the lazily-loaded MainPage chunk (and the LiveKit stack
-        // behind it) so navigating past the connected overlay doesn't wait
-        // on a dynamic import.
-        void import("@pages/MainPage");
+        // Already prefetched at the top of wirePostAuth; this resolves from
+        // the module cache and covers a prefetch that failed transiently.
+        prefetchMainPage();
       } else if (wsState === "disconnected") {
         // Terminal non-connected transition (auth_error, cert-mismatch reject,
         // or intentional disconnect before ever connecting): drop the handler

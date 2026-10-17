@@ -37,6 +37,18 @@ type chatMessagePayload struct {
 	// ordinary message (WP 3B-9). See callBlock.
 	Kind string     `json:"kind,omitempty"`
 	Call *callBlock `json:"call,omitempty"`
+	// GroupEvent is set only on a group DM row (WP 3B-10): the same shape as
+	// the history payload's db.GroupEventInfo.
+	GroupEvent *groupEventBlock `json:"group_event,omitempty"`
+}
+
+// groupEventBlock is the group_event object of a group DM row. Add and remove
+// set TargetUserID, rename sets Name ("" means removed), icon sets IconRemoved
+// and leave sets none, so it encodes as {}.
+type groupEventBlock struct {
+	TargetUserID int64   `json:"target_user_id,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	IconRemoved  *bool   `json:"icon_removed,omitempty"`
 }
 
 // callBlock is the call object of a call log row: the same shape as the
@@ -69,6 +81,8 @@ type chatMessageArgs struct {
 	// Kind and Call are set only for a call log row.
 	Kind string
 	Call *callBlock
+	// GroupEvent is set only for a group DM row.
+	GroupEvent *groupEventBlock
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -107,6 +121,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			ReferencedMessage: a.ReferencedMessage,
 			Kind:              a.Kind,
 			Call:              a.Call,
+			GroupEvent:        a.GroupEvent,
 		},
 	})
 }

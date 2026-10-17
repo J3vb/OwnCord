@@ -70,6 +70,9 @@ export type DmCallView =
       readonly inRoom: readonly number[];
       /** Someone was in the call and you are now alone in it. */
       readonly peerLeft: boolean;
+      /** Ring again is offered: you are alone after a peer left, or a group
+       *  has a member who is not in the call. */
+      readonly canRingAgain: boolean;
     };
 
 export interface DmCallViewInput {
@@ -81,6 +84,13 @@ export interface DmCallViewInput {
   readonly outgoing: OutgoingCallState | null;
   /** Someone else has been in this call's room since you joined. */
   readonly peerWasHere?: boolean;
+}
+
+/** The members of a group DM who are not in the call (everyone but you is in
+ *  `dm.participants`), in the DM's order. A 1:1 has no roster to grey out. */
+export function absentMembers(dm: DmChannel, present: readonly number[]): number[] {
+  if (!dm.isGroup) return [];
+  return dm.participants.map((p) => p.id).filter((id) => !present.includes(id));
 }
 
 /** Which panel, if any, the open channel shows. Pure: the whole decision. */
@@ -104,11 +114,14 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
       if (out.phase === "ringing") return { kind: "outgoing", dm, pending: out.pending };
       return { kind: "unanswered", dm, reason: out.phase };
     }
+    const inRoom = [selfId, ...others];
+    const peerLeft = !dm.isGroup && others.length === 0 && input.peerWasHere === true;
     return {
       kind: "connected",
       dm,
-      inRoom: [selfId, ...others],
-      peerLeft: !dm.isGroup && others.length === 0 && input.peerWasHere === true,
+      inRoom,
+      peerLeft,
+      canRingAgain: peerLeft || absentMembers(dm, inRoom).length > 0,
     };
   }
   if (others.length > 0) {
@@ -251,6 +264,9 @@ export {
   clearIncomingCall,
 } from "../features/direct-messages/callAlerts";
 
+/** Marks a group member who is not in the call: dimmed, no pulse. */
+const ABSENT_CLASS = "dcp-avatar--absent";
+
 /** The expanded panel's dragged height, in px; 0 means the default share. */
 const HEIGHT_PREF = "dmCallHeight";
 /** Keep MIN_HEIGHT in step with the clamp on `.dm-call-panel--expanded`. */
@@ -367,7 +383,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       case "unanswered":
         return `unanswered|${v.dm.channelId}|${v.reason}|${String(videoActive)}`;
       case "connected":
-        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.peerLeft)}|${String(collapsed)}|${String(videoActive)}`;
+        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.peerLeft)}|${String(v.canRingAgain)}|${String(collapsed)}|${String(videoActive)}`;
       default:
         return "none";
     }
@@ -400,12 +416,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const badge = createElement("span", { class: "dcp-avatar-badge" });
     badge.hidden = true;
     wrap.appendChild(badge);
+    if (extra.split(" ").includes(ABSENT_CLASS)) {
+      // Every surface that draws a greyed member (stage, grid tile, live strip).
+      wrap.title = d("notInCall");
+      wrap.appendChild(createElement("span", { class: "sr-only" }, d("notInCall")));
+    }
     avatars.set(userId, { wrap, badge, verify: null, verifyKey: "" });
     return wrap;
   }
 
   function person(userId: number, dm: DmChannel, extra = ""): HTMLElement {
-    const col = createElement("div", { class: "dcp-person" });
+    const absent = extra.split(" ").includes(ABSENT_CLASS);
+    const col = createElement("div", {
+      class: absent ? "dcp-person dcp-person--absent" : "dcp-person",
+    });
     const label = createElement(
       "span",
       { class: "dcp-person-name" },
@@ -545,14 +569,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     dm: DmChannel,
     ids: readonly number[],
     ringing: readonly number[] = [],
+    absent: readonly number[] = [],
   ): HTMLElement {
     root.classList.add("dm-call-panel--video");
     const me = currentUserId();
     const voice = voiceStore.getState();
-    people = ids.map((id) => ({
+    people = [...ids, ...absent].map((id) => ({
       userId: id,
       label: resolvePerson(id, dm, voice, me).name,
-      content: avatar(id, dm, "lg", ringing.includes(id) ? "dcp-avatar--ringing" : ""),
+      content: avatar(
+        id,
+        dm,
+        "lg",
+        ringing.includes(id) ? "dcp-avatar--ringing" : absent.includes(id) ? ABSENT_CLASS : "",
+      ),
       // Its avatars draw their own speaking ring and mute badge.
       marksOwnState: true as const,
     }));
@@ -614,6 +644,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const row = createElement("div", { class: "dcp-row" });
     const faces = createElement("div", { class: "dcp-faces" });
     for (const id of v.inRoom) faces.appendChild(avatar(id, v.dm, "sm"));
+    for (const id of absentMembers(v.dm, v.inRoom)) {
+      faces.appendChild(avatar(id, v.dm, "sm", ABSENT_CLASS));
+    }
     const text = createElement("div", { class: "dcp-row-text" });
     let hint = d("joinHint");
     if (v.otherChannelId !== null) {
@@ -650,13 +683,15 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const me = currentUserId();
     const callees =
       v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
+    const absent = absentMembers(v.dm, [me, ...callees]);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, [me, ...callees], callees);
+      stage = videoStage(v.dm, [me, ...callees], callees, absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       stage.appendChild(person(me, v.dm));
       for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
     fill(
       topBar(d("calling"), "warn", true, true),
@@ -672,13 +707,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // Nobody else is in the room (deriveCallView hands us "unanswered" only
     // then), so the absent callee has no tile: showing their placeholder would
     // look like they joined. Ring again restores the ringing tile.
+    // A group still lists its members, greyed out: they are not in the call.
     const ids = [currentUserId()];
+    const absent = absentMembers(v.dm, ids);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, ids);
+      stage = videoStage(v.dm, ids, [], absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of ids) stage.appendChild(person(id, v.dm));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
     const actions = createElement("div", { class: "dcp-controls" });
     appendChildren(
@@ -725,18 +763,21 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       return;
     }
     root.classList.add("dm-call-panel--expanded");
+    const absent = absentMembers(v.dm, v.inRoom);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, v.inRoom);
+      stage = videoStage(v.dm, v.inRoom, [], absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
-    if (!v.peerLeft) {
+    if (!v.canRingAgain) {
       fill(topBar(status, "", true, true), stage, callControls(false));
       return;
     }
-    // The other person hung up: say so and offer the redial, as for an unanswered ring.
+    // The other person hung up, or a group member is missing: offer the redial,
+    // as for an unanswered ring (a group re-rings everyone).
     const ringAgain = textButton(d("ringAgain"), "btn-primary dcp-pill", "dcp-ring-again", () =>
       options.onRingAgain(v.dm.channelId),
     );

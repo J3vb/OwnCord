@@ -322,7 +322,7 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 	userB := seedUser(t, database, "dmlast-b")
 	userC := seedUser(t, database, "dmlast-c")
 
-	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", []int64{userA, userB, userC})
+	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", userA, []int64{userA, userB, userC})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	userB := seedUser(t, database, "dmatt-b")
 	userC := seedUser(t, database, "dmatt-c")
 
-	ch, err := database.CreateGroupDMChannel(ctx, "grp", []int64{userA, userB, userC})
+	ch, err := database.CreateGroupDMChannel(ctx, "grp", userA, []int64{userA, userB, userC})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}

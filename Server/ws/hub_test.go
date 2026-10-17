@@ -1600,7 +1600,7 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 // hubTestSchema is the minimal schema needed for hub tests.
 // The slice is clipped so the `append(hubTestSchema, ...)` extensions in sibling files copy it
 // instead of writing into spare capacity they would share.
-// hubTestSchema ends with the real member-generation migrations (057, 061), 062 (the custom status expiry column) and 064 (call log), so the ready
+// hubTestSchema ends with the real member-generation migrations (057, 061), 062 (the custom status expiry column), 064 (call log) and 065 (group DM owner), so the ready
 // path's shared member read (serve_ready_members_cache.go) runs against the
 // same triggers production does.
 var hubTestSchema = slices.Clip(slices.Concat([]byte(`
@@ -1836,7 +1836,7 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql")))
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql")))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {

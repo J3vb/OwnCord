@@ -25,8 +25,8 @@ func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessagePara
 	if ref == nil || ref.Deleted {
 		return nil, fmt.Errorf("%w: reply target not found", ErrBadRequest)
 	}
-	if ref.IsCall {
-		return nil, fmt.Errorf("%w: cannot reply to a call", ErrBadRequest)
+	if ref.IsSystem {
+		return nil, fmt.Errorf("%w: cannot reply to a system message", ErrBadRequest)
 	}
 	return ref, nil
 }
