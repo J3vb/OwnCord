@@ -30,9 +30,11 @@ vi.mock("../../../platform/desktop", () => ({
 import {
   armScreenRestart,
   disarmScreenRestart,
+  noteChangedQuality,
   noteChangedSource,
   pickChangeSource,
   pickScreenSource,
+  shareSettings,
 } from "./screenPicker";
 import { setScreenSourcePicker } from "./screenPickerSlot";
 
@@ -72,6 +74,8 @@ describe("pickScreenSource", () => {
     });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "window:81",
+      quality: "high",
+      fps: 30,
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 6_000_000,
       maxFramerate: 30,
@@ -101,6 +105,8 @@ describe("pickScreenSource", () => {
     host.pick = () => ({ source: "screen:277", quality: "low", fps: 30 });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "screen:277",
+      quality: "low",
+      fps: 30,
       capture: { fps: 5, maxWidth: 1280, maxHeight: 720 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
@@ -112,6 +118,8 @@ describe("pickScreenSource", () => {
     host.pick = () => ({ source: "screen:277", quality: "source", fps: 60 });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "screen:277",
+      quality: "source",
+      fps: 60,
       capture: { fps: 60, maxWidth: 0, maxHeight: 0 },
       maxBitrate: 15_000_000,
       maxFramerate: 60,
@@ -280,5 +288,48 @@ describe("pickChangeSource", () => {
   it("resolves null when the dialog is dismissed", async () => {
     host.pick = () => null;
     await expect(pickChangeSource()).resolves.toBeNull();
+  });
+});
+
+describe("shareSettings", () => {
+  it("maps a quality and frame rate onto the host capture and the publish encoding", () => {
+    expect(shareSettings("high", 30)).toEqual({
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxBitrate: 6_000_000,
+      maxFramerate: 30,
+      simulcast: true,
+    });
+    expect(shareSettings("source", 120)).toMatchObject({
+      capture: { fps: 120, maxWidth: 0, maxHeight: 0 },
+      maxFramerate: 120,
+      simulcast: false,
+    });
+  });
+});
+
+describe("noteChangedQuality", () => {
+  beforeEach(() => {
+    host.sources = x11;
+    setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));
+  });
+  afterEach(() => {
+    disarmScreenRestart();
+    setScreenSourcePicker(null);
+  });
+
+  it("a restart after a reconnect re-shares at the changed quality, on the same source", async () => {
+    host.pick = () => ({ source: "window:81", quality: "high", fps: 30, audio: true });
+    await pickScreenSource();
+
+    noteChangedQuality("low", 30);
+
+    await expect(armScreenRestart()).resolves.toBe(true);
+    await expect(pickScreenSource()).resolves.toEqual({
+      source: "window:81",
+      quality: "low",
+      fps: 30,
+      ...shareSettings("low", 30),
+      audio: true,
+    });
   });
 });

@@ -6,6 +6,8 @@ vi.mock("../../stores/auth.store", () => ({
 }));
 vi.mock("../../lib/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
 vi.mock("../../lib/e2eeCrypto", () => ({ signEphemeralKey: vi.fn() }));
+const decode = vi.hoisted(() => ({ list: vi.fn() }));
+vi.mock("./decodeCaps", () => ({ localVideoDecode: () => decode.list() }));
 vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -25,6 +27,14 @@ function deferredPair() {
   return load;
 }
 
+function deferred<T>() {
+  const gate = {} as { promise: Promise<T>; resolve: (value: T) => void };
+  gate.promise = new Promise<T>((resolve) => {
+    gate.resolve = resolve;
+  });
+  return gate;
+}
+
 function setup(host: string | null = "chat.example") {
   let currentHost = host;
   const identity = new E2EEIdentity({ getServerHost: () => currentHost });
@@ -36,6 +46,7 @@ beforeEach(() => {
   auth.user = { id: 7 };
   vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(PAIR);
   vi.mocked(signEphemeralKey).mockResolvedValue("sig");
+  decode.list.mockResolvedValue(["vp8", "h264"]);
 });
 
 describe("rawFromBase64", () => {
@@ -47,6 +58,19 @@ describe("rawFromBase64", () => {
 describe("E2EEIdentity", () => {
   it("starts with no ephemeral keypair", () => {
     expect(setup().identity.ecdhKeyPair).toBeNull();
+  });
+
+  it("the announce awaits the Linux list", async () => {
+    const gate = deferred<string[]>();
+    decode.list.mockReturnValue(gate.promise);
+    const { identity } = setup();
+    const pending = identity.buildAnnouncePayload(EPHEMERAL);
+    const settled = vi.fn();
+    void pending.then(settled);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).not.toHaveBeenCalled();
+    gate.resolve(["vp8", "h264", "vp9"]);
+    await expect(pending).resolves.toMatchObject({ video_decode: ["vp8", "h264", "vp9"] });
   });
 
   it("signs the announce with the identity key scoped to host and user", async () => {

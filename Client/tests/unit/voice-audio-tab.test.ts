@@ -1810,7 +1810,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       .mockReset()
       .mockResolvedValue([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
     nativeCameraSupport.mockReset().mockResolvedValue({ available: true, missing: [] });
-    nativeVideoCodecs.mockReset().mockResolvedValue({ h264: true });
+    nativeVideoCodecs.mockReset().mockResolvedValue({ h264: true, vp9: false, decode: [] });
     vi.doMock("../../src/features/voice/native/videoCodecs", () => ({
       nativeVideoCodecs: () => nativeVideoCodecs() as unknown,
     }));
@@ -1942,7 +1942,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   it("disables H.264 with the reason when the native encoder lacks it", async () => {
-    nativeVideoCodecs.mockResolvedValue({ h264: false });
+    nativeVideoCodecs.mockResolvedValue({ h264: false, vp9: false, decode: [] });
     const tab = await mount();
     const select = await codecSelect(tab.element);
     const h264 = [...select.options].find((o) => o.value === "h264")!;
@@ -1952,7 +1952,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   it("a saved H.264 shows as VP8 when unavailable", async () => {
-    nativeVideoCodecs.mockResolvedValue({ h264: false });
+    nativeVideoCodecs.mockResolvedValue({ h264: false, vp9: false, decode: [] });
     localStorage.setItem("owncord:settings:videoCodec", '"h264"');
     const tab = await mount();
     const select = await codecSelect(tab.element);

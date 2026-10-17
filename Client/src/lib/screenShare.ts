@@ -633,8 +633,9 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
   screenTrackEndedCleanup?: () => void;
-  /** The live share's quality, set once it is published (web path only):
-   *  Change source and Quality act on a share only while it is set. */
+  /** The live share's quality, set once it is published: Change source and
+   *  Quality act on a share only while it is set. On Linux it is the quality
+   *  the native picker chose, and the track changes it itself. */
   quality?: StreamQuality;
   /** The live share's frame-rate choice (30 = the quality's own rate). */
   fps?: number;
@@ -652,6 +653,28 @@ export interface ScreenTrackState extends GenerationGuarded {
  *  (the Linux native capture, which picks in its own dialog). */
 export interface InPlaceSourceChange {
   changeSource(): Promise<void>;
+}
+
+/** A share whose video track runs at a new quality by itself (the Linux native
+ *  capture: the host re-sizes the running capture and republishes it). It
+ *  carries the quality and frame rate it was picked at. `published` is the
+ *  codec the share goes out with now. */
+export interface InPlaceQualityChange {
+  readonly quality: StreamQuality;
+  readonly fps: number;
+  setQuality(quality: StreamQuality, fps: number, published: PublishCodec): Promise<void>;
+}
+
+function qualityOf(track: LocalTrack | undefined): InPlaceQualityChange | null {
+  const t = track as Partial<InPlaceQualityChange> | undefined;
+  return typeof t?.setQuality === "function" && t.quality !== undefined && typeof t.fps === "number"
+    ? (t as InPlaceQualityChange)
+    : null;
+}
+
+/** The live share's video track when it changes quality by itself, else null. */
+export function inPlaceQualityChange(state: ScreenTrackState): InPlaceQualityChange | null {
+  return qualityOf(state.manualScreenTracks.find((t) => t.kind === Track.Kind.Video));
 }
 
 /** The live share's video track when it changes source by itself, else null. */
@@ -848,8 +871,13 @@ export async function enableScreenshare(
     state.announced = videoTrack;
     state.preferred = choice.preferred;
     state.published = videoCodec;
-    // The Linux native capture changes source through its own picker only.
-    if (!isLinuxDesktop()) {
+    // The Linux native capture carries the quality and frame rate its own
+    // picker chose, not the saved prefs.
+    const nativeQuality = isLinuxDesktop() ? qualityOf(videoTrack) : null;
+    if (nativeQuality !== null) {
+      state.quality = nativeQuality.quality;
+      state.fps = nativeQuality.fps;
+    } else if (!isLinuxDesktop()) {
       state.quality = quality;
       state.fps = fps;
     }
