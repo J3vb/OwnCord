@@ -40,6 +40,12 @@ func wizardRunningCfg() *config.Config {
 func wizardHandler(t *testing.T, database *db.DB, cfgPath string, restarted chan string) http.Handler {
 	t.Helper()
 	t.Cleanup(admin.ResetRestartState)
+	// The bare-metal path is what these tests pin; a host with /.dockerenv
+	// must not flip them into the container path. Tests that want the
+	// container path set OWNCORD_CONTAINER=1 before calling this.
+	if _, set := os.LookupEnv("OWNCORD_CONTAINER"); !set {
+		t.Setenv("OWNCORD_CONTAINER", "0")
+	}
 	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{
 			ConfigPath: cfgPath,

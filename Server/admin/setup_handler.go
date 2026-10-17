@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -92,6 +93,7 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 				UploadMaxSizeMB:   cfg.Upload.MaxSizeMB,
 				VoiceQuality:      cfg.Voice.Quality,
 				VoiceAutoDownload: cfg.Voice.AutoDownloadLiveKit,
+				PortLocked:        updater.RunningInContainer(),
 			}
 			// The settings table is authoritative for the values the app
 			// reads live; fall back to the config/seed values on error.
@@ -145,7 +147,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	proxyNets := setupParseCIDRList(trustedProxies)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins, proxyNets, opts.SetupToken)
+		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins, proxyNets, opts.SetupToken, opts.RunningCfg)
 		if !ok {
 			return
 		}
@@ -218,7 +220,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 // the caller from config.Server.TrustedProxies) makes both honour
 // trusted_proxies the same way every other session-creating path does
 // (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
-func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string) (setupRequest, string, bool) {
+func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string, running *config.Config) (setupRequest, string, bool) {
 	var req setupRequest
 
 	// CSRF protection: reject cross-origin requests (BUG-097).
@@ -288,6 +290,13 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return req, "", false
 		}
+		// A container's published port mapping fixes the port, so a different
+		// one would leave the server unreachable. Refused here, with the
+		// other wizard validation, so no account is created for it.
+		if err := wizardPortRefusal(req.Wizard, running); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return req, "", false
+		}
 	}
 
 	return req, host, true
@@ -314,6 +323,12 @@ func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setu
 		warnings = append(warnings,
 			"could not save server settings: "+err.Error()+" — adjust them later in the admin panel's Settings page")
 	}
+	if opts.ConfigPath != "" && opts.RunningCfg != nil && updater.RunningInContainer() {
+		// config.yaml is a read-only mount (or lives in the container layer),
+		// so the settings go to the overrides file in the data volume.
+		restartRequired, restartURL = setupSaveContainerOverrides(ctx, setup, wr, uid, reqHost, opts, &warnings)
+		return warnings, restartRequired, restartURL
+	}
 	if opts.ConfigPath != "" {
 		if err := config.Save(opts.ConfigPath, buildConfigPatch(wr, opts.RunningCfg)); err != nil {
 			slog.Error("setup wizard: writing config failed", "path", opts.ConfigPath, "error", err)
@@ -330,6 +345,42 @@ func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setu
 	}
 
 	return warnings, restartRequired, restartURL
+}
+
+// setupSaveContainerOverrides persists the wizard's startup settings through
+// config-overrides.json, the durable file in the data volume. The merged
+// result is checked with config.Preview first (the twin of verifyLoadable), so
+// a change that would stop the next boot is refused rather than saved. Any
+// failure appends a warning and requests no restart; the account already
+// exists. Neither values nor secrets are logged.
+func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupService, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions, warnings *[]string) (bool, string) {
+	path := config.OverridesPath(opts.RunningCfg.Server.DataDir)
+	fail := func(err error) (bool, string) {
+		slog.Error("setup wizard: writing config failed", "path", path, "error", err)
+		*warnings = append(*warnings,
+			"could not save "+config.OverridesFileName+": "+err.Error()+" — your account was created; adjust these settings later in the admin panel's Settings page")
+		return false, ""
+	}
+	base, err := config.Preview(opts.ConfigPath, path, nil)
+	if err != nil {
+		return fail(err)
+	}
+	changes := wizardOverrides(wr, opts.RunningCfg, base)
+	if len(changes) == 0 {
+		return false, ""
+	}
+	if _, err := config.Preview(opts.ConfigPath, path, changes); err != nil {
+		return fail(err)
+	}
+	if err := config.SaveOverrides(path, changes); err != nil {
+		return fail(err)
+	}
+	setup.RecordConfigWrite(ctx, uid,
+		"setup wizard wrote "+config.OverridesFileName+" ("+strings.Join(overrideKeyNames(changes), ", ")+")")
+	if wizardOverridesNeedRestart(changes) {
+		return true, computeRestartURL(reqHost, wr, opts.RunningCfg)
+	}
+	return false, ""
 }
 
 // setupRestartAfterResponse hands the setup-wizard restart off to main.go.

@@ -37,6 +37,7 @@ type SetupReply = { status?: number; json: Record<string, unknown> };
 
 async function boot(
   setupReply: SetupReply = { json: { token: "T", invite_code: "INV-1" } },
+  defaults: Record<string, unknown> = DEFAULTS,
 ): Promise<{ dom: JSDOM; doc: Document; calls: Call[] }> {
   const calls: Call[] = [];
   const dom = new JSDOM(ADMIN_HTML, {
@@ -53,7 +54,7 @@ async function boot(
           body: typeof opts.body === "string" ? JSON.parse(opts.body) : undefined,
         });
         let r: SetupReply = { json: {} };
-        if (p === "/setup/status") r = { json: { needs_setup: true, defaults: DEFAULTS } };
+        if (p === "/setup/status") r = { json: { needs_setup: true, defaults } };
         else if (p === "/setup") r = setupReply;
         else if (p === "/api/v1/auth/login")
           r = { status: 401, json: { message: "invalid credentials" } };
@@ -320,6 +321,34 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     expect(restartText).toContain("Save your recovery kit, then open the link above.");
     expect(restartText).not.toContain("redirect on its own");
     expect(doc.querySelector("#setupRestart .spinner")).toBeNull();
+  });
+
+  // WP 4.7b: in a container the published port mapping fixes the port, so the
+  // wizard shows it read-only and still sends it unchanged.
+  it("renders the port read-only with a reason when the server locks it", async () => {
+    const booted = await boot(undefined, { ...DEFAULTS, port_locked: true });
+    dom = booted.dom;
+    const { doc, calls } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    await submit(dom);
+    const port = field(doc, "wizPort");
+    expect(port.disabled).toBe(true);
+    expect(port.value).toBe("8443");
+    expect(doc.getElementById("wizPortHint")!.textContent).toMatch(/port mapping/);
+    for (let i = 0; i < 4; i++) await submit(dom);
+    const setup = calls.find((c) => c.path === "/setup");
+    expect((setup!.body as { wizard: { port: number } }).wizard.port).toBe(8443);
+  });
+
+  it("keeps the port editable when the server does not lock it", async () => {
+    const booted = await boot();
+    dom = booted.dom;
+    const { doc } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    await submit(dom);
+    expect(field(doc, "wizPort").disabled).toBe(false);
   });
 
   it("points at the restarted address when the wizard moved the port", async () => {
