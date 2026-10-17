@@ -4753,10 +4753,15 @@ Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
 }
 ```
 
-`can_apply` is `false` in container deployments (detected via
-`OWNCORD_CONTAINER`, which the shipped Dockerfile sets, or the engine marker
-files): checking still works, but `POST /updates/apply` will refuse — the
-admin SPA replaces the apply button with an image-upgrade note.
+`can_apply` is `false` when `POST /updates/apply` would refuse; checking still
+works, and `apply_blocked` (present only then) says why:
+
+- `container`: a container deployment (detected via `OWNCORD_CONTAINER`, which
+  the shipped Dockerfile sets, or the engine marker files). The admin SPA
+  replaces the apply button with an image-upgrade note. This wins when both
+  reasons apply.
+- `install_read_only`: the service cannot create files in the folder that holds
+  its program file. The admin SPA says to install the new release by hand.
 
 #### Errors
 
@@ -4786,6 +4791,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | Status | Code                                                         | Cause                                                                                                                                                       |
 | ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
+| 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |

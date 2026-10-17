@@ -14,7 +14,8 @@ import { applySnapshot, beginSnapshot, failSnapshot } from "./store";
 const log = createLogger("message-requests");
 
 let source: DispatchApi | undefined;
-onAuthCleared(() => {
+// App-lifetime reset hook, registered at module load.
+void onAuthCleared(() => {
   source = undefined;
 });
 

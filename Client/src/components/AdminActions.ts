@@ -61,24 +61,13 @@ export interface MemberContextMenuOptions {
   onToggleBlock(): Promise<void>;
   /** Revokes every session the target holds (the "Force Logout" item). */
   onKick(): Promise<void>;
-  /**
-   * The reason is stored and displayed by the server; empty means "no reason
-   * given". durationHours 0 = permanent, otherwise the ban auto-expires.
-   */
-  onBan(reason: string, durationHours: number): Promise<void>;
+  /** Opens the Ban dialog (reason, length, message history). The menu closes
+   *  first, so the dialog returns focus to the member row. */
+  onBan(): void;
   onChangeRole(newRole: string): Promise<void>;
 }
 
-/** Ban duration choices offered in the ban flow (label key → hours; 0 = permanent). */
 const noop = (): void => {};
-
-const BAN_DURATIONS = [
-  { key: "ban.forever", hours: 0 },
-  { key: "ban.oneHour", hours: 1 },
-  { key: "ban.oneDay", hours: 24 },
-  { key: "ban.sevenDays", hours: 24 * 7 },
-  { key: "ban.thirtyDays", hours: 24 * 30 },
-] as const;
 
 export interface ChannelContextMenuOptions {
   channelId: number;
@@ -497,7 +486,18 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     danger.appendChild(kickItem);
   }
 
-  if (canBan) appendBanFlow(danger, options, signal);
+  if (canBan) {
+    appendRow(
+      danger,
+      shellText("member.ban"),
+      () => {
+        closeMenu();
+        options.onBan();
+      },
+      signal,
+      { testId: "member-menu-ban" },
+    ).classList.add("context-menu__item--danger");
+  }
 
   // Developer Mode: copy the member's ID, just above Block (self included).
   if (isDeveloperMode()) {
@@ -560,103 +560,6 @@ function buildBlockItem(options: MemberContextMenuOptions, signal: AbortSignal):
     );
   }
   return blockItem;
-}
-
-/** Ban entry plus its reason/duration form. Split out so the member menu can
- *  omit it wholesale for an actor without BAN_MEMBERS. */
-function appendBanFlow(menu: Node, options: MemberContextMenuOptions, signal: AbortSignal): void {
-  // Ban — collects the reason the server stores and displays alongside the ban.
-  const banItem = buildMenuItem(
-    shellText("member.ban"),
-    "context-menu__item context-menu__item--danger",
-  );
-  const banReasonRow = createElement("div", {
-    class: "context-menu__reason",
-    style: "display:none;padding:6px 8px",
-  });
-  const banReasonInput = createElement("input", {
-    class: "form-input",
-    type: "text",
-    placeholder: shellText("member.banReason"),
-    maxlength: "200",
-    "data-testid": "ban-reason-input",
-    style: "width:100%;font-size:12px",
-  });
-  const banDurationSelect = createElement("select", {
-    class: "form-input",
-    "data-testid": "ban-duration-select",
-    "aria-label": shellText("member.banDuration"),
-    style: "width:100%;font-size:12px;margin-top:4px",
-  });
-  for (const d of BAN_DURATIONS) {
-    const opt = createElement("option", { value: String(d.hours) }, shellText(d.key));
-    banDurationSelect.appendChild(opt);
-  }
-  const banConfirm = buildMenuItem(
-    shellText("member.banConfirm"),
-    "context-menu__item context-menu__item--danger",
-    { testId: "ban-confirm" },
-  );
-  appendChildren(banReasonRow, banReasonInput, banDurationSelect, banConfirm);
-
-  banItem.addEventListener(
-    "click",
-    (e) => {
-      e.stopPropagation();
-      banItem.style.display = "none";
-      banReasonRow.style.display = "";
-      // The confirm button is a menuitem with tabindex -1 (roving navigation
-      // owns the Tab stop); now that its form is shown it must be Tab-reachable.
-      banConfirm.setAttribute("tabindex", "0");
-      banReasonInput.focus();
-    },
-    { signal },
-  );
-
-  // Typing a reason must not close the menu or trigger the outside-click guard.
-  banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal });
-  banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal });
-  banDurationSelect.addEventListener("click", (e) => e.stopPropagation(), { signal });
-  banDurationSelect.addEventListener("mousedown", (e) => e.stopPropagation(), {
-    signal,
-  });
-
-  let banRunning = false;
-  function submitBan(): void {
-    if (banRunning) return;
-    banRunning = true;
-    setText(banConfirm, shellText("member.banning"));
-    banConfirm.classList.add("context-menu__item--pending");
-    const done = (): void => {
-      banRunning = false;
-      banConfirm.classList.remove("context-menu__item--pending");
-      setText(banConfirm, shellText("member.banConfirm"));
-    };
-    const durationHours = Number.parseInt(banDurationSelect.value, 10) || 0;
-    void options.onBan(banReasonInput.value.trim(), durationHours).then(done, done);
-  }
-
-  banConfirm.addEventListener(
-    "click",
-    (e) => {
-      e.stopPropagation();
-      submitBan();
-    },
-    { signal },
-  );
-  banReasonInput.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        submitBan();
-      }
-    },
-    { signal },
-  );
-
-  menu.appendChild(banItem);
-  menu.appendChild(banReasonRow);
 }
 
 // ---------------------------------------------------------------------------

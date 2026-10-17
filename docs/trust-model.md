@@ -655,4 +655,4 @@ after the user accepts an update, and that preference does not gate it.
 - BPR-051's exit evidence is one non-developer reading "The short answer" and
   answering "who can read my messages?" correctly — recorded in the B2-7
   evidence block of
-  [plans/b2-protocol-trust-compat-2026-08-28.md](plans/b2-protocol-trust-compat-2026-08-28.md).
+  [archive/plans/b2-protocol-trust-compat-2026-08-28.md](archive/plans/b2-protocol-trust-compat-2026-08-28.md).

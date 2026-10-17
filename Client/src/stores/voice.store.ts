@@ -179,7 +179,8 @@ export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 // edge (join, leave, channel switch, reconnect roster, logout) without that
 // module importing this store (DP-40). localDeafened itself is mirrored
 // synchronously by setLocalDeafened/resetVoiceStore.
-voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
+// App-lifetime: the store and this listener live as long as the app.
+void voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
 
 /** Incremented by the incremental roster mutators (updateVoiceState,
  *  removeVoiceUser) — never by setVoiceStates, which replaces the whole

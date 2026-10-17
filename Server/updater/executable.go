@@ -1,6 +1,8 @@
 package updater
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -23,4 +25,33 @@ func resolveExecutablePath() (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(exePath)
+}
+
+// CanReplaceExecutable reports whether the directory holding exePath accepts
+// the file a self-update creates next to the binary. It creates and removes a
+// probe file there, so a read-only install folder is reported before any
+// download starts. The ".old-" infix is deliberate: if the process dies
+// between create and remove, the boot cleanup (removeOldBinaryAt) matches the
+// leftover by that prefix and deletes it.
+//
+// A nil result does not promise the swap succeeds, only that the directory is
+// writable; the swap itself still reports its own failures.
+func CanReplaceExecutable(exePath string) error {
+	dir := filepath.Dir(exePath)
+	probe, err := os.CreateTemp(dir, filepath.Base(exePath)+".old-probe-*")
+	if err != nil {
+		return fmt.Errorf("install directory %s is not writable: %w", dir, err)
+	}
+	name := probe.Name()
+	closeErr := probe.Close()
+	removeErr := os.Remove(name)
+	if closeErr != nil {
+		return fmt.Errorf("closing install directory probe: %w", closeErr)
+	}
+	if removeErr != nil {
+		// The create already proved the folder writable; a file briefly held
+		// open (antivirus, indexer) is left for the boot cleanup.
+		slog.Debug("install directory probe not removed", "path", name, "err", removeErr)
+	}
+	return nil
 }

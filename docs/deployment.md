@@ -2095,6 +2095,11 @@ The audit log tells you which stage failed. Every update writes
 - **Docker refuses the whole thing.** The panel answers
   `503 CONTAINER_DEPLOYMENT`, because the binary is part of the image. Upgrade
   with the image instead: `docker compose pull && docker compose up -d`.
+- **The install folder is read-only to the service.** The panel answers
+  `503 INSTALL_READ_ONLY` before it downloads anything, and the Updates page
+  says the server cannot replace its own program file. Install the release by
+  hand ([Upgrade and Rollback](#upgrade-and-rollback)), or give the service write access to the folder
+  that holds the binary.
 
 To make failures rare:
 

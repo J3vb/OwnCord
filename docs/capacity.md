@@ -83,7 +83,7 @@ Why each part of that is load-bearing:
 - The **ceiling leg** of `load-baseline.yml` runs the same profile with no
   cgroup at all, on the whole runner. It shows headroom. It is not capacity.
 - The **benchmark baseline** in
-  [plans/b3-bench-baseline-2026-09-01.md](plans/b3-bench-baseline-2026-09-01.md)
+  [archive/plans/b3-bench-baseline-2026-09-01.md](archive/plans/b3-bench-baseline-2026-09-01.md)
   was recorded on a 16-core developer workstation. It is a relative
   before/after instrument for Go benchmarks. It is not capacity either.
 

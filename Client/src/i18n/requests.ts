@@ -40,6 +40,8 @@ export const requestsText = defineCatalog("requests", {
   "profile.label": "User profile",
   "profile.close": "Close profile sidebar",
   "profile.about": "ABOUT ME",
+  "profile.role.change": "Change role: {role}",
+  "profile.role.menu": "Roles for {name}",
   "profile.memberSince": "MEMBER SINCE",
   "profile.note": "NOTE",
   "profile.notePlaceholder": "Click to add a note",

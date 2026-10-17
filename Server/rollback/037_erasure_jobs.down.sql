@@ -1,5 +1,5 @@
 -- Rollback of 037, from the erasure_jobs draft's own down file
--- (docs/plans/hp-4-drafts/erasure_jobs.down.sql) with the schema_versions
+-- (docs/archive/plans/hp-4-drafts/erasure_jobs.down.sql) with the schema_versions
 -- delete the draft predates. Rows describe files still to be removed: an
 -- operator rolling this back while a job is not done must reconcile the
 -- storage directory by hand (the B4-9 reconciliation pass lists files

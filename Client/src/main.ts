@@ -228,15 +228,17 @@ void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics
 });
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
-onAuthCleared(cleanupNotificationAudio);
+// App-lifetime hooks: main.ts runs once per window, so none of these is ever removed.
+void onAuthCleared(cleanupNotificationAudio);
 // Coalescing is keyed by channel id, which is only unique per server, so a
 // stale window from the previous profile must not suppress the next server's
 // first notification for the same id.
-onAuthCleared(resetNotificationCoalescing);
+void onAuthCleared(resetNotificationCoalescing);
 // A profile switch or sign-out must not carry one account's moderation notices into the next.
-onAuthCleared(resetSafetyStore);
-onAuthCleared(resetMemberTimeouts);
-onAuthCleared((reason) => {
+void onAuthCleared(resetSafetyStore);
+void onAuthCleared(resetMemberTimeouts); // app-lifetime
+// App-lifetime hook, like the ones above.
+void onAuthCleared((reason) => {
   // Server switches retain their account-scoped drafts. Explicit logout and
   // invalid credentials discard pending sends.
   try {
@@ -1458,8 +1460,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   }
 }
 
-// Handle logout / disconnect
-authStore.subscribeSelector(
+// Handle logout / disconnect. App-lifetime: never unsubscribed.
+void authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own

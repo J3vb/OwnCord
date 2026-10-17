@@ -999,3 +999,51 @@ describe("Server/admin/static — upload file types", () => {
     expect(content.textContent).toContain("Only the server owner can change the file types");
   });
 });
+
+describe("Server/admin/static — Updates page when apply is blocked", () => {
+  let dom: JSDOM | undefined;
+  const BLOCKED = {
+    current: "1.0.0",
+    latest: "v1.1.0",
+    update_available: true,
+    can_apply: false,
+  };
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  async function renderBlocked(applyBlocked?: string): Promise<Document> {
+    const booted = await boot(
+      [],
+      respondWith({ "GET /updates": { json: { ...BLOCKED, apply_blocked: applyBlocked } } }),
+    );
+    dom = booted.dom;
+    const html = await booted.bridge.renderUpdates();
+    const doc = new dom.window.DOMParser().parseFromString(html, "text/html");
+    return doc;
+  }
+
+  it("explains a read-only install folder and offers no Update now button", async () => {
+    const doc = await renderBlocked("install_read_only");
+    expect(doc.querySelector(".card-note")?.textContent).toContain(
+      "cannot replace its own program file",
+    );
+    expect(doc.querySelector('[data-action="applyUpdate"]')).toBeNull();
+    expect(doc.querySelector('[data-action="renderContent"]')?.textContent).toContain(
+      "Check again",
+    );
+  });
+
+  it("keeps the container note for container deployments", async () => {
+    const doc = await renderBlocked("container");
+    expect(doc.querySelector(".card-note")?.textContent).toContain("container deployments");
+    expect(doc.querySelector('[data-action="applyUpdate"]')).toBeNull();
+  });
+
+  it("keeps the container note when an older server sends no apply_blocked", async () => {
+    const doc = await renderBlocked(undefined);
+    expect(doc.querySelector(".card-note")?.textContent).toContain("container deployments");
+  });
+});

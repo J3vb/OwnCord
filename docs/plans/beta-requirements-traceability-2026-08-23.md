@@ -4,15 +4,15 @@
 **Requirements source:**
 [beta-product-requirements-2026-08-23.md](beta-product-requirements-2026-08-23.md)  
 **Execution source:**
-[public-beta roadmap](repo-health-roadmap-2026-08-23.md)  
+[public-beta roadmap](../archive/plans/repo-health-roadmap-2026-08-23.md)  
 **Structural input:**
 [repository-layout audit](../audits/2026-08-23-repository-layout.md)  
 **Current status:** all 57 requirements are mapped; none is release-qualified  
 _2026-09-23 (B9-0):_ the B9 entry baseline
-([b9-entry-baseline-2026-09-23.md](b9-entry-baseline-2026-09-23.md)) qualifies
+([b9-entry-baseline-2026-09-23.md](../archive/plans/b9-entry-baseline-2026-09-23.md)) qualifies
 no row; BPR-060..064, BPR-070..073 and BPR-090..092 keep their status
 _2026-09-25 (B9-26/B9-27):_ the cross-feature journey evidence
-([b9-journey-evidence-2026-09-25.md](b9-journey-evidence-2026-09-25.md))
+([b9-journey-evidence-2026-09-25.md](../archive/plans/b9-journey-evidence-2026-09-25.md))
 records the B9 client halves of BPR-060, BPR-070..073, BPR-090 and BPR-092 (the
 automated keyboard/focus half of BPR-091), plus BPR-063 evidence, as
 automated-tested on the real server at the journey head. The desktop privacy

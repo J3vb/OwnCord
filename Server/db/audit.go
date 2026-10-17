@@ -15,7 +15,7 @@ type Auditor interface {
 
 // WriteAudit records an audit entry best-effort.
 //
-// Per the D8 policy decision (docs/plans/audit-2026-07-19-decisions.md), audit
+// Per the D8 policy decision (docs/archive/plans/audit-2026-07-19-decisions.md), audit
 // writes stay best-effort: a LogAudit failure must never fail or abort the
 // caller's request. But a failed write must never be silently discarded
 // either — this helper logs it with the actor/action/target context so the

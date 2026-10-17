@@ -86,10 +86,10 @@ const CURRENT = [
   "README.md",
 ];
 const DATED = [
-  "docs/plans/b0-baseline-2026-08-25.md",
-  "docs/plans/b1-repository-foundation-2026-08-25.md",
-  "docs/plans/hp-0-scorecard-2026-08-25.md",
-  "docs/plans/hp-1-scorecard-2026-08-27.md",
+  "docs/archive/plans/b0-baseline-2026-08-25.md",
+  "docs/archive/plans/b1-repository-foundation-2026-08-25.md",
+  "docs/archive/plans/hp-0-scorecard-2026-08-25.md",
+  "docs/archive/plans/hp-1-scorecard-2026-08-27.md",
 ];
 
 function fixture(t) {

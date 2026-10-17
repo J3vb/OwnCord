@@ -44,6 +44,24 @@ export interface UserProfileData {
   readonly isDeleted?: boolean;
 }
 
+/** What the role area shows right now, read live while the popup is open. */
+export interface ProfileRoleState {
+  readonly role: string;
+  /** Roles the viewer may assign; null when they may not change this role,
+   *  which leaves the plain read-only badge. */
+  readonly choices: readonly string[] | null;
+}
+
+/** The role picker's live source (P11). Re-read on every `subscribe` callback,
+ *  so a role change on either side re-filters or removes the picker. */
+export interface ProfileRoleControl {
+  read(): ProfileRoleState;
+  subscribe(listener: () => void): () => void;
+  /** Assign `role`. Reports its own failures; the shown role changes only when
+   *  the server's echo reaches the store. */
+  change(role: string): Promise<void>;
+}
+
 export interface UserProfilePopupOptions {
   readonly user: UserProfileData;
   /** Anchor point — the click event's clientX/clientY. */
@@ -63,6 +81,8 @@ export interface UserProfilePopupOptions {
   /** Why Message and Call cannot be used right now (offline, or blocked).
    *  Set: both render disabled with this as their tooltip. */
   readonly unavailableReason?: string;
+  /** Live role and role picker. Absent: the badge shows `user.role` as given. */
+  readonly roleControl?: ProfileRoleControl;
   /** Called once when the popup closes, however it was closed. */
   readonly onClose?: () => void;
   /** Where focus goes on close when the opener has left the document. */
@@ -245,16 +265,177 @@ export function createUserProfilePopup(
       setText(customStatusEl, user.customStatus);
     }
 
-    // Role badge
-    const roleBadge = createElement("span", { class: "upp-role-badge" });
-    const roleDot = createElement("span", { class: "upp-role-dot" });
-    roleDot.style.background = roleColorVar(user.role.toLowerCase());
-    const roleLabel = createElement(
-      "span",
-      {},
-      user.role.charAt(0).toUpperCase() + user.role.slice(1),
-    );
-    appendChildren(roleBadge, roleDot, roleLabel);
+    // Role badge, or the role picker for a viewer who may change it.
+    const roleHolder = createElement("div", { class: "upp-role", "data-testid": "upp-role" });
+    let roleMenuOpen = false;
+    let roleBusy = false;
+    const control = options.roleControl;
+
+    const closeRoleMenu = (focusButton: boolean): void => {
+      roleMenuOpen = false;
+      renderRole();
+      if (focusButton) roleHolder.querySelector<HTMLElement>(".upp-role-btn")?.focus();
+    };
+
+    const roleOptions = (): HTMLElement[] =>
+      Array.from(roleHolder.querySelectorAll<HTMLElement>(".upp-role-option"));
+
+    const focusRoleOption = (index: number): void => {
+      const items = roleOptions();
+      if (items.length === 0) return;
+      items[(index + items.length) % items.length]?.focus();
+    };
+
+    const chooseRole = async (role: string, current: string): Promise<void> => {
+      if (roleBusy || control === undefined) return;
+      if (role.toLowerCase() === current.toLowerCase()) {
+        closeRoleMenu(true);
+        return;
+      }
+      roleBusy = true;
+      for (const item of roleOptions()) item.setAttribute("aria-disabled", "true");
+      try {
+        await control.change(role);
+      } catch {
+        // change() reports its own failures; the menu just closes.
+      } finally {
+        roleBusy = false;
+      }
+      if (isOpen()) closeRoleMenu(true);
+    };
+
+    let lastMenuOpen = false;
+    /** Re-render the role area; when the list opened or closed the card's height
+     *  changed, so it is placed again to stay inside the window. */
+    function renderRole(): void {
+      renderRoleContent();
+      if (popup !== null && roleMenuOpen !== lastMenuOpen) {
+        lastMenuOpen = roleMenuOpen;
+        if (popup.isConnected) position(popup, options.anchorX, options.anchorY);
+      }
+    }
+
+    function renderRoleContent(): void {
+      if (popup === null) return;
+      const state: ProfileRoleState = control?.read() ?? { role: user.role, choices: null };
+      const focusedRole = roleHolder.contains(document.activeElement)
+        ? ((document.activeElement as HTMLElement).dataset["role"] ?? null)
+        : null;
+      const hadFocus = roleHolder.contains(document.activeElement);
+      roleHolder.replaceChildren();
+
+      const label = state.role.charAt(0).toUpperCase() + state.role.slice(1);
+      const roleDot = createElement("span", { class: "upp-role-dot" });
+      roleDot.style.background = roleColorVar(state.role.toLowerCase());
+      const roleLabel = createElement("span", {}, label);
+
+      const choices = state.choices;
+      if (choices === null || control === undefined) {
+        roleMenuOpen = false;
+        const badge = createElement("span", { class: "upp-role-badge" });
+        appendChildren(badge, roleDot, roleLabel);
+        roleHolder.appendChild(badge);
+        // The picker went away (a role changed under it): keep focus in the card.
+        if (hadFocus) popup.focus();
+        return;
+      }
+
+      const btn = createElement("button", {
+        class: "upp-role-badge upp-role-btn",
+        type: "button",
+        "aria-haspopup": "menu",
+        "aria-expanded": String(roleMenuOpen),
+        "aria-label": requestsText("profile.role.change", { role: label }),
+        "data-testid": "upp-role-btn",
+      });
+      appendChildren(btn, roleDot, roleLabel, createIcon("chevron-down", 12));
+      btn.addEventListener(
+        "click",
+        () => {
+          roleMenuOpen = !roleMenuOpen;
+          renderRole();
+          if (roleMenuOpen) {
+            const items = roleOptions();
+            const checked = items.findIndex((i) => i.getAttribute("aria-checked") === "true");
+            focusRoleOption(checked >= 0 ? checked : 0);
+          } else {
+            roleHolder.querySelector<HTMLElement>(".upp-role-btn")?.focus();
+          }
+        },
+        { signal },
+      );
+      btn.addEventListener(
+        "keydown",
+        (e: KeyboardEvent) => {
+          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          e.preventDefault();
+          if (!roleMenuOpen) {
+            roleMenuOpen = true;
+            renderRole();
+          }
+          focusRoleOption(e.key === "ArrowDown" ? 0 : -1);
+        },
+        { signal },
+      );
+      roleHolder.appendChild(btn);
+
+      if (roleMenuOpen) {
+        const menu = createElement("div", {
+          class: "upp-role-menu",
+          role: "menu",
+          "aria-label": requestsText("profile.role.menu", { name: displayName }),
+          "data-testid": "upp-role-menu",
+        });
+        for (const role of choices) {
+          const checked = role.toLowerCase() === state.role.toLowerCase();
+          const item = createElement(
+            "button",
+            {
+              class: "upp-role-option",
+              type: "button",
+              role: "menuitemradio",
+              "aria-checked": String(checked),
+              tabindex: "-1",
+              "data-role": role,
+              "data-testid": `upp-role-option-${role.toLowerCase()}`,
+              ...(roleBusy ? { "aria-disabled": "true" } : {}),
+            },
+            role,
+          );
+          item.addEventListener("click", () => void chooseRole(role, state.role), { signal });
+          menu.appendChild(item);
+        }
+        menu.addEventListener(
+          "keydown",
+          (e: KeyboardEvent) => {
+            const items = roleOptions();
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            if (e.key === "ArrowDown") focusRoleOption(at + 1);
+            else if (e.key === "ArrowUp") focusRoleOption(at - 1);
+            else if (e.key === "Home") focusRoleOption(0);
+            else if (e.key === "End") focusRoleOption(-1);
+            else if (e.key === "Escape") {
+              // Closes the list only; the card stays.
+              e.stopPropagation();
+              closeRoleMenu(true);
+              return;
+            } else if (e.key === "Tab") {
+              closeRoleMenu(true);
+              return;
+            } else return;
+            e.preventDefault();
+          },
+          { signal },
+        );
+        roleHolder.appendChild(menu);
+        // A re-render while the list is open (a role changed) keeps the cursor.
+        if (focusedRole !== null) {
+          roleOptions()
+            .find((i) => i.dataset["role"] === focusedRole)
+            ?.focus();
+        }
+      }
+    }
 
     // Status line
     const statusLine = createElement("div", { class: "upp-status-line" });
@@ -396,7 +577,7 @@ export function createUserProfilePopup(
       nameEl,
       handleEl,
       customStatusEl,
-      roleBadge,
+      roleHolder,
       statusLine,
       aboutSection,
       joinSection,
@@ -409,6 +590,7 @@ export function createUserProfilePopup(
     // Appending it last puts it over the banner without needing a z-index.
     appendChildren(popup, banner, body, avatar);
 
+    renderRole();
     overlay.appendChild(popup);
     container.appendChild(overlay);
 
@@ -423,6 +605,10 @@ export function createUserProfilePopup(
       }
     });
 
+    if (control !== undefined) {
+      disposable.addCleanup(control.subscribe(() => renderRole()));
+    }
+
     // Focus the popup for a11y
     popup.focus();
 
@@ -433,6 +619,15 @@ export function createUserProfilePopup(
         if (popup !== null && !popup.contains(e.target as Node)) {
           close();
         }
+      },
+      { signal },
+    );
+
+    // A press elsewhere in the card closes an open role list.
+    popup.addEventListener(
+      "mousedown",
+      (e: MouseEvent) => {
+        if (roleMenuOpen && !roleHolder.contains(e.target as Node)) closeRoleMenu(false);
       },
       { signal },
     );

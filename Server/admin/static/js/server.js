@@ -550,10 +550,12 @@ async function renderUpdates(){
   let html='<div class="page-title">Updates</div><div class="page-desc">Which version this server runs, and whether a newer one is out.</div>';
   html+='<div class="status-line" id="updateStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+(checkError?esc(title):title)+'</div><div class="status-line-sub">'+(checkError?esc(sub):sub)+'</div></div></div>';
   if(info&&info.update_available&&info.can_apply===false){
-    /* Container deployments: the binary is image content, so in-place apply is
-       refused server-side (503 CONTAINER_DEPLOYMENT) — say so instead of
-       offering a button that can only fail. */
-    html+='<p class="card-note">In-place update is unavailable in container deployments. Upgrade by pulling the new image and recreating the container.</p>';
+    /* In-place apply is refused server-side, so say why instead of offering a
+       button that can only fail. Containers: the binary is image content
+       (503 CONTAINER_DEPLOYMENT). Read-only install folder: the service
+       cannot write next to its program file (503 INSTALL_READ_ONLY). */
+    if(info.apply_blocked==='install_read_only')html+='<p class="card-note">This server cannot replace its own program file (the install folder is read-only to the service). Install the new release by hand: see Upgrade and Rollback in the deployment guide.</p>';
+    else html+='<p class="card-note">In-place update is unavailable in container deployments. Upgrade by pulling the new image and recreating the container.</p>';
     html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else if(info&&info.update_available){
     html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update now…')+'</button>';

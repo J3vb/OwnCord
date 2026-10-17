@@ -94,7 +94,7 @@ row. So two rows no import would have produced were added (`ws/hub_events.go`,
 `internal/app/lifecycle.go`) and `ws/moderation_queue.go` needs none:
 62 → 64 rows, `boundary` 20 → 22, `adapter` 42 unchanged.
 **Owner:** the B3 plan,
-[plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
+[archive/plans/b3-server-architecture-guardrails-2026-08-29.md](../archive/plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
 paste its output between the markers below. The tool exits non-zero when a
 file imports `db` without a row, when a file uses the handle without a row,
@@ -108,7 +108,7 @@ gate consumes ("every direct database use above the domain layer is justified
 or removed"). It answers three questions for every production Go file above
 the domain layer: does it import `db`; what does it use `db` for; and what
 happens to that use — one of four dispositions from the
-[layout-refactor supplement](../plans/developer-experience-layout-refactor-2026-08-29.md):
+[layout-refactor supplement](../archive/plans/developer-experience-layout-refactor-2026-08-29.md):
 
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |

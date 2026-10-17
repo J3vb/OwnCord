@@ -25,7 +25,7 @@ const DefaultFileLimit = 500
 const (
 	// classB3ExitTarget: a B3-5 exit target, tighter than the default. The
 	// plan set these for the ws coordination hotspots
-	// (docs/plans/b3-server-architecture-guardrails-2026-08-29.md, "B3-5 exit")
+	// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md, "B3-5 exit")
 	// and recorded them met at 361/424/183. hub_broadcast.go and serve.go are
 	// no longer listed — the default covers them now; only hub.go's 400 still
 	// bites.

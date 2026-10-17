@@ -228,7 +228,7 @@ The `Server/db` package is the single data layer. Its methods live in
 so sqlc is the type-checked query layer. A documented set of raw queries stays
 hand-written where sqlc cannot express them: variable-length `IN` lists,
 full-text search, multi-statement transactions, and PRAGMA or VACUUM. See
-[plans/sqlc-adoption.md](../plans/sqlc-adoption.md).
+[archive/plans/sqlc-adoption.md](../archive/plans/sqlc-adoption.md).
 
 Code that uses the database depends on small interfaces that `*db.DB`
 satisfies, not on the concrete type:

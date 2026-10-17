@@ -142,6 +142,40 @@ const CANARIES: readonly Canary[] = [
     ws.on("x", onX);`,
     messageId: "storeWriteOutsideDispatcher",
   },
+  {
+    rule: "local/no-raw-html-sink",
+    filePath: "src/lib/dom.ts",
+    code: `function f(el, text) { el.innerHTML = text; }`,
+    messageId: "htmlSink",
+  },
+  {
+    rule: "local/no-raw-html-sink",
+    shape: "insertAdjacentHTML",
+    filePath: "src/components/EmojiPicker.ts",
+    code: `function f(el, html) { el.insertAdjacentHTML("beforeend", html); }`,
+    messageId: "htmlSink",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    filePath: "src/main.ts",
+    code: `import { onAuthCleared } from "@stores/auth.store";
+    onAuthCleared(reset);`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    shape: "store.subscribe",
+    filePath: "src/stores/voice.store.ts",
+    code: `voiceStore.subscribe(() => {});`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    shape: "ws.on",
+    filePath: "src/lib/dispatcher.ts",
+    code: `this.ws.on("x", () => {});`,
+    messageId: "discarded",
+  },
 ];
 
 describe("custom lint-rule canaries (ARCH-06)", () => {

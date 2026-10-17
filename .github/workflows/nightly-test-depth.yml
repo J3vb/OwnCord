@@ -123,7 +123,7 @@ jobs:
           retention-days: 7
 
   mutation-score:
-    # The one full-surface score (docs/plans/b7-8-mutation-baseline-2026-09-20.md):
+    # The one full-surface score (docs/archive/plans/b7-8-mutation-baseline-2026-09-20.md):
     # statuses are summed across shards, never averaged. Fails when a shard
     # report is missing, since a partial score is not the full-surface score.
     # Not a required status context; it only exists on the nightly.

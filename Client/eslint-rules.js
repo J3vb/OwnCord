@@ -676,6 +676,176 @@ const invokeNeedsTryCatch = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// Rule: no-raw-html-sink  (ARCH-038)
+//
+// Invariant (CLAUDE.md, src/lib/dom.ts): user-controlled text reaches the DOM
+// through textContent / @lib/dom helpers, never as parsed HTML. Every raw-HTML
+// sink is reported: assigning `innerHTML` / `outerHTML` / `srcdoc`, calling
+// `insertAdjacentHTML` / `document.write` / `document.writeln`, and
+// `setAttribute("srcdoc", ...)`. `el.innerHTML = ""` is still a sink here;
+// use `replaceChildren()`. Only src/lib/icons.ts (static Lucide path data) is
+// exempt, via eslint.config.js.
+// ─────────────────────────────────────────────────────────────────────────
+
+const HTML_SINK_PROPERTIES = new Set(["innerHTML", "outerHTML", "srcdoc"]);
+const HTML_SINK_METHODS = new Set(["insertAdjacentHTML"]);
+const DOCUMENT_WRITE_METHODS = new Set(["write", "writeln"]);
+
+/** The value of a string literal or a template literal with no `${}`, else null. */
+function staticString(node) {
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis[0].value.cooked;
+  }
+  return null;
+}
+
+/** The static name of a member's property (`a.b`, `a["b"]`, ``a[`b`]``), else null. */
+function memberName(node) {
+  if (node.type !== "MemberExpression") return null;
+  if (!node.computed) return node.property.type === "Identifier" ? node.property.name : null;
+  return staticString(node.property);
+}
+
+const noRawHtmlSink = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Ban raw HTML sinks (innerHTML, outerHTML, srcdoc, insertAdjacentHTML, document.write) so " +
+        "user content cannot be parsed as markup. Build DOM nodes with @lib/dom or textContent.",
+    },
+    schema: [],
+    messages: {
+      htmlSink:
+        "Raw HTML sink '{{name}}' is banned: build nodes with @lib/dom / textContent (use " +
+        "replaceChildren() to clear). Only src/lib/icons.ts, which writes static icon paths, is exempt.",
+    },
+  },
+  create(context) {
+    const report = (node, name) => context.report({ node, messageId: "htmlSink", data: { name } });
+    return {
+      AssignmentExpression(node) {
+        const name = memberName(node.left);
+        if (name !== null && HTML_SINK_PROPERTIES.has(name)) report(node, name);
+      },
+      CallExpression(node) {
+        const name = memberName(node.callee);
+        if (name === null) return;
+        if (HTML_SINK_METHODS.has(name)) {
+          report(node, name);
+        } else if (
+          DOCUMENT_WRITE_METHODS.has(name) &&
+          node.callee.object.type === "Identifier" &&
+          node.callee.object.name === "document"
+        ) {
+          report(node, `document.${name}`);
+        } else if (name === "setAttribute") {
+          const attr = staticString(node.arguments[0]);
+          if (attr !== null && attr.toLowerCase() === "srcdoc") {
+            report(node, "setAttribute(srcdoc)");
+          }
+        }
+      },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule: subscription-result-kept  (ARCH-038)
+//
+// Invariant (CLAUDE.md, lifecycle ownership): `subscribe(...)`,
+// `subscribeSelector(...)`, `<ws>.on(...)` and `onAuthCleared(...)` return the
+// function that removes the listener. A bare expression statement discards it,
+// so the listener can never be removed and leaks past its owner. The result
+// must be stored, returned, pushed, or passed on. An app-lifetime listener is
+// written `void subscribe(...); // why it lives forever`: the explicit `void`
+// is accepted only with a comment on the same line or the line above.
+// ─────────────────────────────────────────────────────────────────────────
+
+const SUBSCRIPTION_NAMES = new Set(["subscribe", "subscribeSelector", "onAuthCleared"]);
+
+/** The name reported for a subscription call, else null. */
+function subscriptionName(call) {
+  const callee = call.callee;
+  if (callee.type === "Identifier") {
+    return SUBSCRIPTION_NAMES.has(callee.name) ? callee.name : null;
+  }
+  if (callee.type !== "MemberExpression" || callee.computed) return null;
+  if (callee.property.type !== "Identifier") return null;
+  const name = callee.property.name;
+  if (SUBSCRIPTION_NAMES.has(name)) return name;
+  return name === "on" && isWsReceiver(callee.object) ? "ws.on" : null;
+}
+
+/** `signal` or `<x>.signal`: an AbortSignal that owns the subscription. */
+function isAbortSignalArg(node) {
+  if (node.type === "Identifier") return node.name === "signal";
+  return (
+    node.type === "MemberExpression" &&
+    !node.computed &&
+    node.property.type === "Identifier" &&
+    node.property.name === "signal"
+  );
+}
+
+const subscriptionResultKept = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Require the unsubscribe function returned by subscribe/subscribeSelector/ws.on/" +
+        "onAuthCleared to be stored, returned or passed on, or explicitly `void`-ed with a comment.",
+    },
+    schema: [],
+    messages: {
+      discarded:
+        "The unsubscribe function returned by {{name}}(...) is discarded. Store it and call it from " +
+        "the owner's teardown, or, for an app-lifetime listener, write `void {{name}}(...)` with a " +
+        "comment saying why it lives forever.",
+      voidNeedsReason:
+        "`void {{name}}(...)` must carry a comment (same line or the line above) saying why the " +
+        "listener lives for the app's lifetime.",
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+    return {
+      ExpressionStatement(node) {
+        let expr = node.expression;
+        let isVoid = false;
+        if (expr.type === "UnaryExpression" && expr.operator === "void") {
+          isVoid = true;
+          expr = expr.argument;
+        }
+        // `await x.subscribe(fn)` and `x?.subscribe(fn)` discard it just the same.
+        if (expr.type === "AwaitExpression") expr = expr.argument;
+        if (expr.type === "ChainExpression") expr = expr.expression;
+        if (expr.type !== "CallExpression") return;
+        const name = subscriptionName(expr);
+        if (name === null) return;
+        if (!isVoid) {
+          // `store.subscribe(fn, signal)` is owned by the AbortSignal.
+          if (expr.arguments.some(isAbortSignalArg)) return;
+          context.report({ node, messageId: "discarded", data: { name } });
+          return;
+        }
+        const line = node.loc.start.line;
+        const commented = sourceCode
+          .getAllComments()
+          .some(
+            (c) =>
+              c.loc.end.line === line - 1 ||
+              c.loc.start.line === line ||
+              c.loc.end.line === node.loc.end.line,
+          );
+        if (!commented) context.report({ node, messageId: "voidNeedsReason", data: { name } });
+      },
+    };
+  },
+};
+
 export default {
   rules: {
     "no-leave-voice-when-superseded": noLeaveVoiceWhenSuperseded,
@@ -684,5 +854,7 @@ export default {
     "no-identity-scope-fallback": noIdentityScopeFallback,
     "no-store-write-in-ws-on": noStoreWriteInWsOn,
     "invoke-needs-try-catch": invokeNeedsTryCatch,
+    "no-raw-html-sink": noRawHtmlSink,
+    "subscription-result-kept": subscriptionResultKept,
   },
 };

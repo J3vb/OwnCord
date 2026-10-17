@@ -15,7 +15,7 @@
 // earlier decision 10 named `gzip -9`; this keeps the level and format but pins
 // the implementation, so the number is identical on every OS with no external
 // binary to probe for. The CLI figures for the same build are recorded once in
-// docs/plans/b7-0-client-baseline-2026-09-19.md as a bridge to the B7-0 record.
+// docs/archive/plans/b7-0-client-baseline-2026-09-19.md as a bridge to the B7-0 record.
 //
 // Startup budget: the JS of the entry's STATIC CLOSURE — the index.html entry
 // file plus everything reachable through its `imports` — not a fixed file list.

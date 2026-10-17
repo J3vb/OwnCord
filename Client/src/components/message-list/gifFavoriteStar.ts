@@ -20,7 +20,8 @@ function syncStar(star: HTMLButtonElement): void {
 // One subscription for every rendered star: the saved list can change from the
 // picker or finish loading after a message rendered, and a filled star is
 // always visible.
-gifFavoritesStore.subscribe(() => {
+// Never unsubscribed: module-level, one listener for the whole app.
+void gifFavoritesStore.subscribe(() => {
   for (const star of document.querySelectorAll<HTMLButtonElement>(".msg-gif-fav")) syncStar(star);
 });
 

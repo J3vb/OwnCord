@@ -13,5 +13,5 @@ See also:
 - [docs/architecture/README.md](architecture/README.md) for the full set of
   architecture documents and the rule that keeps them current.
 - Decision D6 in
-  [docs/plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md)
+  [docs/archive/plans/audit-2026-07-19-decisions.md](archive/plans/audit-2026-07-19-decisions.md)
   for why the SolidJS code was removed.

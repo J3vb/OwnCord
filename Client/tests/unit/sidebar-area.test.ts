@@ -2972,12 +2972,7 @@ describe("SidebarArea", () => {
     /** Extract callbacks passed to createMemberList */
     function getMemberListCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (
-        userId: number,
-        username: string,
-        reason: string,
-        durationHours: number,
-      ) => Promise<void>;
+      onBan: (userId: number, username: string, displayName: string) => void;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as MockedFn).mock.calls;
@@ -3035,7 +3030,24 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onBan calls API and shows success toast", async () => {
+    /** Open the Ban dialog the member menu asks for and return its controls. */
+    async function openBanDialogFor(
+      callbacks: ReturnType<typeof getMemberListCallbacks>,
+    ): Promise<{ reason: HTMLInputElement; confirm: HTMLButtonElement; status: HTMLElement }> {
+      callbacks.onBan(3, "Bob", "Bob");
+      const dialog = await vi.waitFor(() => {
+        const el = document.querySelector('[data-testid="ban-dialog"]');
+        if (el === null) throw new Error("ban dialog not open yet");
+        return el;
+      });
+      return {
+        reason: dialog.querySelector('[data-testid="ban-reason-input"]') as HTMLInputElement,
+        confirm: dialog.querySelector('[data-testid="ban-confirm"]') as HTMLButtonElement,
+        status: dialog.querySelector('[data-testid="ban-status"]') as HTMLElement,
+      };
+    }
+
+    it("onBan opens the dialog, calls the API and shows the success toast", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
@@ -3043,47 +3055,46 @@ describe("SidebarArea", () => {
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "spamming", 0);
+      const { reason, confirm } = await openBanDialogFor(getMemberListCallbacks());
+      reason.value = "spamming";
+      confirm.click();
+      await vi.waitFor(() => expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success"));
 
-      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0);
-      expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
+      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0, undefined, 0);
 
       cleanup(result);
     });
 
-    it("onBan shows error toast on failure", async () => {
-      const mockShow = vi.fn();
+    it("onBan shows the error in the dialog on failure", async () => {
       const opts = defaultOpts();
       (opts.api.adminBanMember as MockedFn).mockRejectedValue(new Error("Ban denied"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
 
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
-
-      expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
+      const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Ban denied"));
 
       cleanup(result);
+      document.querySelector('[data-testid="ban-dialog"]')?.remove();
     });
 
     it("onBan shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminBanMember as MockedFn).mockRejectedValue("string");
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
 
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
+      const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Failed to ban member"));
 
       cleanup(result);
+      document.querySelector('[data-testid="ban-dialog"]')?.remove();
     });
 
     it("onChangeRole calls API with correct role ID", async () => {
