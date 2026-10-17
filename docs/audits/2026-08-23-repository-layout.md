@@ -5,9 +5,9 @@
 **Decision:** a targeted, isolated layout phase is justified; a wholesale
 repository or server rewrite is not  
 **Product input:**
-[beta-product-requirements-2026-08-23.md](plans/beta-product-requirements-2026-08-23.md)
+[beta-product-requirements-2026-08-23.md](../plans/beta-product-requirements-2026-08-23.md)
 **Canonical work register:**
-[repo-health-issue-register-2026-08-23.md](plans/repo-health-issue-register-2026-08-23.md)
+[repo-health-issue-register-2026-08-23.md](../plans/repo-health-issue-register-2026-08-23.md)
 
 ## Executive verdict
 

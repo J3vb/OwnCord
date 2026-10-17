@@ -210,7 +210,7 @@ runs the new test under `go test ./...`), `npm run check:client`.
   `check:hygiene` all exit 0; `TestEpoch1Fixtures` passes `-count=3`,
   `-race -count=3`, `-tags deadlock -count=10`; regeneration is
   byte-identical; both trailing-frame guards proven by negative control.
-- Item 4 grep at HEAD hits only `docs/audit-2026-07-19.md` (dated record) and
+- Item 4 grep at HEAD hits only `docs/audits/2026-07-19-architecture-spec-conformance.md` (dated record) and
   this file's own command text.
 - Item 5 refined twice: the rule is **shape, not value** (a seeded default
   value change is regenerated in the same PR; normalising those values was

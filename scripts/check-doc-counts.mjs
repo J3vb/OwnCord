@@ -34,7 +34,7 @@
 //   3. "<n> records" / "<n> findings", but only where the ledger is named
 //      within the preceding few lines.
 //
-// Dated baselines, plans, scorecards and docs/audit-*.md are not checked against
+// Dated baselines, plans, scorecards and docs/audits/*.md are not checked against
 // today's ledger. Their measurements belong to the cited source revisions.
 
 import { readFileSync, existsSync } from "node:fs";

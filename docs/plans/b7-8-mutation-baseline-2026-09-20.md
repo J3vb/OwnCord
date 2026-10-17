@@ -14,7 +14,7 @@ The headline number this milestone exists to record:
 This is the first full-surface Stryker score for the client. The register's
 C-16 row and every B7 document since cite "stale at 67.04 %"; that figure is a
 **different surface** — 13 risky client modules on 2026-08-19, never re-run
-(`docs/audit-test-coverage-2026-08-19.md:12,137`) — and is not comparable to
+(`docs/audits/2026-08-19-test-audit.md:12,137`) — and is not comparable to
 the number below. B7-0 recorded the harness cost (a dry run), not a score
 (`docs/plans/b7-0-client-baseline-2026-09-19.md:48`).
 

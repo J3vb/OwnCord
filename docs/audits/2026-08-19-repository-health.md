@@ -7,7 +7,7 @@ checks (build/test/boot), doc/code drift across the three reference specs, and
 a static sweep focused on the WebSocket hub, reconnect/sync handling, and the
 REST/WS boundary. Read-only; no code changes ship with this audit.
 **Relationship to prior audits:** successor to the 2026-08-04 pair
-([security](audit-2026-08-04.md), [docs & coverage](audit-2026-08-04-docs-and-coverage.md)),
+([security](2026-08-04-security-review.md), [docs & coverage](2026-08-04-docs-and-ui-coverage.md)),
 which remain the closure trackers for their own findings. Every item those
 audits left open is re-verified in §2.
 **Method:** ten parallel analysis passes (3 prior-finding verification, 3

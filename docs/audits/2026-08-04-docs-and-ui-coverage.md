@@ -4,7 +4,7 @@
 **Scope:** documentation/spec accuracy against the code, a UI/UX flow
 inventory with test-coverage status, real test-suite executions, and
 reconciliation of the four prior audits and eleven plan documents.
-**Relation to `audit-2026-08-04.md`:** same date, disjoint scope — that
+**Relation to `2026-08-04-security-review.md`:** same date, disjoint scope — that
 document is the whole-codebase *security* review (its three findings
 A-2026-08-01/02/03 are referenced here as open, not re-litigated).
 **Method:** every claim below was verified in the code at `5630aa1` and cites
@@ -269,7 +269,7 @@ a regression is least visible in day-to-day dev use.
 
 ## 6. Prior-audit & plan reconciliation
 
-### audit-2026-08-04.md (security review, same day)
+### 2026-08-04-security-review.md (security review, same day)
 
 All three findings verified **still open** at `5630aa1` — nothing in this
 docs-only branch changes them:
@@ -285,7 +285,7 @@ docs-only branch changes them:
   `data/chatserver.db`, ignoring `cfg.Database.Path`
   (`Server/admin/handlers_backup.go:177`).
 
-### audit-test-coverage-2026-07-25.md
+### 2026-07-25-test-coverage.md
 
 - **T-2026-07-25-21 (HIGH)** — closed this branch (C6): the e2e suite was
   repaired but the audit never updated; re-verified 270/270 locally.
@@ -296,7 +296,7 @@ docs-only branch changes them:
 - Its §4 bugs: `logctx.WithGroup` nesting — not re-tested here;
   `drag-reorder` ref-count — still present (KNOWN BUG comment).
 
-### audit-2026-07-19.md
+### 2026-07-19-architecture-spec-conformance.md
 
 - Item 11 ("E2E not in CI") and backlog #10 — closed this branch (C6),
   both were stale.
@@ -306,7 +306,7 @@ docs-only branch changes them:
   **A-2026-07-13** (dead `sounds` table), **A-2026-07-14** (scattered client
   constants).
 
-### audit-2026-04-07.md
+### 2026-04-07-project-audit.md
 
 - **#8 (HIGH, unpinned critical npm packages)** — orphaned: marked
   "review in P2" and never carried into any later audit. Resurfaced here as
@@ -395,7 +395,7 @@ specified, and every suite is green.
   the contract test's exception list is empty now.
 - **DC-02** ~~The three open security findings A-2026-08-01/02/03~~
   **RESOLVED 2026-08-04 (remediation pass)** — all three fixed with pinning
-  tests; statuses closed in [audit-2026-08-04.md](audit-2026-08-04.md).
+  tests; statuses closed in [2026-08-04-security-review.md](2026-08-04-security-review.md).
 - **DC-03** ~~Three native e2e specs matched by **no** Playwright project~~
   **RESOLVED 2026-08-04 (remediation pass)** — all three joined
   `native-authenticated` (they use the persistent fixture + `ensureLoggedIn`).

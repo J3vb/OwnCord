@@ -1,7 +1,7 @@
 # OwnCord Client UX Specification (target state)
 
 **Verified against:** commit `5630aa1`, 2026-08-04
-**Companion:** [../client.md](../client.md) (structural module map) · [../../audit-2026-08-04-docs-and-coverage.md](../../audit-2026-08-04-docs-and-coverage.md)
+**Companion:** [../client.md](../client.md) (structural module map) · [../../audits/2026-08-04-docs-and-ui-coverage.md](../../audits/2026-08-04-docs-and-ui-coverage.md)
 
 This directory specifies **how the Tauri client should behave** — what every UI
 step does, and how each view reacts to server events, permission state, and

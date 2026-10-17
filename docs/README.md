@@ -117,27 +117,13 @@ Target state, not shipped behaviour:
 
 ## Audits
 
-Audits are dated snapshots. They are **not** updated as the code changes. They
-also keep their old paths, so links from commit messages still work. Anything
-in them may be out of date. For current status, see
+Audits are dated snapshots. They are **not** updated as the code changes.
+Anything in them may be out of date. For current status, see
 [Where status lives](#where-status-lives).
 
-| Audit                                                                                      | Scope                                                                                       |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| [parity-sweep-2026-10.md](parity-sweep-2026-10.md)                                         | Every user-facing area compared with what a Discord user expects, plus a bug sweep.         |
-| [ci-flake-audit-2026-10.md](ci-flake-audit-2026-10.md)                                     | CI flakes: checks ranked by red-then-green reruns over 60 days, causes and fixes.           |
-| [client-perf-audit-2026-10.md](client-perf-audit-2026-10.md)                               | Client performance: startup, channel switch, scrolling, voice join, memory.                 |
-| [linux-platform-audit-2026-10.md](linux-platform-audit-2026-10.md)                         | The Linux desktop app compared with Windows: IPC, WebKitGTK differences, what to fix.       |
-| [audit-2026-09-23-windows-update-relaunch.md](audit-2026-09-23-windows-update-relaunch.md) | Windows app update: why the new version can start late (not conclusive).                    |
-| [audit-2026-08-23-repository-layout.md](audit-2026-08-23-repository-layout.md)             | Repository layout and contributor experience.                                               |
-| [audit-2026-08-23-repository-health.md](audit-2026-08-23-repository-health.md)             | Full repository health.                                                                     |
-| [audit-2026-08-19.md](audit-2026-08-19.md)                                                 | Repository health. It says "0 open findings"; that has not been true since. See the ledger. |
-| [audit-test-coverage-2026-08-19.md](audit-test-coverage-2026-08-19.md)                     | Tests. Uses its own `T-*` numbering, separate from the findings ledger.                     |
-| [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md)             | Documentation accuracy and UI test coverage.                                                |
-| [audit-2026-08-04.md](audit-2026-08-04.md)                                                 | Security review.                                                                            |
-| [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md)                     | Test coverage.                                                                              |
-| [audit-2026-07-19.md](audit-2026-07-19.md)                                                 | Architecture and spec conformance.                                                          |
-| [audit-2026-04-07.md](audit-2026-04-07.md)                                                 | The first full audit.                                                                       |
+All of them live in [audits/](audits/README.md), one file per audit with the
+date at the front of the name. That page lists each one with a line on its
+scope.
 
 ## Plans
 

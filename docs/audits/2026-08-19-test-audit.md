@@ -3,7 +3,7 @@
 **Date:** 2026-08-19
 **Branch:** fix/test-audit-2026-08-19 (baseline `4ff199e1`, 43 commits of churn since the 08-04 audit)
 **Scope:** are the existing tests still correct, and what is missing — all three surfaces. Hybrid depth: mechanical sweep everywhere, deep read in auth / permissions / voice-E2EE / ws hub / rate limits / migrations / Rust proxies+TOFU. Every candidate finding was adversarially verified (refute-by-default) before it was fixed; 40 candidates → 35 confirmed (refuted ones listed in §5 so they are not re-raised), plus 2 manual timezone findings and 12 Stryker-survivor findings.
-**Relationship to prior audits:** [audit-test-coverage-2026-07-25.md](audit-test-coverage-2026-07-25.md) (coverage; backlog items 1,2,3,4 closed since) and [audit-2026-08-04-docs-and-coverage.md](audit-2026-08-04-docs-and-coverage.md) (UI flow matrix). Nothing closed there is restated.
+**Relationship to prior audits:** [2026-07-25-test-coverage.md](2026-07-25-test-coverage.md) (coverage; backlog items 1,2,3,4 closed since) and [2026-08-04-docs-and-ui-coverage.md](2026-08-04-docs-and-ui-coverage.md) (UI flow matrix). Nothing closed there is restated.
 
 ## 1. Method
 

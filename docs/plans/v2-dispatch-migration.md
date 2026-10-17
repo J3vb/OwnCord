@@ -74,7 +74,7 @@ V1-shadowing guard inside `RegisterV2`. `registerVoiceHandlersV1` /
 - `Server/ws/hub.go` — `NewHub` registers only V2.
 - Docs: `docs/architecture/websocket.md` §D4c (replace dual-dispatch diagram with
   the single typed path), `docs/architecture/server.md` (WS box "V1+V2 dispatch"
-  → "typed command dispatch"), `docs/audit-2026-07-19.md` (A-2026-07-09 →
+  → "typed command dispatch"), `docs/audits/2026-07-19-architecture-spec-conformance.md` (A-2026-07-09 →
   RESOLVED).
 
 ## Test plan

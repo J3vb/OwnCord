@@ -481,7 +481,7 @@ convention already used in the
 
 - `Client/src/lib/`, `Client/src/components/` — the 21 files listed above
 - `Client/src-tauri/src/lib.rs` — the `generate_handler!` registration list
-- [`docs/audit-2026-08-23-repository-layout.md`](../audit-2026-08-23-repository-layout.md) — `RL-02`, and the target tree
+- [`docs/audits/2026-08-23-repository-layout.md`](../audits/2026-08-23-repository-layout.md) — `RL-02`, and the target tree
 - [`docs/plans/beta-requirements-traceability-2026-08-23.md`](../plans/beta-requirements-traceability-2026-08-23.md) — `BPR-025`
 - [`docs/architecture/client.md`](client.md) — the client as-built
 
