@@ -34,7 +34,14 @@
 //  11. a browser VP9 camera (WP M-11a) decodes natively with the same key,
 //      after checking the browser really sent VP9; skipped locally, with the
 //      reason, where either side lacks VP9, and a failure under CI;
-//  12. its negative control: with a wrong key not one VP9 frame decodes.
+//  12. its negative control: with a wrong key not one VP9 frame decodes;
+//  13. a native VP9 camera (WP M-11b, one L1T3 layer, no simulcast) decodes in
+//      the browser with the same key, after checking the browser received VP9;
+//      skipped locally, with the reason, where the native engine cannot
+//      encode VP9, and a failure under CI;
+//  14. the same for a native VP9 screen share;
+//  15. the negative control: with a wrong key not one frame of the VP9 camera
+//      or share decodes.
 // Not exercised here: the X11 capturer and the Wayland portal (CI has no
 // display); see docs/architecture/voice-e2ee.md.
 // Requires OWNCORD_E2E_LIVEKIT_BINARY and OWNCORD_NATIVE_VOICE_PEER.
@@ -312,6 +319,57 @@ async function expectBrowserVp9(page: import("@playwright/test").Page): Promise<
   const codec = (await browserCameraCodec(page)).toLowerCase();
   if (process.env.CI) expect(codec, "the browser did not publish VP9").toBe("video/vp9");
   else test.skip(codec !== "video/vp9", `the browser published ${codec}, not VP9`);
+}
+
+/** The mime type the browser received for `identity`'s video of `source`
+ *  (`camera` or `screen_share`), from the receiver's inbound-rtp stats. A
+ *  sender that quietly fell back to VP8 would read `video/VP8`. */
+async function browserReceivedCodec(
+  page: import("@playwright/test").Page,
+  identity: string,
+  source: "camera" | "screen_share",
+): Promise<string> {
+  return page.evaluate(
+    async ({ identity, source }) => {
+      const room = (window as unknown as { __room: import("livekit-client").Room }).__room;
+      for (let i = 0; i < 40; i++) {
+        const pubs = [
+          ...(room.remoteParticipants.get(identity)?.videoTrackPublications.values() ?? []),
+        ];
+        const track = pubs.find((p) => p.source === source)?.track;
+        const report = await track?.receiver?.getStats();
+        let codecId: string | undefined;
+        report?.forEach((st: { type: string; kind?: string; codecId?: string }) => {
+          if (st.type === "inbound-rtp" && st.kind === "video" && st.codecId) codecId = st.codecId;
+        });
+        const codec = codecId === undefined ? undefined : report?.get(codecId);
+        if (codec !== undefined) return String((codec as { mimeType: string }).mimeType);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return "unknown";
+    },
+    { identity, source },
+  );
+}
+
+/** Whether the native engine can encode VP9 (WP M-11b), by its own probe. In
+ *  CI a missing encoder is a failure: VP9 stays off the Linux picker until
+ *  these cases have run green there. Locally they skip with the reason. */
+async function gateNativeVp9Encode(): Promise<void> {
+  const probe = await runNativePeer(["--probe-codecs"]).done;
+  const encodes = probe.some((l) => l.event.type === "codecs" && l.event.vp9 === true);
+  if (process.env.CI) expect(encodes, "the native engine cannot encode VP9").toBe(true);
+  else test.skip(!encodes, "the native engine cannot encode VP9 in this build");
+}
+
+/** Fails in CI, skips locally, when the browser did not receive VP9. */
+async function expectBrowserReceivedVp9(
+  page: import("@playwright/test").Page,
+  source: "camera" | "screen_share",
+): Promise<void> {
+  const codec = (await browserReceivedCodec(page, "user-2", source)).toLowerCase();
+  if (process.env.CI) expect(codec, "the native peer did not send VP9").toBe("video/vp9");
+  else test.skip(codec !== "video/vp9", `the native peer sent ${codec}, not VP9`);
 }
 
 async function readBrowserPeer(page: import("@playwright/test").Page, identity: string) {
@@ -804,6 +862,132 @@ test("a browser VP9 camera with the wrong key decodes no VP9 frame natively", as
 
   const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
   expect(fromBrowser.reduce((sum, v) => sum + v.frames, 0)).toBe(0);
+});
+
+// A native VP9 publish (WP M-11b): one L1T3 SVC layer, never simulcast, so the
+// camera is requested with `--simulcast` to prove the host drops it for VP9.
+test("a native VP9 camera decodes in the browser with the same key", async ({ page }) => {
+  await gateNativeVp9Encode();
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    "20",
+    "--video",
+    "1280x720",
+    "--simulcast",
+    "--codec",
+    "vp9",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await expectBrowserReceivedVp9(page, "camera");
+  const perSecond: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    await resetBrowserMeters(page);
+    await page.waitForTimeout(1_000);
+    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
+  }
+  const seen = await readBrowserPeer(page, "user-2");
+  await peer.done;
+  console.log(
+    `browser decoded VP9 native camera, frames/s: ${perSecond.join(",")} at ${seen.videoWidth}x${seen.videoHeight}`,
+  );
+  // Every second of the window: a camera that sends one frame and stalls fails.
+  expect(Math.min(...perSecond)).toBeGreaterThan(10);
+  expect([seen.videoWidth, seen.videoHeight]).toEqual([1280, 720]);
+  expect(seen.encErrors).toBe(0);
+});
+
+test("a native VP9 screen share decodes in the browser with the same key", async ({ page }) => {
+  await gateNativeVp9Encode();
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    "16",
+    "--screen",
+    "1280x720",
+    "--screen-codec",
+    "vp9",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await expectBrowserReceivedVp9(page, "screen_share");
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const browser = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+  console.log(
+    `browser decoded VP9 native screen share: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  expect(browser.videoFrames).toBeGreaterThan(5 * 5);
+  expect([browser.videoWidth, browser.videoHeight]).toEqual([1280, 720]);
+  expect(browser.encErrors).toBe(0);
+});
+
+test("a native VP9 camera and share with the wrong key are decoded by no one", async ({ page }) => {
+  await gateNativeVp9Encode();
+  const key = randomBytes(32).toString("base64");
+  const wrongKey = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    wrongKey,
+    "--secs",
+    "14",
+    "--video",
+    "640x360",
+    "--codec",
+    "vp9",
+    "--screen",
+    "1280x720",
+    "--screen-codec",
+    "vp9",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(3_000);
+  await resetBrowserMeters(page);
+  await page.waitForTimeout(5_000);
+  const camera = await readBrowserPeer(page, "user-2");
+  const screen = await readBrowserPeer(page, "user-2#screen");
+  await peer.done;
+  // Subscribed to both, and not one frame of either decoded.
+  expect(camera.videoFrames).toBe(0);
+  expect(screen.videoFrames).toBe(0);
+  expect(camera.encErrors).toBeGreaterThan(0);
 });
 
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({

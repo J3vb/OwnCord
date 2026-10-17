@@ -134,9 +134,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
   host's `native_voice_change_camera`); `mediaControl` restarts the camera only
   when it rejects `CameraSwitchUnavailable`.
-  The codec is the same: `resolvePreferredCodec` returns H.264 on Linux only
-  when chosen and `native_voice_video_codecs` says the engine has it (Auto and
-  a saved VP9/H.265 are VP8); a live codec switch unpublishes without stopping
+  The codec is the same: `resolvePreferredCodec` returns H.264 or VP9 on Linux
+  only when chosen and `native_voice_video_codecs` says the engine has it (Auto
+  and a saved H.265 are VP8; a native VP9 publish is one L1T3 SVC layer, never
+  simulcast); a live codec switch unpublishes without stopping
   the capture (`unpublishTrack(track, false)`).
   The Linux decode list the announce reports (`features/voice/decodeCaps.ts`) is
   the native receiver's list from the same probe, narrowed to VP8, H.264 and
