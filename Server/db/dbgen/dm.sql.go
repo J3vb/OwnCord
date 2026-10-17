@@ -437,17 +437,3 @@ func (q *Queries) OpenDMIfParticipant(ctx context.Context, arg OpenDMIfParticipa
 	}
 	return result.RowsAffected()
 }
-
-const setDMChannelName = `-- name: SetDMChannelName :exec
-UPDATE channels SET name = ? WHERE id = ? AND type = 'dm'
-`
-
-type SetDMChannelNameParams struct {
-	Name string `json:"name"`
-	ID   int64  `json:"id"`
-}
-
-func (q *Queries) SetDMChannelName(ctx context.Context, arg SetDMChannelNameParams) error {
-	_, err := q.db.ExecContext(ctx, setDMChannelName, arg.Name, arg.ID)
-	return err
-}

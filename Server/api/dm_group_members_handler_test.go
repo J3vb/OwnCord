@@ -534,24 +534,42 @@ func TestGroupRoutes_RateLimitedPerUser(t *testing.T) {
 
 // ─── fan-out survives the request ───────────────────────────────────────────
 
+// cancelAfterAddStore commits the add and then cancels the request, standing in
+// for a client that hangs up right after the commit.
+type cancelAfterAddStore struct {
+	*db.DB
+	cancel func()
+}
+
+func (s *cancelAfterAddStore) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, ids []int64, contentFor func(int64) string) (*db.GroupChange, error) {
+	change, err := s.DB.AddGroupDMMembers(ctx, channelID, actorID, ids, contentFor)
+	s.cancel()
+	return change, err
+}
+
 func TestFanOut_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	f := newMembersFixture(t)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Cancel the request as soon as the service has committed: the first thing
-	// after the commit that touches the broadcaster is the watermark bump.
-	cancelling := &cancelOnMarkBroadcaster{recordingBroadcaster: f.bc, cancel: cancel}
-	router := buildLimitedDMRouter(f.database, cancelling, nil)
+
+	svc := service.New(f.database, auth.NewRateLimiter())
+	svc.DMs = service.NewDMService(&cancelAfterAddStore{DB: f.database, cancel: cancel}, svc.Permissions)
+	r := chi.NewRouter()
+	api.MountDMRoutes(r, f.database, svc, f.bc, nil)
 
 	raw, _ := json.Marshal(map[string]any{"user_ids": []int64{4}})
 	req := httptest.NewRequest(http.MethodPost, f.path("/members"), bytes.NewReader(raw)).WithContext(reqCtx)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+f.tokens[0])
 	req.RemoteAddr = "127.0.0.1:9999"
-	router.ServeHTTP(httptest.NewRecorder(), req)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
 
 	if reqCtx.Err() == nil {
 		t.Fatal("test bug: the request context was never cancelled")
+	}
+	if rr.Code >= 500 {
+		t.Errorf("status = %d, a committed add must not answer a server error", rr.Code)
 	}
 	var members int
 	if err := f.database.QueryRowContext(context.Background(),
@@ -564,16 +582,11 @@ func TestFanOut_SurvivesRequestCancelAfterCommit(t *testing.T) {
 			t.Errorf("fan-out after the cancel is missing %s: %v", want, kinds)
 		}
 	}
-}
-
-// cancelOnMarkBroadcaster cancels the request context the first time the
-// handler bumps the visibility watermark, which is the start of the fan-out.
-type cancelOnMarkBroadcaster struct {
-	*recordingBroadcaster
-	cancel func()
-}
-
-func (b *cancelOnMarkBroadcaster) MarkVisibilityChanged() {
-	b.cancel()
-	b.recordingBroadcaster.MarkVisibilityChanged()
+	rows := f.bc.find("rows", 0)
+	if rows == nil || len(rows.rows) != 1 {
+		t.Fatalf("rows = %+v, want one group_add", rows)
+	}
+	if got := rows.rows[0].Author; got == nil || got.Username == "" {
+		t.Errorf("row author = %+v, want the resolved author (post-commit reads must outlive the request)", got)
+	}
 }

@@ -199,6 +199,8 @@ func mapGroupDBError(what string, err error) error {
 	switch {
 	case errors.Is(err, db.ErrGroupDMFull):
 		return fmt.Errorf("%w: a group DM holds at most %d users", ErrGroupDMFull, db.MaxGroupDMParticipants)
+	case errors.Is(err, db.ErrGroupDMBlockedPair):
+		return fmt.Errorf("%w: cannot add this user to a group DM", ErrForbidden)
 	case errors.Is(err, db.ErrNoNewGroupMembers):
 		return fmt.Errorf("%w: every user is already in this group", ErrBadRequest)
 	case errors.Is(err, db.ErrNotFound):

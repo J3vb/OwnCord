@@ -1861,6 +1861,11 @@ kind `group_rename` (author = the caller, `group_event.name` = the new name, `""
 when the name was removed). A name equal to the current one writes no row and
 sends nothing.
 
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
 Limited to 20 group changes per user per minute, shared with add, remove and
 owner transfer.
 
@@ -1948,6 +1953,15 @@ So on each connection the open arrives before the row, and an added user never
 sees a row for a DM they do not know yet. The cap is counted inside the
 transaction: two adds that together pass 10 cannot both succeed.
 
+The blocked-pair check runs again inside the transaction, so a block or another
+add that lands between the first check and the commit cannot slip a blocked pair
+into the room (403 `FORBIDDEN`).
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
 Limited to 20 group changes per user per minute.
 
 #### Errors
@@ -2015,6 +2029,11 @@ The DM summary shape from the caller's seat, with the new `owner_id`. Every memb
 receives a refreshed `dm_channel_open`. A transfer writes no row. `owner_id`
 always names a current member: a transfer to someone who has just left or been
 removed is a 404 and changes nothing.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
 
 Limited to 20 group changes per user per minute.
 

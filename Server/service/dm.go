@@ -376,7 +376,6 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 
 // RenameGroupResult is what a rename did.
 type RenameGroupResult struct {
-	Channel *db.Channel
 	// Rows is the group_rename row, empty when the name did not change.
 	Rows []GroupEventRow
 	// Audience is the members, who receive the refreshed summary and the row.
@@ -428,11 +427,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	// The rename has committed: the reads below must not fail because the
 	// client hung up right after, or the members would never hear of it.
 	ctx = context.WithoutCancel(ctx)
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	return &RenameGroupResult{Channel: ch, Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
+	return &RenameGroupResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }
 
 // DMSummaryFor returns one DM's payload shape as viewerID sees it: the group

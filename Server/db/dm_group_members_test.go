@@ -541,3 +541,45 @@ func TestEraseAccount_HandOffSkipsBannedMember(t *testing.T) {
 	}
 	assertOwnerIsMember(t, f.database, f.group)
 }
+
+// A block that lands after the service's check, or a member brought in by an
+// earlier add, is caught inside the transaction.
+func TestAddGroupDMMembers_BlockedPairRefusedInsideTx(t *testing.T) {
+	f := newGroupRowFixture(t)
+	ctx := context.Background()
+	dave := seedUser(t, f.database, "dave")
+	erin := seedUser(t, f.database, "erin")
+	frank := seedUser(t, f.database, "frank")
+
+	// A current member blocked dave before the add.
+	if err := f.database.BlockUser(ctx, f.carol, dave); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.alice, []int64{dave}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
+		t.Fatalf("add of a user a member blocked = %v, want ErrGroupDMBlockedPair", err)
+	}
+
+	// Erin joins, then blocks frank: the next add of frank is refused.
+	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.alice, []int64{erin}, contentOf); err != nil {
+		t.Fatalf("add erin: %v", err)
+	}
+	if err := f.database.BlockUser(ctx, erin, frank); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.bob, []int64{frank}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
+		t.Fatalf("add of a user the new member blocked = %v, want ErrGroupDMBlockedPair", err)
+	}
+	// Two new people who block each other, in the other direction.
+	if err := f.database.BlockUser(ctx, frank, dave); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.bob, []int64{frank, dave}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
+		t.Fatalf("add of a blocked pair = %v, want ErrGroupDMBlockedPair", err)
+	}
+	if got := len(memberIDs(t, f.database, f.group)); got != 4 {
+		t.Errorf("members = %d, want 4 (refused adds change nothing)", got)
+	}
+	if got := count(t, f.database, `SELECT COUNT(*) FROM messages WHERE channel_id = ? AND kind = 2`, f.group); got != 1 {
+		t.Errorf("group_add rows = %d, want 1", got)
+	}
+}

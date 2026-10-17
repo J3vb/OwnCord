@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
@@ -22,6 +23,9 @@ var (
 	ErrGroupDMFull = errors.New("group DM is full")
 	// ErrNoNewGroupMembers means every user named by an add is already a member.
 	ErrNoNewGroupMembers = errors.New("no new group members")
+	// ErrGroupDMBlockedPair means a new member and another new member or a
+	// current member have blocked each other (either direction).
+	ErrGroupDMBlockedPair = errors.New("blocked pair in group DM")
 )
 
 // GroupEventRow is a group DM system row as written: the messages row plus the
@@ -170,6 +174,30 @@ func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64)
 	return nil
 }
 
+// requireNoBlockedPair returns ErrGroupDMBlockedPair when any of fresh has
+// blocked, or is blocked by, anyone in all (one query on the transaction).
+func requireNoBlockedPair(ctx context.Context, tx *sql.Tx, fresh, all []int64) error {
+	marks := func(n int) string { return strings.TrimSuffix(strings.Repeat("?,", n), ",") }
+	args := make([]any, 0, 2*(len(fresh)+len(all)))
+	for _, set := range [][]int64{fresh, all, fresh, all} {
+		for _, id := range set {
+			args = append(args, id)
+		}
+	}
+	//nolint:gosec // G202: only "?" placeholders are concatenated, ids are bound
+	query := `SELECT EXISTS (SELECT 1 FROM user_blocks
+	   WHERE (blocker_id IN (` + marks(len(fresh)) + `) AND blocked_id IN (` + marks(len(all)) + `))
+	      OR (blocked_id IN (` + marks(len(fresh)) + `) AND blocker_id IN (` + marks(len(all)) + `)))`
+	var blocked bool
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&blocked); err != nil {
+		return fmt.Errorf("check blocks: %w", err)
+	}
+	if blocked {
+		return ErrGroupDMBlockedPair
+	}
+	return nil
+}
+
 // AddGroupDMMembers adds ids to a group DM on behalf of actorID, who must be a
 // member, and writes one group_add row per added user (author = actor,
 // target = the added user). Users who are already members are skipped; if that
@@ -198,6 +226,11 @@ func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, id
 		}
 		if len(members)+len(fresh) > MaxGroupDMParticipants {
 			return ErrGroupDMFull
+		}
+		// Re-check blocks inside the transaction: the service's check ran
+		// earlier, and a block or another add may have landed since.
+		if err := requireNoBlockedPair(ctx, tx, fresh, slices.Concat(members, fresh)); err != nil {
+			return err
 		}
 
 		var last *GroupEventRow

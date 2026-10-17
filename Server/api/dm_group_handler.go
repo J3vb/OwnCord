@@ -190,11 +190,17 @@ func handleTransferGroupOwner(svc *service.Services, broadcaster DMBroadcaster, 
 	}
 }
 
-// writeGroupSummary answers with the caller's view of the group.
+// writeGroupSummary answers a committed group change with the caller's view of
+// the group. If that read fails the change has still happened and the fan-out
+// has gone out, so an error status would invite a retry of a done change: it
+// logs a warning and answers 204 No Content instead. The caller gets the same
+// summary from its dm_channel_open.
 func writeGroupSummary(w http.ResponseWriter, r *http.Request, svc *service.Services, userID, channelID int64) {
-	summary, err := svc.DMs.DMSummaryFor(r.Context(), userID, channelID)
+	summary, err := svc.DMs.DMSummaryFor(context.WithoutCancel(r.Context()), userID, channelID)
 	if err != nil {
-		writeServiceError(r.Context(), w, err)
+		slog.Warn("writeGroupSummary: summary unavailable after a committed group change",
+			"err", err, "user_id", userID, "channel_id", channelID)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)

@@ -177,27 +177,6 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	}
 }
 
-func TestSetDMChannelName_RefusesNonDM(t *testing.T) {
-	database := groupDMFixture(t)
-	ctx := context.Background()
-
-	textID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.SetDMChannelName(ctx, textID, "hijacked"); err != nil {
-		t.Fatalf("SetDMChannelName: %v", err)
-	}
-
-	ch, err := database.GetChannel(ctx, textID)
-	if err != nil {
-		t.Fatalf("GetChannel: %v", err)
-	}
-	if ch.Name != "general" {
-		t.Errorf("a text channel was renamed through the DM route: %q", ch.Name)
-	}
-}
-
 // An invisible participant must read as offline to everyone but themselves,
 // on the DM list exactly as everywhere else.
 func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
