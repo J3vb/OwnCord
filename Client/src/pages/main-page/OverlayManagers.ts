@@ -6,7 +6,9 @@
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
-import { setOwnedTimeout } from "@lib/dom";
+import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
+import { createModal } from "@lib/modalFactory";
+import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
@@ -20,6 +22,8 @@ import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
+import { errorText } from "@lib/api";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
@@ -201,6 +205,48 @@ export function createQuickSwitcherManager(
 // Generic async overlay controller
 // ---------------------------------------------------------------------------
 
+/** Inline load-failure dialog: the message, Retry and Close. */
+function mountLoadError(
+  root: HTMLDivElement,
+  copy: { readonly message: string; readonly retryLabel: string },
+  onClose: () => void,
+  onRetry: () => void,
+): MountableComponent {
+  const content = createElement("div", { class: "modal-body" });
+  content.appendChild(
+    createElement("div", { class: "invite-manager__error", role: "alert" }, copy.message),
+  );
+  const footer = createElement("div", { class: "modal-footer" });
+  const closeBtn = createElement(
+    "button",
+    { class: "btn-modal-cancel" },
+    shellText("common.close"),
+  );
+  const retryBtn = createElement("button", { class: "btn-modal-save" }, copy.retryLabel);
+  closeBtn.addEventListener("click", onClose);
+  retryBtn.addEventListener("click", onRetry);
+  appendChildren(footer, closeBtn, retryBtn);
+  const disposable = new Disposable();
+  const modal = createModal(
+    {
+      content,
+      closeOnBackdrop: false,
+      onClose,
+      ariaLabel: copy.message,
+      signal: disposable.signal,
+    },
+    root,
+  );
+  modal.modal.appendChild(footer);
+  return {
+    mount: () => undefined,
+    destroy: () => {
+      disposable.destroy();
+      modal.destroy();
+    },
+  };
+}
+
 /**
  * Shared shape behind an overlay that opens by awaiting a fetch: an
  * instance/opening guard against a double-click during the round trip,
@@ -221,6 +267,9 @@ function createAsyncOverlayController<T>(opts: {
   readonly build: (data: T, root: HTMLDivElement, close: () => void) => MountableComponent;
   readonly errorLog: string;
   readonly errorToast: string;
+  /** When set, a failed load also mounts an inline error dialog with a Retry
+   *  button (re-runs the load) instead of leaving only the toast. */
+  readonly inlineError?: { readonly message: string; readonly retryLabel: string };
 }): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
@@ -251,7 +300,15 @@ function createAsyncOverlayController<T>(opts: {
     } catch (err) {
       if (gen !== generation) return;
       log.error(opts.errorLog, { error: String(err) });
-      showToast(opts.errorToast, "error");
+      // The inline dialog carries the message; other overlays only toast.
+      if (opts.inlineError === undefined) showToast(opts.errorToast, "error");
+      const liveRoot = opts.getRoot();
+      if (opts.inlineError !== undefined && liveRoot !== null) {
+        instance = mountLoadError(liveRoot, opts.inlineError, close, () => {
+          close();
+          void open();
+        });
+      }
     } finally {
       if (gen === generation) opening = false;
     }
@@ -269,21 +326,77 @@ export interface InviteManagerController {
   cleanup(): void;
 }
 
+interface InviteLoad {
+  readonly invites: InviteResponse[];
+  readonly featuredCode: string | null;
+}
+
+const DEFAULT_INVITE_HOURS = 168;
+const FRESH_INVITE_MIN_REMAINING_MS = 24 * 3_600_000;
+
+/** Newest invite of the signed-in user that is still worth handing out: it has
+ *  no use limit and is either non-expiring or expires more than 24 h from now. */
+function newestLiveInvite(list: readonly InviteResponse[]): InviteResponse | null {
+  let best: InviteResponse | null = null;
+  let bestKey = -Infinity;
+  const me = authStore.getState().user?.username ?? null;
+  for (const r of list) {
+    if (me === null || r.creator_username !== me) continue;
+    // A limited invite can run out under the user, so it is never featured.
+    if (r.max_uses !== null && r.max_uses > 0) continue;
+    if (
+      r.expires_at !== null &&
+      Date.parse(r.expires_at) - Date.now() <= FRESH_INVITE_MIN_REMAINING_MS
+    )
+      continue;
+    const created = r.created_at !== undefined ? Date.parse(r.created_at) : NaN;
+    const key = Number.isNaN(created) ? r.id : created;
+    if (best === null || key >= bestKey) {
+      best = r;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
 export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
 }): InviteManagerController {
-  const controller = createAsyncOverlayController<InviteResponse[]>({
+  const controller = createAsyncOverlayController<InviteLoad>({
     getRoot: opts.getRoot,
-    load: () => opts.api.getInvites(),
-    build: (raw, _root, close) => {
-      const invites = raw
-        .filter((r) => !isInviteRevoked(r) && !isInviteExpired(r))
-        .map(mapInviteResponse);
+    // Only MANAGE_INVITES holders can list or create invites.
+    canOpen: () => canManageInvites(),
+    load: async () => {
+      const raw = await opts.api.getInvites();
+      const visible = raw.filter((r) => !isInviteRevoked(r) && !isInviteExpired(r));
+      let featured = newestLiveInvite(visible);
+      if (featured === null) {
+        // Never more than one per open; a failure must not block the manager.
+        try {
+          featured = await opts.api.createInvite({
+            expires_in_hours: DEFAULT_INVITE_HOURS,
+            max_uses: 0,
+          });
+          visible.push(featured);
+        } catch (err) {
+          log.error("Fresh invite create failed", { error: String(err) });
+          showToast(errorText(err, shellText("invite.createFailed")), "error");
+        }
+      }
+      return { invites: visible, featuredCode: featured?.code ?? null };
+    },
+    build: (data, _root, close) => {
+      const invites = data.invites.map(mapInviteResponse);
       return createInviteManager({
         invites,
-        onCreateInvite: async () => {
-          const created = await opts.api.createInvite({});
+        featuredCode: data.featuredCode,
+        formatLink: (code: string) => formatInviteLink(code, opts.api.getConfig().host),
+        onCreateInvite: async (params) => {
+          const created = await opts.api.createInvite({
+            expires_in_hours: params.expiresInHours,
+            max_uses: params.maxUses,
+          });
           return mapInviteResponse(created);
         },
         onRevokeInvite: async (code: string) => {
@@ -312,6 +425,7 @@ export function createInviteManagerController(opts: {
     },
     errorLog: "Failed to open invite manager", // i18n-exempt: developer log line, never shown
     errorToast: shellText("invite.loadFailed"),
+    inlineError: { message: shellText("invite.loadFailed"), retryLabel: shellText("invite.retry") },
   });
 
   return { open: controller.open, cleanup: controller.close };
