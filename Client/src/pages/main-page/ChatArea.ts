@@ -8,8 +8,8 @@ import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
-import { createVideoGrid } from "@components/VideoGrid";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import { createLazyVideoGrid } from "./lazyVideoGrid";
+import type { LazyVideoGrid } from "./lazyVideoGrid";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
@@ -56,7 +56,7 @@ export interface ChatAreaResult {
   /** Holds the DM call panel, between the header and the messages. */
   readonly callPanelSlot: HTMLDivElement;
   /** The VideoGrid component instance. */
-  readonly videoGrid: VideoGridComponent;
+  readonly videoGrid: LazyVideoGrid;
   /** The chat header channel-name element (updated reactively). */
   readonly chatHeaderName: HTMLSpanElement | null;
   /** Full chat header refs (hash, name, topic) for DM mode updates. */
@@ -204,7 +204,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
 
   // --- Video grid ---
-  const videoGrid = createVideoGrid();
+  // The grid's code loads on first use (O-6c); the proxy answers until then.
+  const videoGrid = createLazyVideoGrid();
   videoGrid.mount(videoGridSlot);
   children.push(videoGrid);
 

@@ -157,6 +157,7 @@ const {
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
+        ensureLoaded: ReturnType<typeof vi.fn>;
         setExitVisible: ReturnType<typeof vi.fn>;
         showMiniPlayer: ReturnType<typeof vi.fn>;
         hideMiniPlayer: ReturnType<typeof vi.fn>;
@@ -287,6 +288,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
       setExitVisible: vi.fn(),
+      ensureLoaded: vi.fn(),
       showMiniPlayer: vi.fn(),
       hideMiniPlayer: vi.fn(),
       raiseCallPopout: vi.fn(() => false),
@@ -1520,6 +1522,30 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
 
     page.destroy?.();
+  });
+
+  it("joining voice calls ensureLoaded once per channel, not on every voice update", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const ensureLoaded = capturedChatAreaRef.current!.videoGrid.ensureLoaded;
+    expect(ensureLoaded).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+
+    // Other voice updates in the same channel do not ask again.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: !prev.localMuted }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+
+    // A leave asks nothing; the next join (a retry after a failed import) does.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(2);
   });
 
   it("rings the video tiles of whoever is speaking in the current call", () => {

@@ -78,6 +78,7 @@ vi.mock("@components/VideoGrid", () => ({
 // ---------------------------------------------------------------------------
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
+import { createVideoGrid } from "@components/VideoGrid";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
 import {
@@ -218,10 +219,24 @@ describe("createChatArea", () => {
 
   // --- VideoGrid ---
 
-  it("mounts the videoGrid into the video-grid-slot", () => {
+  it("does not import VideoGrid at build", async () => {
+    vi.mocked(createVideoGrid).mockClear();
+    mockVideoMount.mockClear();
     const result = createChatArea(makeOptions());
+    // Give a (wrongly) eager import time to run.
+    await new Promise((r) => setTimeout(r, 10));
 
-    expect(mockVideoMount).toHaveBeenCalledTimes(1);
+    expect(createVideoGrid).not.toHaveBeenCalled();
+    expect(mockVideoMount).not.toHaveBeenCalled();
+    result.videoGrid.destroy?.();
+  });
+
+  it("mounts the videoGrid into the video-grid-slot once loaded", async () => {
+    mockVideoMount.mockClear();
+    const result = createChatArea(makeOptions());
+    result.videoGrid.ensureLoaded();
+    await vi.waitFor(() => expect(mockVideoMount).toHaveBeenCalledTimes(1));
+
     expect(mockVideoMount).toHaveBeenCalledWith(result.slots.videoGridSlot);
   });
 

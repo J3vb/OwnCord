@@ -189,6 +189,7 @@ and only when it changes something a contributor or fork holder must do
 - Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
 - The emoji and GIF pickers, Ctrl+K, message search, the Invite Manager, pinned messages, Create Channel and the new-DM picker now load the first time you open them instead of at startup, so the app loads less up front. If one cannot load, a "Couldn't open that. Try again." message shows and the next try tries again.
 - The voice panel and the per-user volume menu now load the first time you join a voice channel or open the menu, instead of at startup.
+- The video grid (the tiles for cameras and screen shares) now loads when you join a voice channel instead of at startup. If it cannot load, a "Couldn't open that. Try again." message shows and the next join tries again.
 
 **Accounts & profiles**
 
