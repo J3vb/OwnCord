@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
+- The member list sorts each role group A–Z, with Idle and Do Not Disturb people among the Online ones and offline people last. Letter avatars use a fixed colour per person instead of the role colour, role names keep their capitals in the Change Role menu, status tooltips say "Do Not Disturb" instead of "dnd", and the bans list appears as soon as your role is given Ban Members.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
@@ -187,6 +188,7 @@ and only when it changes something a contributor or fork holder must do
 - In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
 - On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.
+- On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
 
 ## v2.3.0-beta.1

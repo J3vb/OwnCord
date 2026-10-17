@@ -21,9 +21,9 @@ import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup"
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { positionForRole, roleHasPermission } from "@lib/permissions";
-import { createAvatarElement } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { readableRoleColor } from "@lib/themes";
-import { shellText } from "../i18n/shell";
+import { shellText, statusLabel } from "../i18n/shell";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -50,7 +50,8 @@ export interface MemberListOptions {
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
-const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["admin", "moderator", "member"];
+// i18n-exempt: built-in role names, matched case-insensitively against the server list
+const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["Admin", "Moderator", "Member"];
 
 /**
  * Role names an admin can assign, taken from the server's role list. "owner" is
@@ -67,7 +68,7 @@ function assignableRoleNames(actorPosition: number | undefined): readonly string
         r.name.toLowerCase() !== "owner" &&
         (actorPosition === undefined || r.position === undefined || r.position < actorPosition),
     )
-    .map((r) => r.name.toLowerCase());
+    .map((r) => r.name);
 }
 
 /** Which moderation menu items the signed-in user may see. */
@@ -150,18 +151,18 @@ function roleGroups(): readonly RoleGroup[] {
 /** Status priority for sorting: lower = higher priority (shown first). */
 function statusPriority(status: UserStatus): number {
   switch (status) {
+    // Online, idle and dnd share one bucket: a member stepping away must not
+    // jump rows, so the order inside a role group is stable A–Z.
     case "online":
-      return 0;
     case "idle":
-      return 1;
     case "dnd":
-      return 2;
+      return 0;
     // "invisible" only ever describes the signed-in user (the server shows
     // everyone else offline), and it sorts with offline because that is where
     // they appear to everybody — including, in this list, to themselves.
     case "invisible":
     case "offline":
-      return 3;
+      return 1;
     default:
       return 99;
   }
@@ -239,15 +240,15 @@ function createMemberItem(
 
   const avatar = createAvatarElement(
     { username: member.username, displayName: member.displayName, avatar: member.avatar },
-    { className: "mi-avatar", background: colorVar },
+    { className: "mi-avatar", background: pickAvatarColor(member.username) },
   );
 
   const statusDot = createElement("div", {
     class: "mi-status",
     id: statusId,
     style: `background: ${statusColor(member.status)}`,
-    "aria-label": member.status,
-    title: member.status,
+    "aria-label": statusLabel(member.status),
+    title: statusLabel(member.status),
   });
   avatar.appendChild(statusDot);
 
@@ -361,7 +362,7 @@ function createMemberItem(
     activeMenu = createMemberContextMenu({
       userId: member.id,
       username: member.username,
-      currentRole: member.role.toLowerCase(),
+      currentRole: member.role,
       availableRoles,
       showAdminActions,
       canKick: gates.canKick,
@@ -488,7 +489,11 @@ function appendGroup(
   rowsByUserId: Map<number, HTMLDivElement>,
 ): void {
   const groupMembers = members.toSorted(
-    (a, b) => statusPriority(a.status) - statusPriority(b.status),
+    (a, b) =>
+      statusPriority(a.status) - statusPriority(b.status) ||
+      memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, {
+        sensitivity: "base",
+      }),
   );
 
   if (groupMembers.length === 0) return;
@@ -553,8 +558,8 @@ function patchPresence(
     const dot = row.querySelector<HTMLDivElement>(".mi-status");
     if (dot !== null) {
       dot.style.background = statusColor(member.status);
-      dot.setAttribute("aria-label", member.status);
-      dot.title = member.status;
+      dot.setAttribute("aria-label", statusLabel(member.status));
+      dot.title = statusLabel(member.status);
     }
   }
 }

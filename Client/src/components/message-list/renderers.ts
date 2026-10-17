@@ -47,7 +47,7 @@ import {
 } from "@lib/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
-import { createAvatarElement } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/markdown";
@@ -235,7 +235,7 @@ function renderReplyRef(
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const miniAvatar = createAvatarElement(author, {
       className: "rr-avatar",
-      background: roleColor,
+      background: pickAvatarColor(author.username),
     });
     appendChildren(
       bar,
@@ -250,7 +250,10 @@ function renderReplyRef(
     const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
       bar,
-      createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+      createAvatarElement(author, {
+        className: "rr-avatar",
+        background: pickAvatarColor(author.username),
+      }),
       createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement(
         "span",
@@ -404,7 +407,7 @@ export function renderMessage(
   el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
   const avatar = createAvatarElement(author, {
     className: "msg-avatar",
-    background: roleColor,
+    background: pickAvatarColor(author.username),
     attrs: { "data-user-id": String(msg.user.id) },
   });
   el.appendChild(avatar);
