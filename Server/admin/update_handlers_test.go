@@ -502,11 +502,12 @@ func releaseServer(t *testing.T, hits *atomic.Int32) *httptest.Server {
 	const dl = "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		var assets []map[string]any
-		for _, n := range []string{
+		names := []string{
 			"chatserver.exe", "chatserver-linux-amd64.tar.gz", "checksums.sha256",
 			"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig",
-		} {
+		}
+		assets := make([]map[string]any, 0, len(names))
+		for _, n := range names {
 			assets = append(assets, map[string]any{"name": n, "browser_download_url": dl + n})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
