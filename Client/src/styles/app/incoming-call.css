@@ -16,7 +16,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
-  max-width: min(92vw, 460px);
+  max-width: min(92vw, 600px);
 }
 .incoming-call-avatar-slot {
   display: flex;
@@ -53,7 +53,7 @@
 }
 .incoming-call-info {
   flex: 1;
-  min-width: 0;
+  min-width: 96px;
 }
 .incoming-call-title {
   font-weight: 600;
@@ -67,10 +67,27 @@
 }
 .incoming-call-actions {
   display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
+}
+/* Pill-sized like the DM call panel's buttons, not the login form's
+   full-width .btn-primary. */
+.incoming-call-actions .btn {
+  width: auto;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.incoming-call-actions .btn-ghost {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.incoming-call-actions .btn-ghost:hover {
+  background: var(--bg-hover);
 }
 
 .call-btn {
