@@ -9,6 +9,7 @@ import {
   setServerNotificationLevel,
 } from "@lib/notificationLevel";
 import { channelsStore } from "@stores/channels.store";
+import { cascadedDeclaration } from "../helpers/app-css";
 import type { Channel } from "@stores/channels.store";
 
 function channel(overrides: Partial<Channel> = {}): Channel {
@@ -182,5 +183,15 @@ describe("Settings - channel notification overrides", () => {
     mount();
     setChannelNotificationLevel(5, "all");
     expect(q("channel-level-5")!.textContent).toBe("All Messages");
+  });
+});
+
+describe("chosen level row", () => {
+  it("shows a visible check mark, not only aria-checked", () => {
+    const content = cascadedDeclaration(
+      '.context-menu-item[role="menuitemradio"][aria-checked="true"]::after',
+      "content",
+    );
+    expect(content).toBeDefined();
   });
 });
