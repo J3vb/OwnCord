@@ -312,4 +312,36 @@ describe("updateChatHeaderForDm", () => {
     expect(refs.nameEl.textContent).toBe("Charlie");
     expect(refs.topicEl.textContent).toBe("");
   });
+
+  describe("Show User Profile button (WP 3B-3)", () => {
+    it("is hidden in a channel, shown for a 1:1 DM, hidden for a group", () => {
+      const { element, refs } = buildChatHeader({
+        onTogglePins: vi.fn(),
+        onToggleDmProfile: vi.fn(),
+      });
+      container.appendChild(element);
+      expect(refs.profileBtn.style.display).toBe("none");
+
+      updateChatHeaderForDm(refs, { username: "Bob", status: "Online" });
+      expect(refs.profileBtn.style.display).toBe("");
+      expect(refs.profileBtn.getAttribute("aria-label")).toBe("Show User Profile");
+
+      updateChatHeaderForDm(refs, { username: "Group", status: "3 members", isGroup: true });
+      expect(refs.profileBtn.style.display).toBe("none");
+
+      updateChatHeaderForDm(refs, { username: "Bob", status: "Online" });
+      updateChatHeaderForDm(refs, null);
+      expect(refs.profileBtn.style.display).toBe("none");
+    });
+
+    it("calls onToggleDmProfile on click and starts unpressed", () => {
+      const onToggleDmProfile = vi.fn();
+      const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onToggleDmProfile });
+      container.appendChild(element);
+      expect(refs.profileBtn.getAttribute("aria-pressed")).toBe("false");
+
+      refs.profileBtn.click();
+      expect(onToggleDmProfile).toHaveBeenCalledOnce();
+    });
+  });
 });

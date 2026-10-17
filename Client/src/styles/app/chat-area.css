@@ -87,7 +87,8 @@
   background: var(--bg-hover);
   color: var(--text-normal);
 }
-.chat-header .ch-tools button.active {
+.chat-header .ch-tools button.active,
+.chat-header .ch-tools button[aria-pressed="true"] {
   color: var(--header-primary);
 }
 .chat-header .search-input {
