@@ -106,13 +106,15 @@ async function runCycle(page: Page, cycle: number, purge: () => Promise<void>): 
   await expect(page.locator(".quick-switcher-overlay")).not.toBeVisible();
   await page.locator(".emoji-btn").click();
   await expect(page.locator(".emoji-picker.open")).toBeVisible();
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator(".emoji-picker.open")).not.toBeVisible();
   await page
     .locator(".channel-item:not(.voice)", { hasText: "general" })
     .click({ button: "right" });
   await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator("[data-testid='channel-context-menu']")).not.toBeVisible();
 
   // Voice join and leave over the real desktop voice path. The 60 s bound is
