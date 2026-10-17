@@ -360,6 +360,11 @@ export function createSidebarMemberSection(
           openBanDialog({
             name: displayName,
             username,
+            // The server also requires MANAGE_MESSAGES to delete history.
+            canDeleteMessages: roleHasPermission(
+              authStore.getState().user?.role ?? "",
+              Permission.MANAGE_MESSAGES,
+            ),
             submit: (req) =>
               api.adminBanMember(
                 userId,

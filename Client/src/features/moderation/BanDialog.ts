@@ -15,10 +15,26 @@
  *   the dialog stays open with the error, and the same button sends again.
  * One request is in flight at a time, and Cancel/Escape before a submit send
  * nothing.
+ *
+ * Deleting history needs MANAGE_MESSAGES as well as BAN_MEMBERS on the server,
+ * so without `canDeleteMessages` the field is not offered and the request
+ * sends 0.
+ *
+ * A resend only counts as a purge retry on the server when the ban fields are
+ * unchanged, and for a temporary ban only within about an hour of the stored
+ * expiry (`banRetryExpirySlack`). So `pending` (what Retry resends) is dropped
+ * after an hour and the form unlocks, rather than sending a stale retry as a
+ * fresh ban without the moderator seeing the fields. A dropped connection on a
+ * request that asked for deletion also keeps its request as `pending`: the ban
+ * may have been written, and Retry must resend exactly the same request.
+ * The backdrop never closes this dialog (a stray click could lose Retry); if
+ * Escape or the owner closes it while a purge is unfinished, a toast reports
+ * how many messages were deleted.
  */
 
-import { errorText, type BanMemberResponse } from "@lib/api";
-import { createElement, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
+import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { ToastType } from "@components/Toast";
 import { shellText } from "../../i18n/shell";
@@ -68,11 +84,17 @@ export interface BanRequest {
   readonly deleteMessageSeconds: number;
 }
 
+/** How long `pending` stays valid: the server's retry slack is about an hour. */
+const RETRY_WINDOW_MS = 60 * 60 * 1000;
+
 export interface BanDialogOptions {
   /** Display name, for the title. */
   readonly name: string;
   /** Handle, for the toasts (the same text the ban toast always used). */
   readonly username: string;
+  /** Whether the viewer holds MANAGE_MESSAGES (the server requires it, on top of
+   *  BAN_MEMBERS, to delete history). False hides the choice and sends 0. */
+  readonly canDeleteMessages: boolean;
   /** Sends one ban request; rejects with the failure. */
   readonly submit: (request: BanRequest) => Promise<BanMemberResponse>;
   /** The server accepted a ban request (it may still be finishing a purge):
@@ -139,9 +161,11 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
     bodyText,
     field("ban-dialog-reason", t("banDialog.reasonLabel"), reasonInput),
     field("ban-dialog-duration", t("banDialog.durationLabel"), durationSelect),
-    field("ban-dialog-delete", t("banDialog.deleteLabel"), deleteSelect),
-    status,
   );
+  if (options.canDeleteMessages) {
+    body.append(field("ban-dialog-delete", t("banDialog.deleteLabel"), deleteSelect));
+  }
+  body.append(status);
 
   const footer = createElement("div", { class: "modal-footer" });
   const cancel = createElement(
@@ -162,13 +186,23 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
   /** Set once the ban is in and only the purge is unfinished: what Retry resends. */
   let pending: BanRequest | null = null;
   let deletedSoFar = 0;
+  /** Aborted on close, so the retry-window timer never outlives the dialog. */
+  const lifetime = new Disposable();
+  let cancelExpiry: (() => void) | null = null;
+
+  /** The unfinished-purge report for a dialog that closed before Retry. */
+  const stoppedText = (): string => t("banDialog.purgeStopped", { name, count: deletedSoFar });
 
   const modal = createModal({
     content,
     ariaLabelledBy: titleId,
     overlayAttrs: { "data-testid": "ban-dialog" },
+    // A stray backdrop click must not lose Retry.
+    closeOnBackdrop: false,
     onClose: () => {
       closed = true;
+      lifetime.destroy();
+      if (pending !== null && !inFlight) notify(stoppedText(), "warning");
     },
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
@@ -199,8 +233,24 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
     return {
       reason: reasonInput.value.trim().slice(0, BAN_REASON_MAX),
       durationHours: numberOr0(durationSelect.value),
-      deleteMessageSeconds: numberOr0(deleteSelect.value),
+      deleteMessageSeconds: options.canDeleteMessages ? numberOr0(deleteSelect.value) : 0,
     };
+  }
+
+  /** Keep `request` as what Retry resends, for an hour at most. */
+  function holdForRetry(request: BanRequest): void {
+    pending = request;
+    cancelExpiry?.();
+    cancelExpiry = setOwnedTimeout(
+      lifetime.signal,
+      () => {
+        pending = null;
+        if (inFlight || closed) return;
+        setBusy(false);
+        showStatus(t("banDialog.retryExpired"));
+      },
+      RETRY_WINDOW_MS,
+    );
   }
 
   function bannedToast(req: BanRequest): string {
@@ -218,12 +268,19 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
     try {
       result = await options.submit(request);
     } catch (err) {
+      // The ban may have been written before the connection dropped: keep the
+      // exact request so Retry cannot differ from it.
+      if (err instanceof TransportError && request.deleteMessageSeconds > 0) {
+        holdForRetry(request);
+      }
       if (closed) {
         notify(errorText(err, shellText("members.banFailed")), "error");
         return;
       }
       setBusy(false);
       showStatus(errorText(err, shellText("members.banFailed")));
+      // The disabled button held focus; keep it inside the dialog's trap.
+      confirm.focus();
       return;
     }
     options.onBanned?.();
@@ -233,19 +290,19 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       if (purge === null) {
         // An older server ignores the field and says nothing about it.
         notify(t("banDialog.purgeUnsupported", { username }), "warning");
+        pending = null;
         modal.close();
         return;
       }
       deletedSoFar += purge.deleted;
       if (!purge.complete) {
-        pending = request;
-        const text = t("banDialog.purgeIncomplete", { name, count: deletedSoFar });
+        holdForRetry(request);
         if (closed) {
-          notify(text, "warning");
+          notify(stoppedText(), "warning");
           return;
         }
         setBusy(false);
-        showStatus(text);
+        showStatus(t("banDialog.purgeIncomplete", { name, count: deletedSoFar }));
         confirm.focus();
         return;
       }
@@ -253,6 +310,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
     } else {
       notify(bannedToast(request), "success");
     }
+    pending = null;
     modal.close();
   }
 

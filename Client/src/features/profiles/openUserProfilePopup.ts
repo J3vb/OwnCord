@@ -116,10 +116,15 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   // picker while the card is open.
   const roleControl: ProfileRoleControl = {
     read: () => {
-      const role = membersStore.getState().members.get(userId)?.role ?? live.role;
+      const member = membersStore.getState().members.get(userId);
+      const role = member?.role ?? live.role;
+      // A member who left or was banned while the card is open has no role to change.
       return {
         role,
-        choices: onChangeRole === undefined ? null : roleChangeChoices(userId, role),
+        choices:
+          onChangeRole === undefined || member === undefined
+            ? null
+            : roleChangeChoices(userId, role),
       };
     },
     subscribe: (listener) => {

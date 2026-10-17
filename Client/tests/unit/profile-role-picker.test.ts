@@ -187,6 +187,41 @@ describe("profile popup role picker", () => {
     expect(options().map((o) => o.getAttribute("aria-checked"))).toEqual(["true", "false"]);
   });
 
+  it("places the card again when the list opens, so it stays in the window", async () => {
+    let height = 200;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => height);
+    vi.stubGlobal("innerHeight", 600);
+    try {
+      openUserProfilePopup({
+        userId: 7,
+        anchorX: 10,
+        anchorY: 450,
+        callbacks: { onChangeRole: vi.fn(async () => {}) },
+      });
+      await vi.waitFor(() => expect(roleButton()).not.toBeNull());
+      const card = document.querySelector<HTMLElement>('[data-testid="user-profile-popup"]')!;
+      expect(card.style.top).toBe("392px");
+      height = 300;
+      roleButton()!.click();
+      expect(card.style.top).toBe("292px");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("drops the picker when the member is no longer in the roster", async () => {
+    await open(vi.fn(async () => {}));
+    expect(roleButton()).not.toBeNull();
+    membersStore.setState((p) => {
+      const next = new Map(p.members);
+      next.delete(7);
+      return { ...p, members: next };
+    });
+    await vi.waitFor(() => expect(roleButton()).toBeNull());
+    expect(badgeText()).toContain("Member");
+  });
+
   describe("keyboard", () => {
     it("opens with ArrowDown on the button, focusing the current role", async () => {
       await open(vi.fn(async () => {}));

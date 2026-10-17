@@ -23,13 +23,20 @@ const confirm = (): HTMLButtonElement => q<HTMLButtonElement>("ban-confirm");
 
 let modal: ModalInstance | null = null;
 
-function setup(submit: (req: BanRequest) => Promise<BanMemberResponse>) {
+function setup(submit: (req: BanRequest) => Promise<BanMemberResponse>, canDeleteMessages = true) {
   const notify = vi.fn();
   const onBanned = vi.fn();
   const opener = document.createElement("button");
   document.body.appendChild(opener);
   opener.focus();
-  modal = openBanDialog({ name: "Alice A.", username: "alice", submit, notify, onBanned });
+  modal = openBanDialog({
+    name: "Alice A.",
+    username: "alice",
+    canDeleteMessages,
+    submit,
+    notify,
+    onBanned,
+  });
   return { notify, onBanned, opener };
 }
 
@@ -307,5 +314,110 @@ describe("ban dialog", () => {
     await vi.waitFor(() => expect(onBanned).toHaveBeenCalledOnce());
     // The ban still happened: the toast is how the moderator learns of it.
     expect(notify).toHaveBeenCalledExactlyOnceWith("Banned alice", "success");
+  });
+
+  it("labels the reason, length and history controls", () => {
+    setup(vi.fn());
+    for (const id of ["ban-reason-input", "ban-duration-select", "ban-delete-select"]) {
+      const control = q(id);
+      const label = document.querySelector(`label[for="${control.id}"]`);
+      expect(control.id).not.toBe("");
+      expect(label?.textContent ?? "").not.toBe("");
+    }
+  });
+
+  it("without MANAGE_MESSAGES the history choice is absent and 0 is sent", async () => {
+    const submit = vi.fn(async () => ({}));
+    const { notify } = setup(submit, false);
+    expect(document.querySelector('[data-testid="ban-delete-select"]')).toBeNull();
+    confirm().click();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(submit).toHaveBeenCalledExactlyOnceWith({
+      reason: "",
+      durationHours: 0,
+      deleteMessageSeconds: 0,
+    });
+    expect(notify).toHaveBeenCalledExactlyOnceWith("Banned alice", "success");
+  });
+
+  it("does not close on a backdrop click", () => {
+    setup(vi.fn());
+    dialog()!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(dialog()).not.toBeNull();
+  });
+
+  it("puts focus back on the button after a failed request", async () => {
+    setup(vi.fn().mockRejectedValue(new ApiClientError(403, "FORBIDDEN", "no")));
+    confirm().click();
+    await vi.waitFor(() => expect(status()).not.toBe(""));
+    expect(document.activeElement).toBe(confirm());
+  });
+
+  it("a dropped connection on a purge request keeps it for an identical Retry", async () => {
+    const submit = vi
+      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+      .mockRejectedValueOnce(new TransportError("socket closed"))
+      .mockResolvedValueOnce({ purge: { deleted: 4, complete: true } });
+    const { notify } = setup(submit);
+    q<HTMLInputElement>("ban-reason-input").value = "raid";
+    q<HTMLSelectElement>("ban-duration-select").value = "24";
+    q<HTMLSelectElement>("ban-delete-select").value = "3600";
+    confirm().click();
+    await vi.waitFor(() => expect(status()).not.toBe(""));
+    expect(confirm().textContent).toBe("Retry");
+    expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(true);
+    expect(q<HTMLSelectElement>("ban-delete-select").disabled).toBe(true);
+
+    confirm().click();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(submit.mock.calls[1]![0]).toEqual(submit.mock.calls[0]![0]);
+    expect(notify).toHaveBeenCalledExactlyOnceWith(
+      "Banned alice and deleted 4 messages",
+      "success",
+    );
+  });
+
+  it("a dropped connection without history leaves the form open and editable", async () => {
+    setup(vi.fn().mockRejectedValue(new TransportError("socket closed")));
+    confirm().click();
+    await vi.waitFor(() => expect(status()).not.toBe(""));
+    expect(confirm().textContent).toBe("Ban");
+    expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(false);
+  });
+
+  it("closing with Escape after an incomplete purge reports the count, without Retry wording", async () => {
+    const { notify } = setup(vi.fn(async () => ({ purge: { deleted: 7, complete: false } })));
+    q<HTMLSelectElement>("ban-delete-select").value = "3600";
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(dialog()).toBeNull();
+    expect(notify).toHaveBeenCalledOnce();
+    const [text, type] = notify.mock.calls[0]!;
+    expect(type).toBe("warning");
+    expect(text).toContain("7 messages");
+    expect(text).not.toMatch(/retry/i);
+  });
+
+  describe("retry window", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("drops the pending retry after an hour and unlocks the form", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const submit = vi.fn(async () => ({ purge: { deleted: 1, complete: false } }));
+      setup(submit);
+      q<HTMLSelectElement>("ban-delete-select").value = "3600";
+      confirm().click();
+      await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+      expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(true);
+
+      vi.advanceTimersByTime(60 * 60 * 1000 + 1);
+      expect(confirm().textContent).toBe("Ban");
+      expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(false);
+      expect(q<HTMLSelectElement>("ban-delete-select").disabled).toBe(false);
+      expect(status()).toContain("ban again");
+    });
   });
 });

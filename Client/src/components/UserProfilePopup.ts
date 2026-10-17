@@ -304,7 +304,18 @@ export function createUserProfilePopup(
       if (isOpen()) closeRoleMenu(true);
     };
 
+    let lastMenuOpen = false;
+    /** Re-render the role area; when the list opened or closed the card's height
+     *  changed, so it is placed again to stay inside the window. */
     function renderRole(): void {
+      renderRoleContent();
+      if (popup !== null && roleMenuOpen !== lastMenuOpen) {
+        lastMenuOpen = roleMenuOpen;
+        if (popup.isConnected) position(popup, options.anchorX, options.anchorY);
+      }
+    }
+
+    function renderRoleContent(): void {
       if (popup === null) return;
       const state: ProfileRoleState = control?.read() ?? { role: user.role, choices: null };
       const focusedRole = roleHolder.contains(document.activeElement)

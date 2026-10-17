@@ -167,6 +167,12 @@ export const moderationText = defineCatalog("moderation", {
     other:
       "{name} is banned, but only {count} messages have been deleted so far. Retry to delete the rest.",
   },
+  "banDialog.purgeStopped": {
+    one: "{name} is banned. Only {count} message was deleted before the dialog closed.",
+    other: "{name} is banned. Only {count} messages were deleted before the dialog closed.",
+  },
+  "banDialog.retryExpired":
+    "Too much time has passed to continue the deletion. Check the fields and ban again.",
   "banDialog.purgeUnsupported":
     "Banned {username}. This server cannot delete message history, so their messages were kept.",
   "banDialog.purgeDone": {
