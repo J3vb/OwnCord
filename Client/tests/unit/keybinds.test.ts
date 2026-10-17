@@ -213,42 +213,66 @@ describe("comboKey", () => {
 });
 
 describe("comboFromEvent", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("reads the key and modifiers", () => {
-    expect(comboFromEvent(ev("KeyX", { ctrlKey: true, shiftKey: true }))).toEqual(
+    expect(comboFromEvent(ev("KeyX", { ctrlKey: true, shiftKey: true }), "inApp")).toEqual(
       c(0x58, { ctrl: true, shift: true }),
     );
-    expect(comboFromEvent(ev("F6", { altKey: true }))).toEqual(c(0x75, { alt: true }));
+    expect(comboFromEvent(ev("F6", { altKey: true }), "inApp")).toEqual(c(0x75, { alt: true }));
   });
 
-  it("refuses Meta", () => {
-    expect(comboFromEvent(ev("KeyX", { ctrlKey: true, metaKey: true }))).toBeNull();
+  it.each(["inApp", "global"] as const)("refuses Meta (%s)", (scope) => {
+    expect(comboFromEvent(ev("KeyX", { ctrlKey: true, metaKey: true }), scope)).toBeNull();
   });
 
   it("refuses AltGr, however the platform reports it", () => {
-    expect(comboFromEvent(ev("KeyQ", { ctrlKey: true, altKey: true }))).toBeNull();
+    expect(comboFromEvent(ev("KeyQ", { ctrlKey: true, altKey: true }), "inApp")).toBeNull();
     const e = ev("KeyQ");
     vi.spyOn(e, "getModifierState").mockImplementation((k) => k === "AltGraph");
-    expect(comboFromEvent(e)).toBeNull();
+    expect(comboFromEvent(e, "inApp")).toBeNull();
   });
 
   it("refuses a modifier-only or unbindable key", () => {
-    expect(comboFromEvent(ev("ShiftLeft", { shiftKey: true }))).toBeNull();
-    expect(comboFromEvent(ev("Escape"))).toBeNull();
-    expect(comboFromEvent(ev("Numpad1", { ctrlKey: true }))).toBeNull();
+    expect(comboFromEvent(ev("ShiftLeft", { shiftKey: true }), "inApp")).toBeNull();
+    expect(comboFromEvent(ev("Escape"), "inApp")).toBeNull();
+    expect(comboFromEvent(ev("Numpad1", { ctrlKey: true }), "inApp")).toBeNull();
   });
 
-  it("matches the combo a later dispatch lookup sees on Windows (layout VK)", () => {
+  it("on Linux, an in-app action takes the layout key and mute/deafen the physical one", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+    // Dvorak: the key at US position F is labelled U.
+    const e = ev("KeyF", { key: "u", ctrlKey: true, shiftKey: true });
+    expect(comboFromEvent(e, "inApp")).toEqual(c(0x55, { ctrl: true, shift: true }));
+    expect(comboFromEvent(e, "global")).toEqual(c(0x46, { ctrl: true, shift: true }));
+  });
+
+  it("falls back to the physical key when e.key is not a single ASCII letter or digit", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+    expect(comboFromEvent(ev("KeyF", { key: "F", ctrlKey: true }), "inApp")?.vk).toBe(0x46);
+    expect(comboFromEvent(ev("Digit1", { key: "!", ctrlKey: true }), "inApp")?.vk).toBe(0x31);
+    expect(comboFromEvent(ev("KeyF", { key: "é", ctrlKey: true }), "inApp")?.vk).toBe(0x46);
+    expect(comboFromEvent(ev("F6", { key: "F6", ctrlKey: true }), "inApp")?.vk).toBe(0x75);
+    expect(comboFromEvent(ev("Digit7", { key: "7", ctrlKey: true }), "inApp")?.vk).toBe(0x37);
+  });
+
+  it("capture and dispatch events built differently still give one combo (Windows AZERTY)", () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (Windows NT 10.0) Edg/140",
     );
-    // AZERTY: the key labelled A sits at US position Q.
-    const captured = comboFromEvent(ev("KeyQ", { keyCode: 0x41, ctrlKey: true }));
-    const dispatched = comboFromEvent(ev("KeyQ", { keyCode: 0x41, ctrlKey: true }));
-    expect(captured).toEqual(c(0x41, { ctrl: true }));
-    expect(captured !== null && dispatched !== null && comboKey(captured)).toBe(
-      dispatched === null ? "" : comboKey(dispatched),
+    // Capture: Shift held, so the browser reports the uppercase letter.
+    const captured = comboFromEvent(
+      ev("KeyQ", { key: "A", keyCode: 0x41, ctrlKey: true, shiftKey: true }),
+      "inApp",
     );
-    vi.restoreAllMocks();
+    // Dispatch: a later keydown with the letter in lowercase from a different code path.
+    const dispatched = comboFromEvent(
+      ev("KeyQ", { key: "a", keyCode: 0x41, ctrlKey: true, shiftKey: true }),
+      "inApp",
+    );
+    expect(captured).toEqual(c(0x41, { ctrl: true, shift: true }));
+    expect(dispatched).not.toBeNull();
+    expect(comboKey(dispatched as KeyCombo)).toBe(comboKey(captured as KeyCombo));
   });
 });
 
@@ -318,9 +342,9 @@ describe("keybindConflict", () => {
     expect(check(combo)).toEqual({ kind: "fixed" });
   });
 
-  it("ptt: the bare push-to-talk key, but not the same key with a modifier", () => {
+  it("ptt: the push-to-talk key in any combo, since the poller ignores modifiers", () => {
     expect(check(c(0x75), "disconnect", 0x75)).toEqual({ kind: "ptt" });
-    expect(check(c(0x75, { shift: true }), "disconnect", 0x75)).toBeNull();
+    expect(check(c(0x75, { shift: true }), "disconnect", 0x75)).toEqual({ kind: "ptt" });
     expect(check(c(0x75), "disconnect", 0)).toBeNull();
   });
 
@@ -343,9 +367,31 @@ describe("keybindConflict", () => {
     expect(check(c(0x46, { ctrl: true }), "search")).toBeNull();
   });
 
-  it("checks in order: needsModifier before reserved before fixed before duplicate", () => {
-    expect(check(c(0x41))).toEqual({ kind: "needsModifier" });
-    expect(check(c(0x41, { ctrl: true }), "search")).toEqual({ kind: "reserved" });
+  it("checks in order: needsModifier > reserved > fixed > ptt > duplicate", () => {
+    expect(check(c(0x41), "search", 0x41)).toEqual({ kind: "needsModifier" });
+    expect(check(c(0x52, { ctrl: true }), "search", 0x52)).toEqual({ kind: "reserved" });
+    expect(check(c(0x4b, { ctrl: true }), "search", 0x4b)).toEqual({ kind: "fixed" });
+    expect(check(c(0x46, { ctrl: true }), "toggleCamera", 0x46)).toEqual({ kind: "ptt" });
+    expect(check(c(0x46, { ctrl: true }), "toggleCamera", 0)).toEqual({
+      kind: "duplicate",
+      with: "search",
+    });
+  });
+
+  it("fixed: Ctrl+Shift+K and the zoom reset keys", () => {
+    expect(check(c(0x4b, { ctrl: true, shift: true }))).toEqual({ kind: "fixed" });
+  });
+  it("fixed: Ctrl+0", () => {
+    expect(check(c(0x30, { ctrl: true }))).toEqual({ kind: "fixed" });
+  });
+  it("fixed: Ctrl+Shift+0", () => {
+    expect(check(c(0x30, { ctrl: true, shift: true }))).toEqual({ kind: "fixed" });
+  });
+  it("reserved: Ctrl+Delete", () => {
+    expect(check(c(0x2e, { ctrl: true }))).toEqual({ kind: "reserved" });
+  });
+  it("reserved: Ctrl+Insert", () => {
+    expect(check(c(0x2d, { ctrl: true }))).toEqual({ kind: "reserved" });
   });
 
   it("ignores unbound actions when looking for duplicates", () => {

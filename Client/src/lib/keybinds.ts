@@ -93,18 +93,39 @@ export function comboKey(combo: KeyCombo): string {
   return `${combo.ctrl ? "ctrl+" : ""}${combo.shift ? "shift+" : ""}${combo.alt ? "alt+" : ""}${combo.vk}`;
 }
 
+/** Which key identity a combo uses. */
+export type ComboScope = "inApp" | "global";
+
+/**
+ * The VK of a single ASCII letter or digit `e.key` (the layout key), or null.
+ * A letter is its uppercase code and a digit its own code, which are the VKs.
+ */
+function layoutVk(e: KeyboardEvent): number | null {
+  if (typeof e.key !== "string" || !/^[a-zA-Z0-9]$/.test(e.key)) return null;
+  return e.key.toUpperCase().charCodeAt(0);
+}
+
 /**
  * The combo a keydown represents, or null when it cannot be bound. Capture and
  * dispatch both go through this so they can never disagree. Win/Super is never
  * captured, and Ctrl+Alt is how Windows reports AltGr, so it would eat a typed
  * character on layouts that use it.
+ *
+ * Key identity: an in-app-only action ("inApp") stores and matches the layout
+ * key, the VK of `e.key.toUpperCase()` when that is a single ASCII A-Z or 0-9
+ * (so Colemak and Dvorak keep today's `e.key` matching); anything else uses
+ * `keyEventToVk`. Global mute and deafen ("global") keep the physical
+ * `keyEventToVk`, so they agree with the X11 poller. Cross-set checks (an
+ * in-app combo against mute or deafen) compare the VKs as stored; a mismatch
+ * between the two identities on non-QWERTY Linux layouts is accepted.
  */
-export function comboFromEvent(e: KeyboardEvent): KeyCombo | null {
+export function comboFromEvent(e: KeyboardEvent, scope: ComboScope): KeyCombo | null {
   if (e.metaKey) return null;
   if (e.ctrlKey && e.altKey) return null;
   if (typeof e.getModifierState === "function" && e.getModifierState("AltGraph")) return null;
-  const vk = keyEventToVk(e);
-  if (vk === null) return null;
+  const physical = keyEventToVk(e);
+  if (physical === null) return null;
+  const vk = (scope === "inApp" ? layoutVk(e) : null) ?? physical;
   return { vk, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey };
 }
 
@@ -123,6 +144,8 @@ const VK_F12 = 0x7b;
 const VK_SPACE = 0x20;
 const VK_HOME = 0x24;
 const VK_END = 0x23;
+const VK_INSERT = 0x2d;
+const VK_DELETE = 0x2e;
 const VK_LEFT = 0x25;
 const VK_UP = 0x26;
 const VK_DOWN = 0x28;
@@ -145,7 +168,16 @@ function isReserved(c: KeyCombo): boolean {
   // refuses a Shift-only non-F key first.)
   if (c.ctrl && !c.shift && TEXT_EDIT_VKS.has(c.vk)) return true;
   if (c.ctrl && c.shift && c.vk === 0x5a) return true; // redo
-  if (c.ctrl && !c.alt && (isArrow(c.vk) || c.vk === VK_HOME || c.vk === VK_END)) return true;
+  if (
+    c.ctrl &&
+    !c.alt &&
+    (isArrow(c.vk) ||
+      c.vk === VK_HOME ||
+      c.vk === VK_END ||
+      c.vk === VK_INSERT ||
+      c.vk === VK_DELETE)
+  )
+    return true;
   return false;
 }
 
@@ -153,6 +185,9 @@ function isReserved(c: KeyCombo): boolean {
  *  arrow) never reach this table: `needsModifier` refuses them first. */
 const FIXED_COMBO_KEYS: ReadonlySet<string> = new Set([
   comboKey(ctrl(0x4b)), // Ctrl+K quick switcher
+  comboKey(ctrlShift(0x4b)), // the quick switcher matches any Shift state
+  comboKey(ctrl(0x30)), // zoom reset (features/zoom/zoomKeys.ts)
+  comboKey(ctrlShift(0x30)),
   comboKey(ctrl(0x42)), // composer bold
   comboKey(ctrl(0x49)), // composer italic
   comboKey(ctrl(0x55)), // composer underline
@@ -178,9 +213,8 @@ export function keybindConflict(
   if (!combo.ctrl && !combo.alt && !isFKey(combo.vk)) return { kind: "needsModifier" };
   if (isReserved(combo)) return { kind: "reserved" };
   if (FIXED_COMBO_KEYS.has(comboKey(combo))) return { kind: "fixed" };
-  if (pttVk !== 0 && combo.vk === pttVk && !combo.ctrl && !combo.shift && !combo.alt) {
-    return { kind: "ptt" };
-  }
+  // The poller ignores modifiers, so push to talk owns its key in any combo.
+  if (pttVk !== 0 && combo.vk === pttVk) return { kind: "ptt" };
   const key = comboKey(combo);
   for (const id of ACTION_IDS) {
     if (id === action) continue;
@@ -263,7 +297,7 @@ function defaults(globals: GlobalShortcutVks): Record<ActionId, KeyCombo | null>
 export function parseKeybinds(
   raw: unknown,
   globals: GlobalShortcutVks = loadGlobalShortcutVks(),
-  pttVk = 0,
+  pttVk = loadPref<number>("pttVk", 0),
 ): EffectiveKeybinds {
   const stored = readShapeValid(raw);
   const eff = defaults(globals);
@@ -271,10 +305,31 @@ export function parseKeybinds(
     const v = stored[a.id];
     if (v !== undefined) eff[a.id] = v;
   }
+  // Fixpoint: a conflicting override reverts to its default, and a reverted
+  // default that still conflicts becomes null. Each action moves at most twice
+  // (override -> default -> null), so this terminates, and the result never has
+  // two rebindable actions on one combo.
+  const level = new Map<RebindableId, 0 | 1 | 2>();
   for (const a of REBINDABLE_ACTIONS) {
     const v = stored[a.id];
-    if (v === undefined || v === null) continue;
-    if (keybindConflict(v, a.id, eff, pttVk) !== null) eff[a.id] = a.defaultCombo;
+    if (v !== undefined && v !== null) level.set(a.id, 0);
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const a of REBINDABLE_ACTIONS) {
+      const lv = level.get(a.id);
+      const cur = eff[a.id];
+      if (lv === undefined || lv === 2 || cur === null) continue;
+      if (keybindConflict(cur, a.id, eff, pttVk) === null) continue;
+      if (lv === 0) {
+        eff[a.id] = a.defaultCombo;
+        level.set(a.id, 1);
+      } else {
+        eff[a.id] = null;
+        level.set(a.id, 2);
+      }
+      changed = true;
+    }
   }
   return eff;
 }
