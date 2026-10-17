@@ -478,7 +478,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             const stored = channelsStore.getState().channels.get(channel.id);
             const modal = createEditChannelModal({
               channelId: channel.id,
-              channelName: channel.name,
+              channelName: stored?.name ?? channel.name,
               channelType: channel.type,
               channelTopic: stored?.topic ?? "",
               channelCategory: stored?.category ?? "",

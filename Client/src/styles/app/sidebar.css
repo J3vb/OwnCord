@@ -212,14 +212,6 @@
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
-/* Collapsed category hiding a (muted) unread row: a small neutral dot. */
-.category-unread-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--text-faint);
-  flex-shrink: 0;
-}
 .category-arrow {
   background: transparent;
   border: none;

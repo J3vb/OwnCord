@@ -26,6 +26,7 @@ import { openMenuOnKeyboard } from "@lib/context-menu";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
@@ -258,17 +259,16 @@ export function buildVoiceModOptions(
   };
 }
 
-/**
- * Whether a text-style row has unread messages; voice rows never do. Muted
- * rows count, so a collapsed category still flags a hidden muted channel.
- */
+/** Whether a text-style row has unread messages; voice rows never do. */
 function rowIsUnread(channel: Channel): boolean {
   return channel.type !== "voice" && channel.unreadCount > 0;
 }
 
 /**
  * Whether a row draws the "unread" class: a muted channel is quiet (no bold,
- * no pill) unless it has a mention.
+ * no pill) unless it has a mention. Every row that looks unread is also shown
+ * under a collapsed category (see `rowVisibleWhenCollapsed`), so a collapsed
+ * header needs no "unread hidden" marker.
  */
 function rowLooksUnread(channel: Channel): boolean {
   return rowIsUnread(channel) && (!isChannelMuted(channel.id) || channel.mentionCount > 0);
@@ -291,31 +291,6 @@ function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | nul
   if (channel.mentionCount > 0) return true;
   if (channel.type === "voice") return voiceChannelOccupied(channel.id);
   return rowIsUnread(channel) && !isChannelMuted(channel.id);
-}
-
-/** Whether a collapsed category hides at least one unread row (a muted one). */
-function hidesUnreadRow(channels: readonly Channel[], activeChannelId: number | null): boolean {
-  return channels.some((ch) => rowIsUnread(ch) && !rowVisibleWhenCollapsed(ch, activeChannelId));
-}
-
-/** Show or clear the header's "unread channels hidden" dot. */
-function syncHiddenUnreadDot(header: Element, show: boolean): void {
-  const existing = header.querySelector(".category-unread-dot");
-  if (!show) {
-    existing?.remove();
-    return;
-  }
-  if (existing !== null) return;
-  const dot = createElement("span", {
-    class: "category-unread-dot",
-    role: "img",
-    "aria-label": shellText("channel.unreadHidden"),
-    title: shellText("channel.unreadHidden"),
-    "data-testid": "category-unread-dot",
-  });
-  const label = header.querySelector(".category-name");
-  if (label !== null) label.after(dot);
-  else header.appendChild(dot);
 }
 
 function renderVoiceChannelItem(
@@ -912,8 +887,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
 
     /** One group's rows, keyed and reused (B9-21). A collapsed category
-     *  keeps only the rows `rowVisibleWhenCollapsed` allows, and its header
-     *  shows a dot while it hides an unread row. */
+     *  keeps only the rows `rowVisibleWhenCollapsed` allows. */
     function reconcileRows(container: HTMLElement, g: GroupRender): void {
       const collapsed = g.name !== null && isCategoryCollapsed(g.name);
       // Hide Muted Channels drops muted rows here, not from `g.channels`: the
@@ -925,9 +899,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           (!collapsed || rowVisibleWhenCollapsed(ch, activeChannelId)),
       );
       const header = container.parentElement?.querySelector(".category") ?? null;
-      if (header !== null) {
-        syncHiddenUnreadDot(header, collapsed && hidesUnreadRow(g.channels, activeChannelId));
-      }
       const groupKey = g.name ?? "\u0000uncategorized";
       let shown = shownRowsByGroup.get(groupKey);
       if (shown === undefined) {
@@ -1086,6 +1057,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         },
         { signal },
       );
+
+      attachCategoryContextMenu(header, arrow, g.name, signal, disposable.signal);
 
       group.appendChild(header);
     }

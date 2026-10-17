@@ -872,7 +872,6 @@ describe("ChannelSidebar", () => {
       Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
         (el) => el.dataset.channelId ?? "",
       );
-    const dot = (): Element | null => container.querySelector(".category-unread-dot");
 
     beforeEach(() => {
       localStorage.clear();
@@ -889,10 +888,9 @@ describe("ChannelSidebar", () => {
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["2"]);
-      expect(dot()).toBeNull();
     });
 
-    it("a mentioned muted channel shows; an unread muted one hides and the header dot shows", () => {
+    it("a mentioned muted channel shows; a plain-unread muted one hides and leaves no header marker", () => {
       setChannels([
         text(1, { unread_count: 2, mention_count: 1 }),
         text(2, { unread_count: 4 }),
@@ -903,18 +901,18 @@ describe("ChannelSidebar", () => {
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      const d = dot();
-      expect(d).not.toBeNull();
-      expect(d?.getAttribute("aria-label")).toBe("Unread channels hidden");
+      // The hidden muted row looks read, so the header carries no dot (3D-2b).
+      expect(container.querySelector(".category-unread-dot")).toBeNull();
+      expect(container.querySelector(".channel-item.unread")).not.toBeNull();
+      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
     });
 
-    it("shows no dot when no hidden row is unread", () => {
+    it("a mentioned muted channel alone still shows", () => {
       setChannels([text(1, { unread_count: 2, mention_count: 1 }), text(2)]);
       muteChannel(1);
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
     });
 
     it("keeps a voice channel with a person and hides an empty one", () => {
@@ -966,26 +964,22 @@ describe("ChannelSidebar", () => {
       expect(rowIds()).toEqual([]);
     });
 
-    it("muting a collapsed unread row hides it and shows the dot; unmuting reverses", () => {
+    it("muting a collapsed unread row hides it; unmuting reverses", () => {
       setChannels([text(1, { unread_count: 2 })]);
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
       muteChannel(1);
       expect(rowIds()).toEqual([]);
-      expect(dot()).not.toBeNull();
       unmuteChannel(1);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
     });
 
-    it("an expanded category shows every row and no header dot", () => {
+    it("an expanded category shows every row", () => {
       setChannels([text(1, { unread_count: 2 }), text(2), text(3, { unread_count: 1 })]);
       muteChannel(3);
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1", "2", "3"]);
-      expect(dot()).toBeNull();
     });
 
     it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {

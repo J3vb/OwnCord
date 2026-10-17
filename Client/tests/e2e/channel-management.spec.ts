@@ -219,6 +219,8 @@ test.describe("Create Channel modal", () => {
       name: "new-lounge",
       type: "voice",
       category: "Text Channels",
+      // A new channel goes to the bottom of its kind in the category.
+      position: 1,
     });
     await expect(page.locator("[data-testid='create-channel-modal']")).not.toBeVisible();
   });
@@ -317,10 +319,11 @@ test.describe("Edit Channel modal", () => {
     expect(body).toEqual({
       name: "general-renamed",
       topic: "New topic",
-      category: "Text Channels",
       slow_mode: 60,
       nsfw: false,
     });
+    // Only changed fields are sent, so another admin's edit to the rest is kept.
+    expect(body).not.toHaveProperty("category");
     expect(body).not.toHaveProperty("voice_max_users");
     expect(body).not.toHaveProperty("voice_max_video");
     await expect(page.locator("[data-testid='edit-channel-modal']")).not.toBeVisible();
@@ -359,7 +362,8 @@ test.describe("Edit Channel modal", () => {
     expect(call.method).toBe("PATCH");
     const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
     expect(body["voice_max_users"]).toBe(9);
-    expect(body["voice_max_video"]).toBe(2);
+    // The video limit was not touched, so it is not sent.
+    expect(body).not.toHaveProperty("voice_max_video");
   });
 
   test("voice limits are clamped to the server maximum", async ({ page }) => {

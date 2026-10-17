@@ -21,7 +21,9 @@ import { showToast } from "@lib/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { uiStore } from "@stores/ui.store";
+import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
+import { dmStore, addDmToChannelsStore } from "@stores/dm.store";
+import { navigateToChannel } from "@lib/channel-navigation";
 import { authStore } from "@stores/auth.store";
 import { errorText } from "@lib/api";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
@@ -139,6 +141,10 @@ export function createQuickSwitcherManager(
   isSuspended?: () => boolean,
   /** Optional: join a voice channel selected in the switcher, matching the sidebar. */
   onJoinVoice?: (channelId: number) => void,
+  /** Optional: runs before a pick leaves a channel for a DM, so "back" returns to it. */
+  onBeforeDm?: () => void,
+  /** Optional: runs when a channel pick leaves DM mode, to drop the saved channel. */
+  onLeaveDm?: () => void,
 ): QuickSwitcherManager {
   let instance: MountableComponent | null = null;
 
@@ -147,6 +153,19 @@ export function createQuickSwitcherManager(
     if (instance !== null || root === null) return;
     instance = createQuickSwitcher({
       onSelectChannel: (channelId: number) => {
+        const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+        if (dm !== undefined) {
+          // The state the DM list sets on a click (selectDmConversation):
+          // remember the channel being left (a no-op when a DM is already
+          // open), refresh the mirror row so a renamed group shows its new
+          // name, then enter DM mode.
+          onBeforeDm?.();
+          addDmToChannelsStore(dm);
+          navigateToChannel(channelId);
+          setActiveDmUser(dm.isGroup ? null : dm.recipient.id);
+          setSidebarMode("dms");
+          return;
+        }
         // A voice channel selected here must go through the same join path the
         // sidebar row uses — a bare setActiveChannel mounts the chat surface
         // for a voice channel the user never joined (F8).
@@ -155,7 +174,14 @@ export function createQuickSwitcherManager(
           onJoinVoice(channelId);
           return;
         }
-        setActiveChannel(channelId);
+        // A channel pick from DM mode returns the sidebar to the channel list
+        // and drops the saved "channel before the DM", so Back later cannot
+        // jump to an older channel.
+        if (uiStore.getState().sidebarMode === "dms") {
+          setSidebarMode("channels");
+          onLeaveDm?.();
+        }
+        navigateToChannel(channelId);
       },
       onClose: close,
     });

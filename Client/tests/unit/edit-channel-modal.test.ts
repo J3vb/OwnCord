@@ -7,7 +7,7 @@ import {
   MAX_VOICE_LIMIT,
 } from "@components/EditChannelModal";
 import type { EditChannelModalOptions, EditChannelData } from "@components/EditChannelModal";
-import { setChannels } from "@stores/channels.store";
+import { channelsStore, setChannels } from "@stores/channels.store";
 
 describe("EditChannelModal", () => {
   let container: HTMLDivElement;
@@ -97,13 +97,7 @@ describe("EditChannelModal", () => {
     saveBtn.click();
 
     await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        name: "renamed-channel",
-        topic: "",
-        category: "",
-        slow_mode: 0,
-        nsfw: false,
-      });
+      expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel" });
     });
     modal.destroy?.();
   });
@@ -123,13 +117,7 @@ describe("EditChannelModal", () => {
     saveBtn.click();
 
     await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        name: "general",
-        topic: "new topic",
-        category: "",
-        slow_mode: 0,
-        nsfw: false,
-      });
+      expect(onSave).toHaveBeenCalledWith({ topic: "new topic" });
     });
     modal.destroy?.();
   });
@@ -146,13 +134,7 @@ describe("EditChannelModal", () => {
     (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        name: "general",
-        topic: "",
-        category: "Gaming",
-        slow_mode: 0,
-        nsfw: false,
-      });
+      expect(onSave).toHaveBeenCalledWith({ category: "Gaming" });
     });
     modal.destroy?.();
   });
@@ -182,13 +164,7 @@ describe("EditChannelModal", () => {
     (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({
-        name: "general",
-        topic: "",
-        category: "",
-        slow_mode: 0,
-        nsfw: false,
-      });
+      expect(onSave).toHaveBeenCalledWith({ category: "" });
     });
     modal.destroy?.();
   });
@@ -406,7 +382,9 @@ describe("EditChannelModal", () => {
     it("sends the flag to onSave when set", async () => {
       const onSave = vi.fn(async () => {});
       const { modal } = makeModal({ onSave });
-      nsfwBox().checked = true;
+      (
+        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
+      ).checked = true;
 
       (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
 
@@ -505,6 +483,9 @@ describe("EditChannelModal", () => {
         payload = data as unknown as Record<string, unknown>;
       });
       const { modal } = makeModal({ onSave });
+      (
+        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
+      ).checked = true;
 
       (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
 
@@ -548,6 +529,83 @@ describe("EditChannelModal", () => {
         expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ voice_max_users: 0 }));
       });
       modal.destroy?.();
+    });
+  });
+
+  // ─── Concurrent edits (N28) ────────────────────────────────────────────────
+
+  describe("concurrent updates", () => {
+    const nameEl = (): HTMLInputElement =>
+      container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const topicEl = (): HTMLInputElement =>
+      container.querySelector("[data-testid='edit-channel-topic-input']") as HTMLInputElement;
+    const submit = (): void =>
+      (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+    const remoteUpdate = (patch: Record<string, unknown>): void => {
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(1, { ...channels.get(1)!, ...patch } as never);
+        return { ...prev, channels };
+      });
+      channelsStore.flush();
+    };
+
+    beforeEach(() => {
+      setChannels([
+        { id: 1, name: "general", type: "text", category: "Chat", position: 0, topic: "old" },
+      ]);
+    });
+
+    it("refreshes an untouched field when the channel is updated elsewhere", () => {
+      const { modal } = makeModal({ channelTopic: "old", channelCategory: "Chat" });
+      remoteUpdate({ topic: "theirs", name: "renamed" });
+      expect(topicEl().value).toBe("theirs");
+      expect(nameEl().value).toBe("renamed");
+      modal.destroy?.();
+    });
+
+    it("keeps a field the user is editing and sends only that field", async () => {
+      const onSave = vi.fn(async () => {});
+      const { modal } = makeModal({ onSave, channelTopic: "old", channelCategory: "Chat" });
+      topicEl().value = "mine";
+      remoteUpdate({ topic: "theirs", name: "renamed" });
+      expect(topicEl().value).toBe("mine");
+      expect(nameEl().value).toBe("renamed");
+
+      submit();
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ topic: "mine" }));
+      modal.destroy?.();
+    });
+
+    it("sends a value typed back after another admin replaced it", async () => {
+      const onSave = vi.fn(async () => {});
+      const { modal } = makeModal({ onSave, channelTopic: "old", channelCategory: "Chat" });
+      topicEl().value = "mine";
+      remoteUpdate({ topic: "theirs" });
+      topicEl().value = "old";
+
+      submit();
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ topic: "old" }));
+      modal.destroy?.();
+    });
+
+    it("closes without saving when nothing was changed", () => {
+      const onSave = vi.fn(async () => {});
+      const onClose = vi.fn();
+      const { modal } = makeModal({ onSave, onClose, channelCategory: "Chat" });
+      remoteUpdate({ topic: "theirs" });
+      submit();
+      expect(onSave).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("stops following the store after destroy", () => {
+      const { modal } = makeModal({ channelTopic: "old", channelCategory: "Chat" });
+      const el = topicEl();
+      modal.destroy?.();
+      remoteUpdate({ topic: "late" });
+      expect(el.value).toBe("old");
     });
   });
 

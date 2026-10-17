@@ -90,6 +90,8 @@ vi.mock("@stores/channels.store", async () => {
   const { createStore } = await import("@lib/store");
   return {
     setActiveChannel: mockSetActiveChannel,
+    // navigateToChannel (the switcher's pick path) also clears the badge.
+    clearUnread: vi.fn(),
     channelsStore: createStore({
       channels: new Map<number, Record<string, unknown>>([
         [99, { nsfw: true }],

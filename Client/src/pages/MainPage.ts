@@ -1199,6 +1199,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // A voice row in the switcher joins voice (matching the sidebar row)
       // instead of mounting chat for an unjoined voice channel (F8).
       (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
+      () => sidebar.rememberChannel(),
+      () => sidebar.forgetChannel(),
     );
     unsubscribers.push(qsManager.attach());
 

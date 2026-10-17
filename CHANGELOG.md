@@ -81,6 +81,9 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 - Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
 - Settings → Diagnostics & logs has an **Open Log Folder** button that opens OwnCord's log folder in your file manager, so you can find the logs without a tray icon (stock GNOME has none). If the folder cannot be opened, the reason shows under the button.
+- Right-clicking a category header now offers **Mark Category as Read**, **Collapse Category** (or Expand), and **Collapse All Categories**.
+- The Create Channel window has an optional **Topic** field, and Enter in the name field creates the channel.
+- Ctrl+K now also finds your DMs, lists names that start with what you typed first, shows an unread dot or mention count on each result, draws a megaphone for announcement channels and says "No results" when nothing matches.
 
 **Voice**
 
@@ -168,6 +171,9 @@ and only when it changes something a contributor or fork holder must do
 
 - A channel with unread messages now shows only a bold name and the white pill, as in Discord; the number is kept for mentions and DMs.
 - A muted channel no longer turns bold or shows the pill for ordinary unread messages; a mention still shows.
+- Alt+Shift+Up/Down now also reaches unread channels inside collapsed categories, and skips muted channels unless they have a mention.
+- A collapsed category no longer shows a dot for hidden muted channels with unread messages, since those channels now look read.
+- Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
 
 **Accounts & profiles**
 
@@ -182,6 +188,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Suppress @everyone and @here now hides only those pings in channels you are not viewing. A message that mentions you by name still alerts, as it already did in the open channel. Older servers keep today's behaviour.
 - With an older server, a mention in a channel you are not viewing now alerts about 3 seconds after it arrives.
+- Do Not Disturb now also stops the taskbar or window flash for messages and mentions, not just the pop-up and sound. A ringing call still flashes.
 
 **Desktop UI**
 
@@ -194,6 +201,10 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
+- Picking a channel in Ctrl+K while in the DM list now takes you to the channel list and clears its unread badge, instead of leaving the DM list showing.
+- A new channel now lands at the bottom of its category instead of the top.
+- Losing access to a channel now says "You no longer have access to this channel, or it was deleted" instead of claiming it was deleted, since a permission change looks the same to the app.
+- Editing a channel no longer overwrites a change someone else made while the dialog was open: fields you did not touch update in the open dialog, and Save sends only the fields you changed.
 
 **Login & connection**
 
