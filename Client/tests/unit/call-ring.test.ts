@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/call-ring";
-import type { RingState, OutgoingCallState } from "@lib/call-ring";
+import type { RingEndReason, RingState, OutgoingCallState } from "@lib/call-ring";
 
 /**
  * Statechart harness. The timer is injected rather than faked globally so a
@@ -15,6 +15,7 @@ function harness() {
   const started: RingState[] = [];
   const missed: RingState[] = [];
   const ended: RingState[] = [];
+  const endReasons: Array<RingEndReason | undefined> = [];
   let pending: (() => void) | null = null;
   let pendingMs = 0;
   let cleared = 0;
@@ -26,7 +27,10 @@ function harness() {
     onDecline: (id) => declined.push(id),
     onRingStart: (s) => started.push(s),
     onMissed: (s) => missed.push(s),
-    onRingEnd: (s) => ended.push(s),
+    onRingEnd: (s, reason) => {
+      ended.push(s);
+      endReasons.push(reason);
+    },
     setTimer: (fn, ms) => {
       pending = fn;
       pendingMs = ms;
@@ -47,6 +51,7 @@ function harness() {
     started,
     missed,
     ended,
+    endReasons,
     fireTimeout: () => pending?.(),
     timerMs: () => pendingMs,
     clearedCount: () => cleared,
@@ -89,6 +94,37 @@ describe("ring controller — incoming", () => {
     expect(h.ctrl.current()?.channelId).toBe(6);
     expect(h.states).toEqual([ring(5), null, ring(6)]);
     expect(h.chimes).toEqual([true, false, true]);
+  });
+});
+
+describe("ring controller — end reasons (3B-4)", () => {
+  it("reports superseded only when a ring from another channel replaces the current one", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.incoming(ring(5)); // a redial of the same channel is not a replacement
+    expect(h.endReasons).toEqual([]);
+
+    h.ctrl.incoming(ring(6));
+    expect(h.ended).toEqual([ring(5)]);
+    expect(h.endReasons).toEqual(["superseded"]);
+    expect(h.missed).toEqual([]);
+  });
+
+  it("reports accepted, declined and timeout for the other exits", () => {
+    const a = harness();
+    a.ctrl.incoming(ring(5));
+    a.ctrl.accept();
+    const d = harness();
+    d.ctrl.incoming(ring(5));
+    d.ctrl.decline();
+    const t = harness();
+    t.ctrl.incoming(ring(5));
+    t.fireTimeout();
+    expect([a.endReasons, d.endReasons, t.endReasons]).toEqual([
+      ["accepted"],
+      ["declined"],
+      ["timeout"],
+    ]);
   });
 });
 

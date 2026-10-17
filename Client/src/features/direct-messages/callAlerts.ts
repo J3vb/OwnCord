@@ -15,6 +15,7 @@ import { createLogger } from "../../lib/logger";
 import type { RingState } from "../../lib/call-ring";
 import { desktop } from "../../platform/desktop";
 import { dmCallText } from "../../i18n/dmCall";
+import { dmStore, dmDisplayName } from "../../stores/dm.store";
 
 const log = createLogger("call-alerts");
 
@@ -58,6 +59,21 @@ export function alertMissedCall(ring: RingState): void {
   const text = dmCallText("missed", { name: ring.fromUsername });
   showToast(text, "info");
   popup(text, ring, false);
+}
+
+/**
+ * A ring replaced by a ring from another channel (3B-4): the first call is no
+ * longer answerable, so say so in app. Toast only, no OS notification: the
+ * newer call's own notification is the one the user can still act on.
+ */
+export function alertSupersededCall(ring: RingState): void {
+  const dm = dmStore.getState().channels.find((c) => c.channelId === ring.channelId);
+  showToast(
+    dm?.isGroup === true
+      ? dmCallText("missedGroup", { name: dmDisplayName(dm) })
+      : dmCallText("missed", { name: ring.fromUsername }),
+    "info",
+  );
 }
 
 /** The ring ended, however it ended: withdraw its notification, which would
