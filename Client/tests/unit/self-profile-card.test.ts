@@ -388,8 +388,9 @@ function setOwn(customStatus: string, expiresAt: string | null | undefined): voi
   membersStore.flush();
 }
 
-function openPicker(): HTMLElement {
+async function openPicker(): Promise<HTMLElement> {
   byId<HTMLButtonElement>("spc-custom-emoji").click();
+  await vi.dynamicImportSettled();
   return card()!.querySelector<HTMLElement>(".emoji-picker")!;
 }
 const firstCell = (picker: HTMLElement): HTMLElement =>
@@ -786,12 +787,12 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(card()).toBeNull();
     });
 
-    it("typed text is committed when an outside click closes the card with the picker open", () => {
+    it("typed text is committed when an outside click closes the card with the picker open", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       input.focus();
       input.value = "  brb   soon ";
-      openPicker();
+      await openPicker();
       input.blur(); // focus moved into the picker: no commit yet
       expect(ws.send).not.toHaveBeenCalled();
 
@@ -801,10 +802,10 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(frames(ws)[0]!.payload.custom_status).toBe("brb soon");
     });
 
-    it("the owner tearing the bar down with the picker open commits it too", () => {
+    it("the owner tearing the bar down with the picker open commits it too", async () => {
       trigger().click();
       byId<HTMLInputElement>("spc-custom-input").value = "away";
-      openPicker();
+      await openPicker();
       comp.destroy?.();
       expect(frames(ws)[0]!.payload.custom_status).toBe("away");
     });
@@ -833,10 +834,10 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it("an update held back while the picker was open applies when it closes and the field is left", () => {
+    it("an update held back while the picker was open applies when it closes and the field is left", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
-      openPicker();
+      await openPicker();
       setOwn("from another device", null);
       expect(input.value).toBe("");
       byId<HTMLButtonElement>("spc-custom-emoji").click(); // closes it, focus to the field
@@ -878,22 +879,22 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       });
     });
 
-    it("does not overwrite the typed text from the store while the picker is open", () => {
+    it("does not overwrite the typed text from the store while the picker is open", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       input.value = "typing";
-      openPicker();
+      await openPicker();
       setOwn("from another device", null);
       expect(input.value).toBe("typing");
     });
   });
 
   describe("emoji button", () => {
-    it("opens the emoji picker inside the card and closes it again", () => {
+    it("opens the emoji picker inside the card and closes it again", async () => {
       trigger().click();
       const btn = byId<HTMLButtonElement>("spc-custom-emoji");
       expect(btn.getAttribute("aria-expanded")).toBe("false");
-      const picker = openPicker();
+      const picker = await openPicker();
       expect(picker).not.toBeNull();
       expect(btn.getAttribute("aria-expanded")).toBe("true");
       expect(card()).not.toBeNull();
@@ -902,12 +903,12 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(btn.getAttribute("aria-expanded")).toBe("false");
     });
 
-    it("inserts the chosen emoji at the caret", () => {
+    it("inserts the chosen emoji at the caret", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       input.value = "hello world";
       input.setSelectionRange(5, 5);
-      const picker = openPicker();
+      const picker = await openPicker();
       const cell = firstCell(picker);
       const emoji = cell.dataset.emoji!;
       cell.click();
@@ -919,24 +920,24 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it("replaces a selection and leaves the clear button showing", () => {
+    it("replaces a selection and leaves the clear button showing", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       input.value = "abcdef";
       input.setSelectionRange(1, 4);
-      const cell = firstCell(openPicker());
+      const cell = firstCell(await openPicker());
       cell.click();
       expect(input.value).toBe(`a${cell.dataset.emoji}ef`);
       expect(byId<HTMLButtonElement>("spc-custom-clear").hidden).toBe(false);
     });
 
-    it("respects the 128-character limit", () => {
+    it("respects the 128-character limit", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       const full = "x".repeat(128);
       input.value = full;
       input.setSelectionRange(128, 128);
-      firstCell(openPicker()).click();
+      firstCell(await openPicker()).click();
       expect(input.value).toBe(full);
 
       // The limit counts characters like the server: with room for one, an
@@ -945,12 +946,13 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       const chars = (s: string): number => [...s].length;
       input.value = "x".repeat(127);
       input.setSelectionRange(127, 127);
-      const cells = [...openPicker().querySelectorAll<HTMLElement>(".ep-emoji")];
+      const picker = await openPicker();
+      const cells = [...picker.querySelectorAll<HTMLElement>(".ep-emoji")];
       const multi = cells.find((c) => chars(c.dataset.emoji!) > 1)!;
       multi.click();
       expect(input.value).toBe("x".repeat(127));
 
-      const single = [...openPicker().querySelectorAll<HTMLElement>(".ep-emoji")].find(
+      const single = [...(await openPicker()).querySelectorAll<HTMLElement>(".ep-emoji")].find(
         (c) => chars(c.dataset.emoji!) === 1 && c.dataset.emoji!.length === 2,
       )!;
       single.click();
@@ -958,7 +960,7 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(chars(input.value)).toBe(128);
     });
 
-    it("picking does not send half-typed text; Enter then commits it with the emoji", () => {
+    it("picking does not send half-typed text; Enter then commits it with the emoji", async () => {
       trigger().click();
       const input = byId<HTMLInputElement>("spc-custom-input");
       input.focus();
@@ -967,7 +969,7 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       const md = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
       byId("spc-custom-emoji").dispatchEvent(md);
       expect(md.defaultPrevented).toBe(true);
-      const cell = firstCell(openPicker());
+      const cell = firstCell(await openPicker());
       input.blur(); // focus moving into the picker
       expect(ws.send).not.toHaveBeenCalled();
       cell.click();
@@ -979,14 +981,14 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       const { setCustomEmoji } = await import("@stores/emoji.store");
       setCustomEmoji([{ id: 1, shortcode: "party", url: "/x.png" } as never], 0);
       trigger().click();
-      const picker = openPicker();
+      const picker = await openPicker();
       expect(picker.querySelector(".ep-emoji-custom")).toBeNull();
       expect(picker.textContent).not.toContain("Server");
     });
 
-    it("Escape in the picker closes only the picker", () => {
+    it("Escape in the picker closes only the picker", async () => {
       trigger().click();
-      const picker = openPicker();
+      const picker = await openPicker();
       picker.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
       );
@@ -997,9 +999,9 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(card()).toBeNull();
     });
 
-    it("closing the card takes the picker with it", () => {
+    it("closing the card takes the picker with it", async () => {
       trigger().click();
-      openPicker();
+      await openPicker();
       trigger().click();
       expect(card()).toBeNull();
       expect(document.body.querySelector(".emoji-picker")).toBeNull();

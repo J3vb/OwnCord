@@ -1305,11 +1305,12 @@ describe("createQuickSwitcherManager", () => {
     root.remove();
   });
 
-  it("opens quick switcher on Ctrl+K", () => {
+  it("opens quick switcher on Ctrl+K", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
     expect(mockQuickSwitcherMount).toHaveBeenCalledWith(root);
@@ -1317,22 +1318,24 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("closes quick switcher on second Ctrl+K", () => {
+  it("closes quick switcher on second Ctrl+K", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Close
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(mockQuickSwitcherDestroy).toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("opens on Ctrl+K from the focused composer, but not while a modal is open", () => {
+  it("opens on Ctrl+K from the focused composer, but not while a modal is open", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
@@ -1340,6 +1343,7 @@ describe("createQuickSwitcherManager", () => {
     modal.className = "modal-overlay visible";
     document.body.appendChild(modal);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).not.toHaveBeenCalled();
     modal.remove();
 
@@ -1349,51 +1353,56 @@ describe("createQuickSwitcherManager", () => {
     composer.dispatchEvent(
       new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
     );
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     composer.remove();
     cleanup();
   });
 
-  it("opens quick switcher on Meta+K (macOS)", () => {
+  it("opens quick switcher on Meta+K (macOS)", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     cleanup();
   });
 
-  it("does not open on plain K key without modifier", () => {
+  it("does not open on plain K key without modifier", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k" }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("does nothing when root is null", () => {
+  it("does nothing when root is null", async () => {
     const manager = createQuickSwitcherManager(() => null);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("cleanup removes the keydown listener and closes", () => {
+  it("cleanup removes the keydown listener and closes", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open first
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Cleanup
@@ -1405,14 +1414,16 @@ describe("createQuickSwitcherManager", () => {
     // After cleanup, Ctrl+K should not open a new instance
     vi.clearAllMocks();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).not.toHaveBeenCalled();
   });
 
-  it("onSelectChannel callback sets active channel", () => {
+  it("onSelectChannel callback sets active channel", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     // Extract the onSelectChannel callback
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
@@ -1425,11 +1436,12 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("joins voice instead of setting the active channel for a voice row (F8)", () => {
+  it("joins voice instead of setting the active channel for a voice row (F8)", async () => {
     const join = vi.fn();
     const manager = createQuickSwitcherManager(() => root, undefined, join);
     const cleanup = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
       onSelectChannel: (channelId: number) => void;
@@ -1442,11 +1454,12 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("sets the active channel for a text row (F8)", () => {
+  it("sets the active channel for a text row (F8)", async () => {
     const join = vi.fn();
     const manager = createQuickSwitcherManager(() => root, undefined, join);
     const cleanup = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
       onSelectChannel: (channelId: number) => void;
@@ -1459,12 +1472,13 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("onClose callback resets instance so re-open works", () => {
+  it("onClose callback resets instance so re-open works", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Simulate component calling onClose directly
@@ -1475,17 +1489,19 @@ describe("createQuickSwitcherManager", () => {
 
     // Re-open should work
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledTimes(2);
 
     cleanup();
   });
 
-  it("does not open a second instance if already open", () => {
+  it("does not open a second instance if already open", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     // Simulate trying to open from external code — the instance check should prevent it
     // The attach() function only exposes Ctrl+K, and the toggle logic handles this
@@ -1494,33 +1510,35 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("opens on Ctrl+K with CapsLock on (KeyboardEvent.key reports uppercase 'K')", () => {
+  it("opens on Ctrl+K with CapsLock on (KeyboardEvent.key reports uppercase 'K')", async () => {
     // OC-0150: `e.key` reflects CapsLock/Shift state. A case-sensitive `=== "k"`
     // check means CapsLock (or Ctrl+Shift+K) silently does nothing.
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "K", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     cleanup();
   });
 
-  it("does not open on AltGr+K (Windows reports AltGr as ctrlKey+altKey)", () => {
+  it("does not open on AltGr+K (Windows reports AltGr as ctrlKey+altKey)", async () => {
     // OC-0150: without an altKey exclusion, AltGr-produced characters on
     // non-US layouts get swallowed by an unwanted preventDefault().
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("does not open while isSuspended() reports true (e.g. settings overlay open)", () => {
+  it("does not open while isSuspended() reports true (e.g. settings overlay open)", async () => {
     // OC-0150: every other global shortcut honours isSuspended; the quick
     // switcher never got the guard, so it could stack on top of Settings.
     const manager = createQuickSwitcherManager(
@@ -1530,6 +1548,7 @@ describe("createQuickSwitcherManager", () => {
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
@@ -1849,7 +1868,7 @@ describe("createSearchOverlayController", () => {
     root.remove();
   });
 
-  it("opens search overlay and mounts to root", () => {
+  it("opens search overlay and mounts to root", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1859,12 +1878,13 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
     expect(mockSearchOverlayMount).toHaveBeenCalledWith(root);
   });
 
-  it("offers only a server-wide search behind an NSFW consent gate", () => {
+  it("offers only a server-wide search behind an NSFW consent gate", async () => {
     const controller = createSearchOverlayController({
       api: makeMockApi() as never,
       getRoot: () => root,
@@ -1872,11 +1892,12 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(vi.mocked(createSearchOverlay).mock.calls[0]![0].currentChannelId).toBeUndefined();
   });
 
-  it("does nothing when root is null", () => {
+  it("does nothing when root is null", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1886,11 +1907,12 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).not.toHaveBeenCalled();
   });
 
-  it("does not open a second instance if already open", () => {
+  it("does not open a second instance if already open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1900,12 +1922,14 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
   });
 
-  it("passes currentChannelId as undefined when null", () => {
+  it("passes currentChannelId as undefined when null", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1915,6 +1939,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       currentChannelId: number | undefined;
@@ -1933,6 +1958,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -1965,6 +1991,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -1991,6 +2018,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -2005,7 +2033,7 @@ describe("createSearchOverlayController", () => {
     expect(mockLogError).toHaveBeenCalled();
   });
 
-  it("onSelectResult hands the whole jump to onJumpToMessage", () => {
+  it("onSelectResult hands the whole jump to onJumpToMessage", async () => {
     const api = makeMockApi();
     const mockJump = vi.fn();
 
@@ -2017,6 +2045,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -2030,7 +2059,7 @@ describe("createSearchOverlayController", () => {
     expect(mockSetActiveChannel).not.toHaveBeenCalled();
   });
 
-  it("onSelectResult does not second-guess the jumper with a toast", () => {
+  it("onSelectResult does not second-guess the jumper with a toast", async () => {
     const api = makeMockApi();
     const mockJump = vi.fn();
 
@@ -2042,6 +2071,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -2053,7 +2083,7 @@ describe("createSearchOverlayController", () => {
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 
-  it("onSelectResult works without onJumpToMessage callback", () => {
+  it("onSelectResult works without onJumpToMessage callback", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -2064,6 +2094,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -2074,7 +2105,7 @@ describe("createSearchOverlayController", () => {
     expect(mockSetActiveChannel).toHaveBeenCalledWith(3);
   });
 
-  it("onClose closes overlay and allows re-open", () => {
+  it("onClose closes overlay and allows re-open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -2084,6 +2115,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onClose: () => void;
@@ -2095,10 +2127,11 @@ describe("createSearchOverlayController", () => {
     // Re-open should work
     vi.clearAllMocks();
     controller.open();
+    await vi.dynamicImportSettled();
     expect(createSearchOverlay).toHaveBeenCalledOnce();
   });
 
-  it("cleanup destroys instance when open", () => {
+  it("cleanup destroys instance when open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -2108,6 +2141,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
     controller.cleanup();
 
     expect(mockSearchOverlayDestroy).toHaveBeenCalled();

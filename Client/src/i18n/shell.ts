@@ -12,6 +12,7 @@ import { defineCatalog } from "./format";
 export const shellText = defineCatalog("shell", {
   "common.cancel": "Cancel",
   "common.close": "Close",
+  "common.openFailed": "Couldn't open that. Try again.",
   "common.unknown": "Unknown",
   "common.settings": "Settings",
   "common.areYouSure": "Are you sure?",

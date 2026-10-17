@@ -145,10 +145,11 @@ describe("QuickSwitcher manager pick", () => {
     { id: 2, name: "random", type: "text", category: null, position: 1, unread_count: 2 },
   ];
 
-  function openAndPick(id: number, onBeforeDm?: () => void): () => void {
+  async function openAndPick(id: number, onBeforeDm?: () => void): Promise<() => void> {
     const manager = createQuickSwitcherManager(() => root, undefined, undefined, onBeforeDm);
     const detach = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     const row = root.querySelector<HTMLElement>(`.quick-switcher__item[data-channelid="${id}"]`);
     expect(row).not.toBeNull();
     row!.click();
@@ -163,10 +164,10 @@ describe("QuickSwitcher manager pick", () => {
   });
   afterEach(() => root.remove());
 
-  it("picking a channel from DM mode returns the sidebar to channels and navigates", () => {
+  it("picking a channel from DM mode returns the sidebar to channels and navigates", async () => {
     setSidebarMode("dms");
     setActiveDmUser(150);
-    const detach = openAndPick(2);
+    const detach = await openAndPick(2);
     expect(uiStore.getState().sidebarMode).toBe("channels");
     expect(uiStore.getState().activeDmUserId).toBeNull();
     expect(channelsStore.getState().activeChannelId).toBe(2);
@@ -175,7 +176,7 @@ describe("QuickSwitcher manager pick", () => {
     detach();
   });
 
-  it("picking a channel from DM mode drops the saved channel-before-DM", () => {
+  it("picking a channel from DM mode drops the saved channel-before-DM", async () => {
     setSidebarMode("dms");
     const onLeaveDm = vi.fn();
     const manager = createQuickSwitcherManager(
@@ -187,14 +188,15 @@ describe("QuickSwitcher manager pick", () => {
     );
     const detach = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     root.querySelector<HTMLElement>('.quick-switcher__item[data-channelid="1"]')!.click();
     expect(onLeaveDm).toHaveBeenCalledOnce();
     detach();
   });
 
-  it("picking a DM opens it in DM mode, remembering the channel first", () => {
+  it("picking a DM opens it in DM mode, remembering the channel first", async () => {
     const onBeforeDm = vi.fn();
-    const detach = openAndPick(50, onBeforeDm);
+    const detach = await openAndPick(50, onBeforeDm);
     expect(onBeforeDm).toHaveBeenCalledOnce();
     expect(uiStore.getState().sidebarMode).toBe("dms");
     expect(uiStore.getState().activeDmUserId).toBe(150);

@@ -24,6 +24,7 @@ import {
   UNCATEGORIZED_VOICE_CATEGORY,
 } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
+import { MAX_CHANNEL_TOPIC_LENGTH, channelTypeLabel } from "./channelTypes";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from ("" = uncategorized). */
@@ -42,25 +43,8 @@ export interface CreateChannelModalOptions {
   readonly onClose: () => void;
 }
 
-/** The server's ceiling for a channel topic (`MaxChannelTopicLen`), mirrored for the field. */
-export const MAX_CHANNEL_TOPIC_LENGTH = 1024;
-
 /** Every channel type is creatable under every category. */
 export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
-
-const CHANNEL_TYPE_LABELS = {
-  text: "channel.type.text",
-  voice: "channel.type.voice",
-  announcement: "channel.type.announcement",
-  dm: "channel.type.dm",
-} as const;
-
-/** The display name of a channel type; an unrecognised wire value is shown capitalised. */
-export function channelTypeLabel(type: string): string {
-  return Object.hasOwn(CHANNEL_TYPE_LABELS, type)
-    ? shellText(CHANNEL_TYPE_LABELS[type as ChannelType])
-    : type.charAt(0).toUpperCase() + type.slice(1);
-}
 
 /**
  * The type pre-selected for a category. Only a hint for the dropdown's initial

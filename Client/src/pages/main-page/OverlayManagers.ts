@@ -10,13 +10,10 @@ import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
 import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
-import { createInviteManager } from "@components/InviteManager";
+import { createLazyScreen } from "@components/lazyScreen";
 import type { InviteItem } from "@components/InviteManager";
 import type { InviteResponse } from "@lib/types";
-import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage } from "@components/PinnedMessages";
-import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
@@ -34,6 +31,26 @@ import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/dialogOpen";
 
 const log = createLogger("overlays");
+
+// Each screen loads on its first open, so its code stays out of the main-page
+// chunk. One loader per screen: it shares an in-flight import and retries a
+// failed one on the next open.
+const quickSwitcherScreen = createLazyScreen(
+  "quick-switcher",
+  () => import("@components/QuickSwitcher"),
+);
+const inviteManagerScreen = createLazyScreen(
+  "invite-manager",
+  () => import("@components/InviteManager"),
+);
+const pinnedMessagesScreen = createLazyScreen(
+  "pinned-messages",
+  () => import("@components/PinnedMessages"),
+);
+const searchOverlayScreen = createLazyScreen(
+  "search-overlay",
+  () => import("@components/SearchOverlay"),
+);
 
 /** Quiet period before an open pinned panel refetches after a pin change. */
 const PIN_REFETCH_DEBOUNCE_MS = 250;
@@ -147,11 +164,31 @@ export function createQuickSwitcherManager(
   onLeaveDm?: () => void,
 ): QuickSwitcherManager {
   let instance: MountableComponent | null = null;
+  // Set while the switcher's code loads. A second Ctrl+K in that window is
+  // swallowed (it opens once), and close()/detach cancels the pending open.
+  let pendingOpen: object | null = null;
 
   function open(): void {
     const root = getRoot();
-    if (instance !== null || root === null) return;
-    instance = createQuickSwitcher({
+    if (instance !== null || pendingOpen !== null || root === null) return;
+    const ticket = {};
+    pendingOpen = ticket;
+    void quickSwitcherScreen.load().then((screen) => {
+      if (pendingOpen !== ticket) return;
+      pendingOpen = null;
+      if (screen === null) return;
+      // Re-derive the root: a page teardown during the load nulls it.
+      const liveRoot = getRoot();
+      if (liveRoot === null || instance !== null) return;
+      mountSwitcher(screen, liveRoot);
+    });
+  }
+
+  function mountSwitcher(
+    screen: typeof import("@components/QuickSwitcher"),
+    root: HTMLDivElement,
+  ): void {
+    instance = screen.createQuickSwitcher({
       onSelectChannel: (channelId: number) => {
         const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
         if (dm !== undefined) {
@@ -189,6 +226,7 @@ export function createQuickSwitcherManager(
   }
 
   function close(): void {
+    pendingOpen = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -203,6 +241,12 @@ export function createQuickSwitcherManager(
     // every other app-wide shortcut respects.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     if (isSuspended?.() === true) return;
+    if (pendingOpen !== null) {
+      // Still loading: the first press already asked to open, so a second one
+      // must not open twice nor cancel it.
+      e.preventDefault();
+      return;
+    }
     if (instance !== null) {
       // Always let Ctrl+K close our own overlay.
       e.preventDefault();
@@ -355,6 +399,7 @@ export interface InviteManagerController {
 interface InviteLoad {
   readonly invites: InviteResponse[];
   readonly featuredCode: string | null;
+  readonly screen: typeof import("@components/InviteManager");
 }
 
 const DEFAULT_INVITE_HOURS = 168;
@@ -394,6 +439,11 @@ export function createInviteManagerController(opts: {
     // Only MANAGE_INVITES holders can list or create invites.
     canOpen: () => canManageInvites(),
     load: async () => {
+      // Fetch the module alongside the list; a failed import rejects into the
+      // controller's own load-failed dialog with Retry.
+      const screenPromise = inviteManagerScreen.loadOrThrow();
+      // The fetch below may throw first; the import must not go unhandled.
+      screenPromise.catch(() => undefined);
       const raw = await opts.api.getInvites();
       const visible = raw.filter((r) => !isInviteRevoked(r) && !isInviteExpired(r));
       let featured = newestLiveInvite(visible);
@@ -410,11 +460,15 @@ export function createInviteManagerController(opts: {
           showToast(errorText(err, shellText("invite.createFailed")), "error");
         }
       }
-      return { invites: visible, featuredCode: featured?.code ?? null };
+      return {
+        invites: visible,
+        featuredCode: featured?.code ?? null,
+        screen: await screenPromise,
+      };
     },
     build: (data, _root, close) => {
       const invites = data.invites.map(mapInviteResponse);
-      return createInviteManager({
+      return data.screen.createInviteManager({
         invites,
         featuredCode: data.featuredCode,
         formatLink: (code: string) => formatInviteLink(code, opts.api.getConfig().host),
@@ -495,7 +549,10 @@ export function createPinnedPanelController(opts: {
   // capturing channelId once at the top and reusing it throughout.
   let channelId: number | null = null;
 
-  const controller = createAsyncOverlayController<Awaited<ReturnType<ApiClient["getPins"]>>>({
+  const controller = createAsyncOverlayController<{
+    readonly resp: Awaited<ReturnType<ApiClient["getPins"]>>;
+    readonly screen: typeof import("@components/PinnedMessages");
+  }>({
     getRoot: opts.getRoot,
     canOpen: () => {
       channelId = opts.getCurrentChannelId();
@@ -503,8 +560,13 @@ export function createPinnedPanelController(opts: {
       // says why nothing is shown, so the panel stays shut.
       return channelId !== null && !nsfwContentBlocked(channelId);
     },
-    load: () => opts.api.getPins(channelId as number),
-    build: (resp, _liveRoot, close) => {
+    load: async () => {
+      const screenPromise = pinnedMessagesScreen.loadOrThrow();
+      screenPromise.catch(() => undefined);
+      const resp = await opts.api.getPins(channelId as number);
+      return { resp, screen: await screenPromise };
+    },
+    build: ({ resp, screen }, _liveRoot, close) => {
       const id = channelId as number;
       const live = new Disposable();
       let refetchTicket = 0;
@@ -526,7 +588,7 @@ export function createPinnedPanelController(opts: {
           });
       };
 
-      const panel = createPinnedMessages({
+      const panel = screen.createPinnedMessages({
         channelId: id,
         pinnedMessages: resp.messages.map(mapToPinnedMessage),
         onJumpToMessage: (msgId: number) => {
@@ -633,8 +695,12 @@ export function createSearchOverlayController(opts: {
   readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): SearchOverlayController {
   let instance: MountableComponent | null = null;
+  // Set while the overlay's code loads: a second open() is ignored, and
+  // close()/cleanup cancels the pending mount.
+  let pendingOpen: object | null = null;
 
   function close(): void {
+    pendingOpen = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -643,13 +709,29 @@ export function createSearchOverlayController(opts: {
 
   function open(): void {
     const root = opts.getRoot();
-    if (instance !== null || root === null) return;
+    if (instance !== null || pendingOpen !== null || root === null) return;
+    const ticket = {};
+    pendingOpen = ticket;
+    void searchOverlayScreen.load().then((screen) => {
+      if (pendingOpen !== ticket) return;
+      pendingOpen = null;
+      if (screen === null) return;
+      // Re-derive the root: a page teardown during the load nulls it.
+      const liveRoot = opts.getRoot();
+      if (liveRoot === null || instance !== null) return;
+      mountOverlay(screen, liveRoot);
+    });
+  }
 
+  function mountOverlay(
+    screen: typeof import("@components/SearchOverlay"),
+    root: HTMLDivElement,
+  ): void {
     const current = opts.getCurrentChannelId();
     // Behind the NSFW gate only a server-wide search is offered (B9-7).
     const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
-    instance = createSearchOverlay({
+    instance = screen.createSearchOverlay({
       currentChannelId: channelId ?? undefined,
       onSearch: async (query, chId, signal, before) => {
         try {

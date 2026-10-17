@@ -9,8 +9,7 @@ import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/do
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
-import { createEmojiPicker } from "@components/EmojiPicker";
-import { createGifPicker } from "@components/GifPicker";
+import { createLazyScreen } from "@components/lazyScreen";
 import {
   createMentionAutocomplete,
   type MentionAutocompleteComponent,
@@ -36,6 +35,11 @@ import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
 import { ATTACHMENT_TTL_MS } from "../features/messaging/attachmentTtl";
+
+// The pickers load on their first open, so their code stays out of the
+// main-page chunk.
+const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
+const gifPickerScreen = createLazyScreen("gif-picker", () => import("@components/GifPicker"));
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
@@ -1629,8 +1633,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // One outside-click owner per open picker, destroyed when that picker closes.
     let emojiDismiss: Disposable | null = null;
     let gifDismiss: Disposable | null = null;
+    // Set while a picker's code loads. A second toggle (or any close) clears
+    // it, which cancels the mount; the load resolving later checks it still
+    // holds the same ticket and that the composer is still mounted.
+    let emojiPending: object | null = null;
+    let gifPending: object | null = null;
 
     function closeEmojiPicker(): void {
+      emojiPending = null;
       if (emojiPicker !== null) {
         emojiPicker.element.remove();
         emojiPicker.destroy();
@@ -1654,15 +1664,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     function toggleEmojiPicker(): void {
-      // Close GIF picker if open
-      if (gifPicker !== null) {
-        closeGifPicker();
-      }
-      if (emojiPicker !== null) {
+      // Close GIF picker if open (or still loading)
+      closeGifPicker();
+      if (emojiPicker !== null || emojiPending !== null) {
         closeEmojiPicker();
         return;
       }
-      emojiPicker = createEmojiPicker({
+      const ticket = {};
+      emojiPending = ticket;
+      void emojiPickerScreen.load().then((screen) => {
+        if (emojiPending !== ticket || signal.aborted) return;
+        emojiPending = null;
+        if (screen !== null) openEmojiPicker(screen);
+      });
+    }
+
+    function openEmojiPicker(screen: typeof import("@components/EmojiPicker")): void {
+      emojiPicker = screen.createEmojiPicker({
         // Read the set at open time, not at mount: an emoji_update while the
         // composer is alive must be in the next picker the user opens.
         customEmoji: listCustomEmoji(),
@@ -1702,6 +1720,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     // GIF picker toggle
     function closeGifPicker(): void {
+      gifPending = null;
       if (gifPicker !== null) {
         gifPicker.element.remove();
         gifPicker.destroy();
@@ -1723,15 +1742,26 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     function toggleGifPicker(): void {
       const gifApi = options.gifApi;
       if (gifApi === undefined) return;
-      // Close emoji picker if open
-      if (emojiPicker !== null) {
-        closeEmojiPicker();
-      }
-      if (gifPicker !== null) {
+      // Close emoji picker if open (or still loading)
+      closeEmojiPicker();
+      if (gifPicker !== null || gifPending !== null) {
         closeGifPicker();
         return;
       }
-      gifPicker = createGifPicker({
+      const ticket = {};
+      gifPending = ticket;
+      void gifPickerScreen.load().then((screen) => {
+        if (gifPending !== ticket || signal.aborted) return;
+        gifPending = null;
+        if (screen !== null) openGifPicker(screen, gifApi);
+      });
+    }
+
+    function openGifPicker(
+      screen: typeof import("@components/GifPicker"),
+      gifApi: NonNullable<MessageInputOptions["gifApi"]>,
+    ): void {
+      gifPicker = screen.createGifPicker({
         api: gifApi,
         onUnavailable: (reason: string) => {
           gifUnavailable = true;
