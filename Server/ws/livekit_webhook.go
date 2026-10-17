@@ -294,7 +294,7 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, c
 	// channel, not the token, so it would still be fooled by a same-channel
 	// rejoin — this compares both, in one voiceMu critical section
 	// (voice_registry.go).
-	matched := c.voiceSlot.clearExactKeepCompleted(channelID, joinToken)
+	matched := c.clearExactKeepCompleted(channelID, joinToken)
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, c, userID, channelID, joinToken)

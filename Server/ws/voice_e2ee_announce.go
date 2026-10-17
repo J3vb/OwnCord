@@ -22,11 +22,11 @@ func (a e2eeAnnounce) clone() e2eeAnnounce {
 // setE2EEAnnounce stores the announce for voice E2EE key exchange, replacing
 // any earlier one (an announce without a video decode list clears it).
 func (c *Client) setE2EEAnnounce(a e2eeAnnounce) {
-	c.voiceSlot.setE2EE(a.clone())
+	c.setE2EE(a.clone())
 }
 
 // getE2EEAnnounce returns a copy of the stored announce; callers cannot
 // mutate the stored video decode list.
 func (c *Client) getE2EEAnnounce() e2eeAnnounce {
-	return c.voiceSlot.e2eeCopy()
+	return c.e2eeCopy()
 }

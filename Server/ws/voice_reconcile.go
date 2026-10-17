@@ -237,7 +237,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 // The compare and the clear run in one voiceMu critical section
 // (voiceSlot.clearExact).
 func (h *Hub) clearExactJoin(c *Client, channelID int64, joinedAt string) bool {
-	matched := c.voiceSlot.clearExact(channelID, joinedAt)
+	matched := c.clearExact(channelID, joinedAt)
 	if matched {
 		h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
 	}

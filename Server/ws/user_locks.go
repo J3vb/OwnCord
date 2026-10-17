@@ -106,7 +106,7 @@ func (v *userLocks) refsForTest(userID int64) int {
 // See voice_registry.go for the lock order; callers hold none of the hub's
 // locks.
 func (h *Hub) voiceLock(userID int64) func() {
-	return h.voiceRegistry.lock(userID)
+	return h.lock(userID)
 }
 
 // leaveVoiceLocked runs a client-requested voice leave under c's voice lock.

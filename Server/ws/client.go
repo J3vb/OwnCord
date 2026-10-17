@@ -181,35 +181,35 @@ func (c *Client) setLivePresence(status string, customStatus *string, expiresAt 
 // (WP 5.3a); 5.3d removes them.
 
 // getVoiceChID returns the voice channel ID under voiceMu.
-func (c *Client) getVoiceChID() int64 { return c.voiceSlot.channel() }
+func (c *Client) getVoiceChID() int64 { return c.channel() }
 
 // getVoiceState returns the voice channel ID and join token under voiceMu.
-func (c *Client) getVoiceState() (int64, string) { return c.voiceSlot.state() }
+func (c *Client) getVoiceState() (int64, string) { return c.state() }
 
 // setVoiceState starts a new join instance; see voiceSlot.setState.
-func (c *Client) setVoiceState(chID int64, joinToken string) { c.voiceSlot.setState(chID, joinToken) }
+func (c *Client) setVoiceState(chID int64, joinToken string) { c.setState(chID, joinToken) }
 
 // markVoiceJoinCompleteIfMatch; see voiceSlot.markCompletedIfMatch.
 func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool {
-	return c.voiceSlot.markCompletedIfMatch(chID, joinToken)
+	return c.markCompletedIfMatch(chID, joinToken)
 }
 
 // clearVoiceState; see voiceSlot.clearState.
-func (c *Client) clearVoiceState() (int64, string, bool) { return c.voiceSlot.clearState() }
+func (c *Client) clearVoiceState() (int64, string, bool) { return c.clearState() }
 
 // clearVoiceStateIfMatch; see voiceSlot.clearIfChannel.
 func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
-	return c.voiceSlot.clearIfChannel(chID)
+	return c.clearIfChannel(chID)
 }
 
 // setPendingModFlags; see voiceSlot.stashModFlags.
 func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.voiceSlot.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
+	c.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
 }
 
 // takePendingModFlags; see voiceSlot.takeModFlags.
 func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	serverMuted, serverDeafened, serverMutedBy = c.voiceSlot.takeModFlags()
+	serverMuted, serverDeafened, serverMutedBy = c.takeModFlags()
 	return serverMuted, serverDeafened, serverMutedBy
 }
 
