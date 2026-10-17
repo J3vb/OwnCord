@@ -26,6 +26,7 @@ describe("the leave dialog picks the copy by whether the group reports an owner"
     hasOwner,
     unread: false,
     muted: false,
+    mutedUntil: null,
   });
   afterEach(() => {
     document.querySelectorAll('[data-testid="dm-leave-modal"]').forEach((el) => el.remove());

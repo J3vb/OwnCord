@@ -125,8 +125,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 0 16px 8px;
+  /* Right padding clears the panel's close button. */
+  padding: 0 44px 8px 16px;
 }
 .group-member-panel .gm-heading {
   font-size: var(--font-size-xs);
@@ -176,11 +178,6 @@
   color: var(--red);
   font-size: var(--font-size-sm);
   margin: 8px 0 0;
-}
-.group-member-panel .gm-head {
-  /* Clear the panel's close button in the top-right corner. */
-  padding-right: 44px;
-  flex-wrap: wrap;
 }
 .group-member-panel .gm-main {
   display: flex;
