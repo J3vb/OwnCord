@@ -11,9 +11,13 @@
 
 import { createElement, setText } from "@lib/dom";
 import { navigateToChannel, findChannelByName, findChannelById } from "@lib/channel-navigation";
-import { parseMessageLink } from "@lib/deep-link";
+import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
+import { getChannelMutesHost } from "@lib/channel-mutes";
+import { normalizeHostForCertCompare } from "@lib/hostNormalize";
+import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
+import { memberDisplayName, membersStore } from "@stores/members.store";
 import {
   CHANNEL_TOKEN_REGEX,
   MENTION_TOKEN_REGEX,
@@ -57,6 +61,8 @@ export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
 export const ANGLE_URL_REGEX = /(?<!(?:^|[^\\])\\(?:\\\\)*)<https?:\/\/[^\s<>]+>/gi;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
+/** `owncord://invite/<code>` (optionally `?host=…`) pasted into a message. */
+export const INVITE_LINK_REGEX = /owncord:\/\/invite\/[\w%-]+(?:\?host=[\w.:%[\]-]*[\w%\]-])?/g;
 
 export type { MentionInfo };
 
@@ -162,6 +168,11 @@ function buildMaskedLink(
   // URL and one a profile.
   for (const chip of link.querySelectorAll<HTMLElement>(".mention[data-user-id]")) {
     stripMentionControl(chip);
+  }
+  // An invite chip is a control too, and a click would also follow the link:
+  // inside a masked link it stays the text it was typed as.
+  for (const chip of link.querySelectorAll<HTMLElement>(".message-link-chip[data-raw]")) {
+    chip.replaceWith(document.createTextNode(chip.dataset["raw"] ?? ""));
   }
   return link;
 }
@@ -311,8 +322,22 @@ function buildMentionNode(raw: string, token: string, info?: MentionInfo): HTMLS
     role: "button",
     tabindex: "0",
     "data-user-id": String(userId),
+    // The typed token, so a resync re-resolves it though the text is a name.
+    "data-mention": raw,
   });
-  setText(span, raw);
+  // Show the display name when the member has one; the typed @username stays
+  // as the title. Trailing punctuation the token matched through is kept.
+  const member = membersStore.getState().members.get(userId);
+  const name = member === undefined ? null : memberDisplayName(member);
+  if (member !== undefined && name !== member.username) {
+    const tail = token.toLowerCase().startsWith(member.username.toLowerCase())
+      ? token.slice(member.username.length)
+      : "";
+    setText(span, `@${name}${tail}`);
+    span.title = raw;
+  } else {
+    setText(span, raw);
+  }
   return span;
 }
 
@@ -382,6 +407,67 @@ function buildMessageLinkNode(url: string): HTMLSpanElement | null {
   return chip;
 }
 
+/** Same server, ignoring case, whitespace, a default :443 and IPv6 brackets. */
+function sameHost(a: string, b: string): boolean {
+  return normalizeHostForCertCompare(a.trim()) === normalizeHostForCertCompare(b.trim());
+}
+
+/**
+ * Build the chip for a pasted `owncord://invite/…` link, or null when it does
+ * not parse. Joining signs out of the current server, so a chip for another
+ * server confirms first, and one for the server already open just says so.
+ */
+function buildInviteLinkNode(url: string): HTMLSpanElement | null {
+  const invite = parseInviteLink(url);
+  if (invite === null) return null;
+  const current = getChannelMutesHost();
+  const alreadyIn = invite.host !== undefined && current !== null && sameHost(invite.host, current);
+  const target = invite.host ?? messagingText("invite.thisServer");
+
+  const chip = createElement("span", {
+    class: alreadyIn ? "message-link-chip invite-chip-here" : "message-link-chip",
+    "data-invite-code": invite.code,
+    "data-raw": url,
+    title: alreadyIn
+      ? messagingText("invite.alreadyIn")
+      : messagingText("invite.joinTitle", { server: target }),
+  });
+  const label = createElement("span", { class: "mlc-channel" });
+  setText(label, target);
+  const action = createElement("span", { class: "mlc-action" });
+  setText(action, alreadyIn ? messagingText("invite.alreadyIn") : messagingText("invite.join"));
+  chip.appendChild(label);
+  chip.appendChild(action);
+  if (alreadyIn) return chip;
+
+  chip.setAttribute("role", "link");
+  chip.setAttribute("tabindex", "0");
+  const go = (): void => {
+    const name = authStore.getState().serverName ?? current ?? "";
+    const body =
+      invite.host === undefined
+        ? messagingText("invite.confirmBodyNoHost", { current: name })
+        : messagingText("invite.confirmBody", { current: name, target });
+    // On demand, like the masked-link guard: keeps the modal off the startup chunk.
+    void import("../InviteJoinConfirm").then((m) =>
+      m.confirmInviteJoin(body, () => requestInviteJoin(invite.code, invite.host)),
+    );
+  };
+  chip.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    go();
+  });
+  chip.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      go();
+    }
+  });
+  return chip;
+}
+
 /**
  * Render @mentions, #channel links and message permalinks within a text
  * segment (no http URLs). Tokens that resolve to nothing are left as plain text.
@@ -393,6 +479,13 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     const idx = match.index;
     if (idx === undefined) continue;
     const node = buildMessageLinkNode(match[0]);
+    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
+  }
+
+  for (const match of text.matchAll(INVITE_LINK_REGEX)) {
+    const idx = match.index;
+    if (idx === undefined) continue;
+    const node = buildInviteLinkNode(match[0]);
     if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
   }
 
@@ -504,7 +597,8 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
     // querySelectorAll returns a static list, so replacing a span as we go does
     // not disturb the walk.
     for (const span of content.querySelectorAll<HTMLElement>(".mention")) {
-      const raw = span.textContent ?? "";
+      // The typed token lives in data-mention; the text may be a display name.
+      const raw = span.dataset["mention"] ?? span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
       const replacement = buildMentionNode(raw, token, info);
       // A mention that labels a masked link stays plain link content when it is
@@ -512,7 +606,14 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
         stripMentionControl(replacement);
       }
-      if (replacement !== null && sameMention(span, replacement)) continue;
+      if (replacement !== null && sameMention(span, replacement)) {
+        if (span.textContent !== replacement.textContent) {
+          setText(span, replacement.textContent ?? raw);
+        }
+        if (replacement.title === "") span.removeAttribute("title");
+        else span.title = replacement.title;
+        continue;
+      }
       span.replaceWith(replacement ?? document.createTextNode(raw));
     }
 

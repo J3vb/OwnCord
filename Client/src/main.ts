@@ -75,6 +75,7 @@ import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setInviteJoinHandler } from "@lib/invite-navigation";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
@@ -1541,6 +1542,8 @@ function handleMessageDeepLink(
 ): void {
   openMessageTarget(channelId, messageId, host);
 }
+// An invite link pasted into chat runs the same flow as one opened from the OS.
+setInviteJoinHandler(handleInviteDeepLink);
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
 // A clicked message notification opens the message it was for (U1d). The native
