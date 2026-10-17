@@ -1321,6 +1321,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // Not a Tauri host, or the command was refused: keep the native default.
       });
 
+    // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
+    // reconnect leaves it alone and a server switch remounts a fresh one.
+    // Loaded on demand; the same !tornDown guard as the badge below.
+    void import("@lib/channel-mute-expiry").then((expiry) => {
+      if (!tornDown) unsubscribers.push(expiry.startMuteExpiryWatch());
+    });
+
     // DP-27: the taskbar and tray unread badge, cleared again on teardown so a
     // logout or server switch does not leave this session's count behind.
     // destroy() sets tornDown before it runs unsubscribers, so a stopper

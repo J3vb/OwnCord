@@ -124,6 +124,7 @@ export const shards = {
   "lib-rest-1": [
     "src/components/message-list/avatar.ts",
     "src/lib/channel-mutes.ts",
+    "src/lib/channel-mute-expiry.ts",
     "src/lib/gifProvider.ts",
     "src/features/updates/UpdateCheckRow.ts",
   ], // timed out at 90 min on run 38926807609 while it still held icons.ts
