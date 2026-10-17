@@ -312,11 +312,9 @@ test("the root lockfile selects every capability", () => {
 test("the client lockfile selects the components that consume the client npm tree, and no others", () => {
   // Deliberately not "everything": the Rust crate and the Go server do not
   // resolve through Client/package-lock.json, so spending their jobs on it
-  // would be cost without coverage. It IS a harness change — a vite or
-  // Playwright bump moves the ground under the smoke run — which is why the
-  // development browser run widens to full.
+  // would be cost without coverage.
   const sel = picked("M\tClient/package-lock.json");
-  for (const cap of ["client", "browser", "integration", "native", "harness"]) {
+  for (const cap of ["client", "browser", "integration", "native"]) {
     assert.equal(sel[cap], true, `${cap} after the client lockfile`);
   }
   for (const cap of ["server", "rust"]) {
@@ -442,18 +440,14 @@ test("--all with no --paths-file still succeeds, because a selection is never a 
   assert.match(text, /^native=true$/m);
 });
 
-// ─── The smoke/full split for the development browser run.
+// ─── Spec and fixture edits reach the parity job, which runs the full suite.
 
-test("editing the e2e specs widens the development browser run to full", () => {
-  assert.equal(runs("M\tClient/tests/e2e/connect-page.spec.ts", "harness"), true);
+test("editing an e2e spec selects the browser jobs", () => {
+  assert.equal(runs("M\tClient/tests/e2e/connect-page.spec.ts", "browser"), true);
 });
 
-test("editing a spec fixture widens it too", () => {
-  assert.equal(runs("A\tClient/tests/e2e/support/helpers.ts", "harness"), true);
-});
-
-test("an ordinary application change does not widen it", () => {
-  assert.equal(runs("M\tClient/src/pages/MainPage.ts", "harness"), false);
+test("editing a spec fixture selects the browser jobs", () => {
+  assert.equal(runs("A\tClient/tests/e2e/support/helpers.ts", "browser"), true);
 });
 
 test("a Rust change reaches rust-tests and the native job, not the browser jobs", () => {
