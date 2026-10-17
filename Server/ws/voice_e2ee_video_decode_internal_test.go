@@ -163,8 +163,11 @@ func TestVoiceGrace_CarriesVideoDecode(t *testing.T) {
 
 	resumed := NewTestClient(h, 1, make(chan []byte, 8))
 	resumed.lastSeq = 1
-	if ch := h.inheritParkedVoice(resumed); ch != 5 {
-		t.Fatalf("inheritParkedVoice = %d, want 5", ch)
+	txn := h.begin(1)
+	ch := txn.inherit(resumed)
+	txn.end()
+	if ch != 5 {
+		t.Fatalf("inherit = %d, want 5", ch)
 	}
 	got := resumed.getE2EEAnnounce()
 	if got.key != "user-pub" || got.sig != "user-sig" || !reflect.DeepEqual(got.videoDecode, want) {

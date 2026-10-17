@@ -29,14 +29,6 @@ import (
 // read back; the caller rolls the half-made join back.
 var errVoiceJoinReadBack = errors.New("voice join: read back the committed row")
 
-// slotSnap is what a clear removed from a slot: the channel, the join token
-// and whether that join had completed (voiceSlot.voiceJoinCompleted).
-type slotSnap struct {
-	chID      int64
-	joinToken string
-	completed bool
-}
-
 // voiceTxn is a handle on one user's voice membership lock.
 type voiceTxn struct {
 	h      *Hub
@@ -52,13 +44,13 @@ func (h *Hub) begin(userID int64) *voiceTxn {
 }
 
 // heldTxn returns a borrowed handle for a helper whose caller already holds
-// userID's lock through begin; end on it does nothing. Callers: handleVoiceLeave,
-// handleVoiceLeaveIfStillIn and leaveVoiceChannelWithRetry (voice_leave.go),
-// leaveVoiceOnDisconnect (voice_grace.go), rollbackVoiceJoin (voice_join.go) and
-// freshConnectCleanStaleVoice (serve_ready.go). They are also driven directly by
-// tests, so their signatures cannot take the caller's txn; the retry goroutine's
-// delete is scoped to one join instance and needs no lock. WP 5.3c/5.3d retire
-// it (VoiceMutatorAllow in invariants lists its callers).
+// userID's lock through begin; end on it does nothing. Callers: registerNow
+// (hub_registry.go), handleVoiceLeave, handleVoiceLeaveIfStillIn and
+// leaveVoiceChannelWithRetry (voice_leave.go), rollbackVoiceJoin
+// (voice_join.go) and freshConnectCleanStaleVoice (serve_ready.go). Tests drive
+// them directly under pinned signatures, so they cannot take the caller's txn;
+// the retry goroutine's delete is scoped to one join instance and needs no
+// lock. WP 5.3d retires it (VoiceMutatorAllow in invariants lists its callers).
 func (h *Hub) heldTxn(userID int64) *voiceTxn {
 	return &voiceTxn{h: h, userID: userID}
 }
@@ -125,23 +117,23 @@ func (t *voiceTxn) markCompleted(c *Client, chID int64, token string) bool {
 // voice_e2ee_announce relays (which carry no channel_id to filter on) for the
 // connection's lifetime.
 func (t *voiceTxn) clear(c *Client) slotSnap {
-	chID, token, completed := c.clearState()
-	if chID != 0 {
-		t.h.pubsub.Unsubscribe(c, VoiceTopic(chID))
+	snap := c.clearSnap()
+	if snap.chID != 0 {
+		t.h.pubsub.Unsubscribe(c, VoiceTopic(snap.chID))
 	}
-	return slotSnap{chID: chID, joinToken: token, completed: completed}
+	return snap
 }
 
 // clearIfChannel is clear conditioned on the slot still naming chID, reporting
 // whether it cleared. Delayed evictions decided against a snapshotted channel
 // use it so a membership committed after the snapshot survives.
 func (t *voiceTxn) clearIfChannel(c *Client, chID int64) (slotSnap, bool) {
-	token, ok := c.clearIfChannel(chID)
+	snap, ok := c.clearSnapIfChannel(chID)
 	if !ok {
 		return slotSnap{}, false
 	}
 	t.h.pubsub.Unsubscribe(c, VoiceTopic(chID))
-	return slotSnap{chID: chID, joinToken: token}, true
+	return snap, true
 }
 
 // clearExact is clear conditioned on the slot still naming this exact join
@@ -168,7 +160,7 @@ func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 // entry. The delete is scoped to one join instance, which is why the retry in
 // leaveVoiceChannelWithRetry may run it after the lock is released.
 func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (bool, error) {
-	t.h.voiceGrace.takeJoin(t.userID, chID, joinedAt)
+	t.takeParked(chID, joinedAt)
 	if t.h.voice == nil {
 		return false, nil
 	}
@@ -179,10 +171,57 @@ func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (
 	return deleted, nil
 }
 
+// takeParked removes and returns userID's grace entry, or nil, and stops its
+// timer. A zero chID or an empty token matches any entry; otherwise the entry
+// must park exactly that join. Taking under the member lock is what keeps a
+// resuming socket's inherit and the expiry teardown from both running
+// (expireVoiceGrace's takeIfSame).
+func (t *voiceTxn) takeParked(chID int64, token string) *voiceGraceEntry {
+	return t.h.voiceGrace.takeJoin(t.userID, chID, token)
+}
+
 // dropParked drops userID's grace entry for chID whatever its join token, for
 // a channel being torn down under every member.
 func (t *voiceTxn) dropParked(chID int64) {
-	t.h.voiceGrace.takeJoin(t.userID, chID, "")
+	t.takeParked(chID, "")
+}
+
+// transfer hands old's slot to c when a new connection replaces it, and
+// returns the voice channel old was in (0 for none) so the caller can re-run
+// the key-holder election there. It empties old completely and moves
+// everything old held, field by field, in one critical section:
+//
+//   - the moderator's pending mute/deafen always moves (OC-0302): it lives only
+//     on the client between a move's eviction, which deletes the row it
+//     normally lives in, and the target's own re-join, so any replacement,
+//     resume or full resync alike, has to carry it;
+//   - the membership (channel, token, completed flag, E2EE key) moves only
+//     when resume is true, c is not already in a channel and old's join had
+//     completed (OC-0270). A join still racing its own supersession guards
+//     would read the move as an eviction and abandon itself with its row left
+//     behind, so an incomplete one stays with old and is cleared, and the next
+//     sweep reaps its row.
+//
+// The caller strips old's pub/sub subscriptions (UnsubscribeAll) and
+// subscribes c to the channel it now holds. TestVoiceRegistry_TransferCarriesEveryField
+// fails when a voiceSlot field is neither moved nor reset here.
+func (t *voiceTxn) transfer(old, c *Client, resume bool) int64 {
+	snap, flags := old.drainAll()
+	if flags.muted || flags.deafened {
+		c.stashModFlags(flags.muted, flags.deafened, flags.mutedBy)
+	}
+	if resume && snap.completed {
+		c.adopt(snap)
+	}
+	return snap.chID
+}
+
+// stashModFlags stashes a moderator-imposed mute/deafen on c, replacing any
+// earlier stash. A moderator move runs it in the same txn as the eviction
+// (EvictForModeratorMove), so a channel switch of the target's own cannot take
+// the stash between the two.
+func (t *voiceTxn) stashModFlags(c *Client, serverMuted, serverDeafened bool, serverMutedBy *int64) {
+	c.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
 }
 
 // setJoinToken adopts tok as c's join token, which the token refresh does when
