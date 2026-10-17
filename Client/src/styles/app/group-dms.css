@@ -56,10 +56,24 @@
   color: var(--green);
 }
 
-.dm-member-picker-search {
+/* Same look as the DM list's "Find a conversation" box. */
+.dm-member-picker-search,
+.dm-group-name-input {
   width: 100%;
   box-sizing: border-box;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.dm-member-picker-search {
   margin: 0 0 8px;
+}
+.dm-member-picker-search::placeholder,
+.dm-group-name-input::placeholder {
+  color: var(--text-muted);
 }
 .dm-member-picker-chips {
   display: flex;
