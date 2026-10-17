@@ -48,7 +48,11 @@ describe("NotificationsTab — notification level", () => {
     const group = tab.querySelector<HTMLElement>("[data-testid='notification-level']")!;
     expect(group).not.toBeNull();
     const options = [...group.querySelectorAll<HTMLElement>("[role='radio']")];
-    expect(options.map((o) => o.textContent)).toEqual(["All", "Mentions only", "Nothing"]);
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All Messages",
+      "Only @mentions",
+      "Nothing",
+    ]);
     expect(options.map((o) => o.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
   });
 

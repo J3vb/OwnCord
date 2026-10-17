@@ -157,6 +157,7 @@ describe("settings search", () => {
       settingsText("notifications.permission.unavailable"),
       settingsText("notifications.blockedReason"),
       settingsText("notifications.muted.empty"),
+      settingsText("notifications.channelLevels.empty"),
       settingsText("accessibility.syncOsMotion.asking"),
       settingsText("accessibility.syncOsMotion.notAsking"),
       settingsText("keybinds.pttModeOff"),
