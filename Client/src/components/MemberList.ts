@@ -520,7 +520,12 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
 
   function focusMember(id: number): HTMLElement | null {
     const el = rowEl(id) ?? root?.querySelector<HTMLElement>(".member-item") ?? null;
-    if (el === null) return null;
+    if (el === null) {
+      // No rows left (a search nobody matches): the search box keeps focus in the list.
+      const search = searchWrap?.querySelector<HTMLElement>(".member-search") ?? null;
+      search?.focus();
+      return search;
+    }
     if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
     el.focus({ preventScroll: true });
     return el;

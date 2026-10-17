@@ -2058,4 +2058,16 @@ describe("MemberList arrow navigation (4.14b)", () => {
     expect(document.activeElement).not.toBe(document.body);
     expect(focusedId()).toBe("member-5");
   });
+
+  it("the only match renamed out of the search moves focus to the search box", () => {
+    const members = roster();
+    mountWith(members);
+    box().value = "eli";
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    row(5).focus();
+    setTestMembers(members.map((m) => (m.id === 5 ? { ...m, username: "zed" } : m)));
+    membersStore.flush();
+    expect(container.querySelector(".member-item")).toBeNull();
+    expect(document.activeElement).toBe(box());
+  });
 });
