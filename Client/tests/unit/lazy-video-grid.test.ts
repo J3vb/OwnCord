@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   loads: { value: 0 },
   calls: [] as string[],
   grids: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
+  throwOnce: false,
+  errors: [] as unknown[],
 }));
 
 vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
@@ -16,7 +18,12 @@ vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
 // The real logger registers a window listener at load; each test reloads the
 // graph, so keep it out of the way.
 vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: (...args: unknown[]) => h.errors.push(args),
+  }),
 }));
 
 vi.mock("@lib/livekitSession", () => ({
@@ -91,6 +98,22 @@ function fakeGrid(): Record<string, ReturnType<typeof vi.fn>> {
   return grid;
 }
 
+async function gatedFactory(): Promise<object> {
+  h.loads.value += 1;
+  await h.gate!.promise;
+  return {
+    createVideoGrid: () => {
+      if (h.throwOnce) {
+        h.throwOnce = false;
+        throw new Error("grid failed to start");
+      }
+      const g = fakeGrid();
+      h.grids.push(g);
+      return g;
+    },
+  };
+}
+
 describe("createLazyVideoGrid", () => {
   let lazy: LazyModule;
   let toast: typeof import("@lib/toast");
@@ -103,17 +126,9 @@ describe("createLazyVideoGrid", () => {
     h.loads.value = 0;
     h.calls.length = 0;
     h.grids.length = 0;
-    vi.doMock("@components/VideoGrid", async () => {
-      h.loads.value += 1;
-      await h.gate!.promise;
-      return {
-        createVideoGrid: () => {
-          const g = fakeGrid();
-          h.grids.push(g);
-          return g;
-        },
-      };
-    });
+    h.errors.length = 0;
+    h.throwOnce = false;
+    vi.doMock("@components/VideoGrid", gatedFactory);
     lazy = await import("../../src/pages/main-page/lazyVideoGrid");
     toast = await import("@lib/toast");
     vi.mocked(toast.showToast).mockClear();
@@ -335,22 +350,81 @@ describe("createLazyVideoGrid", () => {
     expect(grid.hasStreams()).toBe(true);
 
     h.gate = makeGate();
-    vi.doMock("@components/VideoGrid", async () => {
-      h.loads.value += 1;
-      await h.gate!.promise;
-      return {
-        createVideoGrid: () => {
-          const g = fakeGrid();
-          h.grids.push(g);
-          return g;
-        },
-      };
-    });
+    vi.doMock("@components/VideoGrid", gatedFactory);
     grid.ensureLoaded();
     await vi.waitFor(() => expect(h.loads.value).toBe(2));
     await loaded();
     expect(h.calls).toEqual(["mount(·)", "addStream(5,five,·,·)"]);
     expect(toast.showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a failed import, track and roster events do not retry or toast again", async () => {
+    grid.addStream(5, "five", stream(), config());
+    h.gate!.fail();
+    await vi.waitFor(() => expect(toast.showToast).toHaveBeenCalledTimes(1));
+    h.gate = makeGate();
+    const people = [{ userId: 1, label: "a", content: document.createElement("div") }];
+    for (let i = 0; i < 3; i++) {
+      grid.setPeople(people);
+      grid.addStream(6 + i, "x", stream(), config());
+      grid.setFocusedTile(5);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.loads.value).toBe(1);
+    expect(toast.showToast).toHaveBeenCalledTimes(1);
+
+    // A join tries again.
+    vi.doMock("@components/VideoGrid", gatedFactory);
+    grid.ensureLoaded();
+    await vi.waitFor(() => expect(h.loads.value).toBe(2));
+    await loaded();
+    expect(h.grids).toHaveLength(1);
+  });
+
+  it("a user's watch after a failed import tries again", async () => {
+    h.gate!.fail();
+    grid.watch(3);
+    await vi.waitFor(() => expect(toast.showToast).toHaveBeenCalledTimes(1));
+    h.gate = makeGate();
+    vi.doMock("@components/VideoGrid", gatedFactory);
+    grid.watch(3);
+    await vi.waitFor(() => expect(h.loads.value).toBe(2));
+  });
+
+  it("a grid that throws while starting is logged, keeps state, and the next trigger loads", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    grid.mount(slot);
+    grid.addStream(5, "five", stream(), config());
+    h.throwOnce = true;
+    h.gate!.open();
+    await vi.waitFor(() => expect(h.errors).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 10));
+    process.off("unhandledRejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(h.grids).toHaveLength(0);
+    expect(grid.hasStreams()).toBe(true);
+
+    grid.ensureLoaded();
+    await vi.waitFor(() => expect(h.grids).toHaveLength(1));
+    expect(h.calls).toEqual(["mount(·)", "addStream(5,five,·,·)"]);
+  });
+
+  it("replays a stream whose video track ended as a tile without a stream", async () => {
+    const dead = {
+      getTracks: () => [],
+      getVideoTracks: () => [{ readyState: "ended" }],
+    } as unknown as MediaStream;
+    const live = {
+      getTracks: () => [],
+      getVideoTracks: () => [{ readyState: "live" }],
+    } as unknown as MediaStream;
+    grid.addStream(5, "five", dead, config());
+    grid.addStream(6, "six", live, config());
+    await loaded();
+    const calls = h.grids[0]!.addStream!.mock.calls;
+    expect(calls[0]![2]).toBeNull();
+    expect(calls[1]![2]).toBe(live);
   });
 
   it("mount after load mounts the real grid", async () => {
@@ -457,6 +531,54 @@ describe("parity with the real grid", () => {
     expect(got.html === want.html).toBe(true);
     expect(proxy.getFocusedTileId()).toBe(direct.getFocusedTileId());
     expect(proxy.hasStreams()).toBe(direct.hasStreams());
+
+    direct.destroy?.();
+    proxy.destroy?.();
+    directSlot.remove();
+    proxySlot.remove();
+  });
+
+  it("draws the same call view when a watched null tile gets its stream before load", async () => {
+    const actual =
+      await vi.importActual<typeof import("../../src/components/VideoGrid")>(
+        "@components/VideoGrid",
+      );
+    const callbacks = {
+      callControls: { onMuteToggle: vi.fn(), onDeafenToggle: vi.fn(), onLeave: vi.fn() },
+      setStreamWatched: vi.fn(),
+      forgetStreamWatch: vi.fn(),
+    };
+    const run = (
+      g: LazyVideoGrid | import("../../src/components/VideoGrid").VideoGridComponent,
+    ): void => {
+      g.setCallbacks(callbacks);
+      g.setCallState({ muted: false, deafened: false, listenOnly: false });
+      g.setExitVisible(true);
+      const cfg: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: false };
+      g.addStream(2, "bob", null, cfg); // offered, not watched
+      g.watch(2);
+      g.addStream(2, "bob", stream(), cfg); // its stream arrives
+    };
+    const directSlot = document.createElement("div");
+    document.body.appendChild(directSlot);
+    const direct = actual.createVideoGrid();
+    direct.mount(directSlot);
+    run(direct);
+
+    const { createLazyVideoGrid } = await import("../../src/pages/main-page/lazyVideoGrid");
+    const proxy = createLazyVideoGrid();
+    const proxySlot = document.createElement("div");
+    document.body.appendChild(proxySlot);
+    proxy.mount(proxySlot);
+    run(proxy);
+    h.gate!.open();
+    await vi.waitFor(() => expect(proxySlot.querySelector(".video-grid")).not.toBeNull());
+
+    const want = summary(directSlot);
+    const got = summary(proxySlot);
+    expect(want.cells.length).toBe(1);
+    expect(got.cells).toEqual(want.cells);
+    expect(got.html === want.html).toBe(true);
 
     direct.destroy?.();
     proxy.destroy?.();

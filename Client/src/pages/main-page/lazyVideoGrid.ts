@@ -16,6 +16,7 @@
  */
 
 import { createLazyScreen } from "@components/lazyScreen";
+import { createLogger } from "@lib/logger";
 import type {
   CallState,
   GridPerson,
@@ -38,12 +39,24 @@ interface PendingStream {
   config: TileConfig | undefined;
 }
 
+const log = createLogger("lazy-video-grid");
+
+/** A stream whose video track ended while the grid was loading is replayed as
+ *  a tile offered without a stream, not as a dead one. */
+function liveOrNull(stream: MediaStream | null): MediaStream | null {
+  if (stream === null) return null;
+  return stream.getVideoTracks()[0]?.readyState === "ended" ? null : stream;
+}
+
 const videoGridScreen = createLazyScreen("video-grid", () => import("@components/VideoGrid"));
 
 export function createLazyVideoGrid(): LazyVideoGrid {
   let real: VideoGridComponent | null = null;
   let disposed = false;
   let loading = false;
+  /** The last load failed: only a join (ensureLoaded) or a user's own action
+   *  tries again, so track and roster events cannot re-toast. */
+  let failed = false;
 
   // The latest value of each piece of grid state, until the grid exists.
   let slot: Element | null = null;
@@ -87,7 +100,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     if (speaking !== null) grid.setSpeaking(speaking);
     if (people.length > 0) grid.setPeople(people);
     for (const [tileId, s] of streams) {
-      grid.addStream(tileId, s.username, s.stream, s.config);
+      grid.addStream(tileId, s.username, liveOrNull(s.stream), s.config);
       if (s.relabel !== undefined) grid.setLabel(tileId, s.relabel.username, s.relabel.name);
     }
     if (focusedTileId !== null) grid.setFocusedTile(focusedTileId);
@@ -96,19 +109,45 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     for (const tileId of watches) grid.watch(tileId);
   }
 
-  function ensureLoaded(): void {
+  function load(automatic: boolean): void {
     if (real !== null || loading || disposed) return;
+    if (automatic && failed) return;
     loading = true;
     void videoGridScreen
       .load(() => !disposed)
       .then((mod) => {
-        loading = false;
-        if (mod === null || disposed || real !== null) return;
-        const grid = mod.createVideoGrid();
-        replayInto(grid);
-        real = grid;
-        dropRecorded();
+        try {
+          if (mod === null) {
+            failed = true;
+            return;
+          }
+          if (disposed || real !== null) return;
+          const grid = mod.createVideoGrid();
+          try {
+            replayInto(grid);
+          } catch (err) {
+            try {
+              grid.destroy?.();
+            } catch {
+              // Already failing; the recorded state stays for the next try.
+            }
+            throw err;
+          }
+          real = grid;
+          failed = false;
+          dropRecorded();
+        } catch (err) {
+          failed = true;
+          log.error("Failed to start the video grid", { error: String(err) });
+        } finally {
+          loading = false;
+        }
       });
+  }
+
+  /** A join: the import starts, and a failed one tries again. */
+  function ensureLoaded(): void {
+    load(false);
   }
 
   return {
@@ -138,7 +177,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
       // update keeps its place, and names the tile again from this call.
       if (!streams.has(userId)) watches.delete(userId);
       streams.set(userId, { username, relabel: undefined, stream, config });
-      ensureLoaded();
+      load(true);
     },
 
     watch(tileId): void {
@@ -151,7 +190,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
       watches.add(tileId);
       // Subscribing the track is what makes the stream arrive: do it now.
       callbacks?.setStreamWatched?.(tileId, true);
-      ensureLoaded();
+      load(false);
     },
 
     setLabel(userId, username, name): void {
@@ -200,7 +239,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
         return;
       }
       focusedTileId = tileId;
-      if (tileId !== null) ensureLoaded();
+      if (tileId !== null) load(true);
     },
 
     getFocusedTileId: (): number | null =>
@@ -212,7 +251,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
         return;
       }
       people = next;
-      if (next.length > 0) ensureLoaded();
+      if (next.length > 0) load(true);
     },
 
     setSpeaking(userIds): void {
@@ -241,7 +280,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
         return;
       }
       exitVisible = visible;
-      if (visible) ensureLoaded();
+      if (visible) load(false);
     },
 
     // Nothing can be playing in a grid that is not there yet.
