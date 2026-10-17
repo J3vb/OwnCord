@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ContentViewId } from "../features/navigation/destinations";
 
 export interface UiState {
@@ -224,3 +225,15 @@ export function setActiveDmUser(userId: number | null): void {
 export function setActiveView(view: ContentViewId | null): void {
   uiStore.setState((prev) => ({ ...prev, activeView: view }));
 }
+
+/** Sign-out or server switch: nothing in `ready` restates the sidebar mode, so
+ *  a "dms" mode (and its peer id) would otherwise mount on the next server. The
+ *  collapsed categories and their persistence host belong to the old server
+ *  too; `loadCollapsedCategories` sets both again on the next mount. */
+function resetUiSessionState(): void {
+  setSidebarMode("channels");
+  currentServerHost = null;
+  uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+}
+
+void registerSessionReset("ui:session", resetUiSessionState); // app-lifetime

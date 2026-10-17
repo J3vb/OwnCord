@@ -116,6 +116,7 @@ export const shards = {
     "src/lib/dispatcher.ts",
     "src/lib/e2eeCrypto.ts",
     "src/lib/legacyKeyMigration.ts",
+    "src/lib/sessionRegistry.ts",
     "src/lib/sessionScope.ts",
     "src/lib/session-notice.ts",
     "src/features/channels/wsHandlers.ts",

@@ -20,12 +20,7 @@ import { Disposable } from "@lib/disposable";
 import { installFileDropGuard } from "./features/messaging/fileDropGuard";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import {
-  openMessageTarget,
-  openNotificationTarget,
-  resetNotificationCoalescing,
-} from "@lib/notifications";
-import { cleanupNotificationAudio } from "@lib/notificationSound";
+import { openMessageTarget, openNotificationTarget } from "@lib/notifications";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import {
   bracketBareIPv6Host,
@@ -38,9 +33,8 @@ import {
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
 import { markActiveChannelReadOnUnload } from "@lib/read-state";
-import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
-import { resetSafetyStore } from "./features/safety/store";
-import { resetMemberTimeouts } from "./features/moderation/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
+import { authStore, clearAuth } from "@stores/auth.store";
 import {
   setTransientError,
   uiStore,
@@ -226,29 +220,24 @@ const ws = createWsClient();
 void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
   configureConnectionDiagnostics(api, ws);
 });
-// Registered here rather than imported by auth.store: notifications imports
-// auth.store, so that import was a cycle.
-// App-lifetime hooks: main.ts runs once per window, so none of these is ever removed.
-void onAuthCleared(cleanupNotificationAudio);
-// Coalescing is keyed by channel id, which is only unique per server, so a
-// stale window from the previous profile must not suppress the next server's
-// first notification for the same id.
-void onAuthCleared(resetNotificationCoalescing);
-// A profile switch or sign-out must not carry one account's moderation notices into the next.
-void onAuthCleared(resetSafetyStore);
-void onAuthCleared(resetMemberTimeouts); // app-lifetime
-// App-lifetime hook, like the ones above.
-void onAuthCleared((reason) => {
-  // Server switches retain their account-scoped drafts. Explicit logout and
-  // invalid credentials discard pending sends.
-  try {
-    deactivatePendingMessages({
-      discard: reason === "user" && sessionStorage.getItem("owncord:quick-switch-target") === null,
-    });
-  } finally {
-    api.endSession();
-  }
-});
+// App-lifetime hook: main.ts runs once per window. The other per-server resets
+// register themselves from their own modules.
+void registerSessionReset(
+  "main:pending-and-api",
+  (reason) => {
+    // Server switches retain their account-scoped drafts. Explicit logout and
+    // invalid credentials discard pending sends.
+    try {
+      deactivatePendingMessages({
+        discard:
+          reason === "user" && sessionStorage.getItem("owncord:quick-switch-target") === null,
+      });
+    } finally {
+      api.endSession();
+    }
+  },
+  { phase: "session" },
+);
 // Single writer for the UX-facing connection status (docs/architecture/ux §3):
 // live controls read ui.store.connectionStatus reactively instead of wiring
 // their own ws.onStateChange. Lifecycle plumbing that needs the exact internal

@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { connectText } from "../i18n/connect";
 import type {
   ReadyChannel,
@@ -193,6 +194,7 @@ export function resetChannelsStore(): void {
   pointerOnOpen.clear();
   channelsStore.setState(() => INITIAL_STATE);
 }
+void registerSessionReset("channels:store", resetChannelsStore); // app-lifetime
 
 /** Look up a role ID by name (case-insensitive). Returns undefined if not found. */
 export function getRoleIdByName(name: string): number | undefined {

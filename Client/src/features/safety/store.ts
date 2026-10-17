@@ -19,6 +19,7 @@
 import type { ApiClient, MyAppeal, OwnModerationAction } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { AppealStatusPayload, ReadyNotice } from "@lib/types";
 
 const log = createLogger("safety");
@@ -293,3 +294,7 @@ export function resetSafetyStore(): void {
   clearExpiryTimer();
   safetyStore.setState(() => INITIAL);
 }
+
+// App-lifetime: a profile switch or sign-out must not carry one account's
+// moderation notices into the next.
+void registerSessionReset("safety:store", resetSafetyStore);
