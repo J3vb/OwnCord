@@ -163,7 +163,7 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 // parked in the grace window (voiceTxn.park); anything else (disabled window,
 // a failed/half join, a kick that refuses reconnection) leaves immediately.
 func (h *Hub) disconnectVoice(ctx context.Context, txn *voiceTxn, c *Client, reason string) {
-	snap, handled := txn.park(c)
+	snap, handled := txn.park(c) //nolint:contextcheck // the grace timer outlives the disconnect ctx; expiry uses its own.
 	if handled {
 		return
 	}
@@ -174,7 +174,8 @@ func (h *Hub) disconnectVoice(ctx context.Context, txn *voiceTxn, c *Client, rea
 // reporting whether nothing is left for the caller to tear down: the slot held
 // no membership, the membership is parked, or the registry is closed (shutdown;
 // the slot is cleared, no timer is armed and nothing is written to the
-// database, whatever the membership's state: the next boot wipes the rows). When it reports false the membership was not parkable (an
+// database, whatever the membership's state: the next boot wipes the rows).
+// When it reports false the membership was not parkable (an
 // incomplete join, a disabled window, a kick that refuses reconnection), and
 // the caller leaves immediately with the returned snap.
 //
@@ -273,7 +274,7 @@ func (t *voiceTxn) inherit(c *Client) int64 {
 		return 0
 	}
 	e := t.takeParked(0, "")
-	if e == nil || !c.adopt(e.snap) {
+	if e == nil || !t.adoptParked(c, e.snap) {
 		return 0
 	}
 	slog.Info("hub: resumed connection inherited the grace-window voice membership",

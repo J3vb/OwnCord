@@ -44,14 +44,14 @@ func setNonZero(t *testing.T, name string, v reflect.Value) {
 		v.SetUint(7)
 	case reflect.String:
 		v.SetString("x-" + name)
-	case reflect.Ptr:
+	case reflect.Pointer:
 		v.Set(reflect.New(v.Type().Elem()))
 		setNonZero(t, name, v.Elem())
 	case reflect.Slice:
 		v.Set(reflect.MakeSlice(v.Type(), 1, 1))
 		setNonZero(t, name, v.Index(0))
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
+		for i := range v.NumField() {
 			setNonZero(t, name+"."+v.Type().Field(i).Name, slotField(v, i))
 		}
 	default:
@@ -63,9 +63,9 @@ func setNonZero(t *testing.T, name string, v reflect.Value) {
 // slotFields lists the voiceSlot fields a hand-off must treat: all but the lock.
 func slotFields(t *testing.T) []int {
 	t.Helper()
-	typ := reflect.TypeOf(voiceSlot{})
+	typ := reflect.TypeFor[voiceSlot]()
 	var out []int
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		if typ.Field(i).Name != "voiceMu" {
 			out = append(out, i)
 		}
@@ -183,11 +183,10 @@ func waitForNoWaiters(t *testing.T, h *Hub, userID int64) {
 // leaves nothing stashed and nothing evicted, and a move that gets there first
 // hands the stash, whole, to the target's re-join.
 func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
-	ctx := context.Background()
-
 	t.Run("switch wins the lock", func(t *testing.T) {
 		f := newTxnFixture(t, nil)
 		f.join(t)
+		ctx := context.Background()
 
 		hold := f.h.begin(f.uid) // the target's switch is mid-flight
 		done := make(chan bool, 1)
@@ -218,6 +217,7 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 	t.Run("move wins the lock", func(t *testing.T) {
 		f := newTxnFixture(t, nil)
 		f.join(t)
+		ctx := context.Background()
 		by := int64(42)
 
 		if !f.h.EvictForModeratorMove(ctx, f.uid, f.chID, true, true, &by) {
@@ -271,6 +271,25 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 	}
 	if f.h.voiceGrace.get(f.uid) != nil {
 		t.Error("late park armed a grace entry")
+	}
+
+	// An incomplete join and a kicked client are not parkable, but after close
+	// they are dropped the same way: handled, with no teardown and no write.
+	for _, kicked := range []bool{false, true} {
+		f.c.setVoiceState(f.chID, token)
+		if kicked {
+			f.c.markVoiceJoinCompleteIfMatch(f.chID, token)
+			f.c.markTerminalKick()
+		}
+		txn = f.h.begin(f.uid)
+		snap, handled = txn.park(f.c)
+		txn.end()
+		if !handled || snap.chID != f.chID {
+			t.Errorf("late park (kicked=%v) = (%+v, %v), want handled", kicked, snap, handled)
+		}
+		if f.h.voiceGrace.get(f.uid) != nil {
+			t.Errorf("late park (kicked=%v) armed a grace entry", kicked)
+		}
 	}
 
 	time.Sleep(10 * voiceGraceWindow) // several windows: a surviving timer would have fired

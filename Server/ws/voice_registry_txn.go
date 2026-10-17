@@ -224,6 +224,12 @@ func (t *voiceTxn) stashModFlags(c *Client, serverMuted, serverDeafened bool, se
 	c.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
 }
 
+// adoptParked installs a parked grace snapshot as c's membership, reporting
+// whether c took it (it refuses when c is already in a channel).
+func (t *voiceTxn) adoptParked(c *Client, snap slotSnap) bool {
+	return c.adopt(snap)
+}
+
 // setJoinToken adopts tok as c's join token, which the token refresh does when
 // the client had none cached. It sets only the token, only while c is in voice
 // with an empty token, and leaves the completed flag and the rest of the slot

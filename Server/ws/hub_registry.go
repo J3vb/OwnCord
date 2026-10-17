@@ -7,7 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// Register queues a client for registration with the hub.
+// Register queues a client for registration with the hub. Test-only: it runs
+// registerNow without the member lock, which production callers hold.
 func (h *Hub) Register(c *Client) {
 	h.clientEvents <- clientEvent{c: c, add: true}
 }

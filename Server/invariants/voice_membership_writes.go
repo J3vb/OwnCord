@@ -39,7 +39,8 @@ var voiceSlotMutators = map[string]bool{
 	"markCompletedIfMatch": true, "setE2EE": true,
 	"setVoiceState": true, "clearVoiceState": true, "clearVoiceStateIfMatch": true,
 	"markVoiceJoinCompleteIfMatch": true,
-	"heldTxn":                      true, // the lock-free borrowed handle
+	"clearSnap":                    true, "clearSnapIfChannel": true, "drainAll": true, "adopt": true,
+	"heldTxn": true, // the lock-free borrowed handle
 }
 
 // voiceTxnShared are the mutator names voiceTxn also defines.
