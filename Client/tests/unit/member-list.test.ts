@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
-import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
+import {
+  membersStore,
+  updatePresence,
+  updateMemberRole,
+  updateMemberProfile,
+} from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
@@ -1701,5 +1706,167 @@ describe("MemberList rows update in place (3C-4a)", () => {
     expect(container.querySelector('[data-testid="member-5"]')).toBeNull();
     expect(container.querySelectorAll(".member-item")).toHaveLength(before.length - 1);
     expect(row(1)).toBe(before[0]);
+  });
+});
+
+describe("MemberList search (3C-4b)", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+
+  const row = (id: number): HTMLElement =>
+    container.querySelector<HTMLElement>(`[data-testid="member-${id}"]`)!;
+  const box = (): HTMLInputElement =>
+    container.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+  const texts = (): string[] =>
+    Array.from(
+      container.querySelectorAll(".member-role-group, .member-item, .member-list-empty-text"),
+    ).map((el) =>
+      el.classList.contains("member-item")
+        ? (el.getAttribute("data-testid") ?? "")
+        : (el.textContent ?? ""),
+    );
+  function type(value: string): void {
+    box().value = value;
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    list = null;
+  });
+
+  afterEach(() => {
+    list?.destroy?.();
+    container.remove();
+  });
+
+  function mountWith(members: Member[]): void {
+    setTestMembers(members);
+    list = createMemberList(defaultOpts());
+    list.mount(container);
+  }
+
+  const roster = (): Member[] => [
+    makeMember({ id: 1, username: "zoe_x", displayName: "Zoë Quinn", role: "admin" }),
+    makeMember({ id: 2, username: "bob", role: "member" }),
+    makeMember({ id: 3, username: "zorro", role: "member", status: "offline" }),
+    makeMember({ id: 4, username: "carl", displayName: "Carlos", role: "member" }),
+  ];
+
+  it("renders a labelled search box before the list", () => {
+    mountWith(roster());
+    expect(box().getAttribute("aria-label")).toBe("Search members");
+    expect(box().placeholder).toBe("Search members");
+    expect(box().parentElement!.nextElementSibling!.classList.contains("member-list")).toBe(true);
+    list!.destroy?.();
+    expect(container.querySelector(".member-search-wrap")).toBeNull();
+  });
+
+  it("search filters by display name and username, case- and diacritic-insensitive", () => {
+    mountWith(roster());
+    type("ZOE");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
+    type("ZO");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1", "member-3"]);
+    type("quinn");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
+    type("carlos");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-4"]);
+    type("CARL");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-4"]);
+  });
+
+  it("search ignores a leading @ and surrounding spaces", () => {
+    mountWith(roster());
+    type("  @bob ");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-2"]);
+    type("@ bob");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-2"]);
+  });
+
+  it("search re-folds a member renamed while filtered", () => {
+    mountWith(roster());
+    type("quinn");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
+    updateMemberProfile(1, { username: "zoe_x", avatar: null, displayName: "Zed" });
+    membersStore.flush();
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual([]);
+    type("zed");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
+  });
+
+  it("counts reflect matches and empty groups hide", () => {
+    mountWith(roster());
+    expect(texts().filter((t) => t.includes(" — "))).toEqual([
+      "ADMIN — 1",
+      "MEMBER — 2",
+      "OFFLINE — 1",
+    ]);
+    type("zo");
+    expect(texts()).toEqual(["ADMIN — 1", "member-1", "OFFLINE — 1", "member-3"]);
+    type("bob");
+    expect(texts()).toEqual(["MEMBER — 1", "member-2"]);
+  });
+
+  it("no match shows members.searchEmpty, and clearing restores the list", () => {
+    mountWith(roster());
+    type("nobody");
+    expect(texts()).toEqual(["No members match your search"]);
+    type("");
+    expect(texts().filter((t) => t.startsWith("member-"))).toHaveLength(4);
+  });
+
+  it("Escape clears a non-empty query and keeps focus; an empty box is left alone", () => {
+    mountWith(roster());
+    box().focus();
+    type("bob");
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const seen = vi.fn();
+    document.addEventListener("keydown", seen);
+    box().dispatchEvent(esc);
+    document.removeEventListener("keydown", seen);
+    expect(box().value).toBe("");
+    expect(esc.defaultPrevented).toBe(true);
+    expect(seen).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(box());
+    expect(texts().filter((t) => t.startsWith("member-"))).toHaveLength(4);
+
+    const again = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    box().dispatchEvent(again);
+    expect(again.defaultPrevented).toBe(false);
+  });
+
+  it("a live presence change keeps the filter applied", () => {
+    mountWith(roster());
+    type("zo");
+    updatePresence(1, "offline");
+    membersStore.flush();
+    expect(texts()).toEqual(["OFFLINE — 2", "member-1", "member-3"]);
+    // A member who joins and does not match stays hidden; one who does shows.
+    setTestMembers([
+      ...roster(),
+      makeMember({ id: 9, username: "newbie" }),
+      makeMember({ id: 10, username: "zoomer" }),
+    ]);
+    membersStore.flush();
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual([
+      "member-1",
+      "member-10",
+      "member-3",
+    ]);
+  });
+
+  it("a full snapshot re-applies the active search and reuses unchanged rows", () => {
+    mountWith(roster());
+    type("zo");
+    const before = row(1);
+    setTestMembers(roster().map((m) => ({ ...m })));
+    membersStore.flush();
+    expect(box().value).toBe("zo");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1", "member-3"]);
+    expect(row(1)).toBe(before);
+    expect(texts().filter((t) => t.includes(" — "))).toEqual(["ADMIN — 1", "OFFLINE — 1"]);
   });
 });

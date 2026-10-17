@@ -530,6 +530,27 @@ interface Entry {
   readonly colorVar: string;
 }
 
+/** Case-, accent- and `@`-insensitive form of a name, for the search box. */
+function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase();
+}
+
+// Folded "username\ndisplayName" per Member object; a new object (every
+// snapshot makes them) is folded once, an unchanged one never again.
+const foldCache = new WeakMap<Member, string>();
+
+function searchText(member: Member): string {
+  let text = foldCache.get(member);
+  if (text === undefined) {
+    text = `${fold(member.username)}\n${fold(member.displayName ?? "")}`;
+    foldCache.set(member, text);
+  }
+  return text;
+}
+
 function compareEntries(a: Entry, b: Entry): number {
   return (
     nameCollator.compare(memberDisplayName(a.member), memberDisplayName(b.member)) ||
@@ -544,7 +565,7 @@ function compareEntries(a: Entry, b: Entry): number {
  * "offline" and role keys carry a "g:" prefix, so a role named "Offline"
  * cannot collide with it.
  */
-function buildItems(members: ReadonlyMap<number, Member>): ListItem[] {
+function buildItems(members: ReadonlyMap<number, Member>, query: string): ListItem[] {
   if (members.size === 0) {
     return [{ kind: "empty", key: "empty", text: shellText("members.empty") }];
   }
@@ -552,9 +573,11 @@ function buildItems(members: ReadonlyMap<number, Member>): ListItem[] {
   const known = new Map<string, RoleGroup>();
   for (const group of groups) if (!known.has(group.role)) known.set(group.role, group);
 
+  const needle = fold(query.trim().replace(/^@\s*/, ""));
   const buckets = new Map<string, Entry[]>();
   const offline: Entry[] = [];
   for (const member of members.values()) {
+    if (needle !== "" && !searchText(member).includes(needle)) continue;
     const role = member.role.toLowerCase();
     const entry: Entry = { member, colorVar: known.get(role)?.colorVar ?? MEMBER_COLOR };
     if (isAwayStatus(member.status)) {
@@ -589,12 +612,19 @@ function buildItems(members: ReadonlyMap<number, Member>): ListItem[] {
   for (const group of order)
     push(`g:${group.role}`, group.label, false, buckets.get(group.role) ?? []);
   push("offline", shellText("members.offlineGroup"), true, offline);
+  if (items.length === 0) {
+    return [{ kind: "empty", key: "empty", text: shellText("members.searchEmpty") }];
+  }
   return items;
 }
 
 export function createMemberList(opts: MemberListOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  let searchWrap: HTMLDivElement | null = null;
+  // The filter lives here, so every store-driven render re-applies it. It is
+  // not persisted: a remount starts with an empty box.
+  let query = "";
   // Rows are reused across renders, so each owns its listeners: a row's owner
   // is destroyed when reconcile removes or rebuilds it (OC-0295 - listeners on
   // the component-lifetime signal would retain every discarded row), and
@@ -618,7 +648,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function render(): void {
     if (root === null) return;
-    reconcileChildren<ListItem>(root, buildItems(membersStore.getState().members), {
+    reconcileChildren<ListItem>(root, buildItems(membersStore.getState().members, query), {
       key: (item) => item.key,
       // A header's text is patched in `update`, not part of its signature.
       // Status is not here: it patches the dot in place without a rebuild.
@@ -684,6 +714,39 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function mount(container: Element): void {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
+    const label = shellText("members.search");
+    const search = createElement("input", {
+      type: "search",
+      class: "dm-search member-search",
+      "data-testid": "member-search",
+      maxlength: "100",
+      autocomplete: "off",
+      spellcheck: "false",
+      placeholder: label,
+      "aria-label": label,
+    });
+    search.addEventListener(
+      "input",
+      () => {
+        query = search.value;
+        render();
+      },
+      { signal: disposable.signal },
+    );
+    search.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.isComposing || e.key !== "Escape" || search.value === "") return;
+        e.preventDefault();
+        e.stopPropagation();
+        search.value = "";
+        query = "";
+        render();
+      },
+      { signal: disposable.signal },
+    );
+    searchWrap = createElement("div", { class: "member-search-wrap" });
+    searchWrap.appendChild(search);
     render();
 
     disposable.onStoreChange<MembersState, ReadonlyMap<number, Member>>(
@@ -705,7 +768,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
       },
     );
 
-    container.appendChild(root);
+    container.append(searchWrap, root);
   }
 
   function destroy(): void {
@@ -719,6 +782,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
       root.remove();
       root = null;
     }
+    searchWrap?.remove();
+    searchWrap = null;
   }
 
   return { mount, destroy };

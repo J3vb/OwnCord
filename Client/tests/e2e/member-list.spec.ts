@@ -98,6 +98,30 @@ test.describe("Member List", () => {
     ).toHaveText("otheruser");
   });
 
+  test("the search box filters the rows and Escape restores the list", async ({ page }) => {
+    const search = page.locator("[data-testid='member-search']");
+    await expect(search).toBeVisible({ timeout: 5_000 });
+    const names = page.locator(".member-item .mi-name");
+    await expect(names.first()).toBeVisible();
+    const all = await names.allTextContents();
+    expect(all).toContain("otheruser");
+
+    await search.fill("@OTHERUS");
+    await expect(names).toHaveText(["otheruser"]);
+    await expect(page.locator(".member-role-group")).toHaveText([/— 1$/]);
+
+    await search.fill("zzz-no-match");
+    await expect(page.locator(".member-item")).toHaveCount(0);
+    await expect(page.locator(".member-list-empty-text")).toHaveText(
+      "No members match your search",
+    );
+
+    await search.press("Escape");
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(names).toHaveText(all);
+  });
+
   test("member list is always visible in sidebar", async ({ page }) => {
     const sidebarMembers = page.locator("[data-testid='sidebar-members']");
     await expect(sidebarMembers).toBeAttached({ timeout: 3_000 });
