@@ -161,6 +161,7 @@ function isReserved(c: KeyCombo): boolean {
   if (c.ctrl && c.alt) return true;
   if (c.alt && (c.vk === VK_F4 || c.vk === VK_SPACE)) return true;
   if (!c.alt && (c.vk === VK_F5 || c.vk === VK_F11 || c.vk === VK_F12)) return true;
+  if (c.shift && !c.ctrl && !c.alt && c.vk === 0x79) return true; // Shift+F10 context menu
   if (c.ctrl && !c.alt && c.vk === VK_R) return true;
   if (c.ctrl && c.shift && (c.vk === VK_I || c.vk === VK_J)) return true;
   if (c.ctrl && !c.shift && c.vk === VK_P) return true;

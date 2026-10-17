@@ -51,9 +51,17 @@ function makeHandlers(): {
   };
 }
 
+/** The `code` a real keydown carries for a letter or digit. */
+function codeFor(key: string): string {
+  if (/^[a-zA-Z]$/.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  return "";
+}
+
 function press(key: string, opts: Partial<KeyboardEventInit> = {}): KeyboardEvent {
   const event = new KeyboardEvent("keydown", {
     key,
+    code: codeFor(key),
     ctrlKey: true,
     cancelable: true,
     ...opts,
@@ -153,7 +161,7 @@ describe("global keybinds", () => {
     document.body.appendChild(composer);
     composer.focus();
     composer.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }),
+      new KeyboardEvent("keydown", { key: "f", code: "KeyF", ctrlKey: true, bubbles: true }),
     );
 
     expect(h.onSearch).toHaveBeenCalledOnce();
@@ -435,6 +443,21 @@ describe("global keybinds", () => {
 
       press("V", { shiftKey: true, code: "KeyV" });
       expect(h.onToggleCamera).toHaveBeenCalledOnce();
+      press("X", { shiftKey: true, code: "KeyX" });
+      expect(h.onToggleCamera).toHaveBeenCalledTimes(2);
+    });
+
+    it("drops its cache when the mute key changes", () => {
+      saveGlobalShortcutVk("mute", X);
+      // Camera on mute's key conflicts, so it reverts to Ctrl+Shift+V.
+      saveKeybind("toggleCamera", { vk: X, ctrl: true, shift: true, alt: false });
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      press("V", { shiftKey: true, code: "KeyV" });
+      expect(h.onToggleCamera).toHaveBeenCalledOnce();
+
+      saveGlobalShortcutVk("mute", 0x4d);
+
       press("X", { shiftKey: true, code: "KeyX" });
       expect(h.onToggleCamera).toHaveBeenCalledTimes(2);
     });
@@ -743,6 +766,7 @@ describe("global keybinds", () => {
       }
       const event = new KeyboardEvent("keydown", {
         key,
+        code: codeFor(key),
         bubbles: true,
         cancelable: true,
         ...init,

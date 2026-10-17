@@ -44,7 +44,6 @@ import {
   loadEffectiveKeybinds,
   type ActionId,
   type EffectiveKeybinds,
-  type KeyCombo,
 } from "@lib/keybinds";
 import { inputMode } from "@lib/inputMode";
 import { loadPref } from "@lib/preferences";
@@ -234,7 +233,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
    *  consumed (acted on, or deliberately ignored); false to carry on. */
   const dispatchRebindable = (e: KeyboardEvent): boolean => {
     if (e.isComposing || dialogOpen()) return false;
-    const combo = eventCombo(e);
+    const combo = comboFromEvent(e, "inApp");
     if (combo === null) return false;
     const id = currentTable().get(comboKey(combo));
     if (id === undefined) return false;
@@ -395,23 +394,6 @@ function isPttKey(e: KeyboardEvent): boolean {
   if (!inVoice() || inputMode() !== "ptt") return false;
   const vk = loadPref<number>("pttVk", 0);
   return vk !== 0 && e.keyCode === vk;
-}
-
-/**
- * The in-app combo a keydown represents, or null when it cannot be bound (Meta,
- * AltGr, a key the table has no VK for). An event with no `code` at all (a
- * synthetic one) falls back to the layout key, as `e.key` matching always did.
- */
-function eventCombo(e: KeyboardEvent): KeyCombo | null {
-  const combo = comboFromEvent(e, "inApp");
-  if (combo !== null || e.code !== "") return combo;
-  if (e.metaKey || (e.ctrlKey && e.altKey) || !/^[a-zA-Z0-9]$/.test(e.key)) return null;
-  return {
-    vk: e.key.toUpperCase().charCodeAt(0),
-    ctrl: e.ctrlKey,
-    shift: e.shiftKey,
-    alt: e.altKey,
-  };
 }
 
 /** The message box on screen, when it can be typed into. */
