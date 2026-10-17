@@ -99,7 +99,7 @@ describe("profile popup receives about and join date (3C-7a)", () => {
     const { user } = await open();
     expect(user["about"]).toBe("Hello there");
     expect(typeof user["joinDate"]).toBe("string");
-    expect(user["joinDate"]).toContain("2025");
+    expect(user["joinDate"]).toBe("March 4, 2025");
   });
 
   it("omits both when the server did not send them", async () => {

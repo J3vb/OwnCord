@@ -15,6 +15,7 @@ import type { UserProfilePopupComponent } from "../../components/UserProfilePopu
 import { showToast } from "../../lib/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
+import { formatDate } from "../../i18n/format";
 import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 
@@ -70,7 +71,7 @@ function formatJoinDate(createdAt: string | undefined): string | null {
   if (createdAt === undefined) return null;
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return formatDate(date, { year: "numeric", month: "long", day: "numeric" });
 }
 
 /** Close the open popup, if any, and cancel one that is still loading. */
