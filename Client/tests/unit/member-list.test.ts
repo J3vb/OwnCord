@@ -2036,6 +2036,19 @@ describe("MemberList arrow navigation (4.14b)", () => {
     expect(focusedId()).toBe("member-3");
   });
 
+  it("focus follows the focused member when its row is rebuilt", () => {
+    const members = roster();
+    mountWith(members);
+    const old = row(2);
+    old.focus();
+    // A display name change alters the row signature, so reconcile builds a new
+    // row and hands focus to it by key.
+    setTestMembers(members.map((m) => (m.id === 2 ? { ...m, displayName: "Bobby" } : m)));
+    membersStore.flush();
+    expect(row(2)).not.toBe(old);
+    expect(document.activeElement).toBe(row(2));
+  });
+
   it("a search that removes the focused member focuses the first match, not the body", () => {
     mountWith(roster());
     row(1).focus();
