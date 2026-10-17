@@ -65,7 +65,7 @@ import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
-import { shellText } from "../../i18n/shell";
+import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
 import { readPointerEnabled } from "@lib/serverCapabilities";
@@ -1066,9 +1066,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           });
         } else if (dmChannel !== undefined) {
           const member = membersStore.getState().members.get(dmChannel.recipient.id);
-          const status =
-            member?.status ?? dmChannel.recipient.status ?? shellText("status.offline");
-          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+          subtitle = statusLabel(member?.status ?? dmChannel.recipient.status ?? "offline");
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
         updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });

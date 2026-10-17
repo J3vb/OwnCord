@@ -959,7 +959,20 @@ function buildVoiceAudioTabInner(
     },
     { signal },
   );
-  const fpsGroup = [fpsHeader, fpsDesc, fpsSelect];
+  // Linux (M-3): the Wayland portal negotiates 60 fps at most; the picker
+  // greys 120 out there, so say it here as well.
+  const fpsGroup = isLinuxDesktop()
+    ? [
+        fpsHeader,
+        fpsDesc,
+        createElement(
+          "p",
+          { class: "setting-desc", "data-testid": "screen-fps-wayland-note" },
+          t("voiceAudio.screenFpsWaylandNote"),
+        ),
+        fpsSelect,
+      ]
+    : [fpsHeader, fpsDesc, fpsSelect];
 
   // Video device selector
   const videoHeader = createElement(

@@ -451,6 +451,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":
     "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+  "voiceAudio.screenFpsWaylandNote": "On a Wayland desktop, screen sharing is limited to 60 FPS.",
   "voiceAudio.fps.30": "30 FPS (default)",
   "voiceAudio.fps.60": "60 FPS",
   "voiceAudio.fps.120": "120 FPS",

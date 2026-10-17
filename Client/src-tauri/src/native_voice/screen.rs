@@ -531,8 +531,10 @@ fn run_loop(
 ) {
     let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
     let started = Instant::now();
+    // Frames are due on a fixed grid, so a late wake-up or a slow grab does
+    // not push every later frame back by the same amount.
+    let mut due = started;
     loop {
-        let tick = Instant::now();
         // Bound the pre-first-frame phase (voice #9): a picked source whose
         // capturer never produces a first frame (a transient error that
         // loops) used to spin here forever while the shared
@@ -571,7 +573,12 @@ fn run_loop(
             }
         }
         // A stop (or the owner dropping) wakes this immediately.
-        match stopped.recv_timeout(interval.saturating_sub(tick.elapsed())) {
+        due += interval;
+        let now = Instant::now();
+        if due < now {
+            due = now;
+        }
+        match stopped.recv_timeout(due - now) {
             Err(RecvTimeoutError::Timeout) => {}
             _ => return,
         }
@@ -648,6 +655,50 @@ mod tests {
         );
         stopper.join().unwrap();
         rt.block_on(&mut ready_rx).ok()
+    }
+
+    /// 120 fps is the share's top rate: the loop must keep the 8.3 ms grid
+    /// rather than drift to a slower rate. The bound is loose enough for a
+    /// busy CI runner.
+    #[test]
+    fn a_120_fps_capture_paces_near_one_frame_per_8_ms() {
+        let shared = Shared {
+            source: Mutex::new(None),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
+        };
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let stopper = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(1));
+            let _ = stop_tx.send(());
+        });
+        let mut frames = 0usize;
+        let mut grab = || {
+            frames += 1;
+            Grab::Frame(bars(64, 36, frames))
+        };
+        let (ready_tx, _ready_rx) = oneshot::channel();
+        let began = Instant::now();
+        run_loop(
+            &mut grab,
+            CaptureOptions {
+                fps: 120.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            &shared,
+            &stop_rx,
+            &mut Some(ready_tx),
+            None,
+            FAILED,
+            || {},
+        );
+        let elapsed = began.elapsed().as_secs_f64();
+        stopper.join().unwrap();
+        let rate = frames as f64 / elapsed;
+        assert!(
+            (90.0..=125.0).contains(&rate),
+            "{frames} frames in {elapsed:.3}s is {rate:.1} fps"
+        );
     }
 
     /// voice #9: a picked source that never yields a first frame must not

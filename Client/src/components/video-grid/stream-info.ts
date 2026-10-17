@@ -58,7 +58,7 @@ function limitationText(reason: string | undefined): string | undefined {
 /** Your own share's second line (M-1): the capture rate, what holds the
  *  encoder back, and which codec and encoder, e.g. "Capture 120 fps · Limited
  *  by CPU · VP8 · libvpx". Empty before anything is known; a note where the
- *  share has no sender stats to read (null: the Linux native share). */
+ *  share has no sender stats to read (null: no sample yet). */
 export function senderText(sample: ShareSenderSample | null): string {
   if (sample === null) return t("tile.senderUnavailable");
   const parts = [

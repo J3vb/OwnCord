@@ -354,7 +354,6 @@ import {
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
-import { createMessageInput } from "@components/MessageInput";
 import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
 
 // ---------------------------------------------------------------------------
@@ -2470,7 +2469,7 @@ describe("createChannelController", () => {
 
       expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
         username: "bob",
-        status: "Dnd",
+        status: "Do Not Disturb",
       });
     });
 

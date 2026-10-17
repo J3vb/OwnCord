@@ -27,6 +27,8 @@ interface LangSpec {
   readonly patterns: readonly Pattern[];
   readonly keywords: ReadonlySet<string>;
   readonly ident?: RegExp;
+  /** Keywords are stored lowercase and matched case-insensitively (SQL). */
+  readonly ignoreCase?: boolean;
 }
 
 const kw = (words: string): ReadonlySet<string> => new Set(words.split(" "));
@@ -52,6 +54,17 @@ const JS_LIKE: readonly Pattern[] = [
   BACKTICK_STRING,
   NUMBER,
 ];
+
+const JS_LIKE_NO_BT: readonly Pattern[] = [
+  SLASH_LINE_COMMENT,
+  C_BLOCK_COMMENT,
+  DQ_STRING,
+  SQ_STRING,
+  NUMBER,
+];
+
+/** C/C++ preprocessor directive (`#include`, `#define`). */
+const C_PREPROC: Pattern = { re: /#[ \t]*[a-z]+/y, cls: "keyword" };
 
 const LANGS: Readonly<Record<string, LangSpec>> = {
   javascript: {
@@ -154,6 +167,67 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     ],
     keywords: kw(""),
   },
+  c: {
+    patterns: [C_PREPROC, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t",
+    ),
+  },
+  cpp: {
+    patterns: [C_PREPROC, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t class public private protected virtual override namespace using template typename new delete this nullptr try catch throw auto constexpr operator explicit friend std",
+    ),
+  },
+  java: {
+    patterns: [{ re: /"""[\s\S]*?(?:"""|$)/y, cls: "string" }, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "class interface enum extends implements package import public private protected static final " +
+        "abstract void int long short byte char float double boolean new this super return if else for " +
+        "while do switch case default break continue try catch finally throw throws instanceof null " +
+        "true false var synchronized String",
+    ),
+  },
+  csharp: {
+    patterns: [{ re: /@"(?:[^"]|"")*"?/y, cls: "string" }, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "namespace using class struct interface enum record public private protected internal static " +
+        "readonly const abstract virtual override sealed void int long short byte char float double " +
+        "decimal bool string var new this base return if else for foreach while do switch case default " +
+        "break continue try catch finally throw null true false async await in is as get set",
+    ),
+  },
+  sql: {
+    ignoreCase: true,
+    patterns: [
+      { re: /--[^\n]*/y, cls: "comment" },
+      C_BLOCK_COMMENT,
+      // Standard SQL has no backslash escape; '' is two adjacent strings.
+      { re: /'[^'\n]*'?/y, cls: "string" },
+      DQ_STRING,
+      NUMBER,
+    ],
+    keywords: kw(
+      "select from where and or not in is null like between join inner left right full outer cross on " +
+        "group by order having limit offset as distinct union all insert into values update set delete " +
+        "create alter drop table index view database primary key foreign references default unique " +
+        "check constraint case when then else end exists asc desc with returning begin commit rollback " +
+        "int integer bigint text varchar char boolean date timestamp true false",
+    ),
+  },
+  yaml: {
+    patterns: [
+      // A comment needs whitespace before "#"; a quote opens a string only
+      // where a value starts, so "don't" stays plain text; a key starts only
+      // at the start of a run, which keeps hostile runs linear.
+      { re: /(?<!\S)#[^\n]*/y, cls: "comment" },
+      DQ_STRING,
+      { re: /'(?<=(?:^|[:[{,-])[ \t]*')(?:[^'\n]|'')*'?/my, cls: "string" },
+      { re: /(?<![\w./-])[\w./-]+(?=[ \t]*:(?:[ \t]|$))/my, cls: "keyword" },
+      NUMBER,
+    ],
+    keywords: kw("true false null"),
+  },
 };
 
 /** Aliases accepted after the opening fence. */
@@ -186,6 +260,23 @@ const ALIASES: Readonly<Record<string, string>> = {
   html: "html",
   xml: "html",
   svg: "html",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  "c++": "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  java: "java",
+  cs: "csharp",
+  csharp: "csharp",
+  "c#": "csharp",
+  sql: "sql",
+  sqlite: "sql",
+  postgres: "sql",
+  mysql: "sql",
+  yaml: "yaml",
+  yml: "yaml",
 };
 
 const DEFAULT_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/y;
@@ -238,7 +329,7 @@ export function highlightCode(code: string, lang: string | null): CodeToken[] {
     ident.lastIndex = i;
     const word = ident.exec(code);
     if (word !== null && word[0].length > 0) {
-      if (spec.keywords.has(word[0])) {
+      if (spec.keywords.has(spec.ignoreCase === true ? word[0].toLowerCase() : word[0])) {
         flush();
         tokens.push({ text: word[0], cls: "keyword" });
       } else {

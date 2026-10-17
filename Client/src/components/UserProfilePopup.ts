@@ -20,7 +20,7 @@ import { resolveDisplayName } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
 import { roleColorVar } from "@lib/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
-import { shellText } from "../i18n/shell";
+import { statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
 
 // ---------------------------------------------------------------------------
@@ -84,19 +84,6 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   invisible: "var(--text-micro)",
   offline: "var(--text-micro)",
 };
-
-const STATUS_LABELS: Record<
-  UserStatus,
-  "status.online" | "status.idle" | "status.dnd" | "status.invisible" | "status.offline"
-> = {
-  online: "status.online",
-  idle: "status.idle",
-  dnd: "status.dnd",
-  invisible: "status.invisible",
-  offline: "status.offline",
-};
-
-const statusLabel = (status: UserStatus): string => shellText(STATUS_LABELS[status]);
 
 /**
  * Place the card beside the anchor, flipping and clamping so it always lands
