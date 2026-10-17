@@ -466,7 +466,7 @@ func TestBaseConfig_IgnoresOverridesLayer(t *testing.T) {
 	if base.Server.Port != 9000 || base.Upload.MaxSizeMB != 20 {
 		t.Errorf("BaseConfig applied the overrides layer: port %d, max_size_mb %d", base.Server.Port, base.Upload.MaxSizeMB)
 	}
-	if base.Server.DataDir != dataDir {
+	if filepath.Clean(base.Server.DataDir) != dataDir {
 		t.Errorf("data_dir = %q, want %q", base.Server.DataDir, dataDir)
 	}
 	effective, err := config.Preview(cfgPath, overrides, nil)
