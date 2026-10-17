@@ -147,11 +147,21 @@ test.describe("B9-3 Accessibility tab text", () => {
 // ---------------------------------------------------------------------------
 
 /** Q1's largest text at the minimum window, applied by the real startup path. */
-async function startAtLargestText(page: Page): Promise<void> {
+async function startAtLargestText(
+  page: Page,
+  opts: { memberListLeft?: boolean } = {},
+): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("owncord:settings:fontSize", "20");
     localStorage.setItem("owncord:settings:largeFont", "true");
   });
+  if (opts.memberListLeft === true) {
+    // The member list defaults to the right column (3C-6c); the "MEMBERS"
+    // heading checked with this option exists only in the left section.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
+  }
   await mockTauriFullSessionWithMessages(page);
   await page.goto("/");
 }
@@ -187,7 +197,7 @@ test.describe("B9-18 connect and shell text", () => {
   test("reads the catalogs' English copy on the connect page and in the shell", async ({
     page,
   }) => {
-    await startAtLargestText(page);
+    await startAtLargestText(page, { memberListLeft: true });
     await expect(page.locator(".server-panel-header h2")).toHaveText("Servers");
     await expect(page.locator(".btn-add-server")).toHaveText("+ Add Server");
     await expect(page.locator(".brand-tagline")).toHaveText(
@@ -214,7 +224,7 @@ test.describe("B9-18 connect and shell text", () => {
   test("keeps expanded shell and connect text whole, named and operable at 940×500 with 20px text", async ({
     page,
   }, testInfo) => {
-    await startAtLargestText(page);
+    await startAtLargestText(page, { memberListLeft: true });
     test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
 
     // Sign in: the main page renders entirely through the expanded seam.

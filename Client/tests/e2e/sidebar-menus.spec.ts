@@ -371,6 +371,10 @@ test.describe("DM sidebar — group rename", () => {
 
 test.describe("Member list section", () => {
   test.beforeEach(async ({ page }) => {
+    // The default moved to the right column in 3C-6c; this is the left section.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
     await mockDmSession(page);
     await page.goto("/");
     await submitLoginAndWait(page);

@@ -223,7 +223,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
     // mode with the "left" layout, added and removed in place.
     let leftPanel: ReturnType<typeof buildMemberPanel> | null = null;
     const syncMemberSection = () => {
-      const left = localStorage.getItem("owncord:settings:memberListLayout") !== '"right"';
+      const left = localStorage.getItem("owncord:settings:memberListLayout") === '"left"';
       if (left && leftPanel === null) {
         leftPanel = buildMemberPanel();
         sidebarWrapper.appendChild(leftPanel.element);
@@ -4004,7 +4004,8 @@ describe("MainPage — member list placement (3C-6b)", () => {
   beforeEach(async () => {
     resetStores();
     uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeView: null }));
-    localStorage.removeItem("owncord:settings:memberListLayout");
+    // These tests flip from the left layout; the default has been right since 3C-6c.
+    localStorage.setItem("owncord:settings:memberListLayout", '"left"');
     localStorage.removeItem("owncord:settings:memberListOpen");
     memberPanels.created = 0;
     memberPanels.destroyed = 0;
@@ -4046,7 +4047,7 @@ describe("MainPage — member list placement (3C-6b)", () => {
   });
 
   it("switching layout leaves exactly one member-list in the document", () => {
-    // Default is left: the sidebar's section is the only instance.
+    // Stored left: the sidebar's section is the only instance.
     expect(memberLists()).toBe(1);
     expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
 

@@ -129,6 +129,26 @@ test.describe("Member List", () => {
     await expect(names).toHaveText(all);
   });
 
+  test("member list is visible in the right column by default", async ({ page }) => {
+    // No stored layout: the default is the right-hand column (3C-6c).
+    const column = page.locator("[data-testid='member-column']");
+    await expect(column).toBeVisible({ timeout: 3_000 });
+    await expect(column.locator("[data-testid='member-list']")).toBeVisible();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+  });
+});
+
+test.describe("Member List — under the channels", () => {
+  test.beforeEach(async ({ page }) => {
+    // The default moved to the right column in 3C-6c; this is the left layout.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+  });
+
   test("member list is always visible in sidebar", async ({ page }) => {
     const sidebarMembers = page.locator("[data-testid='sidebar-members']");
     await expect(sidebarMembers).toBeAttached({ timeout: 3_000 });
