@@ -154,16 +154,16 @@ func TestCreateGroupDMChannel_SetsOwner(t *testing.T) {
 func TestLeaveGroupDM_OwnerHandsOffToLowestRemaining(t *testing.T) {
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
-	if _, err := f.database.LeaveGroupDM(ctx, f.alice, f.group); err != nil {
+	if _, err := f.database.LeaveGroupDM(ctx, f.alice, f.group, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 	if got := ownerOf(t, f.database, f.group); got != f.bob {
 		t.Fatalf("owner after the owner left = %d, want %d (lowest remaining)", got, f.bob)
 	}
 	// Two members left, the owner leaves again: a group of one keeps an owner.
-	deleted, err := f.database.LeaveGroupDM(ctx, f.bob, f.group)
-	if err != nil || deleted {
-		t.Fatalf("LeaveGroupDM = %v, %v, want a survivor", deleted, err)
+	res, err := f.database.LeaveGroupDM(ctx, f.bob, f.group, "left")
+	if err != nil || res.Deleted {
+		t.Fatalf("LeaveGroupDM = %+v, %v, want a survivor", res, err)
 	}
 	if got := ownerOf(t, f.database, f.group); got != f.carol {
 		t.Errorf("owner of the last member = %d, want %d", got, f.carol)
@@ -172,7 +172,7 @@ func TestLeaveGroupDM_OwnerHandsOffToLowestRemaining(t *testing.T) {
 
 func TestLeaveGroupDM_NonOwnerLeaveKeepsOwner(t *testing.T) {
 	f := newGroupRowFixture(t)
-	if _, err := f.database.LeaveGroupDM(context.Background(), f.carol, f.group); err != nil {
+	if _, err := f.database.LeaveGroupDM(context.Background(), f.carol, f.group, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 	if got := ownerOf(t, f.database, f.group); got != f.alice {
@@ -187,7 +187,7 @@ func TestLeaveGroupDM_HealsNullOwner(t *testing.T) {
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET dm_owner_id = NULL WHERE id = ?`, f.group); err != nil {
 		t.Fatalf("clear owner: %v", err)
 	}
-	if _, err := f.database.LeaveGroupDM(context.Background(), f.carol, f.group); err != nil {
+	if _, err := f.database.LeaveGroupDM(context.Background(), f.carol, f.group, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 	if got := ownerOf(t, f.database, f.group); got != f.alice {

@@ -54,3 +54,66 @@ func (q *Queries) GetMessageGroupEventsByMessageIDs(ctx context.Context, ids []i
 	}
 	return items, nil
 }
+
+const insertGroupEventMessage = `-- name: InsertGroupEventMessage :one
+INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, ?, ?)
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
+          mentions_everyone, pinned_at, kind
+`
+
+type InsertGroupEventMessageParams struct {
+	ChannelID int64  `json:"channelId"`
+	UserID    int64  `json:"userId"`
+	Content   string `json:"content"`
+	Kind      int64  `json:"kind"`
+}
+
+// A group DM row is a messages row with kind 2 to 6. The author is the actor:
+// the member who added, removed, renamed or left. The caller passes the
+// fallback text that only old clients show.
+func (q *Queries) InsertGroupEventMessage(ctx context.Context, arg InsertGroupEventMessageParams) (Message, error) {
+	row := q.db.QueryRowContext(ctx, insertGroupEventMessage,
+		arg.ChannelID,
+		arg.UserID,
+		arg.Content,
+		arg.Kind,
+	)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.UserID,
+		&i.Content,
+		&i.ReplyTo,
+		&i.EditedAt,
+		&i.Deleted,
+		&i.Pinned,
+		&i.Timestamp,
+		&i.MentionsEveryone,
+		&i.PinnedAt,
+		&i.Kind,
+	)
+	return i, err
+}
+
+const insertMessageGroupEvent = `-- name: InsertMessageGroupEvent :exec
+INSERT INTO message_group_events (message_id, target_user_id, name, icon_removed)
+VALUES (?, ?, ?, ?)
+`
+
+type InsertMessageGroupEventParams struct {
+	MessageID    int64   `json:"messageId"`
+	TargetUserID *int64  `json:"targetUserId"`
+	Name         *string `json:"name"`
+	IconRemoved  int64   `json:"iconRemoved"`
+}
+
+func (q *Queries) InsertMessageGroupEvent(ctx context.Context, arg InsertMessageGroupEventParams) error {
+	_, err := q.db.ExecContext(ctx, insertMessageGroupEvent,
+		arg.MessageID,
+		arg.TargetUserID,
+		arg.Name,
+		arg.IconRemoved,
+	)
+	return err
+}

@@ -451,6 +451,9 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 		// "already in the requested end state" twin of DUPLICATE_REPORT, so
 		// the caller gets a clean typed refusal instead of a 500.
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_DELETED", Message: err.Error()})
+	case errors.Is(err, service.ErrGroupDMFull):
+		// Before ErrConflict, which it wraps: the group has no room left.
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "GROUP_DM_FULL", Message: err.Error()})
 	case errors.Is(err, service.ErrConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
 	case errors.Is(err, service.ErrInternal):

@@ -28,6 +28,9 @@ const (
 	// VoiceLeaveReasonDMLeave is a user leaving a group DM whose call they
 	// are in, including the last participant closing it (api DM handler).
 	VoiceLeaveReasonDMLeave = "dm_leave"
+	// VoiceLeaveReasonDMRemoved is a user the group owner removed from a group
+	// DM whose call they are in (api DM handler).
+	VoiceLeaveReasonDMRemoved = "dm_removed"
 	// VoiceLeaveReasonBlocked is a user evicted from a 1:1 DM call because
 	// the other participant blocked them (api block handler).
 	VoiceLeaveReasonBlocked = "blocked"

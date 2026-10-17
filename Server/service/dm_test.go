@@ -158,8 +158,8 @@ func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenameGroupDM with a 100-rune multibyte name: %v", err)
 	}
-	if ch.Name != name100 {
-		t.Fatalf("name mangled: %q", ch.Name)
+	if ch.Channel.Name != name100 {
+		t.Fatalf("name mangled: %q", ch.Channel.Name)
 	}
 
 	name101 := strings.Repeat("é", 101)

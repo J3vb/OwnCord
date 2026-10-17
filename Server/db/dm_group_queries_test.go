@@ -76,7 +76,7 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
-	if _, err = database.LeaveGroupDM(ctx, 3, group.ID); err != nil {
+	if _, err = database.LeaveGroupDM(ctx, 3, group.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 
@@ -102,12 +102,12 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	}
 
 	for i, uid := range []int64{1, 2, 3} {
-		deleted, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID)
+		res, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID, "left")
 		if leaveErr != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, leaveErr)
 		}
 		wantDeleted := i == 2
-		if deleted != wantDeleted {
+		if deleted := res.Deleted; deleted != wantDeleted {
 			t.Errorf("leave %d: deleted=%v, want %v", uid, deleted, wantDeleted)
 		}
 	}
@@ -152,7 +152,7 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	}
 
 	for _, uid := range []int64{1, 2, 3} {
-		if _, err := database.LeaveGroupDM(ctx, uid, group.ID); err != nil {
+		if _, err := database.LeaveGroupDM(ctx, uid, group.ID, "left"); err != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, err)
 		}
 	}

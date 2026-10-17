@@ -414,9 +414,10 @@ var erasureStatements = []struct {
 	{"gif_favorites", `DELETE FROM gif_favorites WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 	// Group DM owner (migration 065): hand the group to its lowest remaining
-	// member, the same rule a leave applies, so dm_owner_id keeps naming a
-	// current member. A group with no member left gets NULL.
-	{"group DM owner", `UPDATE channels SET dm_owner_id = (SELECT MIN(user_id) FROM dm_participants WHERE channel_id = channels.id) WHERE dm_owner_id = ?`},
+	// member who is not banned, the same rule a leave applies (lowestMemberSQL),
+	// so dm_owner_id keeps naming a current member. A group with no member left
+	// gets NULL.
+	{"group DM owner", `UPDATE channels SET dm_owner_id = ` + lowestMemberSQL("channels.id") + ` WHERE dm_owner_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
