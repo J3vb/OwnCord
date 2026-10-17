@@ -12,6 +12,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
+import { showToast } from "@lib/toast";
 import type { ModalInstance } from "@lib/modalFactory";
 import { Disposable } from "@lib/disposable";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
@@ -70,6 +71,9 @@ const reachable = (m: Member): number =>
  */
 export function createMemberPickerModal(opts: MemberPickerOptions): MountableComponent {
   let modalInstance: ModalInstance | null = null;
+  // Set once the modal is dismissed or destroyed, so a late answer to an add
+  // that was still in flight does not touch a picker nobody can see.
+  let closed = false;
   const selected = new Set<number>();
   const adding = opts.onAdd !== undefined;
   const multi = adding || opts.onSelectGroup !== undefined;
@@ -340,7 +344,11 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         confirmBtn.disabled = true;
         onAdd(ids)
           .then((failure) => {
-            if (modalInstance === null) return;
+            if (closed) {
+              // Dismissed while the add was in flight: say how it ended.
+              if (failure !== null) showToast(failure, "error");
+              return;
+            }
             if (failure === null) {
               close();
               return;
@@ -391,7 +399,10 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     modalInstance = createModal(
       {
         content,
-        onClose: opts.onClose,
+        onClose: () => {
+          closed = true;
+          opts.onClose();
+        },
         className: "dm-member-picker-modal",
       },
       container,
@@ -400,6 +411,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
   }
 
   function destroy(): void {
+    closed = true;
     selected.clear();
     pickerOwner.destroy();
     if (modalInstance !== null) {

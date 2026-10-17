@@ -151,18 +151,49 @@ describe("GroupDmMemberPanel", () => {
     expect(document.querySelector(".group-member-menu")).toBeNull();
   });
 
+  function startRemove(id: number): void {
+    q(`group-member-actions-${id}`)!.click();
+    document.querySelector<HTMLElement>(`[data-testid="group-remove-${id}"]`)!.click();
+  }
+  const confirmRemove = (): void =>
+    document.querySelector<HTMLElement>('[data-testid="group-remove-confirm-confirm"]')!.click();
+
   it("Remove From Group confirms first, then calls back with the group it was asked for", () => {
     open();
-    q("group-member-actions-2")!.click();
-    document.querySelector<HTMLElement>('[data-testid="group-remove-2"]')!.click();
+    startRemove(2);
     const dialog = document.querySelector('[data-testid="group-remove-confirm"]')!;
     expect(dialog.textContent).toContain("Remove Alice from the group?");
     expect(dialog.textContent).toContain("unless someone adds them back");
     expect(opts.onRemove).not.toHaveBeenCalled();
-    // The view moves on to another group while the dialog is open.
-    panel.update(view({ channelId: 9 }));
-    document.querySelector<HTMLElement>('[data-testid="group-remove-confirm-confirm"]')!.click();
+    confirmRemove();
     expect(opts.onRemove).toHaveBeenCalledWith(5, expect.objectContaining({ id: 2 }));
+  });
+
+  it("sends nothing when the panel moved to another group while the confirm was open", () => {
+    open();
+    startRemove(2);
+    panel.update(view({ channelId: 9 }));
+    confirmRemove();
+    expect(opts.onRemove).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when you stopped being the owner while the confirm was open", () => {
+    open();
+    startRemove(2);
+    panel.update(view({ canManage: false }));
+    confirmRemove();
+    expect(opts.onRemove).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the target left the group while the confirm was open", () => {
+    open();
+    startRemove(2);
+    panel.update(
+      view({ members: [member(1, "Me", { isSelf: true, isOwner: true }), member(3, "Carol")] }),
+    );
+    confirmRemove();
+    expect(opts.onRemove).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="group-remove-confirm"]')).toBeNull();
   });
 
   it("cancelling the confirm does nothing", () => {
@@ -188,5 +219,95 @@ describe("GroupDmMemberPanel", () => {
     open();
     q("group-panel-close")!.click();
     expect(opts.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  describe("structure for assistive tech", () => {
+    it("is a list of listitems; the name button and the actions button are siblings", () => {
+      open();
+      const list = slot.querySelector('[role="list"]')!;
+      const items = [...list.querySelectorAll(':scope > [role="listitem"]')];
+      expect(items).toHaveLength(3);
+      const row = q("group-member-row-2")!;
+      expect(row.getAttribute("role")).toBe("listitem");
+      expect(q("group-member-2")!.tagName).toBe("BUTTON");
+      expect(q("group-member-actions-2")!.parentElement).toBe(row);
+      expect(q("group-member-2")!.contains(q("group-member-actions-2"))).toBe(false);
+      expect(slot.querySelector('[role="button"]')).toBeNull();
+    });
+
+    it("the owner's accessible name says Group owner; others' does not", () => {
+      open();
+      expect(q("group-member-1")!.getAttribute("aria-label")).toBe("Me (you), Group owner");
+      expect(q("group-member-2")!.getAttribute("aria-label")).toBe("Alice");
+    });
+  });
+
+  describe("repainting", () => {
+    it("an unchanged view keeps the same DOM", () => {
+      open();
+      const before = q("group-member-2");
+      panel.update(view());
+      expect(q("group-member-2")).toBe(before);
+    });
+
+    it("an open owner menu and its focus survive a repaint that changes something else", () => {
+      open();
+      q("group-member-actions-2")!.click();
+      expect(menuItems()).toEqual(["Make Group Owner", "Remove From Group"]);
+      panel.update(
+        view({
+          members: [
+            member(1, "Me", { isSelf: true, isOwner: true }),
+            member(2, "Alice", { status: "dnd" }),
+            member(3, "Carol"),
+          ],
+        }),
+      );
+      expect(menuItems()).toEqual(["Make Group Owner", "Remove From Group"]);
+    });
+
+    it("the menu closes when its member leaves", () => {
+      open();
+      q("group-member-actions-2")!.click();
+      panel.update(
+        view({ members: [member(1, "Me", { isSelf: true, isOwner: true }), member(3, "Carol")] }),
+      );
+      expect(menuItems()).toEqual([]);
+    });
+
+    it("keyboard focus stays on the same member's control after a repaint", () => {
+      open();
+      q("group-member-3")!.focus();
+      panel.update(
+        view({
+          members: [
+            member(1, "Me", { isSelf: true, isOwner: true }),
+            member(2, "Alice", { status: "idle" }),
+            member(3, "Carol"),
+          ],
+        }),
+      );
+      expect(document.activeElement).toBe(q("group-member-3"));
+      q("group-member-actions-2")!.focus();
+      panel.update(
+        view({
+          members: [
+            member(1, "Me", { isSelf: true, isOwner: true }),
+            member(2, "Alice"),
+            member(3, "Carol"),
+          ],
+        }),
+      );
+      expect(document.activeElement).toBe(q("group-member-actions-2"));
+    });
+
+    it("focus falls back to the panel only when the member is gone", () => {
+      open();
+      q("group-member-3")!.focus();
+      panel.update(
+        view({ members: [member(1, "Me", { isSelf: true, isOwner: true }), member(2, "Alice")] }),
+      );
+      expect(document.activeElement).toBe(q("group-member-panel"));
+    });
   });
 });

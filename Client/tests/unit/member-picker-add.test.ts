@@ -7,6 +7,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { showToast } from "@lib/toast";
+
+vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
 
 const member = (id: number, username: string) => ({
   id,
@@ -117,5 +120,16 @@ describe("member picker add mode", () => {
     q("dm-picker-create")!.click();
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(onAdd).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failure that arrives after the picker was dismissed is shown as a toast", async () => {
+    let fail!: (text: string | null) => void;
+    const onAdd = vi.fn(() => new Promise<string | null>((r) => (fail = r)));
+    open({ onAdd });
+    q("dm-picker-member-3")!.click();
+    q("dm-picker-create")!.click();
+    document.querySelector<HTMLElement>(".btn-secondary")!.click();
+    fail("This group is full");
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("This group is full", "error"));
   });
 });

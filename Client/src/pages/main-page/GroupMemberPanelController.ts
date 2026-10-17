@@ -12,12 +12,12 @@
  * removes or re-owns members) and from the members those DMs name.
  */
 
-import type { ApiClient } from "@lib/api";
+import { ApiClientError, type ApiClient } from "@lib/api";
 import { loadPref, savePref } from "@lib/preferences";
 import type { Member } from "@stores/members.store";
 import { membersStore } from "@stores/members.store";
 import { getActiveChannel } from "@stores/channels.store";
-import { dmStore } from "@stores/dm.store";
+import { dmStore, type DmChannel } from "@stores/dm.store";
 import { openUserProfilePopup } from "../../features/profiles/openUserProfilePopup";
 import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel";
 import type * as GroupMembers from "../../features/direct-messages/groupMembers";
@@ -49,6 +49,22 @@ export interface GroupMemberPanelController {
 }
 
 const noop = (): void => undefined;
+
+/** What the member panel draws from a DM: membership, names, avatars, owner. */
+function membershipKey(dm: DmChannel | undefined): string {
+  if (dm === undefined) return "";
+  return JSON.stringify([
+    dm.isGroup,
+    dm.name,
+    dm.ownerId ?? null,
+    dm.participants.map((p) => [p.id, p.displayName ?? "", p.avatar, p.status]),
+  ]);
+}
+
+/** The error the server would answer a full group with. */
+function fullError(): ApiClientError {
+  return new ApiClientError(409, "GROUP_DM_FULL", "full");
+}
 
 function activeGroupId(): number | null {
   const active = getActiveChannel();
@@ -121,13 +137,18 @@ export function createGroupMemberPanelController(
     unsub?.();
     boundChannelId = channelId;
     let unsubMembers: () => void = noop;
+    let boundIds = "";
     const bindMembers = (): void => {
-      unsubMembers();
       const ids =
         dmStore
           .getState()
           .channels.find((c) => c.channelId === channelId)
           ?.participants.map((p) => p.id) ?? [];
+      // Re-subscribe only when the people change, not on every DM update.
+      const idsKey = ids.join(",");
+      if (idsKey === boundIds) return;
+      boundIds = idsKey;
+      unsubMembers();
       unsubMembers = membersStore.subscribeSelector(
         (s) =>
           ids
@@ -140,8 +161,10 @@ export function createGroupMemberPanelController(
       );
     };
     bindMembers();
+    // A string key of what the panel shows, so a new last-message preview or
+    // unread count (which replace the channel object) does not fire it.
     const unsubDm = dmStore.subscribeSelector(
-      (s) => s.channels.find((c) => c.channelId === channelId),
+      (s) => membershipKey(s.channels.find((c) => c.channelId === channelId)),
       () => {
         bindMembers();
         refresh();
@@ -160,11 +183,21 @@ export function createGroupMemberPanelController(
     const view = mod.buildGroupPanelView(channelId);
     if (view === null || !view.canAdd) return;
     const exclude = new Set(view.members.map((m) => m.id));
+    // The group may have changed while the picker was open: check again on submit.
+    const submit = async (ids: readonly number[]): Promise<string | null> => {
+      const now = mod.buildGroupPanelView(channelId);
+      if (now === null || !now.canAdd) return mod.groupActionErrorText(undefined, "add");
+      const taken = new Set(now.members.map((m) => m.id));
+      const fresh = ids.filter((id) => !taken.has(id));
+      if (fresh.length === 0) return null;
+      if (fresh.length > now.slotsLeft) return mod.groupActionErrorText(fullError(), "add");
+      return mod.addGroupMembers(opts.api, channelId, fresh);
+    };
     const created = createMemberPickerModal({
       onSelect: () => undefined,
       excludeIds: exclude,
       maxSelect: view.slotsLeft,
-      onAdd: (ids) => mod.addGroupMembers(opts.api, channelId, ids),
+      onAdd: submit,
       onClose: () => {
         picker = null;
       },

@@ -177,3 +177,22 @@
   font-size: var(--font-size-sm);
   margin: 8px 0 0;
 }
+.group-member-panel .gm-head {
+  /* Clear the panel's close button in the top-right corner. */
+  padding-right: 44px;
+  flex-wrap: wrap;
+}
+.group-member-panel .gm-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}

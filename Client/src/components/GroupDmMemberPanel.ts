@@ -104,7 +104,11 @@ interface ConfirmSpec {
 }
 
 /** Ask before an owner action; Cancel is focused first, Escape and the backdrop cancel. */
-function confirmOwnerAction(spec: ConfirmSpec, onConfirm: () => void): void {
+function confirmOwnerAction(
+  spec: ConfirmSpec,
+  stillValid: () => boolean,
+  onConfirm: () => void,
+): void {
   const owner = new Disposable();
   const titleId = `${spec.testId}-title`;
   const header = createElement("div", { class: "modal-header" });
@@ -140,7 +144,9 @@ function confirmOwnerAction(spec: ConfirmSpec, onConfirm: () => void): void {
     "click",
     () => {
       modal.close();
-      onConfirm();
+      // The group may have changed while the dialog was open: send nothing
+      // unless you still own it and the target is still in it.
+      if (stillValid()) onConfirm();
     },
     { signal: owner.signal },
   );
@@ -167,6 +173,15 @@ export function createGroupDmMemberPanel(
       .join(", ");
   }
 
+  /** The confirm's last look before sending: still the owner of the same group, target still in it. */
+  function stillCanManage(channelId: number, targetId: number): boolean {
+    return (
+      view.channelId === channelId &&
+      view.canManage &&
+      view.members.some((m) => m.id === targetId && !m.isSelf)
+    );
+  }
+
   function askRemove(member: GroupMemberView): void {
     const channelId = view.channelId;
     confirmOwnerAction(
@@ -177,6 +192,7 @@ export function createGroupDmMemberPanel(
         danger: true,
         testId: "group-remove-confirm",
       },
+      () => stillCanManage(channelId, member.id),
       () => options.onRemove(channelId, member),
     );
   }
@@ -191,19 +207,68 @@ export function createGroupDmMemberPanel(
         danger: false,
         testId: "group-owner-confirm",
       },
+      () => stillCanManage(channelId, member.id),
       () => options.onMakeOwner(channelId, member),
     );
+  }
+
+  /**
+   * The open owner menu, if any. It belongs to the panel, not to a rebuild of
+   * the list, so a repaint (a new message in the group, a presence change)
+   * leaves it open; it closes when its member leaves or the owner role moves.
+   */
+  let menu: { readonly memberId: number; readonly owner: Disposable } | null = null;
+
+  function closeMenu(): void {
+    const current = menu;
+    menu = null;
+    current?.owner.destroy();
+  }
+
+  function openMemberMenu(member: GroupMemberView, x: number, y: number): void {
+    closeMenu();
+    const owner = new Disposable();
+    const mine = { memberId: member.id, owner };
+    menu = mine;
+    showContextMenu({
+      x,
+      y,
+      signal: owner.signal,
+      className: "group-member-menu",
+      onClosed: () => {
+        if (menu === mine) menu = null;
+      },
+      items: [
+        {
+          label: groupDmText("makeOwner"),
+          testId: `group-make-owner-${member.id}`,
+          onClick: () => askMakeOwner(member),
+        },
+        {
+          label: groupDmText("removeMember"),
+          danger: true,
+          testId: `group-remove-${member.id}`,
+          onClick: () => askRemove(member),
+        },
+      ],
+    });
   }
 
   function buildRow(member: GroupMemberView, rowSignal: AbortSignal): HTMLElement {
     const label = member.isSelf ? groupDmText("self", { name: member.name }) : member.name;
     const row = createElement("div", {
       class: "member-item group-member-item",
+      "data-testid": `group-member-row-${member.id}`,
+      role: "listitem",
+    });
+    // A real button for the name: opens the profile. The actions button below
+    // is its sibling, never nested in it.
+    const main = createElement("button", {
+      type: "button",
+      class: "gm-main",
       "data-testid": `group-member-${member.id}`,
-      role: "button",
-      tabindex: "0",
       "aria-haspopup": "dialog",
-      "aria-label": label,
+      "aria-label": member.isOwner ? `${label}, ${groupDmText("ownerBadge")}` : label,
     });
     const avatar = createAvatarElement(
       { username: member.username, displayName: member.name, avatar: member.avatar },
@@ -217,64 +282,44 @@ export function createGroupDmMemberPanel(
       }),
     );
     const name = createElement("span", { class: "mi-name" }, label);
-    appendChildren(row, avatar, name);
+    appendChildren(main, avatar, name);
     if (member.isOwner) {
       const crown = createElement("span", {
         class: "gm-crown",
         title: groupDmText("ownerBadge"),
-        role: "img",
-        "aria-label": groupDmText("ownerBadge"),
+        "aria-hidden": "true",
         "data-testid": `group-owner-${member.id}`,
       });
       crown.appendChild(createCrownIcon());
-      row.appendChild(crown);
+      main.appendChild(crown);
     }
+    row.appendChild(main);
 
-    const openProfile = (x: number, y: number): void => options.onOpenProfile(member, x, y);
-    row.addEventListener("click", (e) => openProfile(e.clientX, e.clientY), { signal: rowSignal });
-    row.addEventListener(
-      "keydown",
+    main.addEventListener(
+      "click",
       (e) => {
-        if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
-        e.preventDefault();
-        const rect = row.getBoundingClientRect();
-        openProfile(rect.left, rect.top);
+        // A keyboard activation has no pointer position: anchor to the button.
+        if (e.detail === 0) {
+          const rect = main.getBoundingClientRect();
+          options.onOpenProfile(member, rect.left, rect.top);
+        } else {
+          options.onOpenProfile(member, e.clientX, e.clientY);
+        }
       },
       { signal: rowSignal },
     );
 
     // Owner actions: on other members only. Everyone else gets no menu at all.
     if (view.canManage && !member.isSelf) {
-      const openMenu = (x: number, y: number): void => {
-        showContextMenu({
-          x,
-          y,
-          signal: rowSignal,
-          className: "group-member-menu",
-          items: [
-            {
-              label: groupDmText("makeOwner"),
-              testId: `group-make-owner-${member.id}`,
-              onClick: () => askMakeOwner(member),
-            },
-            {
-              label: groupDmText("removeMember"),
-              danger: true,
-              testId: `group-remove-${member.id}`,
-              onClick: () => askRemove(member),
-            },
-          ],
-        });
-      };
       row.addEventListener(
         "contextmenu",
         (e) => {
           e.preventDefault();
-          openMenu(e.clientX, e.clientY);
+          openMemberMenu(member, e.clientX, e.clientY);
         },
         { signal: rowSignal },
       );
-      openMenuOnKeyboard(row, openMenu, rowSignal);
+      openMenuOnKeyboard(main, (x, y) => openMemberMenu(member, x, y), rowSignal);
       const more = createElement("button", {
         type: "button",
         class: "gm-more",
@@ -286,10 +331,9 @@ export function createGroupDmMemberPanel(
       more.appendChild(createIcon("ellipsis", 16));
       more.addEventListener(
         "click",
-        (e) => {
-          e.stopPropagation();
+        () => {
           const rect = more.getBoundingClientRect();
-          openMenu(rect.left, rect.bottom);
+          openMemberMenu(member, rect.left, rect.bottom);
         },
         { signal: rowSignal },
       );
@@ -376,19 +420,45 @@ export function createGroupDmMemberPanel(
     );
   }
 
+  let painted = JSON.stringify(options.view);
+
   function update(next: GroupPanelView): void {
     view = next;
     if (panel === null || body === null) return;
-    const hadFocus = body.contains(document.activeElement);
+    // Nothing the panel draws has changed (a new message or an unread count
+    // replaced the channel object): keep the DOM, the focus and any open menu.
+    const key = JSON.stringify(next);
+    if (key === painted) return;
+    painted = key;
+
+    const active = document.activeElement;
+    const focusedId =
+      active instanceof HTMLElement && body.contains(active) ? active.dataset["testid"] : undefined;
     const fresh = buildBody();
     body.replaceWith(fresh);
     body = fresh;
-    if (hadFocus) panel.focus();
+
+    if (menu !== null) {
+      const id = menu.memberId;
+      if (!next.canManage || !next.members.some((m) => m.id === id && !m.isSelf)) closeMenu();
+    }
+    if (focusedId !== undefined) {
+      // Same control if it survives, else the same member's profile button,
+      // else the panel (the member is gone).
+      const memberId = /(\d+)$/.exec(focusedId)?.[1];
+      const target =
+        fresh.querySelector<HTMLElement>(`[data-testid="${focusedId}"]`) ??
+        (memberId === undefined
+          ? null
+          : fresh.querySelector<HTMLElement>(`[data-testid="group-member-${memberId}"]`));
+      (target ?? panel).focus();
+    }
   }
 
   function destroy(): void {
     open = false;
     disposable.destroy();
+    closeMenu();
     bodyOwner?.destroy();
     bodyOwner = null;
     panel?.remove();

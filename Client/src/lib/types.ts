@@ -580,8 +580,6 @@ export interface ChatEditedPayload {
   readonly mentions_here?: boolean;
   readonly kind?: string;
   readonly call?: CallInfo;
-  /** See GroupEventInfo; present on a group DM system row only. */
-  readonly group_event?: GroupEventInfo;
 }
 
 export interface ChatDeletedPayload {

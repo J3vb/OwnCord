@@ -8,8 +8,14 @@ import { createGroupMemberPanelController } from "../../src/pages/main-page/Grou
 import type { ApiClient } from "../../src/lib/api";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { addDmChannel, dmStore, type DmChannel, type DmUser } from "../../src/stores/dm.store";
-import { membersStore } from "../../src/stores/members.store";
+import {
+  addDmChannel,
+  dmStore,
+  updateDmLastMessagePreview,
+  type DmChannel,
+  type DmUser,
+} from "../../src/stores/dm.store";
+import { membersStore, updatePresence } from "../../src/stores/members.store";
 
 const ME = 1;
 const user = (id: number, username: string): DmUser => ({
@@ -255,5 +261,56 @@ describe("GroupMemberPanelController", () => {
     document.querySelector<HTMLElement>('[data-testid="group-owner-confirm-confirm"]')!.click();
     await vi.waitFor(() => expect(api.setGroupDmOwner).toHaveBeenCalledWith(10, 3));
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  describe("a busy group does not disturb the open panel", () => {
+    async function openOwnerMenu(): Promise<void> {
+      activate(10);
+      ctrl.syncToActive();
+      await settle();
+      slot.querySelector<HTMLElement>('[data-testid="group-member-actions-2"]')!.click();
+      expect(document.querySelector(".group-member-menu")).not.toBeNull();
+    }
+
+    it("a new message keeps the panel DOM, the owner menu and the focus", async () => {
+      await openOwnerMenu();
+      const row = slot.querySelector('[data-testid="group-member-3"]');
+      (row as HTMLElement).focus();
+
+      updateDmLastMessagePreview(10, 99, "hello", "2026-03-15T10:00:00Z");
+      dmStore.flush();
+      membersStore.flush();
+      await Promise.resolve();
+
+      expect(slot.querySelector('[data-testid="group-member-3"]')).toBe(row);
+      expect(document.querySelector(".group-member-menu")).not.toBeNull();
+      expect(document.activeElement).toBe(row);
+    });
+
+    it("a presence change repaints but keeps the menu and the focused control", async () => {
+      await openOwnerMenu();
+      (slot.querySelector('[data-testid="group-member-3"]') as HTMLElement).focus();
+
+      updatePresence(3, "dnd");
+      membersStore.flush();
+      await Promise.resolve();
+
+      expect(document.querySelector(".group-member-menu")).not.toBeNull();
+      expect(document.activeElement).toBe(slot.querySelector('[data-testid="group-member-3"]'));
+    });
+
+    it("Add People re-checks the live group on submit", async () => {
+      activate(10);
+      ctrl.syncToActive();
+      await settle();
+      slot.querySelector<HTMLElement>('[data-testid="group-add-people"]')!.click();
+      // While the picker is open, user 5 is added by someone else.
+      addDmChannel(dm(10, [user(2, "u2"), user(3, "u3"), user(5, "u5")]));
+      dmStore.flush();
+      document.querySelector<HTMLElement>('[data-testid="dm-picker-member-5"]')!.click();
+      document.querySelector<HTMLElement>('[data-testid="dm-picker-member-4"]')!.click();
+      document.querySelector<HTMLElement>('[data-testid="dm-picker-create"]')!.click();
+      await vi.waitFor(() => expect(api.addGroupDmMembers).toHaveBeenCalledWith(10, [4]));
+    });
   });
 });
