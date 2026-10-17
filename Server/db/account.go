@@ -15,9 +15,24 @@ import (
 // This file keeps the pieces it shares with the anonymising deletion it
 // replaced: the last-admin guard and the DM-channel snapshot/close steps.
 
+// underErasureClause excludes accounts whose erasure is queued from a count
+// of administrators: their sessions are gone and they are on their way out.
+const underErasureClause = ` AND id NOT IN (SELECT user_id FROM erasure_jobs WHERE state = 'queued')`
+
 // deleteAccountAdminGuard blocks the erasure when userID is the last
 // remaining admin-class account, returning ErrLastAdmin.
 func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) error {
+	// An erasure already queued for the subject passed this guard when it
+	// was queued (WP 4.1a), and every other account under erasure no longer
+	// counts as an administrator below, so two erasures cannot both pass.
+	var queued int
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM erasure_jobs WHERE user_id = ? AND state = 'queued'`, userID).Scan(&queued); {
+	case err == nil:
+		return nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("DeleteAccount queued erasure: %w", err)
+	}
 	// ── Guard: last admin/owner check ────────────────────────────────────
 	// Resolve admin-class roles by the canonical criteria — the seeded
 	// Owner/Admin role IDs plus any custom role holding the Administrator
@@ -72,7 +87,7 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 			// verbs like %Y and %H that fmt.Sprintf would otherwise try to
 			// parse as its own format directives.
 			query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE role_id IN (%s) AND id != ? AND `,
-				strings.Join(placeholders, ",")) + notBannedClause
+				strings.Join(placeholders, ",")) + notBannedClause + underErasureClause
 			if err := tx.QueryRowContext(ctx, query,
 				args...,
 			).Scan(&adminCount); err != nil {

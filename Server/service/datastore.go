@@ -157,10 +157,8 @@ type Store interface {
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
 	ResetAllUserStatuses(ctx context.Context) error
-	// Account erasure (B4-9): the database half in one transaction, the
-	// file half journaled in erasure_jobs and resumed until every file is
-	// gone; ReferencedStoredFiles serves the storage reconciliation pass.
-	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	// Account erasure (B4-9): the stages of the database half (WP 4.1a).
+	ErasureStageStore
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	FlushAudits(ctx context.Context) error

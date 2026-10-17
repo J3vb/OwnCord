@@ -142,7 +142,21 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 
+// Every class is zero at the shipped chunk size and at one row per chunk, the
+// shape that exercises every cursor and every chunk boundary.
 func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		chunk, window int
+	}{{"chunk 1", 1, 1}, {"default", 500, 5000}} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer db.SetErasureChunkSizesForTest(tc.chunk, tc.window)()
+			eraseEveryInventoryClassIsZero(t)
+		})
+	}
+}
+
+func eraseEveryInventoryClassIsZero(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

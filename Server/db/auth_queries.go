@@ -489,10 +489,7 @@ func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHas
 		ExpiresAt: expiresAt,
 		Unseen:    unseenFlag,
 	})
-	if err != nil {
-		return 0, fmt.Errorf("CreateSession: %w", err)
-	}
-	return res.LastInsertId()
+	return sessionRowID(res, err, userID)
 }
 
 // GetSessionByTokenHash retrieves a session by its hashed token, or nil if

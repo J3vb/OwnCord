@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -40,10 +39,10 @@ const (
 
 // EraseAccount hard-deletes every data class attributable to userID
 // (docs/architecture/data-lifecycle.md, classes 1–20; class 21, the audit
-// history, is B4-10's) in one transaction on the writer connection, with
-// PRAGMA secure_delete on for that transaction so the erased rows' bytes do
-// not survive in freed pages (HP-4 decision 2), and truncates the WAL after
-// commit. The last-admin guard and the OC-0294/OC-0293 mention-count
+// history, is B4-10's) in three stages on the writer connection — lock, drain
+// in chunks, finish (erasure_chunks.go) — each a short transaction with
+// PRAGMA secure_delete on, so the erased rows' bytes do not survive in freed
+// pages (HP-4 decision 2), and truncates the WAL after the last commit. The last-admin guard and the OC-0294/OC-0293 mention-count
 // reversal are kept from the anonymising deletion this replaces.
 //
 // Children are deleted before the users row: messages.user_id,
@@ -114,231 +113,11 @@ func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
 	if err := d.reader.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM users
 		  WHERE role_id IN (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0)
-		    AND `+notBannedClause,
+		    AND `+notBannedClause+underErasureClause,
 		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountAdminClassAccounts: %w", err)
 	}
 	return n, nil
-}
-
-// eraseAccount is EraseAccount and ReplayEraseAccount: guard selects the
-// last-admin guard.
-func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
-	conn, err := d.writer.Conn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount conn: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-
-	// secure_delete is per connection. The writer pool is one connection, so
-	// this is the connection every later write uses too; restore it after.
-	var prevSecureDelete int
-	if err := conn.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&prevSecureDelete); err != nil {
-		return nil, fmt.Errorf("EraseAccount read secure_delete: %w", err)
-	}
-	if _, err := conn.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
-		return nil, fmt.Errorf("EraseAccount secure_delete: %w", err)
-	}
-	defer func() {
-		if _, err := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf(`PRAGMA secure_delete = %d`, prevSecureDelete)); err != nil {
-			slog.Warn("erasure: could not restore secure_delete", "user_id", userID, "err", err)
-		}
-	}()
-
-	job, err := eraseAccountTx(ctx, conn, userID, subjectToken, guard)
-	if err != nil {
-		return nil, err
-	}
-	// B6-11 drill 9's crash seam: the transaction has committed and the
-	// checkpoint below has not run, which is the window a test needs to read
-	// the bytes as a crash leaves them. Nil in production.
-	if d.testEraseCommitHook != nil {
-		d.testEraseCommitHook()
-	}
-	// The audit writer's rule for the subject, now that the transaction has
-	// committed and while this connection is still held: an audit entry
-	// about the subject that a flush inserts after the UPDATE above is
-	// written unlinked (AuditWriter.Unlink), and a refused transaction has
-	// installed nothing.
-	d.unlinkAuditsFor(userID, subjectToken)
-
-	// The WAL still holds the transaction's frames, erased bytes included,
-	// until a checkpoint copies them into the main file and TRUNCATE drops
-	// the log. Best effort: a reader mid-transaction makes the checkpoint
-	// partial and the next one finishes it.
-	//
-	// "The next one" is not left to SQLite (B6-11 task 5). The autocheckpoint
-	// that follows is PASSIVE: it copies frames into the main file and never
-	// truncates the log, so the erased bytes stay in the -wal until something
-	// runs TRUNCATE again — and nothing does. So a checkpoint that comes back
-	// blocked or partial owes one, and CheckpointErasureWAL (start-up, and the
-	// runner tick behind FinishOwedErasureCheckpoint) is what pays it.
-	busy, logFrames, checkpointed, err := walCheckpointTRUNCATE(ctx, conn)
-	switch {
-	case err != nil:
-		// Whatever the error was, the log is very likely still full. Set the
-		// flag rather than work out which failures left frames behind: a
-		// retry that finds nothing to do costs one pragma.
-		d.checkpointOwed.Store(true)
-		slog.Warn("erasure: WAL checkpoint failed", "user_id", userID, "err", err)
-	case !walTruncated(busy, logFrames, checkpointed):
-		d.checkpointOwed.Store(true)
-		slog.Info("erasure: WAL checkpoint incomplete, a later checkpoint finishes it", "user_id", userID, "busy", busy, "log", logFrames, "checkpointed", checkpointed)
-	default:
-		d.checkpointOwed.Store(false)
-	}
-	return job, nil
-}
-
-// walCheckpointTRUNCATE runs one wal_checkpoint(TRUNCATE) on conn and reports
-// SQLite's own triple: whether the checkpoint was blocked, how many frames the
-// log held, and how many of them are in the main database.
-//
-// conn is the caller's because the caller that matters most — eraseAccount —
-// is already holding the sole writer connection. It runs under WithoutCancel:
-// the frames being copied are the erased ones, and a cancelled request context
-// must not be what leaves them in the log.
-func walCheckpointTRUNCATE(ctx context.Context, conn *sql.Conn) (busy, logFrames, checkpointed int, err error) {
-	err = conn.QueryRowContext(context.WithoutCancel(ctx), `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointed)
-	return busy, logFrames, checkpointed, err
-}
-
-// walTruncated reports whether the triple says the log is now empty: the
-// checkpoint was not blocked, and every frame it held is in the main file. A
-// database that is not in WAL mode reports -1 for both counts, which this
-// reads as empty — there is no log to hold anything.
-func walTruncated(busy, logFrames, checkpointed int) bool {
-	return busy == 0 && checkpointed >= logFrames
-}
-
-// CheckpointErasureWAL runs one wal_checkpoint(TRUNCATE) on the writer and
-// reports whether the log is empty afterwards.
-//
-// It is called at start-up, before anything serves, and it is unconditional
-// for the window a crash leaves behind: an erasure whose transaction committed
-// and whose checkpoint never ran. The owed flag cannot cover that window,
-// because it is process-local and died with the process that set it — only a
-// pass that runs on every boot can finish what the last one could not. It also
-// runs over the frames the two marker replays write on their way here.
-//
-// Best effort in the same sense eraseAccount's checkpoint is: a reader
-// mid-transaction can block it again, which is the tick's to finish rather
-// than a reason to refuse a boot. Callers read the bool, not the error, to
-// decide whether anything is still owed.
-func (d *DB) CheckpointErasureWAL(ctx context.Context) (bool, error) {
-	conn, err := d.writer.Conn(ctx)
-	if err != nil {
-		d.checkpointOwed.Store(true)
-		return false, fmt.Errorf("erasure WAL checkpoint: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-	return d.checkpointErasureWAL(ctx, conn)
-}
-
-// FinishOwedErasureCheckpoint is the runner tick's half of the same job: it
-// pays the debt an erasure left behind, and does nothing at all on a tick
-// where there is none — which is every tick but the ones right after a
-// checkpoint came back blocked.
-func (d *DB) FinishOwedErasureCheckpoint(ctx context.Context) (bool, error) {
-	if !d.checkpointOwed.Load() {
-		return false, nil
-	}
-	attempt := d.checkpointAttempts.Add(1)
-	done, err := d.CheckpointErasureWAL(ctx)
-	if err != nil {
-		slog.Warn("erasure: the retried WAL checkpoint failed; the next tick tries again", "attempt", attempt, "err", err)
-		return false, err
-	}
-	if !done {
-		slog.Info("erasure: the retried WAL checkpoint is still blocked; the next tick tries again", "attempt", attempt)
-		return false, nil
-	}
-	slog.Info("erasure: the retried WAL checkpoint finished; the erased frames are out of the log", "attempts", attempt)
-	return true, nil
-}
-
-// checkpointErasureWAL is the shared body of the two above: one TRUNCATE on
-// conn, with the outcome recorded in the owed flag — set when the log is not
-// empty afterwards, cleared when it is.
-func (d *DB) checkpointErasureWAL(ctx context.Context, conn *sql.Conn) (bool, error) {
-	busy, logFrames, checkpointed, err := walCheckpointTRUNCATE(ctx, conn)
-	if err != nil {
-		d.checkpointOwed.Store(true)
-		return false, fmt.Errorf("erasure WAL checkpoint: %w", err)
-	}
-	done := walTruncated(busy, logFrames, checkpointed)
-	d.checkpointOwed.Store(!done)
-	return done, nil
-}
-
-// eraseAccountTx is EraseAccount's transaction; guard selects the
-// last-admin guard (off for a marker replay).
-func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	var username string
-	if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, userID).Scan(&username); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("EraseAccount user %d: %w", userID, ErrNotFound)
-		}
-		return nil, fmt.Errorf("EraseAccount fetch user: %w", err)
-	}
-	if guard {
-		if err := deleteAccountAdminGuard(ctx, tx, userID); err != nil {
-			return nil, err
-		}
-	}
-	dmChannelIDs, err := deleteAccountDMChannels(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	files, err := erasureCollectFiles(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if err := erasureReverseMentionCounts(ctx, tx, userID); err != nil {
-		return nil, err
-	}
-	if err := erasureDeleteLockouts(ctx, tx, userID, username); err != nil {
-		return nil, err
-	}
-	for _, s := range erasureStatements {
-		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {
-			return nil, fmt.Errorf("EraseAccount %s: %w", s.label, err)
-		}
-	}
-	assetFiles, err := erasureReassignAssets(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, assetFiles...)
-	if err := deleteAccountCloseDMChannels(ctx, tx, userID, dmChannelIDs); err != nil {
-		return nil, err
-	}
-	if err := erasureUnlinkPrincipalRows(ctx, tx, userID, subjectToken); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		return nil, fmt.Errorf("EraseAccount users: %w", err)
-	}
-
-	encoded, err := json.Marshal(files)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount encode files: %w", err)
-	}
-	jobID, err := dbgen.New(tx).InsertErasureJob(ctx, dbgen.InsertErasureJobParams{UserID: userID, Files: string(encoded)})
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount job: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("EraseAccount commit: %w", err)
-	}
-	return &ErasureJob{ID: jobID, UserID: userID, State: ErasureStateDBDone, Files: files}, nil
 }
 
 // erasureStatements are the per-class deletes, children before parents, all
@@ -426,8 +205,10 @@ var erasureStatements = []struct {
 	// count, but the link to the erased account is cut. Rows for the subject's
 	// OWN invites are already gone via the invite_id cascade above.
 	{"invite redemptions", `UPDATE invite_redemptions SET user_id = NULL WHERE user_id = ?`},
-	// Replay events naming the subject (HP-4 decision 1).
-	{"events", `DELETE FROM events WHERE ` + EventNamesUserPredicate},
+	// Replay events naming the subject (HP-4 decision 1) are not here: the
+	// drain walks the whole table in key windows, and the finish stage sweeps
+	// only what was written since the lock (eraseSubjectRows), because a JSON
+	// predicate over every row is the slowest statement of the lot.
 }
 
 // EventNamesUserPredicate is the SQL that decides whether a persisted replay

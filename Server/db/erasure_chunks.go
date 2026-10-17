@@ -1,0 +1,293 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
+)
+
+// Chunked account erasure (WP 4.1a). One writer connection serves every
+// request, so a single transaction that deletes a prolific account's history
+// holds every other write behind it for as long as it runs. The erasure is
+// therefore three stages, each its own short writer transaction:
+//
+//  1. Lock (EraseAccountLock): the point of no return. Runs the last-admin
+//     guard, records a 'queued' erasure_jobs row, and revokes the subject's
+//     sessions, API tokens and half-finished logins.
+//  2. Drain (EraseAccountDrain): deletes the bulky per-user tables in chunks
+//     of at most erasureChunk rows, one transaction each. Attachment names
+//     are appended to the queued row in the chunk that unlinks them.
+//  3. Finish (EraseAccountFinish): today's single-transaction body, now over
+//     tables that are already nearly empty, ending with the row going from
+//     'queued' to 'db_done'.
+//
+// Every statement is idempotent, so a stage that was interrupted, or a drain
+// that was never started, is repeated by the next caller. database/sql hands
+// a returned writer connection to its longest-waiting caller, so every other
+// writer gets a turn between two chunks.
+
+// ErasureStateQueued is the state of a job whose lock stage has committed and
+// whose finish stage has not: the account is locked, and part of its data is
+// still there. Migration 037's CHECK already allowed it.
+const ErasureStateQueued = "queued"
+
+// Chunk sizes. Package variables so tests can shrink them; there is no
+// config key, because nothing has measured a better number.
+var (
+	// erasureChunk is the most rows one drain transaction deletes from an
+	// indexed per-user predicate (and the most messages it removes).
+	erasureChunk = 500
+	// erasureScanWindow is the most key values one drain transaction walks
+	// for a table with no index on the user column (reactions, events).
+	erasureScanWindow = 5000
+)
+
+// erasureHook runs the test seam; nil in production.
+func (d *DB) erasureHook(stage string, n int) error {
+	if d.testErasureChunkHook == nil {
+		return nil
+	}
+	return d.testErasureChunkHook(stage, n)
+}
+
+// withErasureConn runs fn on the writer connection with PRAGMA secure_delete
+// ON, so the erased rows' bytes do not survive in freed pages (HP-4 decision
+// 2), and restores the setting afterwards. secure_delete is per connection
+// and the writer pool is one connection, so this is the connection every
+// later write uses too.
+func (d *DB) withErasureConn(ctx context.Context, userID int64, fn func(conn *sql.Conn) error) error {
+	conn, err := d.writer.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("EraseAccount conn: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	var prevSecureDelete int
+	if err := conn.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&prevSecureDelete); err != nil {
+		return fmt.Errorf("EraseAccount read secure_delete: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
+		return fmt.Errorf("EraseAccount secure_delete: %w", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf(`PRAGMA secure_delete = %d`, prevSecureDelete)); err != nil {
+			slog.Warn("erasure: could not restore secure_delete", "user_id", userID, "err", err)
+		}
+	}()
+	return fn(conn)
+}
+
+// eraseAccount is EraseAccount and ReplayEraseAccount: all three stages with
+// no time budget. guard selects the last-admin guard.
+func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
+	if _, err := d.EraseAccountLock(ctx, userID, guard); err != nil {
+		return nil, err
+	}
+	if _, err := d.EraseAccountDrain(ctx, userID, time.Time{}); err != nil {
+		return nil, err
+	}
+	return d.EraseAccountFinish(ctx, userID, subjectToken)
+}
+
+// EraseAccountLock is the lock stage: the last-admin guard (when guard is set
+// and no job is queued for the subject yet), then one transaction that finds
+// or inserts the subject's queued job and deletes their sessions, API tokens
+// and partial-auth challenges. Returns ErrLastAdmin and ErrNotFound as
+// EraseAccount does; either way nothing changed. After it returns without an
+// error the erasure is committed to: the caller finishes it now or leaves it
+// to Resume.
+func (d *DB) EraseAccountLock(ctx context.Context, userID int64, guard bool) (*ErasureJob, error) {
+	var job *ErasureJob
+	err := d.withErasureConn(ctx, userID, func(conn *sql.Conn) error {
+		var err error
+		job, err = eraseLockTx(ctx, conn, userID, guard)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := d.erasureHook("lock", 0); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+func eraseLockTx(ctx context.Context, conn *sql.Conn, userID int64, guard bool) (*ErasureJob, error) {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var one int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("EraseAccount user %d: %w", userID, ErrNotFound)
+		}
+		return nil, fmt.Errorf("EraseAccount fetch user: %w", err)
+	}
+	q := dbgen.New(tx)
+	job := &ErasureJob{UserID: userID, State: ErasureStateQueued, Files: []string{}}
+	queued, err := q.GetQueuedErasureJobForUser(ctx, userID)
+	switch {
+	case err == nil:
+		// A job already queued passed the guard when it was queued.
+		job.ID = queued.ID
+		if err := json.Unmarshal([]byte(queued.Files), &job.Files); err != nil {
+			return nil, fmt.Errorf("EraseAccount decode queued files: %w", err)
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		if guard {
+			if err := deleteAccountAdminGuard(ctx, tx, userID); err != nil {
+				return nil, err
+			}
+		}
+		job.ID, err = q.InsertQueuedErasureJob(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("EraseAccount job: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("EraseAccount queued job: %w", err)
+	}
+	for _, s := range erasureLockStatements {
+		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {
+			return nil, fmt.Errorf("EraseAccount %s: %w", s.label, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("EraseAccount commit lock: %w", err)
+	}
+	return job, nil
+}
+
+// erasureLockStatements revoke every credential the subject holds, so the
+// account stops working at the lock and not at the end of the drain.
+var erasureLockStatements = []struct{ label, query string }{
+	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
+	{"api_tokens", `DELETE FROM api_tokens WHERE user_id = ?`},
+	{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
+}
+
+// drainResult is what one chunk transaction reports.
+type drainResult struct {
+	// done: the step has nothing left to delete.
+	done bool
+	// next: the cursor for the following chunk of a windowed step.
+	next int64
+	// files: stored_as names the chunk unlinked, to be appended to the job.
+	files []string
+}
+
+// drainStep deletes one chunk of one per-user table inside tx. cursor is the
+// previous chunk's next (zero at the start).
+type drainStep struct {
+	label string
+	run   func(ctx context.Context, tx *sql.Tx, userID, cursor int64) (drainResult, error)
+}
+
+// EraseAccountDrain is the drain stage: it deletes the subject's rows from
+// the bulky tables, one chunk per writer transaction, in the order of
+// erasureStatements. It stops early, reporting done=false, once deadline has
+// passed between two chunks; a zero deadline never stops. Safe to call on an
+// account whose drain already ran, and to call again after an error.
+func (d *DB) EraseAccountDrain(ctx context.Context, userID int64, deadline time.Time) (bool, error) {
+	chunks := 0
+	for _, step := range erasureDrainSteps {
+		cursor := int64(0)
+		for {
+			if !deadline.IsZero() && !time.Now().Before(deadline) {
+				return false, nil
+			}
+			var res drainResult
+			err := d.withErasureConn(ctx, userID, func(conn *sql.Conn) error {
+				var err error
+				res, err = drainChunk(ctx, conn, step, userID, cursor)
+				return err
+			})
+			if err != nil {
+				return false, err
+			}
+			chunks++
+			cursor = res.next
+			if err := d.erasureHook("chunk", chunks); err != nil {
+				return false, err
+			}
+			if res.done {
+				break
+			}
+		}
+	}
+	return true, nil
+}
+
+func drainChunk(ctx context.Context, conn *sql.Conn, step drainStep, userID, cursor int64) (drainResult, error) {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return drainResult{}, fmt.Errorf("EraseAccount drain %s begin tx: %w", step.label, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := step.run(ctx, tx, userID, cursor)
+	if err != nil {
+		return drainResult{}, fmt.Errorf("EraseAccount drain %s: %w", step.label, err)
+	}
+	if len(res.files) > 0 {
+		if err := appendErasureJobFiles(ctx, tx, userID, res.files); err != nil {
+			return drainResult{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return drainResult{}, fmt.Errorf("EraseAccount drain %s commit: %w", step.label, err)
+	}
+	return res, nil
+}
+
+// appendErasureJobFiles adds names to the subject's queued job in the same
+// transaction that unlinked them (the appendRetentionRunBatch pattern): the
+// job is the only handle left on the blobs once the attachment rows go.
+func appendErasureJobFiles(ctx context.Context, tx *sql.Tx, userID int64, names []string) error {
+	q := dbgen.New(tx)
+	queued, err := q.GetQueuedErasureJobForUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("EraseAccount drain job for user %d: %w", userID, ErrNotFound)
+		}
+		return fmt.Errorf("EraseAccount drain job: %w", err)
+	}
+	var have []string
+	if err := json.Unmarshal([]byte(queued.Files), &have); err != nil {
+		return fmt.Errorf("EraseAccount drain decode files: %w", err)
+	}
+	encoded, err := json.Marshal(append(have, names...))
+	if err != nil {
+		return fmt.Errorf("EraseAccount drain encode files: %w", err)
+	}
+	n, err := q.AppendErasureJobFiles(ctx, dbgen.AppendErasureJobFilesParams{Files: string(encoded), ID: queued.ID})
+	if err != nil {
+		return fmt.Errorf("EraseAccount drain journal: %w", err)
+	}
+	if n != 1 {
+		return fmt.Errorf("EraseAccount drain journal job %d: %w", queued.ID, ErrNotFound)
+	}
+	return nil
+}
+
+// sessionRowID reads the id of the session row InsertSession wrote. Sign-in
+// is refused while an account deletion is being completed: the insert writes
+// no row for a user with a queued erasure job, reported as ErrAccountErasing.
+func sessionRowID(res sql.Result, err error, userID int64) (int64, error) {
+	if err != nil {
+		return 0, fmt.Errorf("CreateSession: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return 0, fmt.Errorf("CreateSession rows: %w", err)
+	} else if n == 0 {
+		return 0, fmt.Errorf("CreateSession user %d: %w", userID, ErrAccountErasing)
+	}
+	return res.LastInsertId()
+}
