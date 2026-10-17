@@ -138,6 +138,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   when chosen and `native_voice_video_codecs` says the engine has it (Auto and
   a saved VP9/H.265 are VP8); a live codec switch unpublishes without stopping
   the capture (`unpublishTrack(track, false)`).
+  The Linux decode list the announce reports (`features/voice/decodeCaps.ts`) is
+  the native receiver's list from the same probe, narrowed to VP8, H.264 and
+  VP9; a failed or slow probe reports the baseline.
   Keep the state machine platform-blind: a Linux-only behaviour belongs in
   the adapter or the Rust session, never as a branch in
   `joinOrchestration`/`mediaControl`. The interop proof is

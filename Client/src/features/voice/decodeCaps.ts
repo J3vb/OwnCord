@@ -10,6 +10,7 @@
  */
 
 import { isLinuxDesktop } from "./native/platform";
+import { nativeVideoCodecs } from "./native/videoCodecs";
 
 export type VideoCodecName = "vp8" | "h264" | "vp9" | "h265" | "av1";
 
@@ -23,6 +24,11 @@ const E2EE_DECRYPTABLE: ReadonlySet<string> = new Set(["vp8", "h264", "vp9", "h2
 /** Dev-only localStorage key: any value forces this client to report VP8 only,
  *  to exercise the downgrade by hand. */
 export const DEV_VP8_ONLY_KEY = "owncord:dev:videoDecodeVp8Only";
+
+/** The codecs the native engine's decode list may add to the baseline on Linux:
+ *  the ones an interop run proves end to end with E2EE. H.265 and AV1 are never
+ *  reported there. */
+const NATIVE_DECODE_PROVEN: ReadonlySet<string> = new Set(["vp8", "h264", "vp9"]);
 
 let memo: readonly VideoCodecName[] | null = null;
 
@@ -51,11 +57,43 @@ function probeReceiver(): readonly VideoCodecName[] {
   }
 }
 
-/** The codecs this client reports as decodable. Memoised; the Linux native
- *  room reports the fixed baseline until its Rust decoder factory can report. */
-export function localVideoDecode(): readonly VideoCodecName[] {
+/** How long the announce waits for the native probe before it reports the
+ *  baseline for this join (the answer is not memoised then). */
+const NATIVE_PROBE_TIMEOUT_MS = 3000;
+
+async function probeNative(): Promise<readonly VideoCodecName[] | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), NATIVE_PROBE_TIMEOUT_MS);
+    });
+    const codecs = await Promise.race([nativeVideoCodecs(), timeout]);
+    if (codecs === null) return null;
+    const found = new Set<string>(BASELINE_DECODE);
+    for (const name of codecs.decode) {
+      if (NATIVE_DECODE_PROVEN.has(name)) found.add(name);
+    }
+    return [...found] as VideoCodecName[];
+  } catch {
+    return BASELINE_DECODE;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The codecs this client reports as decodable. Memoised. On Linux it asks
+ *  the native engine (its receiver list, narrowed to the proven codecs) and
+ *  reports the baseline when the probe fails or does not answer in time. */
+export async function localVideoDecode(): Promise<readonly VideoCodecName[]> {
   if (devForcesVp8()) return ["vp8"];
-  if (memo === null) memo = isLinuxDesktop() ? BASELINE_DECODE : probeReceiver();
+  if (memo !== null) return memo;
+  if (!isLinuxDesktop()) {
+    memo = probeReceiver();
+    return memo;
+  }
+  const native = await probeNative();
+  if (native === null) return BASELINE_DECODE;
+  memo = native;
   return memo;
 }
 

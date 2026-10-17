@@ -118,6 +118,8 @@ export const messagingText = defineCatalog("messaging", {
   "search.searching": "Searching...",
   "search.empty": "No results found",
   "search.failed": "Search failed",
+  "search.retry": "Retry",
+  "search.spoiler": "Spoiler",
   "search.authorHandle": "@{username}",
   "search.scope.label": "Search scope",
   "search.scope.server": "Whole server",

@@ -114,9 +114,10 @@ export const nativeVoice: NativeVoice = {
     try {
       return await invoke<NativeVoiceVideoCodecs>("native_voice_video_codecs");
     } catch {
-      // A failed probe reads as no H.264: the picker disables it and the
-      // publish stays on VP8.
-      return { h264: false };
+      // A failed probe reads as no H.264 or VP9 and no decode list: the
+      // picker disables them, the publish stays on VP8 and the announce
+      // reports the baseline.
+      return { h264: false, vp9: false, decode: [] };
     }
   },
   startCamera: (session, source, capture) =>
