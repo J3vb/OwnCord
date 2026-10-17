@@ -133,9 +133,9 @@ test.describe("B9-15 moderation notices", () => {
     await expect(page.locator("[role='dialog'][aria-modal='true']:visible")).toHaveCount(0);
     await expect(region.getByRole("button")).toHaveText([
       "Acknowledge",
-      "View in Safety settings",
+      "View in Privacy & Safety settings",
       "Acknowledge",
-      "View in Safety settings",
+      "View in Privacy & Safety settings",
     ]);
     expect(await findUnnamedControls(region)).toEqual([]);
 
@@ -233,7 +233,9 @@ test.describe("B9-15 moderation notices", () => {
     page,
   }) => {
     await start(page);
-    await notice(page, 11).getByRole("button", { name: "View in Safety settings" }).click();
+    await notice(page, 11)
+      .getByRole("button", { name: "View in Privacy & Safety settings" })
+      .click();
     const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).toHaveClass(/open/);
     await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toHaveAttribute(
@@ -273,7 +275,7 @@ test.describe("B9-15 moderation notices", () => {
         date: first.locator(".moderation-notice-date"),
         reason: first.locator(".moderation-notice-reason"),
         ack: first.getByRole("button", { name: "Acknowledge" }),
-        link: first.getByRole("button", { name: "View in Safety settings" }),
+        link: first.getByRole("button", { name: "View in Privacy & Safety settings" }),
       };
       for (const [name, locator] of Object.entries(parts)) {
         const { ratio } = await textContrast(locator);

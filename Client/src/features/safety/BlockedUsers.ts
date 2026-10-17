@@ -61,6 +61,20 @@ export function resolveBlockedUser(userId: number): BlockedIdentity {
 
 let sectionSeq = 0;
 
+/** Unblocks in flight, shared by every open view: closing and reopening the
+ *  tab mid-request must still show that row as busy, not offer a second DELETE. */
+const pending = new Set<number>();
+/** Live views, re-rendered when `pending` changes. */
+const liveViews = new Set<() => void>();
+function renderLiveViews(): void {
+  for (const render of liveViews) render();
+}
+
+/** For tests: forget in-flight unblocks left by an earlier test. */
+export function resetPendingUnblocks(): void {
+  pending.clear();
+}
+
 /** Load the avatar drawer lazily, then build the section. */
 export async function loadBlockedUsersSection(
   signal: AbortSignal,
@@ -100,7 +114,6 @@ export function buildBlockedUsersSection(
   section.append(heading, desc, status, failure, retry, list);
 
   let phase: "loading" | "loaded" | "failed" = "loading";
-  const pending = new Set<number>();
   const rows = new Map<number, { el: HTMLLIElement; sig: string }>();
 
   function buildRow(userId: number, who: BlockedIdentity, busy: boolean): HTMLLIElement {
@@ -130,7 +143,9 @@ export function buildBlockedUsersSection(
         type: "button",
         class: "ac-btn secondary",
         "data-testid": "blocked-user-unblock",
-        "aria-label": t("unblockLabel", { name: who.name }),
+        "aria-label": busy
+          ? t("unblockingLabel", { name: who.name })
+          : t("unblockLabel", { name: who.name }),
       },
       busy ? t("unblocking") : t("unblock"),
     );
@@ -175,31 +190,39 @@ export function buildBlockedUsersSection(
   function unblock(userId: number, name: string): void {
     if (pending.has(userId)) return;
     pending.add(userId);
-    render();
+    renderLiveViews();
     // Not tied to the tab's signal: closing Settings must not cancel it.
     api.unblockUser(userId).then(
       () => {
+        // The store write re-renders every live view; the row leaves with it.
+        const hadFocus = list.contains(document.activeElement);
+        const rowsBefore = [...list.children];
+        const at = rowsBefore.findIndex((el) => el === rows.get(userId)?.el);
         pending.delete(userId);
         setUserBlockedByMe(userId, false);
+        blocksStore.flush();
         showToast(shellText("members.unblocked", { username: name }), "success");
-        if (signal.aborted) return;
-        const hadFocus = list.contains(document.activeElement);
-        render();
-        if (hadFocus && !list.contains(document.activeElement)) heading.focus();
+        renderLiveViews();
+        if (signal.aborted || !hadFocus || list.contains(document.activeElement)) return;
+        // The focused row is gone: land on the next Unblock, else the previous,
+        // else the heading.
+        const target = list.children[Math.min(at, list.children.length - 1)];
+        const next = target?.querySelector<HTMLElement>("button");
+        (next ?? heading).focus();
       },
       (err: unknown) => {
         pending.delete(userId);
         const fallback = shellText("members.unblockFailed");
         showToast(errorText(err, fallback) || fallback, "error");
         // The row stays and its button comes back.
-        render();
+        renderLiveViews();
       },
     );
   }
 
   function load(): void {
     phase = "loading";
-    retry.hidden = true;
+    // Retry stays put while loading so a focused button keeps focus.
     retry.setAttribute("aria-disabled", "true");
     section.setAttribute("aria-busy", "true");
     setText(failure, "");
@@ -242,7 +265,15 @@ export function buildBlockedUsersSection(
   // A tab closed before this module loaded gets nothing: no subscription, no GET.
   if (signal.aborted) return section;
   const unsubscribe = blocksStore.subscribeSelector((s) => s.blockedByMe, render);
-  signal.addEventListener("abort", unsubscribe, { once: true });
+  liveViews.add(render);
+  signal.addEventListener(
+    "abort",
+    () => {
+      unsubscribe();
+      liveViews.delete(render);
+    },
+    { once: true },
+  );
   load();
   return section;
 }

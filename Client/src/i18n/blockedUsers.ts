@@ -17,5 +17,5 @@ export const blockedUsersText = defineCatalog("blockedUsers", {
   unblocking: "Unblocking…",
   unblockLabel: "Unblock {name}",
   unknownUser: "Unknown user",
-  chunkFailed: "Couldn't load your blocked users. Close Settings and try again.",
+  unblockingLabel: "Unblocking {name}",
 });

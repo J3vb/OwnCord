@@ -1,6 +1,5 @@
 import type { ApiClient } from "@lib/api";
 import { createElement } from "@lib/dom";
-import { blockedUsersText } from "../../i18n/blockedUsers";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { buildSafetyTab } from "../safety/Notices";
 
@@ -27,7 +26,7 @@ export function buildSafetyPane(
             createElement(
               "div",
               { class: "form-error", role: "alert" },
-              blockedUsersText("chunkFailed"),
+              reportEntryText("blockedLoadFailed"),
             ),
           );
         }

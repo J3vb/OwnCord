@@ -12,7 +12,11 @@ import { blocksStore, setUserBlockedByMe } from "@stores/blocks.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { membersStore, type Member } from "@stores/members.store";
 import { createAvatarElement } from "@components/message-list/avatar";
-import { buildBlockedUsersSection, type BlockedUsersApi } from "./BlockedUsers";
+import {
+  buildBlockedUsersSection,
+  resetPendingUnblocks,
+  type BlockedUsersApi,
+} from "./BlockedUsers";
 
 interface Deferred<T> {
   resolve: (v: T) => void;
@@ -77,6 +81,7 @@ const unblockBtn = (r: HTMLElement): HTMLButtonElement =>
   r.querySelector<HTMLButtonElement>("[data-testid='blocked-user-unblock']")!;
 
 beforeEach(() => {
+  resetPendingUnblocks();
   gets = [];
   deletes = [];
   tab = new AbortController();
@@ -129,12 +134,18 @@ describe("blocked users list", () => {
     expect(alertText(s)).toBe("Couldn't load your blocked users.");
     expect(retryBtn(s).hidden).toBe(false);
     expect(status(s)).toBe("");
+    retryBtn(s).focus();
     retryBtn(s).click();
     expect(gets).toHaveLength(2);
     expect(alertText(s)).toBe("");
-    expect(retryBtn(s).hidden).toBe(true);
+    // Retry stays (disabled) while loading, so focus is not dropped to <body>.
+    expect(retryBtn(s).hidden).toBe(false);
+    expect(retryBtn(s).getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(retryBtn(s));
     gets[1]!.resolve({ blocked_user_ids: [5] });
     await flush();
+    expect(retryBtn(s).hidden).toBe(true);
+    expect(document.activeElement).toBe(s.querySelector("h3"));
     expect(rowsOf(s)).toHaveLength(1);
     expect(alertText(s)).toBe("");
   });
@@ -149,6 +160,7 @@ describe("blocked users list", () => {
     const pendingBtn = unblockBtn(rowsOf(s)[0]!);
     expect(pendingBtn.textContent).toBe("Unblocking…");
     expect(pendingBtn.getAttribute("aria-disabled")).toBe("true");
+    expect(pendingBtn.getAttribute("aria-label")).toBe("Unblocking carol");
     pendingBtn.click();
     expect(deletes).toHaveLength(1);
     deletes[0]!.resolve();
@@ -240,7 +252,69 @@ describe("blocked users list", () => {
   });
 });
 
+async function mountWith(...ids: number[]): Promise<HTMLElement> {
+  setRoster(...ids.map((id) => member(id, `u${id}`)));
+  const s = mount();
+  gets[0]!.resolve({ blocked_user_ids: ids });
+  await flush();
+  return s;
+}
+const finish = async (i: number): Promise<void> => {
+  deletes[i]!.resolve();
+  await flush();
+};
+
+describe("focus after an unblock", () => {
+  it("moves focus to the next row's Unblock", async () => {
+    const s = await mountWith(1, 2, 3);
+    unblockBtn(rowsOf(s)[0]!).focus();
+    unblockBtn(rowsOf(s)[0]!).click();
+    await finish(0);
+    expect(document.activeElement).toBe(unblockBtn(rowsOf(s)[0]!));
+    expect(rowsOf(s)[0]!.dataset["userId"]).toBe("2");
+  });
+
+  it("moves focus to the previous row when the last one goes", async () => {
+    const s = await mountWith(1, 2);
+    unblockBtn(rowsOf(s)[1]!).focus();
+    unblockBtn(rowsOf(s)[1]!).click();
+    await finish(0);
+    expect(document.activeElement).toBe(unblockBtn(rowsOf(s)[0]!));
+  });
+
+  it("moves focus to the heading when the list empties", async () => {
+    const s = await mountWith(1);
+    unblockBtn(rowsOf(s)[0]!).focus();
+    unblockBtn(rowsOf(s)[0]!).click();
+    await finish(0);
+    expect(document.activeElement).toBe(s.querySelector("h3"));
+  });
+});
+
 describe("teardown and races", () => {
+  it("shows a reopened view's row as busy until the shared DELETE settles, with one toast", async () => {
+    setRoster(member(3, "carol"));
+    const first = mount();
+    gets[0]!.resolve({ blocked_user_ids: [3] });
+    await flush();
+    unblockBtn(rowsOf(first)[0]!).click();
+    tab.abort();
+    first.remove();
+    tab = new AbortController();
+    const second = mount();
+    gets[1]!.resolve({ blocked_user_ids: [3] });
+    await flush();
+    const busy = unblockBtn(rowsOf(second)[0]!);
+    expect(busy.textContent).toBe("Unblocking…");
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+    busy.click();
+    expect(deletes).toHaveLength(1);
+    deletes[0]!.resolve();
+    await flush();
+    expect(rowsOf(second)).toHaveLength(0);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts the GET with the tab and ignores its late reply", async () => {
     const s = mount();
     tab.abort();
