@@ -279,7 +279,8 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 // interleave with the recheck and delete (ARCH-014). It reports whether the
 // row was removed; the caller does the SFU removal after the lock is released.
 func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64, joinedAt string) (removed bool) {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 
 	// Re-check the live client immediately before deleting (OC-0017).
 	// voice_join.go commits the row before it calls c.setVoiceState
@@ -307,7 +308,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	// Channel-conditional delete: only removes the row if it still points
 	// at the channel we snapshotted. If the user rejoined or moved between
 	// the snapshot and now, the delete is a no-op and we skip the broadcast.
-	deleted, err := h.voice.LeaveIfMatch(ctx, userID, channelID, joinedAt)
+	deleted, err := txn.deleteRow(ctx, channelID, joinedAt)
 	if err != nil {
 		slog.Error("sweepStaleVoiceStates: LeaveIfMatch failed",
 			"err", err, "user_id", userID, "channel_id", channelID)
@@ -395,8 +396,11 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// being in THIS channel: a user who moved to another voice channel
 	// between the snapshot above and this loop must not be clobbered.
 	for _, vs := range states {
-		unlockVoice := h.voiceLock(vs.UserID)
-		if _, err := h.voice.LeaveIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
+		txn := h.begin(vs.UserID)
+		// The channel is going away: whatever token a parked entry holds in
+		// it dies with the row.
+		txn.dropParked(channelID)
+		if _, err := txn.deleteRow(ctx, channelID, vs.JoinedAt); err != nil {
 			slog.Error("CleanupVoiceForChannel LeaveIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
@@ -406,10 +410,8 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		// unconditional clear leaves a window where a concurrent voice_join
 		// to another channel commits in between and gets silently wiped
 		// along with its own voice-topic subscription (OC-0050). Mirrors
-		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn /
-		// clearVoiceStateIfMatch and the LiveKit webhook's inline
-		// compare-and-clear.
-		h.voiceGrace.takeJoin(vs.UserID, channelID, "")
+		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn and the LiveKit
+		// webhook's clearExact.
 		h.mu.RLock()
 		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()
@@ -417,11 +419,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 			if cleanupVoiceRaceClearHook != nil {
 				cleanupVoiceRaceClearHook(client)
 			}
-			if _, cleared := client.clearVoiceStateIfMatch(channelID); cleared {
-				h.pubsub.Unsubscribe(client, VoiceTopic(channelID))
-			}
+			txn.clearIfChannel(client, channelID)
 		}
-		unlockVoice()
+		txn.end()
 
 		// Remove from LiveKit (best-effort), off this goroutine: the caller
 		// is the admin archive/delete request, and LiveKit can take seconds

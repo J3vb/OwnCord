@@ -436,7 +436,7 @@ func (h *Hub) reconnectRegister(
 ) (events [][]byte, ok, refused bool) {
 	// RT-8: drop a parked grace entry whose row is gone (a DB read, before
 	// h.seqMu); the voice lock spans that and registerNow.
-	defer h.voiceLock(c.userID)()
+	defer h.begin(c.userID).end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
 	h.seqMu.Lock()
 	start := time.Now()

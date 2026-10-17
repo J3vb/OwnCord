@@ -256,19 +256,20 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 
 	// Clean up voice state if the user disconnected from LiveKit
 	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	h.mu.RLock()
 	c, exists := h.clients[userID]
 	h.mu.RUnlock()
 
 	if exists {
-		h.webhookLeftCleanupClient(ctx, c, userID, channelID, joinToken)
+		h.webhookLeftCleanupClient(ctx, txn, c, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
-		// A grace-window entry parking this exact join dies with its row.
-		h.voiceGrace.takeJoin(userID, channelID, joinToken)
-		deleted, dbErr := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken)
+		// A grace-window entry parking this exact join dies with its row
+		// (deleteRow drops it first).
+		deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)
@@ -282,26 +283,21 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 // handleWebhookParticipantLeft: it compare-and-clears the client's voice
 // fields for this exact join instance, then either finishes the leave or, when
 // the client has already moved on, clears the stale DB row.
-func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, channelID int64, joinToken string) {
-	// Atomic compare-and-clear under the slot's voiceMu, replacing the
-	// previous read-then-read-then-clear: two independent unlocked
-	// getVoiceState snapshots followed by an unconditional clearVoiceState
-	// is not a guard at all — no lock spans the second read and the clear,
-	// so a voice_join committed on the readPump goroutine in between (a
-	// channel switch, or a same-channel rejoin with a fresh token) is
-	// wiped out from under the new session, dropping its VoiceTopic
-	// subscription along with it. clearVoiceStateIfMatch only compares the
-	// channel, not the token, so it would still be fooled by a same-channel
-	// rejoin — this compares both, in one voiceMu critical section
-	// (voice_registry.go).
-	matched := c.clearExactKeepCompleted(channelID, joinToken)
+func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Client, userID, channelID int64, joinToken string) {
+	// Atomic compare-and-clear of this exact join instance (channel AND
+	// token, one slot critical section): a voice_join committed on the
+	// readPump goroutine in between (a channel switch, or a same-channel
+	// rejoin with a fresh token) must not be wiped out from under the new
+	// session, dropping its VoiceTopic subscription along with it. Like every
+	// clear it resets the completed flag and unsubscribes.
+	_, matched := txn.clearExact(c, channelID, joinToken)
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, c, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client has voiceChID=0 or moved to a different channel (e.g.
 		// after F5 reload), or this webhook is for an older join instance.
-		deleted, dbErr := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken)
+		deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)
@@ -315,11 +311,9 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, c
 
 // webhookLeftFinishLeave is the tear-down stage of webhookLeftCleanupClient,
 // reached once the client's voice fields matched this join instance and were
-// cleared: drop the voice subscription, clear the DB row, move the E2EE key
-// holder on, and broadcast the leave.
+// cleared (and unsubscribed from the voice topic): clear the DB row, move the
+// E2EE key holder on, and broadcast the leave.
 func (h *Hub) webhookLeftFinishLeave(ctx context.Context, c *Client, userID, channelID int64, joinToken string) {
-	h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
-
 	if h.voice != nil {
 		if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",

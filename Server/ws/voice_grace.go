@@ -139,11 +139,11 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 // failed/half join, a kick that refuses reconnection) leaves immediately.
 func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason string) {
 	e2ee := c.getE2EEAnnounce()
-	chID, joinToken, completed := c.clearVoiceState()
+	snap := h.heldTxn(c.userID).clear(c)
+	chID, joinToken, completed := snap.chID, snap.joinToken, snap.completed
 	if chID == 0 {
 		return
 	}
-	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
 	if !completed || voiceGraceWindow <= 0 || c.isTerminallyKicked() {
 		h.finishVoiceLeave(ctx, c, chID, joinToken, reason)
 		return
@@ -166,7 +166,8 @@ func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason stri
 // removes the entry before the teardown so the slow finishVoiceLeave never
 // runs with this lock held and a superseding reconnect cannot race it.
 func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	if !h.voiceGrace.takeIfSame(userID, entry) {
 		return
 	}
@@ -175,7 +176,7 @@ func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 
 // leaveParkedVoice runs the full voice teardown for a parked membership
 // already taken from the grace window, reporting false for a nil entry.
-// The caller holds h.voiceLock for the entry's user.
+// The caller holds Hub.begin for the entry's user.
 func (h *Hub) leaveParkedVoice(ctx context.Context, e *voiceGraceEntry, reason string) bool {
 	if e == nil {
 		return false
@@ -215,7 +216,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 // (c.getVoiceChID() != 0) — a reconnect that beat the drop teardown. A fresh
 // connect (lastSeq == 0) is a deliberate reload rather than a blip, so it
 // discards any parked entry instead.
-// The caller holds h.voiceLock(c.userID).
+// The caller holds Hub.begin(c.userID).
 func (h *Hub) inheritParkedVoice(c *Client) int64 {
 	if c.lastSeq == 0 {
 		h.voiceGrace.take(c.userID)

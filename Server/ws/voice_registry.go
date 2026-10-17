@@ -8,11 +8,12 @@ package ws
 // by voiceSlot (embedded in Client). The durable half is the voice_states row,
 // written through VoiceStore.
 //
-// 5.3a moves the state here without changing who writes it or which lock
+// 5.3a moved the state here without changing who writes it or which lock
 // guards it: the fields keep their names, so every existing reader and test
 // reaches them unchanged through Go's field promotion, and the old Client
-// accessors stay as one-line delegators. Routing every write through a
-// lock handle is 5.3b; whole-slot hand-off and shutdown are 5.3c.
+// accessors stay as one-line delegators. 5.3b (voice_registry_txn.go) routes
+// every membership write through the lock handle Hub.begin returns; whole-slot
+// hand-off and shutdown are 5.3c.
 //
 // Lock order (outermost first) — unchanged by the move; voiceSlot.voiceMu is
 // the old Client.voiceMu:
@@ -22,9 +23,12 @@ package ws
 //
 // voiceMember (WP 1D-10) serializes every change to a user's voice
 // membership: the voice_states row, the slot's channel and join token, and
-// the grace entry. Each top-level path takes it once through Hub.voiceLock;
-// the helpers they call never do. It may span DB I/O and broadcasts but never
-// a LiveKit RPC: SFU removals are scoped by identity and join token, so they
+// the grace entry. (The one exception: the leave retry goroutine's deleteRow
+// drops only its own exact (channel, token) grace entry after the lock is
+// released, which is a no-op because the first attempt already took it.) Each
+// top-level path takes it once through Hub.begin (WP
+// 5.3b, voice_registry_txn.go); the helpers they call never do. It may span
+// DB I/O and broadcasts but never a LiveKit RPC: SFU removals are scoped by identity and join token, so they
 // run after unlock or on removeLiveKitParticipantAsync. A goroutine holds at
 // most one user's voiceMember lock and never takes it while holding any lock
 // to its right. The hub dispatch goroutine never takes it. A path holding
@@ -38,13 +42,8 @@ import "github.com/J3vb/OwnCord/Server/syncutil"
 // membership lock and the reconnect grace window. Both zero values are ready
 // to use, so a Hub literal in a test needs no constructor.
 type voiceRegistry struct {
-	voiceMember userLocks       // per-user voice membership lock (Hub.voiceLock)
+	voiceMember userLocks       // per-user voice membership lock (Hub.begin)
 	voiceGrace  voiceGraceState // RT-8 grace window (voice_grace.go)
-}
-
-// lock takes userID's voice membership lock and returns its release.
-func (r *voiceRegistry) lock(userID int64) func() {
-	return r.voiceMember.lock(userID)
 }
 
 // voiceSlot is one connection's voice membership. Every field is guarded by
@@ -108,6 +107,19 @@ func (s *voiceSlot) setState(chID int64, joinToken string) {
 	s.voiceJoinCompleted = false
 }
 
+// adoptJoinToken sets the join token only when the slot is in a channel and
+// holds no token yet, reporting whether it did. Nothing else changes, the
+// completed flag included.
+func (s *voiceSlot) adoptJoinToken(joinToken string) bool {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	if s.voiceChID == 0 || s.voiceJoinToken != "" {
+		return false
+	}
+	s.voiceJoinToken = joinToken
+	return true
+}
+
 // markCompletedIfMatch records that the join for (chID, joinToken) has
 // passed voiceJoinComplete's supersession guard, but only if the slot is
 // still in exactly that join instance — re-checked under this same lock
@@ -160,37 +172,21 @@ func (s *voiceSlot) clearIfChannel(chID int64) (string, bool) {
 }
 
 // clearExact clears the membership only while it still names this exact join
-// instance (channel AND token), reporting whether it did. Token-scoped unlike
-// clearIfChannel: a same-channel rejoin has a new token, and its membership
-// must survive. The reconciler's reap uses it (voice_reconcile.go).
-func (s *voiceSlot) clearExact(chID int64, joinToken string) bool {
+// instance (channel AND token), reporting whether that join had completed and
+// whether it cleared. Token-scoped unlike clearIfChannel: a same-channel
+// rejoin has a new token, and its membership must survive.
+func (s *voiceSlot) clearExact(chID int64, joinToken string) (completed, ok bool) {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	if s.voiceChID != chID || s.voiceJoinToken != joinToken {
-		return false
+		return false, false
 	}
+	completed = s.voiceJoinCompleted
 	s.voiceChID = 0
 	s.voiceJoinToken = ""
 	s.voiceJoinCompleted = false
 	s.e2ee = e2eeAnnounce{}
-	return true
-}
-
-// clearExactKeepCompleted is the LiveKit participant_left webhook's
-// compare-and-clear (livekit_webhook.go): like clearExact, but an empty
-// joinToken never matches and voiceJoinCompleted is left as it was. Moved
-// verbatim from the webhook in 5.3a; 5.3b folds it into clearExact, which
-// resets the completed flag too.
-func (s *voiceSlot) clearExactKeepCompleted(chID int64, joinToken string) bool {
-	s.voiceMu.Lock()
-	defer s.voiceMu.Unlock()
-	if s.voiceChID != chID || s.voiceJoinToken == "" || s.voiceJoinToken != joinToken {
-		return false
-	}
-	s.voiceChID = 0
-	s.voiceJoinToken = ""
-	s.e2ee = e2eeAnnounce{}
-	return true
+	return completed, true
 }
 
 // stashModFlags stashes a moderator-imposed mute/deafen before a server-driven

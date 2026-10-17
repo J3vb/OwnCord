@@ -259,7 +259,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// replacement connections. The voice lock spans snapshot to park, so
 		// a reconnect's transfer (inheritParkedVoice) runs wholly before or
 		// after this teardown (WP 1D-10).
-		unlockVoice := hub.voiceLock(c.userID)
+		txn := hub.begin(c.userID)
 		voiceChID := c.getVoiceChID()
 		replaced := hub.unregisterNow(c)
 		// Clean up voice state only when this was the user's final
@@ -276,7 +276,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		if c.user != nil && voiceChID != 0 && !replaced {
 			hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
 		}
-		unlockVoice()
+		txn.end()
 		if c.user != nil {
 			c.mu.Lock()
 			received := c.msgsReceived
