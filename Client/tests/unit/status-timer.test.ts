@@ -1,0 +1,262 @@
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import type { UserStatus } from "@lib/types";
+import { authStore } from "@stores/auth.store";
+import { membersStore, updatePresence } from "@stores/members.store";
+import { startStatusTimerWatcher } from "@lib/statusTimer";
+import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/statusChoices";
+import {
+  clearStatusTimer,
+  loadStatusTimer,
+  loadUserStatus,
+  saveStatusTimer,
+  saveUserStatus,
+} from "@lib/userStatus";
+import { savePref } from "@lib/preferences";
+
+const HOUR = 60 * 60_000;
+const START = new Date(2026, 9, 17, 10, 0, 0).getTime();
+
+function setUser(status?: "online" | "idle" | "dnd" | "invisible"): void {
+  authStore.setState(() => ({
+    token: "tok",
+    user: { id: 7, username: "alice", avatar: null, role: "member", status },
+    serverName: "S",
+    motd: null,
+    isAuthenticated: true,
+  }));
+  authStore.flush();
+}
+
+function setOwnPresence(status: "online" | "idle" | "dnd" | "invisible" | "offline"): void {
+  updatePresence(7, status);
+  membersStore.flush();
+}
+
+/** A timed status as the card's duration choice leaves it. */
+function pickTimed(status: "idle" | "dnd" | "invisible", ms: number): void {
+  saveUserStatus(status);
+  saveStatusTimer(status, Date.now() + ms);
+}
+
+describe("status timer watcher", () => {
+  let onRevert: Mock<(status: UserStatus) => void>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    onRevert = vi.fn<(status: UserStatus) => void>();
+    setUser();
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
+    }));
+    membersStore.flush();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    membersStore.setState((p) => ({ ...p, members: new Map() }));
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+  });
+
+  it("reverts to Online through the same path when the duration ends", () => {
+    pickTimed("dnd", HOUR);
+    setOwnPresence("dnd");
+    const w = startStatusTimerWatcher({ onRevert });
+
+    vi.advanceTimersByTime(HOUR - 1000);
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("dnd");
+
+    vi.advanceTimersByTime(1000);
+    expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadStatusTimer()).toBeNull();
+    w.destroy();
+  });
+
+  it("a timer set after the watcher started is picked up", () => {
+    const w = startStatusTimerWatcher({ onRevert });
+    pickTimed("idle", 15 * 60_000);
+    vi.advanceTimersByTime(15 * 60_000);
+    expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+    w.destroy();
+  });
+
+  it("a manual status change cancels the timer", () => {
+    pickTimed("dnd", HOUR);
+    const w = startStatusTimerWatcher({ onRevert });
+    vi.advanceTimersByTime(HOUR / 2);
+
+    saveUserStatus("idle"); // picked by hand, no timer
+    expect(loadStatusTimer()).toBeNull();
+    vi.advanceTimersByTime(HOUR * 2);
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("idle");
+    w.destroy();
+  });
+
+  it("a new timer replaces the old one, which never fires", () => {
+    pickTimed("dnd", HOUR);
+    const w = startStatusTimerWatcher({ onRevert });
+    vi.advanceTimersByTime(HOUR / 2);
+    pickTimed("dnd", 8 * HOUR);
+
+    vi.advanceTimersByTime(HOUR); // the first timer's end has passed
+    expect(onRevert).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(8 * HOUR);
+    expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+    w.destroy();
+  });
+
+  it("a stored timer that ended while the app was closed reverts on startup", () => {
+    pickTimed("invisible", HOUR);
+    vi.setSystemTime(START + 2 * HOUR);
+    expect(loadUserStatus()).toBe("invisible");
+
+    const w = startStatusTimerWatcher({ onRevert });
+    expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadStatusTimer()).toBeNull();
+    w.destroy();
+  });
+
+  it("a restart inside the window keeps the timer and ends it on time", () => {
+    pickTimed("dnd", HOUR);
+    vi.setSystemTime(START + HOUR / 2);
+    const w = startStatusTimerWatcher({ onRevert });
+    expect(onRevert).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(HOUR / 2);
+    expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+    w.destroy();
+  });
+
+  it("a leftover timer for a status that is no longer the saved one is dropped", () => {
+    saveStatusTimer("dnd", START + HOUR); // saved status is still online
+    const w = startStatusTimerWatcher({ onRevert });
+    expect(loadStatusTimer()).toBeNull();
+    vi.advanceTimersByTime(2 * HOUR);
+    expect(onRevert).not.toHaveBeenCalled();
+    w.destroy();
+  });
+
+  it("destroying the watcher stops the pending timer but keeps the stored one", () => {
+    pickTimed("dnd", HOUR);
+    const w = startStatusTimerWatcher({ onRevert });
+    w.destroy();
+    vi.advanceTimersByTime(2 * HOUR);
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(loadStatusTimer()).not.toBeNull();
+  });
+
+  // Edge case (a): another device (or a reconnect) hands us a different status
+  // while the timer is running.
+  describe("a server-pushed status that differs from the timed one", () => {
+    it("cancels the timer when another device changes the status (presence)", () => {
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      const w = startStatusTimerWatcher({ onRevert });
+      vi.advanceTimersByTime(HOUR / 4);
+
+      setOwnPresence("idle");
+      expect(loadStatusTimer()).toBeNull();
+      vi.advanceTimersByTime(2 * HOUR);
+      expect(onRevert).not.toHaveBeenCalled();
+      w.destroy();
+    });
+
+    it("cancels the timer when a reconnect's auth_ok carries another status", () => {
+      setUser("dnd");
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      vi.advanceTimersByTime(HOUR / 4);
+
+      setUser("online"); // the reconnect: the server's own status is Online
+      expect(loadStatusTimer()).toBeNull();
+      vi.advanceTimersByTime(2 * HOUR);
+      expect(onRevert).not.toHaveBeenCalled();
+      w.destroy();
+    });
+
+    it("keeps the timer when the server echoes the timed status back", () => {
+      setUser("online");
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("dnd"); // our own optimistic apply and the echo
+      setUser("dnd");
+      expect(loadStatusTimer()).not.toBeNull();
+      vi.advanceTimersByTime(HOUR);
+      expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+      w.destroy();
+    });
+
+    it("does not read Offline (an invisible user, or a dropped socket) as a different choice", () => {
+      pickTimed("invisible", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("offline");
+      expect(loadStatusTimer()).not.toBeNull();
+      vi.advanceTimersByTime(HOUR);
+      expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+      w.destroy();
+    });
+
+    it("the firing never overrides a newer status the watcher was not told about", () => {
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      // A newer choice written straight to storage (another window of an
+      // older client), bypassing saveUserStatus and its timer cleanup.
+      savePref("userStatus", "idle");
+      vi.advanceTimersByTime(2 * HOUR);
+      expect(onRevert).not.toHaveBeenCalled();
+      expect(loadUserStatus()).toBe("idle");
+      w.destroy();
+    });
+  });
+
+  it("clearStatusTimer on nothing stores nothing", () => {
+    const events = vi.fn();
+    window.addEventListener("owncord:pref-change", events);
+    clearStatusTimer();
+    window.removeEventListener("owncord:pref-change", events);
+    expect(events).not.toHaveBeenCalled();
+  });
+});
+
+describe("custom status Clear after", () => {
+  const at = (h: number, m = 0, s = 0): Date => new Date(2026, 9, 17, h, m, s);
+
+  it.each<[ClearAfterId, number | undefined]>([
+    ["30m", 1800],
+    ["1h", 3600],
+    ["4h", 14400],
+    ["never", undefined],
+  ])("%s sends %s", (id, seconds) => {
+    expect(clearAfterSeconds(id, at(10))).toBe(seconds);
+  });
+
+  it("Today is the seconds to local midnight", () => {
+    expect(clearAfterSeconds("today", at(10))).toBe(14 * 3600);
+    expect(clearAfterSeconds("today", at(23, 0, 0))).toBe(3600);
+  });
+
+  // Edge case (b): chosen half a minute before midnight, the server would
+  // refuse a 30-second expiry, so it is raised to the 60-second minimum.
+  it("Today chosen at 23:59:30 still sends at least 60 seconds", () => {
+    expect(clearAfterSeconds("today", at(23, 59, 30))).toBe(60);
+    expect(clearAfterSeconds("today", at(23, 59, 59))).toBe(60);
+    expect(clearAfterSeconds("today", at(23, 58, 0))).toBe(120);
+  });
+
+  it("clamps into the server's 60..604800 range and whole seconds", () => {
+    expect(clampExpiresIn(5)).toBe(60);
+    expect(clampExpiresIn(1e9)).toBe(604_800);
+    expect(clampExpiresIn(61.2)).toBe(62);
+  });
+});

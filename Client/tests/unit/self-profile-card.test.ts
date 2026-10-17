@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import { createUserBar } from "@components/UserBar";
-import { loadCustomStatus, loadUserStatus, saveUserStatus } from "@lib/userStatus";
+import {
+  loadCustomStatus,
+  loadStatusTimer,
+  loadUserStatus,
+  saveStatusTimer,
+  saveUserStatus,
+} from "@lib/userStatus";
+import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { savePref } from "@lib/preferences";
 import { createPresenceSender } from "@lib/presence";
 import { createPresenceLimiter } from "@lib/rate-limiter";
@@ -341,5 +348,503 @@ describe("SelfProfileCard from the user bar", () => {
     comp.mount(container);
     trigger().click();
     expect(document.body.querySelectorAll("[data-testid='self-profile-card']").length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Status timers, Clear after and the emoji button (3C-5b)
+// ---------------------------------------------------------------------------
+
+const frames = (w: WsClient): Array<{ payload: Record<string, unknown> }> =>
+  (w.send as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+const press = (k: string): void => {
+  document.activeElement!.dispatchEvent(
+    new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }),
+  );
+};
+const byId = <T extends HTMLElement>(id: string): T => q<T>(`[data-testid='${id}']`)!;
+
+describe("SelfProfileCard: timers, Clear after, emoji", () => {
+  let container: HTMLDivElement;
+  let comp: ReturnType<typeof createUserBar>;
+  let ws: WsClient;
+
+  beforeAll(async () => {
+    await loadEmojiCatalog();
+  });
+
+  /** A fresh bar with its own presence limiter, so each case's first send
+   *  goes straight out. */
+  function mountBar(): void {
+    comp?.destroy?.();
+    ws = mockWs();
+    comp = createUserBar({ ws, presenceSender: createPresenceSender(ws, createPresenceLimiter()) });
+    comp.mount(container);
+  }
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+    setConnectionStatus("connected");
+    setUser();
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
+    }));
+    membersStore.flush();
+    mountBar();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    comp.destroy?.();
+    container.remove();
+    membersStore.setState((p) => ({ ...p, members: new Map() }));
+    setConnectionStatus("disconnected");
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+  });
+
+  describe("status durations", () => {
+    it("Idle, Do Not Disturb and Invisible offer 15 minutes to 3 days and Forever; Online does not", () => {
+      trigger().click();
+      expect(q("[data-testid='spc-durations-online']")).toBeNull();
+      for (const status of ["idle", "dnd", "invisible"]) {
+        const labels = [
+          ...document.body.querySelectorAll(
+            `[data-testid='spc-durations-${status}'] [role='menuitem']`,
+          ),
+        ].map((el) => el.textContent);
+        expect(labels).toEqual([
+          "For 15 minutes",
+          "For 1 hour",
+          "For 8 hours",
+          "For 24 hours",
+          "For 3 days",
+          "Forever",
+        ]);
+        expect(byId(`spc-durations-${status}`).hidden).toBe(true);
+      }
+    });
+
+    it("picking a duration saves and sends the status and stores the expiry", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 17, 10, 0, 0));
+      trigger().click();
+      byId("spc-chevron-dnd").click();
+      expect(byId("spc-durations-dnd").hidden).toBe(false);
+      byId<HTMLButtonElement>("spc-duration-dnd-1h").click();
+
+      expect(loadUserStatus()).toBe("dnd");
+      expect(frames(ws)).toHaveLength(1);
+      expect(frames(ws)[0]!.payload).toEqual({ status: "dnd" });
+      expect(loadStatusTimer()).toEqual({
+        status: "dnd",
+        until: new Date(2026, 9, 17, 11).getTime(),
+      });
+      expect(card()).toBeNull();
+    });
+
+    it("the card shows 'Until HH:MM' under the running status", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 17, 10, 0, 0));
+      trigger().click();
+      byId<HTMLButtonElement>("spc-duration-idle-8h").click();
+
+      trigger().click();
+      const until = byId("spc-until-idle");
+      expect(until.hidden).toBe(false);
+      expect(until.textContent).toMatch(/^Until 6:00\sPM$/);
+      expect(byId("spc-until-dnd").hidden).toBe(true);
+
+      // It follows a change while open: Online has no timer line.
+      saveUserStatus("online");
+      expect(byId("spc-until-idle").hidden).toBe(true);
+    });
+
+    it("Forever, and a plain click on the row, store no timer", () => {
+      trigger().click();
+      byId<HTMLButtonElement>("spc-duration-dnd-forever").click();
+      expect(loadUserStatus()).toBe("dnd");
+      expect(loadStatusTimer()).toBeNull();
+
+      saveStatusTimer("dnd", Date.now() + 3_600_000);
+      trigger().click();
+      byId<HTMLButtonElement>("spc-status-idle").click();
+      expect(loadUserStatus()).toBe("idle");
+      expect(loadStatusTimer()).toBeNull(); // a manual change cancels the timer
+    });
+
+    it("the duration options are reachable by keyboard inside the menu", () => {
+      trigger().click();
+      const dnd = byId<HTMLButtonElement>("spc-status-dnd");
+      dnd.focus();
+      expect(dnd.getAttribute("aria-keyshortcuts")).toBe("ArrowRight");
+
+      press("ArrowRight");
+      const first = byId<HTMLButtonElement>("spc-duration-dnd-15m");
+      expect(byId("spc-durations-dnd").hidden).toBe(false);
+      expect(document.activeElement).toBe(first);
+      expect(first.getAttribute("role")).toBe("menuitem");
+      expect(first.tabIndex).toBe(-1);
+
+      press("ArrowDown");
+      expect(document.activeElement).toBe(byId("spc-duration-dnd-1h"));
+      press("End");
+      expect(document.activeElement).toBe(byId("spc-status-invisible"));
+      press("ArrowUp");
+      expect(document.activeElement).toBe(byId("spc-duration-dnd-forever"));
+      press("Home");
+      press("ArrowDown");
+      press("ArrowDown");
+      press("ArrowDown");
+      expect(document.activeElement).toBe(byId("spc-duration-dnd-15m"));
+
+      press("ArrowLeft");
+      expect(byId("spc-durations-dnd").hidden).toBe(true);
+      expect(document.activeElement).toBe(dnd);
+
+      // Enter on a duration is its click: commit and close.
+      press("ArrowRight");
+      press("ArrowDown");
+      (document.activeElement as HTMLElement).click();
+      expect(loadUserStatus()).toBe("dnd");
+      expect(loadStatusTimer()?.status).toBe("dnd");
+      expect(card()).toBeNull();
+    });
+
+    it("ArrowRight does nothing on Online, and the roving order is unchanged while collapsed", () => {
+      trigger().click();
+      byId<HTMLButtonElement>("spc-status-online").focus();
+      press("ArrowRight");
+      expect(document.activeElement).toBe(byId("spc-status-online"));
+      press("ArrowDown");
+      expect(document.activeElement).toBe(byId("spc-status-idle"));
+      press("ArrowDown");
+      expect(document.activeElement).toBe(byId("spc-status-dnd"));
+    });
+
+    it("is inert while the connection is down", () => {
+      setConnectionStatus("disconnected");
+      trigger().click();
+      expect(byId<HTMLButtonElement>("spc-duration-dnd-1h").disabled).toBe(true);
+      expect(byId<HTMLButtonElement>("spc-chevron-dnd").disabled).toBe(true);
+      expect(byId<HTMLSelectElement>("spc-clear-after").disabled).toBe(true);
+    });
+  });
+
+  describe("custom status Clear after", () => {
+    function commit(option: string, text = "heads down"): void {
+      mountBar();
+      trigger().click();
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      select.value = option;
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.value = text;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+
+    it("offers Today, 4 hours, 1 hour, 30 minutes and Don't clear, defaulting to Don't clear", () => {
+      trigger().click();
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      expect([...select.options].map((o) => o.textContent)).toEqual([
+        "Today",
+        "4 hours",
+        "1 hour",
+        "30 minutes",
+        "Don't clear",
+      ]);
+      expect(select.value).toBe("never");
+      expect(document.body.querySelector("label[for='spc-clear-after']")?.textContent).toBe(
+        "Clear after",
+      );
+    });
+
+    it.each([
+      ["4h", 14400],
+      ["1h", 3600],
+      ["30m", 1800],
+    ])("%s sends custom_status_expires_in %i", (option, seconds) => {
+      commit(option);
+      expect(frames(ws)[0]!.payload).toEqual({
+        status: "online",
+        custom_status: "heads down",
+        custom_status_expires_in: seconds,
+      });
+    });
+
+    it("Today is the seconds to local midnight", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 17, 10, 0, 0));
+      commit("today");
+      expect(frames(ws)[0]!.payload.custom_status_expires_in).toBe(14 * 3600);
+    });
+
+    // Edge case (b): 23:59:30 is 30 seconds from midnight; the server's minimum is 60.
+    it("Today chosen at 23:59:30 still sends at least 60 seconds", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 9, 17, 23, 59, 30));
+      commit("today");
+      expect(frames(ws)[0]!.payload.custom_status_expires_in).toBe(60);
+    });
+
+    it("Don't clear sends no expiry field", () => {
+      commit("never");
+      expect(frames(ws)[0]!.payload).toEqual({ status: "online", custom_status: "heads down" });
+    });
+
+    it("clearing the text drops the expiry even with a Clear after chosen", () => {
+      commit("1h", "x");
+      expect(frames(ws)[0]!.payload.custom_status_expires_in).toBe(3600);
+      membersStore.flush();
+      expect(membersStore.getState().members.get(7)?.customStatusExpiresAt).not.toBeNull();
+
+      trigger().click();
+      byId<HTMLSelectElement>("spc-clear-after").value = "1h";
+      byId<HTMLButtonElement>("spc-custom-clear").click();
+      membersStore.flush();
+      const own = membersStore.getState().members.get(7);
+      expect(own?.customStatus).toBe("");
+      expect(own?.customStatusExpiresAt).toBeNull();
+    });
+
+    it("changing Clear after restates the text already set, with the new expiry", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.value = "in a meeting";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(frames(ws)).toHaveLength(1);
+
+      // The retry carries the later choice once the limiter window reopens;
+      // the optimistic apply shows it at once.
+      trigger().click();
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      select.value = "1h";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      membersStore.flush();
+      const own = membersStore.getState().members.get(7);
+      expect(own?.customStatus).toBe("in a meeting");
+      expect(own?.customStatusExpiresAt).not.toBeNull();
+    });
+
+    it("changing it with no text set sends nothing", () => {
+      trigger().click();
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      select.value = "1h";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    describe("the 'Clears at' line", () => {
+      function setOwn(customStatus: string, expiresAt: string | null | undefined): void {
+        membersStore.setState((p) => ({
+          ...p,
+          members: new Map(p.members).set(7, {
+            id: 7,
+            username: "alice",
+            status: "online",
+            customStatus,
+            ...(expiresAt === undefined ? {} : { customStatusExpiresAt: expiresAt }),
+          } as never),
+        }));
+        membersStore.flush();
+      }
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
+      });
+
+      it("renders 'Clears at 2:30 PM' from your member entry", () => {
+        setOwn("in a meeting", new Date(2026, 9, 17, 14, 30).toISOString());
+        trigger().click();
+        const line = byId("spc-clears-line");
+        expect(line.hidden).toBe(false);
+        expect(line.textContent).toMatch(/^Clears at 2:30\sPM$/);
+      });
+
+      it("renders 'Clears today' for the end-of-day choice", () => {
+        setOwn("lunch", new Date(2026, 9, 18, 0, 0, 0).toISOString());
+        trigger().click();
+        expect(byId("spc-clears-line").textContent).toBe("Clears today");
+      });
+
+      it("names the weekday when it is not today", () => {
+        setOwn("away", new Date(2026, 9, 19, 9, 0).toISOString());
+        trigger().click();
+        expect(byId("spc-clears-line").textContent).toMatch(/^Clears Mon at 9:00\sAM$/);
+      });
+
+      it("falls back to the instant auth_ok gave when the entry says nothing", () => {
+        setOwn("in a meeting", undefined);
+        authStore.setState((s) => ({
+          ...s,
+          user: {
+            ...s.user!,
+            custom_status: "in a meeting",
+            custom_status_expires_at: new Date(2026, 9, 17, 15, 0).toISOString(),
+          },
+        }));
+        trigger().click();
+        expect(byId("spc-clears-line").textContent).toMatch(/^Clears at 3:00\sPM$/);
+      });
+
+      it("an explicit 'no expiry' on the entry beats a stale auth_ok instant", () => {
+        setOwn("in a meeting", null);
+        authStore.setState((s) => ({
+          ...s,
+          user: {
+            ...s.user!,
+            custom_status_expires_at: new Date(2026, 9, 17, 15, 0).toISOString(),
+          },
+        }));
+        trigger().click();
+        expect(byId("spc-clears-line").hidden).toBe(true);
+      });
+
+      it("is hidden with no expiry or no text", () => {
+        setOwn("plain", null);
+        trigger().click();
+        expect(byId("spc-clears-line").hidden).toBe(true);
+        card()!.remove();
+        comp.destroy?.();
+        mountBar();
+        setOwn("", new Date(2026, 9, 17, 14).toISOString());
+        trigger().click();
+        expect(byId("spc-clears-line").hidden).toBe(true);
+      });
+
+      it("hides an already-expired status without waiting for the server to clear it", () => {
+        setOwn("in a meeting", new Date(2026, 9, 17, 11, 59).toISOString());
+        trigger().click();
+        expect(byId("spc-clears-line").hidden).toBe(true);
+        expect(byId("spc-custom-line").hidden).toBe(true);
+        expect(byId<HTMLInputElement>("spc-custom-input").value).toBe("");
+      });
+
+      it("shows no clearing timer of its own: nothing is scheduled for the expiry", () => {
+        const spy = vi.spyOn(globalThis, "setTimeout");
+        setOwn("in a meeting", new Date(2026, 9, 17, 12, 30).toISOString());
+        trigger().click();
+        const longTimers = spy.mock.calls.filter(([, ms]) => (ms ?? 0) >= 60_000);
+        expect(longTimers).toHaveLength(0);
+        spy.mockRestore();
+      });
+    });
+  });
+
+  describe("emoji button", () => {
+    function openPicker(): HTMLElement {
+      byId<HTMLButtonElement>("spc-custom-emoji").click();
+      return card()!.querySelector<HTMLElement>(".emoji-picker")!;
+    }
+    const firstCell = (picker: HTMLElement): HTMLElement =>
+      picker.querySelector<HTMLElement>(".ep-emoji")!;
+
+    it("opens the emoji picker inside the card and closes it again", () => {
+      trigger().click();
+      const btn = byId<HTMLButtonElement>("spc-custom-emoji");
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+      const picker = openPicker();
+      expect(picker).not.toBeNull();
+      expect(btn.getAttribute("aria-expanded")).toBe("true");
+      expect(card()).not.toBeNull();
+      btn.click();
+      expect(card()!.querySelector(".emoji-picker")).toBeNull();
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("inserts the chosen emoji at the caret", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.value = "hello world";
+      input.setSelectionRange(5, 5);
+      const picker = openPicker();
+      const cell = firstCell(picker);
+      const emoji = cell.dataset.emoji!;
+      cell.click();
+      expect(input.value).toBe(`hello${emoji} world`);
+      expect(input.selectionStart).toBe(5 + emoji.length);
+      expect(card()!.querySelector(".emoji-picker")).toBeNull();
+      expect(document.activeElement).toBe(input);
+      // Nothing is sent until the text is committed.
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("replaces a selection and leaves the clear button showing", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.value = "abcdef";
+      input.setSelectionRange(1, 4);
+      const cell = firstCell(openPicker());
+      cell.click();
+      expect(input.value).toBe(`a${cell.dataset.emoji}ef`);
+      expect(byId<HTMLButtonElement>("spc-custom-clear").hidden).toBe(false);
+    });
+
+    it("respects the 128-character limit", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      const full = "x".repeat(128);
+      input.value = full;
+      input.setSelectionRange(128, 128);
+      firstCell(openPicker()).click();
+      expect(input.value).toBe(full);
+
+      // With room for the emoji but not for more: 127 + one 1-unit emoji is
+      // fine, and an emoji that would overshoot is refused whole.
+      input.value = "x".repeat(127);
+      input.setSelectionRange(127, 127);
+      const picker = openPicker();
+      const cells = [...picker.querySelectorAll<HTMLElement>(".ep-emoji")];
+      const wide = cells.find((c) => c.dataset.emoji!.length > 1)!;
+      wide.click();
+      expect(input.value).toBe("x".repeat(127));
+      expect(input.value.length).toBeLessThanOrEqual(128);
+    });
+
+    it("picking does not send half-typed text; Enter then commits it with the emoji", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.focus();
+      input.value = "on it ";
+      input.setSelectionRange(6, 6);
+      const md = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      byId("spc-custom-emoji").dispatchEvent(md);
+      expect(md.defaultPrevented).toBe(true);
+      const cell = firstCell(openPicker());
+      input.blur(); // focus moving into the picker
+      expect(ws.send).not.toHaveBeenCalled();
+      cell.click();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(frames(ws)[0]!.payload.custom_status).toBe(`on it ${cell.dataset.emoji}`);
+    });
+
+    it("Escape in the picker closes only the picker", () => {
+      trigger().click();
+      const picker = openPicker();
+      picker.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+      expect(card()).not.toBeNull();
+      expect(card()!.querySelector(".emoji-picker")).toBeNull();
+      // A second Escape closes the card.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(card()).toBeNull();
+    });
+
+    it("closing the card takes the picker with it", () => {
+      trigger().click();
+      openPicker();
+      trigger().click();
+      expect(card()).toBeNull();
+      expect(document.body.querySelector(".emoji-picker")).toBeNull();
+    });
   });
 });

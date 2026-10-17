@@ -18,6 +18,10 @@ export interface Member {
   readonly displayName?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly customStatus?: string | null;
+  /** RFC 3339 instant the custom status clears itself. Only the owner is ever
+   *  told it, so it is set on your own entry alone. Null = no expiry,
+   *  undefined = not known (use auth_ok's). */
+  readonly customStatusExpiresAt?: string | null;
   /** Profile text. Null = unset, undefined = never sent (older server). */
   readonly about?: string | null;
   /** Account creation time (RFC3339) for "Member since"; undefined = older server. */
@@ -71,6 +75,9 @@ export function setMembers(members: readonly ReadyMember[]): void {
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
+      ...(m.custom_status_expires_at === undefined
+        ? {}
+        : { customStatusExpiresAt: m.custom_status_expires_at }),
       ...(m.about === undefined ? {} : { about: m.about }),
       ...(m.created_at === undefined ? {} : { createdAt: m.created_at }),
     });
@@ -166,13 +173,31 @@ export function updateMemberProfile(userId: number, patch: MemberProfilePatch): 
   });
 }
 
+/** The expiry that goes with a member's custom status after an update. A new
+ *  text drops the old expiry (the server does the same), unless the caller
+ *  states one; the same text, or no text in the event, keeps it. */
+function nextCustomStatusExpiry(
+  existing: Member,
+  customStatus: string | null | undefined,
+  provided: string | null | undefined,
+): { customStatusExpiresAt?: string | null } {
+  if (provided !== undefined) return { customStatusExpiresAt: provided };
+  if (customStatus === undefined) return {};
+  const same = (existing.customStatus ?? "") === (customStatus ?? "");
+  return same || existing.customStatusExpiresAt === undefined
+    ? {}
+    : { customStatusExpiresAt: null };
+}
+
 /** Update a member's presence status, and the custom status line that rides
  *  along with it. `customStatus` is only applied when the event carried the
- *  field — a bare status flip must not blank the text. */
+ *  field — a bare status flip must not blank the text. `customStatusExpiresAt`
+ *  is passed only for your own optimistic send, where the client knows it. */
 export function updatePresence(
   userId: number,
   status: UserStatus,
   customStatus?: string | null,
+  customStatusExpiresAt?: string | null,
 ): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -182,6 +207,7 @@ export function updatePresence(
       ...existing,
       status,
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
+      ...nextCustomStatusExpiry(existing, customStatus, customStatusExpiresAt),
     });
     return { ...prev, members: next };
   });
@@ -203,7 +229,12 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
     for (const u of updates) {
       const existing = next.get(u.user_id);
       if (existing === undefined) continue;
-      next.set(u.user_id, { ...existing, status: u.status, customStatus: u.custom_status });
+      next.set(u.user_id, {
+        ...existing,
+        status: u.status,
+        customStatus: u.custom_status,
+        ...nextCustomStatusExpiry(existing, u.custom_status, undefined),
+      });
     }
     return { ...prev, members: next };
   });

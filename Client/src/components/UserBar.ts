@@ -15,12 +15,15 @@ import { createStatusPicker, type StatusPickerComponent } from "@components/Stat
 import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
+  isTimedStatus,
   loadCustomStatus,
   loadUserStatus,
   onUserStatusChange,
   saveCustomStatus,
+  saveStatusTimer,
   saveUserStatus,
 } from "@lib/userStatus";
+import { parseExpiry } from "@components/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
@@ -63,6 +66,19 @@ export interface UserBarOptions {
 function serverCustomStatus(): string | null {
   const user = authStore.getState().user;
   return user !== null ? (user.custom_status ?? "") : null;
+}
+
+/**
+ * When your own custom status clears itself. Your member entry first (the
+ * optimistic apply of a "Clear after" and a change from another device write
+ * it, `null` meaning none), then auth_ok's, which is where the server states
+ * it on a fresh connection.
+ */
+function ownCustomStatusExpiresAt(): string | null {
+  const user = authStore.getState().user;
+  const m = user === null ? undefined : membersStore.getState().members.get(user.id);
+  if (m?.customStatusExpiresAt !== undefined) return m.customStatusExpiresAt;
+  return user?.custom_status_expires_at ?? null;
 }
 
 /** Status labels for the line under the username. */
@@ -273,8 +289,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     };
 
     // One save path for the dropdown and the profile card.
-    function applyStatus(status: UserStatus): void {
+    function applyStatus(status: UserStatus, durationMs?: number): void {
       saveUserStatus(status);
+      // After the save, which ends any earlier timer: this one reverts the
+      // status to Online when it runs out (lib/statusTimer, started by the page).
+      if (durationMs !== undefined && isTimedStatus(status)) {
+        saveStatusTimer(status, Date.now() + durationMs);
+      }
       updateFromState();
       const sender = options?.presenceSender;
       if (sender !== null && sender !== undefined && canSetStatus()) {
@@ -285,11 +306,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         sender.send(status);
       }
     }
-    function applyCustomStatus(text: string): void {
+    function applyCustomStatus(text: string, expiresInSeconds?: number): void {
       saveCustomStatus(text);
       const sender = options?.presenceSender;
       if (sender !== null && sender !== undefined && canSetStatus()) {
-        sender.send(loadUserStatus(), text);
+        sender.send(loadUserStatus(), text, expiresInSeconds);
       }
     }
 
@@ -302,10 +323,14 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       getCustomStatus: () => {
         const id = authStore.getState().user?.id;
         const m = id === undefined ? undefined : membersStore.getState().members.get(id);
-        return m !== undefined
-          ? (m.customStatus ?? "")
-          : (serverCustomStatus() ?? loadCustomStatus());
+        const text =
+          m !== undefined ? (m.customStatus ?? "") : (serverCustomStatus() ?? loadCustomStatus());
+        // The server clears an expired status itself; until its broadcast
+        // lands, do not show text whose time has already passed.
+        const expiresAt = parseExpiry(ownCustomStatusExpiresAt());
+        return expiresAt !== null && expiresAt <= Date.now() ? "" : text;
       },
+      getCustomStatusExpiresAt: ownCustomStatusExpiresAt,
       onStatusChange: applyStatus,
       onCustomStatusChange: applyCustomStatus,
     });

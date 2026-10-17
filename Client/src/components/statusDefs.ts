@@ -4,6 +4,8 @@
  */
 
 import type { UserStatus } from "@lib/types";
+import { formatDate } from "../i18n/format";
+import { shellText } from "../i18n/shell";
 
 export interface StatusDef {
   readonly value: UserStatus;
@@ -33,4 +35,51 @@ export const STATUS_DEFS: readonly StatusDef[] = [
 
 export function colorForStatus(status: UserStatus): string {
   return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";
+}
+
+const TIME_OF_DAY = { hour: "numeric", minute: "2-digit" } as const;
+
+function sameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** "3:40 PM", or "Tue 3:40 PM" when it is not today, in the user's clock style. */
+function whenText(at: Date, now: Date): string {
+  const time = formatDate(at, TIME_OF_DAY);
+  return sameLocalDay(at, now) ? time : `${formatDate(at, { weekday: "short" })} ${time}`;
+}
+
+/** The line under a timed status: "Until 3:40 PM". */
+export function statusTimerLine(until: number, now: number = Date.now()): string {
+  return shellText("status.timerUntil", { when: whenText(new Date(until), new Date(now)) });
+}
+
+/**
+ * The line saying when your custom status clears itself. "Clears today" when
+ * it is the end-of-day choice (the first minute past the coming midnight),
+ * "Clears at 3:40 PM" later today, and the weekday too beyond that.
+ */
+export function customStatusClearsLine(expiresAtIso: string, now: number = Date.now()): string {
+  const at = new Date(expiresAtIso);
+  const today = new Date(now);
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (sameLocalDay(at, tomorrow) && at.getHours() === 0 && at.getMinutes() === 0) {
+    return shellText("status.clearsToday");
+  }
+  const time = formatDate(at, TIME_OF_DAY);
+  return sameLocalDay(at, today)
+    ? shellText("status.clearsAt", { time })
+    : shellText("status.clearsOn", { day: formatDate(at, { weekday: "short" }), time });
+}
+
+/** The instant (epoch ms) a custom status expires, or null when it has none
+ *  or the text is not a date. */
+export function parseExpiry(expiresAtIso: string | null | undefined): number | null {
+  if (expiresAtIso === null || expiresAtIso === undefined) return null;
+  const t = Date.parse(expiresAtIso);
+  return Number.isNaN(t) ? null : t;
 }

@@ -41,6 +41,7 @@ import {
 import { loadPref, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
+import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
@@ -319,6 +320,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
@@ -859,6 +861,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
     syncBanner();
+    // Idle / Do Not Disturb / Invisible "for 1 hour": reverts to Online when
+    // the stored timer ends, and at once if it ended while the app was closed.
+    // Before the restore below, so that reads (and re-asserts) the reverted status.
+    statusTimerWatcher = startStatusTimerWatcher({ onRevert: (status) => applyPresence(status) });
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
@@ -1987,6 +1993,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       closeActiveLightbox();
       autoIdle?.destroy();
       autoIdle = null;
+      statusTimerWatcher?.destroy();
+      statusTimerWatcher = null;
       presenceSender.destroy();
       setActivePresenceSender(null);
       // Drop the mark-read sender (and, via setMarkReadSender's own

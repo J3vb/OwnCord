@@ -132,6 +132,9 @@ export interface UserWithRole extends MessageUser {
    *  older servers. */
   readonly created_at?: string;
   readonly custom_status?: string | null;
+  /** RFC 3339 instant the signed-in user's OWN custom status clears itself;
+   *  null = no expiry. Only on their own auth_ok / REST me payload. */
+  readonly custom_status_expires_at?: string | null;
   /** The signed-in user's OWN true status, "invisible" included. Only ever
    *  present on their own auth_ok / REST me payload. */
   readonly status?: UserStatus;
@@ -256,6 +259,9 @@ export interface ReadyMember {
   readonly display_name?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly custom_status?: string | null;
+  /** When the signed-in user's own custom status clears itself. Servers only
+   *  tell the owner, so this is absent on every other member's entry. */
+  readonly custom_status_expires_at?: string | null;
   /** Profile text. Null = unset; absent from servers before 3C-7. */
   readonly about?: string | null;
   /** Account creation time (RFC3339); absent from servers before 3C-7. */
@@ -1052,6 +1058,9 @@ export interface PresenceUpdatePayload {
   /** Omitted = leave the stored text alone (what the auto-idle timer sends);
    *  "" = clear it. */
   readonly custom_status?: string;
+  /** Whole seconds (60..604800) after which the server clears the custom
+   *  status. Only valid with a non-empty `custom_status`; omitted = no expiry. */
+  readonly custom_status_expires_in?: number;
 }
 
 export interface VoiceJoinPayload {

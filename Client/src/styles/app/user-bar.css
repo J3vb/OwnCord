@@ -302,7 +302,9 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 0;
 }
-.self-profile-card .spc-custom-clear {
+.self-profile-card .spc-custom-clear,
+.self-profile-card .spc-custom-emoji,
+.self-profile-card .spc-status-chevron {
   display: flex;
   padding: 6px;
   background: none;
@@ -311,7 +313,9 @@
   color: var(--text-muted);
   cursor: pointer;
 }
-.self-profile-card .spc-custom-clear:hover {
+.self-profile-card .spc-custom-clear:hover,
+.self-profile-card .spc-custom-emoji:hover:not(:disabled),
+.self-profile-card .spc-status-chevron:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-normal);
 }
@@ -336,15 +340,21 @@
   cursor: pointer;
 }
 .self-profile-card .spc-status:hover:not(:disabled),
-.self-profile-card .spc-action:hover {
+.self-profile-card .spc-action:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 .self-profile-card .spc-status:focus-visible,
-.self-profile-card .spc-action:focus-visible {
+.self-profile-card .spc-action:focus-visible,
+.self-profile-card .spc-custom-emoji:focus-visible,
+.self-profile-card .spc-custom-clear:focus-visible,
+.self-profile-card .spc-status-chevron:focus-visible,
+.self-profile-card .spc-clear-after-select:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
-.self-profile-card .spc-status:disabled {
+.self-profile-card .spc-status:disabled,
+.self-profile-card .spc-action:disabled,
+.self-profile-card .spc-custom-emoji:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -360,7 +370,10 @@
   display: flex;
   flex-direction: column;
 }
-.self-profile-card .spc-status-note {
+.self-profile-card .spc-status-note,
+.self-profile-card .spc-status-until,
+.self-profile-card .spc-clears-line,
+.self-profile-card .spc-clear-after-label {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
@@ -373,5 +386,47 @@
   display: flex;
 }
 .self-profile-card [hidden] {
+  display: none;
+}
+.self-profile-card .spc-clear-after {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.self-profile-card .spc-clear-after-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+}
+.self-profile-card .spc-status-row {
+  display: flex;
+  align-items: center;
+}
+.self-profile-card .spc-status-row .spc-status {
+  flex: 1;
+  min-width: 0;
+}
+.self-profile-card .spc-durations {
+  margin: 0 0 4px 20px;
+  display: flex;
+  flex-direction: column;
+}
+/* The picker opens beside the card, where it cannot cover the custom status
+   it is filling in; the composer's own placement is above its button. */
+.self-profile-card .spc-emoji-picker {
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: calc(100% + 8px);
+  margin: 0;
+}
+.self-profile-card .spc-durations[hidden] {
   display: none;
 }
