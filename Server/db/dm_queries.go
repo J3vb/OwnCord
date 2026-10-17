@@ -426,19 +426,6 @@ func (d *DB) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
 	return flag != 0, nil
 }
 
-// SetDMChannelName sets the optional group name on a DM channel. The type
-// predicate lives in the SQL so a stray channel id cannot rename a guild
-// channel through the DM route.
-func (d *DB) SetDMChannelName(ctx context.Context, channelID int64, name string) error {
-	if err := d.q.SetDMChannelName(ctx, dbgen.SetDMChannelNameParams{
-		Name: name,
-		ID:   channelID,
-	}); err != nil {
-		return fmt.Errorf("SetDMChannelName: %w", err)
-	}
-	return nil
-}
-
 // GetDMParticipants returns every participant of a DM channel, viewer-adjusted
 // (an invisible participant reads as offline to anyone but themselves).
 func (d *DB) GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]DMUser, error) {

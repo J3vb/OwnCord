@@ -585,13 +585,18 @@ Kinds 2 to 6 (migration 065) are the group DM event rows `group_add`,
 in `message_group_events`: `target_user_id` for add and remove (`ON DELETE
 CASCADE`, and erasure deletes the row), `name` for rename (`''` means removed)
 and `icon_removed` for icon. They are read-only like call rows and only the
-server may write them. Nothing writes one yet.
+server may write them: adding a member writes `group_add` (author = the adder),
+the owner removing one writes `group_remove`, a leave writes `group_leave`
+(author = the leaver, none for the last leaver) and a changed name writes
+`group_rename`, each in the same transaction as the change. Nothing writes
+`group_icon` yet.
 
 `channels.dm_owner_id` (migration 065) names a group DM's owner. A group with at
 least one member always has an owner who is a member: create sets it to the
 creator, a leave runs one statement that gives a missing or departed owner to
-the lowest remaining member id, and an erasure hands each group the erased
-user owned to its lowest remaining member id.
+the lowest remaining member id that is not banned from the server (the lowest
+member id when every member is banned), an owner transfer names another member,
+and an erasure hands each group the erased user owned to the same member.
 
 ---
 

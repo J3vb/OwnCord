@@ -35,9 +35,6 @@ WHERE dp.channel_id = sqlc.arg(channel_id);
 -- name: IsGroupDM :one
 SELECT is_group FROM channels WHERE id = ? AND type = 'dm';
 
--- name: SetDMChannelName :exec
-UPDATE channels SET name = ? WHERE id = ? AND type = 'dm';
-
 -- name: GetDMParticipants :many
 SELECT
     u.id                                      AS id,

@@ -27,7 +27,7 @@ func TestCreateDM_RecipientStatus_OfflineWhenDisconnected(t *testing.T) {
 
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(r, database, svc, broadcaster)
+	api.MountDMRoutes(r, database, svc, broadcaster, nil)
 
 	tokenAlice := dmCreateToken(t, database, "presence_alice", 4)
 	_ = dmCreateToken(t, database, "presence_bob", 4)

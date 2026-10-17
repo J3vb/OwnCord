@@ -76,7 +76,7 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
-	if _, err = database.LeaveGroupDM(ctx, 3, group.ID); err != nil {
+	if _, err = database.LeaveGroupDM(ctx, 3, group.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 
@@ -102,12 +102,12 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	}
 
 	for i, uid := range []int64{1, 2, 3} {
-		deleted, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID)
+		res, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID, "left")
 		if leaveErr != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, leaveErr)
 		}
 		wantDeleted := i == 2
-		if deleted != wantDeleted {
+		if deleted := res.Deleted; deleted != wantDeleted {
 			t.Errorf("leave %d: deleted=%v, want %v", uid, deleted, wantDeleted)
 		}
 	}
@@ -152,7 +152,7 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	}
 
 	for _, uid := range []int64{1, 2, 3} {
-		if _, err := database.LeaveGroupDM(ctx, uid, group.ID); err != nil {
+		if _, err := database.LeaveGroupDM(ctx, uid, group.ID, "left"); err != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, err)
 		}
 	}
@@ -174,27 +174,6 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	}
 	if att.MessageID != nil {
 		t.Errorf("attachment MessageID = %v, want nil (unlinked ahead of the cascade)", *att.MessageID)
-	}
-}
-
-func TestSetDMChannelName_RefusesNonDM(t *testing.T) {
-	database := groupDMFixture(t)
-	ctx := context.Background()
-
-	textID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.SetDMChannelName(ctx, textID, "hijacked"); err != nil {
-		t.Fatalf("SetDMChannelName: %v", err)
-	}
-
-	ch, err := database.GetChannel(ctx, textID)
-	if err != nil {
-		t.Fatalf("GetChannel: %v", err)
-	}
-	if ch.Name != "general" {
-		t.Errorf("a text channel was renamed through the DM route: %q", ch.Name)
 	}
 }
 

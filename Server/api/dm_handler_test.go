@@ -133,6 +133,12 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned_at  TEXT,
     kind       INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_group_events (
+    message_id     INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT,
+    icon_removed   INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
@@ -313,7 +319,7 @@ func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) s
 func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(r, database, svc, broadcaster)
+	api.MountDMRoutes(r, database, svc, broadcaster, nil)
 	return r
 }
 

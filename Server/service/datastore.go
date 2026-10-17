@@ -19,6 +19,7 @@ import (
 // which *db.DB and this Store both satisfy.
 type Store interface {
 	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
+	GroupDMStore // group DM membership and its system rows (WP 3B-10)
 	// ── Second-factor state (B4-3) ──
 	// The durable backend behind the auth service's partial-auth, pending
 	// enrolment and used-code stores, plus the recovery-code rows; stdlib
@@ -290,9 +291,7 @@ type Store interface {
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 	CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error)
 	GetGroupDMOwner(ctx context.Context, channelID int64) (int64, error)
-	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
-	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
 	// ── Message requests (migration 046, B5-6) ──

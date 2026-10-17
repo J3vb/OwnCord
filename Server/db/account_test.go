@@ -326,10 +326,10 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
-	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userB): %v", err)
 	}
-	if _, err := database.LeaveGroupDM(context.Background(), userC, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(context.Background(), userC, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userC): %v", err)
 	}
 
@@ -488,10 +488,10 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	seedLinked(userA, "att-dm-a", "stored-a.png")
 	seedLinked(userB, "att-dm-b", "stored-b.png")
 
-	if _, err := database.LeaveGroupDM(ctx, userB, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(ctx, userB, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userB): %v", err)
 	}
-	if _, err := database.LeaveGroupDM(ctx, userC, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(ctx, userC, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userC): %v", err)
 	}
 

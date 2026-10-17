@@ -129,7 +129,7 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 }
 
 // S-03: the group-DM create (CreateGroupDM -> CreateGroupDMChannel,
-// db/dm_queries.go:292) and rename (RenameGroupDM -> SetDMChannelName) paths
+// db/dm_queries.go:292) and rename (RenameGroupDM -> SetGroupDMName) paths
 // are the two user-side writers of channels.name, and their shared bound
 // (MaxGroupDMNameLen, via cleanTextBounded) must count runes like the admin
 // writer's (TestChannelMeta_NameCountsRunesNotBytes) does, not bytes.
@@ -154,12 +154,12 @@ func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	}
 
 	name100 := strings.Repeat("é", 100)
-	ch, err := svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name100)
-	if err != nil {
+	if _, err = svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name100); err != nil {
 		t.Fatalf("RenameGroupDM with a 100-rune multibyte name: %v", err)
 	}
-	if ch.Name != name100 {
-		t.Fatalf("name mangled: %q", ch.Name)
+	ch, err := svc.st.GetChannel(context.Background(), created.Channel.ID)
+	if err != nil || ch == nil || ch.Name != name100 {
+		t.Fatalf("name mangled: %+v (%v)", ch, err)
 	}
 
 	name101 := strings.Repeat("é", 101)
