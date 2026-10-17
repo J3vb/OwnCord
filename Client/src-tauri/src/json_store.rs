@@ -16,8 +16,9 @@
 //! save replaces the bad file. A store that cannot be read at all, or whose
 //! copy could not be saved, fails to open whatever its kind.
 //!
-//! The on-disk format is the plugin's (a pretty-printed JSON object), so files
-//! written by earlier versions load unchanged.
+//! The on-disk format is a JSON object (the plugin's was pretty-printed; a save
+//! now writes it compact, which serde reads the same), so files written by
+//! earlier versions load unchanged.
 
 use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE};
 use serde_json::{Map, Value};
@@ -60,7 +61,7 @@ impl JsonStore {
     pub fn save(&self) -> Result<(), String> {
         // Held across the write so two saves cannot interleave on the temp file.
         let map = self.lock();
-        let bytes = serde_json::to_vec_pretty(&*map).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(&*map).map_err(|e| e.to_string())?;
         write_atomic(&self.path, &bytes).map_err(|e| format!("{}: {e}", self.path.display()))
     }
 

@@ -44,6 +44,8 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
+vi.mock("@lib/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -476,6 +478,27 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     setActivePresenceSender(null);
 
     expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
+describe("main.ts MainPage prefetch (CL-04)", () => {
+  it("starts the MainPage chunk load when the login is accepted, before the socket connects", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    mockPrefetchMainPage.mockClear();
+
+    await capturedConnectCallbacks.onLogin!("prefetch.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The offline server has not answered: the socket is not connected, yet
+    // the prefetch is already under way.
+    expect(mockPrefetchMainPage).toHaveBeenCalledTimes(1);
+    expect(createMainPage).not.toHaveBeenCalled();
+
+    // Drain the pre-auth deadline this attempt leaves behind.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    clearAuth();
   });
 });
 
