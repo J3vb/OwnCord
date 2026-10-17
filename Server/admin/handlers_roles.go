@@ -129,6 +129,20 @@ func handlePatchRole(hub HubBroadcaster, permInvalidator PermissionInvalidator, 
 			return
 		}
 
+		// Any edit drops the members' cached snapshots, not only a permission
+		// change: the cache also holds the role row itself (name, colour,
+		// position), which GetRoleForUser serves without a store read. It runs
+		// before the member_update broadcast so a client reacting to it reads
+		// the new row.
+		if affectedOK {
+			invalidateUsers(permInvalidator, affected)
+		} else if permInvalidator != nil {
+			// The member list was unreadable, so per-user eviction cannot
+			// be trusted; drop every cached mask instead (what reorder
+			// does on every call) rather than leave revoked grants live.
+			permInvalidator.InvalidateAll()
+		}
+
 		// A rename re-keys every member of the role: clients hold a role name
 		// string, not an id, so without a member_update each they lose their
 		// role color, member-list group and permission-gated affordances until
@@ -141,17 +155,6 @@ func handlePatchRole(hub HubBroadcaster, permInvalidator PermissionInvalidator, 
 			}
 		}
 
-		// Any edit drops the members' cached snapshots, not only a permission
-		// change: the cache also holds the role row itself (name, colour,
-		// position), which GetRoleForUser serves without a store read.
-		if affectedOK {
-			invalidateUsers(permInvalidator, affected)
-		} else if permInvalidator != nil {
-			// The member list was unreadable, so per-user eviction cannot
-			// be trusted; drop every cached mask instead (what reorder
-			// does on every call) rather than leave revoked grants live.
-			permInvalidator.InvalidateAll()
-		}
 		if res.PermsChanged {
 			// READ_MESSAGES may have moved in either direction, so every
 			// channel's audience for this role has to be re-derived.

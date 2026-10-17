@@ -333,7 +333,14 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) (*c
 	// The key carries the generation snapshot, so a load that began before an
 	// invalidation is never shared with a caller that arrived after it.
 	key := strconv.FormatInt(userID, 10) + ":" + strconv.FormatUint(startGen, 10)
-	ch := s.loads.DoChan(key, func() (any, error) {
+	ch := s.loads.DoChan(key, func() (v any, err error) {
+		// singleflight re-panics a load panic on a fresh goroutine nothing can
+		// recover, so turn it into a load error for every waiter instead.
+		defer func() {
+			if r := recover(); r != nil {
+				v, err = nil, fmt.Errorf("permission load panicked: %v", r)
+			}
+		}()
 		return s.loadPerms(ctx, userID, startGen)
 	})
 	select {

@@ -265,3 +265,22 @@ func TestGetRoleForUserWarmCacheNoStoreRead(t *testing.T) {
 		t.Fatal("Color pointer is shared between calls")
 	}
 }
+
+// panicStore panics inside the shared load.
+type panicStore struct{ *gateStore }
+
+func (p *panicStore) GetRoleForUser(context.Context, int64) (*db.Role, error) {
+	panic("store exploded")
+}
+
+func TestPermissionLoadPanicBecomesError(t *testing.T) {
+	_, g := newGateService(t, false)
+	svc := NewPermissionService(&panicStore{g}, permissions.NewChecker(g.DB))
+	cp, err := svc.getOrPopulate(context.Background(), 1)
+	if err == nil || cp != nil {
+		t.Fatalf("getOrPopulate = (%v, %v), want a load error", cp, err)
+	}
+	if svc.HasChannelPerm(context.Background(), 1, 10, permissions.ReadMessages) {
+		t.Fatal("a panicking load must deny")
+	}
+}
