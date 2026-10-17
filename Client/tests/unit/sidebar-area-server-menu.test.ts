@@ -198,10 +198,36 @@ describe("SidebarArea - server name menu", () => {
     await new Promise((r) => setTimeout(r, 5));
 
     nameBtn().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    nameBtn().click();
+    nameBtn().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
 
     expect(menu()).toBeNull();
     expect(nameBtn().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("a keyboard click after a press dragged off the button still opens it", async () => {
+    mount();
+    open();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // The press closes the menu; the pointer leaves, so no click follows.
+    nameBtn().dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(menu()).toBeNull();
+
+    nameBtn().click();
+
+    expect(menu()).not.toBeNull();
+    expect(nameBtn().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("reopening from the keyboard while open leaves the button expanded", async () => {
+    mount();
+    open();
+    await new Promise((r) => setTimeout(r, 5));
+
+    nameBtn().click();
+
+    expect(document.querySelectorAll(".server-menu")).toHaveLength(1);
+    expect(nameBtn().getAttribute("aria-expanded")).toBe("true");
   });
 
   it("an outside press closes it", async () => {

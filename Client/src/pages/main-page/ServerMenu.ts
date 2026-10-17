@@ -109,8 +109,10 @@ export function attachServerMenu(
 
   button.addEventListener(
     "click",
-    () => {
-      if (openAtPress) {
+    (e) => {
+      // A keyboard click has no press before it, so a stale flag from a press
+      // dragged off the button must not swallow it.
+      if (openAtPress && e.detail !== 0) {
         openAtPress = false;
         return;
       }
@@ -119,7 +121,7 @@ export function attachServerMenu(
       // A mouse click does not focus a button in every webview; the menu
       // hands focus back to whatever held it when it opened.
       button.focus();
-      setExpanded(true);
+      openAtPress = false;
       showContextMenu({
         x: rect.left,
         y: rect.bottom + 4,
@@ -130,6 +132,8 @@ export function attachServerMenu(
         restoreFocusTo: () => button,
         onClosed: () => setExpanded(false),
       });
+      // After the open, which closes any earlier copy and runs its onClosed.
+      setExpanded(true);
     },
     { signal },
   );
