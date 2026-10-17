@@ -288,7 +288,8 @@ type Store interface {
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
-	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
+	CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error)
+	GetGroupDMOwner(ctx context.Context, channelID int64) (int64, error)
 	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	SetDMChannelName(ctx context.Context, channelID int64, name string) error

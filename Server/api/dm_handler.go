@@ -337,7 +337,7 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 		broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, result.ParticipantIDs)
 
 		writeJSON(w, http.StatusCreated,
-			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, result.Participants, user.ID))
+			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, user.ID, result.Participants, user.ID))
 	}
 }
 

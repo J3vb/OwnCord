@@ -844,9 +844,7 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		m.Deleted = deleted != 0
 		m.Pinned = pinned != 0
 		m.MentionsEveryone = everyone != 0
-		if kind == MessageKindCall {
-			m.Kind = MessageKindNameCall
-		}
+		m.Kind = MessageKindName(kind)
 		m.Attachments = []AttachmentInfo{}
 		m.Reactions = []ReactionInfo{}
 		m.Mentions = []int64{}
@@ -895,6 +893,10 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 
 	if err := d.attachCalls(ctx, msgs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages calls: %w", err)
+	}
+
+	if err := d.attachGroupEvents(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages group events: %w", err)
 	}
 
 	return d.attachReferencedMessages(ctx, msgs)

@@ -81,6 +81,7 @@ vi.mock("@lib/notificationSound", () => ({
 vi.mock("../../src/features/direct-messages/callAlerts", () => ({
   alertIncomingCall: vi.fn(),
   alertMissedCall: vi.fn(),
+  alertSupersededCall: vi.fn(),
   clearIncomingCall: vi.fn(),
 }));
 
@@ -321,7 +322,11 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
-import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
+import {
+  alertIncomingCall,
+  alertMissedCall,
+  alertSupersededCall,
+} from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -1246,6 +1251,68 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
   });
 
+  it("Join with video on the incoming banner joins and turns the camera on once connected (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    (document.querySelector('[data-testid="incoming-call-accept-video"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    vi.mocked(lk.enableCamera).mockClear();
+    page.destroy?.();
+  });
+
+  it("Ctrl+Enter accepts and Escape declines a ringing call (3B-4)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    // The closed Settings panel is hidden by stylesheet only, which jsdom does
+    // not load; hide it the way the real page's CSS does.
+    const settingsOverlay = document.querySelector<HTMLElement>('[data-testid="settings-overlay"]');
+    expect(settingsOverlay).not.toBeNull();
+    settingsOverlay!.style.display = "none";
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, cancelable: true }),
+    );
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_decline", payload: { channel_id: 51 } });
+    page.destroy?.();
+  });
+
+  it("a ring replaced by a ring from another channel reports the first as missed (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertSupersededCall).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    await vi.dynamicImportSettled();
+    expect(alertSupersededCall).not.toHaveBeenCalled();
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    await vi.waitFor(() => expect(alertSupersededCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertSupersededCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
+    page.destroy?.();
+  });
+
   function openOneToOneDm(id: number): void {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -2098,6 +2165,66 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
     expect(panel.dataset.state).toBe("unanswered");
+    page.destroy?.();
+  });
+
+  it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        isGroup: true,
+        participants: [
+          ...c.participants,
+          { id: 12, username: "dan", avatar: "", status: "online" as const },
+        ],
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    // Alice and bob are in the room; dan is not.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected" as const,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map(
+            [
+              [1, "alice"],
+              [10, "bob"],
+            ].map(([userId, username]) => [
+              userId as number,
+              {
+                userId: userId as number,
+                username: username as string,
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ]),
+          ),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+    const again = panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement;
+    expect(again).not.toBeNull();
+
+    vi.mocked(ws.send).mockClear();
+    again.click();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    // Bob is in the call: no ringing state is started over a live call.
+    expect(panel.dataset.state).toBe("connected");
     page.destroy?.();
   });
 

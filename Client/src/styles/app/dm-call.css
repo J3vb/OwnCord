@@ -183,6 +183,15 @@
   opacity: 0.55;
   animation: dcp-ring 1.4s ease-in-out infinite;
 }
+/* A group member who is not in the call: greyed out, no pulse. The title and
+   the screen-reader text ("Not in call") carry the state. */
+.dcp-avatar--absent {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.dcp-person--absent .dcp-person-name {
+  color: var(--text-muted);
+}
 @keyframes dcp-ring {
   0%,
   100% {

@@ -162,7 +162,8 @@ import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
+import { isDmKeptForCall, resetKeptCallDms } from "../../src/features/direct-messages/keptCallDms";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
@@ -1899,6 +1900,71 @@ describe("SidebarArea", () => {
       });
 
       cleanup(result);
+    });
+
+    // WP 3B-5 (D14): a local close must not end the DM's live call on a network blip.
+    describe("closing a DM while in its call", () => {
+      const closeFromSidebar = (channelId: number, opts = defaultOpts()) => {
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        const calls = (createDmSidebar as MockedFn).mock.calls;
+        calls[calls.length - 1]![0].onCloseDm(channelId);
+        return result;
+      };
+
+      afterEach(() => {
+        resetKeptCallDms();
+      });
+
+      it("keeps a closed 1:1's call eligible for reconnect retries", () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+
+        const result = closeFromSidebar(100);
+
+        expect(dmStore.getState().channels).toHaveLength(0);
+        expect(isDmKeptForCall(100)).toBe(true);
+        cleanup(result);
+      });
+
+      it("does not keep a group the user leaves, so its call still ends", () => {
+        addDmChannel(makeDm({ channelId: 100, isGroup: true, name: "Crew" }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+
+        const result = closeFromSidebar(100);
+
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
+
+      it("does not keep a 1:1 closed while the user is in a different call", () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(55);
+
+        const result = closeFromSidebar(100);
+
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
+
+      it("forgets the DM when the server refuses the close and the row returns", async () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+        const opts = defaultOpts();
+        (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+
+        const result = closeFromSidebar(100, opts);
+
+        await vi.waitFor(() => {
+          expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
+        });
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
     });
 
     it("restores a rejected closeDm row at its old place, not the top", async () => {

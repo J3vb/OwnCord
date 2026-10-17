@@ -29,7 +29,7 @@ var diagnosticTables = []string{
 	"api_tokens", "appeals", "attachments", "audit_log", "channel_overrides",
 	"channel_retention", "channel_user_overrides", "channels", "dm_open_state",
 	"dm_participants", "emoji", "erasure_jobs", "events", "gif_favorites", "invites",
-	"login_attempts", "mention_receipts", "message_call_participants", "message_calls", "message_delivery_receipts", "message_mentions", "message_requests",
+	"login_attempts", "mention_receipts", "message_call_participants", "message_calls", "message_delivery_receipts", "message_group_events", "message_mentions", "message_requests",
 	"messages", "moderation_actions", "nsfw_acknowledgements", "partial_auth_challenges",
 	"pending_totp_enrollments", "push_subscriptions",
 	"rate_lockouts", "reactions", "read_states", "recovery_assists", "recovery_kits",

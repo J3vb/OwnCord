@@ -44,7 +44,12 @@ community service, so it adds nothing here; its lifecycle row is class 11a in
 `messages.kind`, `message_calls` and `message_call_participants`, the server-written
 record of a call in a DM. It is no community service and nothing a user can write
 (call rows are read-only), so it adds nothing here; its lifecycle row is class 11b
-in `data-lifecycle.md`. Other
+in `data-lifecycle.md`. **Amended 2026-10-17 (group DM owner):**
+`065_group_dm_owner.sql` adds `channels.dm_owner_id` and `message_group_events`,
+the group DM owner and the server-written rows for membership changes (WP 3B-10).
+They are no community service and nothing a user can write (group rows are
+read-only), so they add nothing here; their lifecycle rows are classes 11c and
+14e in `data-lifecycle.md`. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

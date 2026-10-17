@@ -435,6 +435,58 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    function startDrag(): { section: ReturnType<typeof createSidebarMemberSection> } {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const handle = container.querySelector(".sidebar-resize-handle") as HTMLElement;
+      handle.dispatchEvent(new MouseEvent("mousedown", { clientY: 300, bubbles: true }));
+      return { section };
+    }
+
+    it("writes localStorage once on mouseup, not on every mousemove", () => {
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+      const { section } = startDrag();
+
+      for (const y of [290, 280, 270, 260]) {
+        document.dispatchEvent(new MouseEvent("mousemove", { clientY: y, bubbles: true }));
+      }
+      expect(setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT)).toHaveLength(0);
+
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      const writes = setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT);
+      expect(writes).toHaveLength(1);
+      // jsdom lays nothing out (start height 0), so the clamp floor of 80 applies.
+      expect(writes[0]![1]).toBe("80");
+
+      // A second mouseup after the drag ended writes nothing more.
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT)).toHaveLength(1);
+
+      section.destroy();
+      setItem.mockRestore();
+    });
+
+    it("does not throw when storage rejects the write on mouseup", () => {
+      const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new DOMException("quota", "QuotaExceededError");
+      });
+      // jsdom reports a listener's exception as a window "error" event rather
+      // than throwing out of dispatchEvent, so watch for that.
+      const reported = vi.fn((e: Event) => e.preventDefault());
+      window.addEventListener("error", reported);
+      const { section } = startDrag();
+      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 250, bubbles: true }));
+
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+      expect(setItem).toHaveBeenCalled();
+      expect(reported).not.toHaveBeenCalled();
+
+      window.removeEventListener("error", reported);
+      section.destroy();
+      setItem.mockRestore();
+    });
+
     it("does not resize when not dragging", () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);

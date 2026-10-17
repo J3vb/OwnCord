@@ -360,6 +360,11 @@ var erasureStatements = []struct {
 	// The messages_ad trigger (migration 001) drops each row from the FTS
 	// index; message_mentions and reactions on these rows cascade.
 	{"messages", `DELETE FROM messages WHERE user_id = ?`},
+	// Group event rows naming the subject (migration 065, WP 3B-10). A row the
+	// subject authored went with the statement above. A row another member
+	// authored that names the subject as its target (added, removed) would
+	// survive the users delete below as a message with a dangling target.
+	{"group events naming the subject", `DELETE FROM messages WHERE id IN (SELECT message_id FROM message_group_events WHERE target_user_id = ?)`},
 	// Call log participation (migration 064). Call rows the subject authored cascade with messages.
 	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
@@ -408,6 +413,10 @@ var erasureStatements = []struct {
 	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
 	{"gif_favorites", `DELETE FROM gif_favorites WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
+	// Group DM owner (migration 065): hand the group to its lowest remaining
+	// member, the same rule a leave applies, so dm_owner_id keeps naming a
+	// current member. A group with no member left gets NULL.
+	{"group DM owner", `UPDATE channels SET dm_owner_id = (SELECT MIN(user_id) FROM dm_participants WHERE channel_id = channels.id) WHERE dm_owner_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
@@ -427,7 +436,8 @@ var erasureStatements = []struct {
 // carry user_id (presence, typing, reactions, voice, member_ban), message
 // frames carry the author as user.id, chat frames list the mentioned ids
 // under mentions, a call log row lists the people who joined under
-// call.participants, a relayed E2EE offer names its sender as from_user_id, and
+// call.participants, a group add or remove row names its target as
+// group_event.target_user_id, a relayed E2EE offer names its sender as from_user_id, and
 // a presence_batch lists each user under updates[].user_id.
 // ws.eventNamesUser is the same rule over the bytes in the ring buffer; the
 // two must stay in step.
@@ -437,6 +447,7 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR json_extract(payload, '$.payload.referenced_message.user.id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE json_each.value = ?1)
+	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 
 // DeleteEventsForUser removes every persisted replay event naming userID —

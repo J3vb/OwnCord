@@ -110,5 +110,10 @@ const (
 type MessageKind string
 
 const (
-	MessageKindCall MessageKind = "call" // a call log row in a DM, written and updated only by the server
+	MessageKindCall        MessageKind = "call"         // a call log row in a DM, written and updated only by the server
+	MessageKindGroupAdd    MessageKind = "group_add"    // a group DM row: a member was added, written only by the server
+	MessageKindGroupRemove MessageKind = "group_remove" // a group DM row: a member was removed by the owner, written only by the server
+	MessageKindGroupLeave  MessageKind = "group_leave"  // a group DM row: a member left, written only by the server
+	MessageKindGroupRename MessageKind = "group_rename" // a group DM row: the group name changed or was cleared, written only by the server
+	MessageKindGroupIcon   MessageKind = "group_icon"   // a group DM row: the group icon changed or was removed, written only by the server
 )

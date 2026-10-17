@@ -20,7 +20,7 @@ const absenceWindow = 100 * time.Millisecond
 // seedGroupDM creates a group DM containing every listed user.
 func seedGroupDM(t *testing.T, database *db.DB, name string, userIDs ...int64) int64 {
 	t.Helper()
-	ch, err := database.CreateGroupDMChannel(context.Background(), name, userIDs)
+	ch, err := database.CreateGroupDMChannel(context.Background(), name, userIDs[0], userIDs)
 	if err != nil {
 		t.Fatalf("seedGroupDM: %v", err)
 	}

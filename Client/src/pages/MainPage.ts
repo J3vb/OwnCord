@@ -670,6 +670,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
+    // The ring above already went out to the whole DM (a group redial from inside
+    // a live call too, 3B-8); with someone else in the room there is no
+    // "Calling…" to show, and the voice subscription would clear it at once.
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     // The server drops rings to offline members, so waiting on them would
@@ -1233,6 +1236,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
           stepChannel(direction, unreadOnly);
         },
+        ringActive: () => ringCtrl?.current() != null,
+        onAcceptRing: () => acceptRing(false),
+        onDeclineRing: () => ringCtrl?.decline(),
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
         isGlobalPollerActive: () => globalPollerActive,
@@ -1345,10 +1351,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
       onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
-      onRingEnd: (ring) => void callAlerts().then((m) => m.clearIncomingCall(ring)),
+      onRingEnd: (ring, reason) =>
+        void callAlerts().then((m) => {
+          m.clearIncomingCall(ring);
+          if (reason === "superseded") m.alertSupersededCall(ring);
+        }),
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => acceptRing(false),
+      onAccept: (withVideo) => acceptRing(withVideo),
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);

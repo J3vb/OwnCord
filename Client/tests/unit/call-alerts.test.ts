@@ -25,11 +25,12 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 vi.mock("../../src/lib/toast", () => ({ showToast }));
 
-const { alertIncomingCall, alertMissedCall, clearIncomingCall } =
+const { alertIncomingCall, alertMissedCall, alertSupersededCall, clearIncomingCall } =
   await import("../../src/features/direct-messages/callAlerts");
 const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/notificationSound");
 const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
+const { dmStore } = await import("../../src/stores/dm.store");
 
 /** Every frequency the app's audio graph was asked to play, in order. */
 const frequencies: number[] = [];
@@ -165,6 +166,41 @@ describe("a missed call", () => {
     alertMissedCall(ring);
     expect(showToast).toHaveBeenCalledTimes(1);
     expect(showCall).not.toHaveBeenCalled();
+  });
+});
+
+describe("a ring replaced by a ring from another channel (3B-4)", () => {
+  afterEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("toasts a missed 1:1 call and sends no OS notification", () => {
+    alertSupersededCall(ring);
+
+    expect(showToast.mock.calls).toEqual([["Missed call from Otto", "info"]]);
+    expect(showCall).not.toHaveBeenCalled();
+  });
+
+  it("names the group for a missed group call", () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 50,
+          recipient: { id: 10, username: "Otto", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "Otto", avatar: "", status: "online" }],
+          name: "Game night",
+          isGroup: true,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    alertSupersededCall(ring);
+
+    expect(showToast.mock.calls).toEqual([["Missed call in Game night", "info"]]);
   });
 });
 

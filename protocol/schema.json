@@ -225,6 +225,36 @@
           "go": "MessageKindCall",
           "ts": "CALL",
           "note": "a call log row in a DM, written and updated only by the server"
+        },
+        {
+          "wire": "group_add",
+          "go": "MessageKindGroupAdd",
+          "ts": "GROUP_ADD",
+          "note": "a group DM row: a member was added, written only by the server"
+        },
+        {
+          "wire": "group_remove",
+          "go": "MessageKindGroupRemove",
+          "ts": "GROUP_REMOVE",
+          "note": "a group DM row: a member was removed by the owner, written only by the server"
+        },
+        {
+          "wire": "group_leave",
+          "go": "MessageKindGroupLeave",
+          "ts": "GROUP_LEAVE",
+          "note": "a group DM row: a member left, written only by the server"
+        },
+        {
+          "wire": "group_rename",
+          "go": "MessageKindGroupRename",
+          "ts": "GROUP_RENAME",
+          "note": "a group DM row: the group name changed or was cleared, written only by the server"
+        },
+        {
+          "wire": "group_icon",
+          "go": "MessageKindGroupIcon",
+          "ts": "GROUP_ICON",
+          "note": "a group DM row: the group icon changed or was removed, written only by the server"
         }
       ]
     }

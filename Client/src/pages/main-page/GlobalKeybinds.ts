@@ -8,6 +8,10 @@
  * anywhere, like the user panel's buttons: outside a call they only change the
  * saved state the next join starts with.
  *
+ * While a call is ringing, Ctrl+Enter accepts it (audio only) and Escape
+ * declines it, ahead of the mark-read use of Escape below. Both keep to the same
+ * rules: no dialog open, not suspended, nobody else used the key.
+ *
  * Ctrl+, (Cmd+, on macOS) opens Settings, including from the message box.
  * Ctrl+/ (Cmd+/) opens the read-only shortcuts overlay the same way; pressing
  * it again closes the overlay, which listens for that itself because every
@@ -53,6 +57,14 @@ export interface GlobalKeybindHandlers {
   /** Alt+↑/↓ — step to the previous/next channel; with Shift, the previous/
    *  next unread one (DP-35). `direction` is 1 for down/next, -1 for up. */
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
+  /** Whether an incoming-call ring is on screen. While it is, Ctrl+Enter
+   *  accepts it and Escape declines it (3B-4); with none, neither key does
+   *  anything new. Optional so a host with no calls attaches nothing. */
+  readonly ringActive?: () => boolean;
+  /** Ctrl+Enter while a ring is current — accept it, audio only. */
+  readonly onAcceptRing?: () => void;
+  /** Escape while a ring is current — decline it, ahead of mark-read. */
+  readonly onDeclineRing?: () => void;
   /** Ctrl+, (Cmd+, on macOS) — open Settings. Not run while Settings is open
    *  (`isSuspended`) or a dialog is up. */
   readonly onOpenSettings: () => void;
@@ -214,10 +226,26 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (e.key !== "Escape") return;
     escapeTaken = handlers.isSuspended?.() === true || dialogOpen();
   };
+  // Ctrl+Enter answers a ringing call. It is taken in the capture phase,
+  // before the message box would send its draft on the same key; with no
+  // ring the key reaches the message box untouched.
+  const onAcceptRingCapture = (e: KeyboardEvent): void => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.repeat || e.isComposing || handlers.isSuspended?.() === true || dialogOpen()) return;
+    if (handlers.ringActive?.() !== true) return;
+    e.stopPropagation();
+    runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
+  };
   const onEscape = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
     if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
     if (isTypingTarget(e.target) && !isComposer(e.target)) return;
+    // A ringing call outranks mark-read: the key declines it, and the
+    // preventDefault inside runGlobal keeps anything else from reusing it.
+    if (!e.shiftKey && handlers.ringActive?.() === true) {
+      runGlobal(e, "decline-ring", () => handlers.onDeclineRing?.());
+      return;
+    }
     if (e.shiftKey) runGlobal(e, "mark-server-read", handlers.onMarkServerRead);
     else runGlobal(e, "mark-channel-read", handlers.onMarkChannelRead);
   };
@@ -225,6 +253,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   const owner = new Disposable();
   document.addEventListener("keydown", handler, { signal: owner.signal });
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
+  window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
   return () => owner.destroy();
 }

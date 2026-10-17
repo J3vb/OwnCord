@@ -84,7 +84,7 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 			r.Content = string(runes[:referencedSnippetRunes])
 		}
 		r.HasAttachments = hasAtt != 0
-		r.IsCall = kind == MessageKindCall
+		r.IsSystem = kind != MessageKindUser
 		r.User = &UserPublic{ID: *uid, Username: *username, Avatar: avatar}
 		out[r.ID] = &r
 	}

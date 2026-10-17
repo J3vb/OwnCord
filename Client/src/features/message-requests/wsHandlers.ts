@@ -12,7 +12,7 @@ import { loadRequests } from "./sync";
  * (docs/protocol.md, dm_request).
  */
 export function applyReadyDmRequests(api: DispatchApi | undefined): void {
-  loadRequests(api);
+  void loadRequests(api);
 }
 
 export function handleDmRequest(payload: Payload<"dm_request">): void {

@@ -97,7 +97,7 @@ func TestSearch_InUnreadableTargetsLookIdentical(t *testing.T) {
 	_ = chTestCreateToken(t, f.database, "inid-fourth", 4)
 	thirdUser, _ := f.database.GetUserByUsername(ctx, "inid-third")
 	fourthUser, _ := f.database.GetUserByUsername(ctx, "inid-fourth")
-	dm, err := f.database.CreateGroupDMChannel(ctx, "dmgroup", []int64{f.owner.ID, thirdUser.ID, fourthUser.ID})
+	dm, err := f.database.CreateGroupDMChannel(ctx, "dmgroup", f.owner.ID, []int64{f.owner.ID, thirdUser.ID, fourthUser.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

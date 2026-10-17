@@ -173,18 +173,45 @@ type Message struct {
 	// token and the author held MENTION_EVERYONE. Per-user mentions live in
 	// message_mentions.
 	MentionsEveryone bool
-	// Kind is MessageKindUser for an ordinary message and MessageKindCall for
-	// a call log row, which only the server writes.
+	// Kind is MessageKindUser for an ordinary message. Every other value is a
+	// row only the server writes: a call log row or a group event row.
 	Kind int64
 }
 
-// MessageKindUser and MessageKindCall are the stored values of messages.kind.
-// MessageKindNameCall is the wire name of kind 1 (protocol enum chat_message.kind).
+// The stored values of messages.kind. 0 is a message a user wrote, 1 a call
+// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10).
+// MessageKindName gives their wire names (protocol enum chat_message.kind).
 const (
-	MessageKindUser     int64 = 0
-	MessageKindCall     int64 = 1
-	MessageKindNameCall       = "call"
+	MessageKindUser        int64 = 0
+	MessageKindCall        int64 = 1
+	MessageKindGroupAdd    int64 = 2
+	MessageKindGroupRemove int64 = 3
+	MessageKindGroupLeave  int64 = 4
+	MessageKindGroupRename int64 = 5
+	MessageKindGroupIcon   int64 = 6
+
+	MessageKindNameCall = "call"
 )
+
+// MessageKindName is the wire name of a stored kind: "" for an ordinary
+// message (the field is omitted) and for a value this server does not know.
+func MessageKindName(kind int64) string {
+	switch kind {
+	case MessageKindCall:
+		return MessageKindNameCall
+	case MessageKindGroupAdd:
+		return "group_add"
+	case MessageKindGroupRemove:
+		return "group_remove"
+	case MessageKindGroupLeave:
+		return "group_leave"
+	case MessageKindGroupRename:
+		return "group_rename"
+	case MessageKindGroupIcon:
+		return "group_icon"
+	}
+	return ""
+}
 
 // MessageWithUser joins a Message with the author's public fields.
 type MessageWithUser struct {
@@ -255,6 +282,19 @@ type MessageAPIResponse struct {
 	// for an ordinary message. See CallInfo.
 	Kind string    `json:"kind,omitempty"`
 	Call *CallInfo `json:"call,omitempty"`
+	// GroupEvent is set only on a group event row (kinds group_add to
+	// group_icon). See GroupEventInfo.
+	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
+}
+
+// GroupEventInfo is the group_event block of a group DM row. Which fields are
+// set depends on the kind: add and remove carry TargetUserID, rename carries
+// Name ("" means the name was removed) and icon carries IconRemoved. A leave
+// row carries none, so it encodes as {}.
+type GroupEventInfo struct {
+	TargetUserID int64   `json:"target_user_id,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	IconRemoved  *bool   `json:"icon_removed,omitempty"`
 }
 
 // CallInfo is the call block of a call log row. Times use the message
@@ -273,9 +313,10 @@ type ReferencedMessage struct {
 	Content        string      `json:"content"`
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
-	// IsCall marks a call log row. It is server-side only: a reply to one is
-	// refused, so it never reaches the wire.
-	IsCall bool `json:"-"`
+	// IsSystem marks a server-written row (a call log or group event row, any
+	// kind other than MessageKindUser). It is server-side only: a reply to one
+	// is refused, so it never reaches the wire.
+	IsSystem bool `json:"-"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.

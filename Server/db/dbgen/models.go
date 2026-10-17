@@ -75,6 +75,7 @@ type Channel struct {
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
 	Nsfw            int64   `json:"nsfw"`
 	IsGroup         int64   `json:"isGroup"`
+	DmOwnerID       *int64  `json:"dmOwnerId"`
 }
 
 type ChannelOverride struct {
@@ -224,6 +225,13 @@ type MessageDeliveryReceipt struct {
 	MessageID       int64  `json:"messageId"`
 	Timestamp       string `json:"timestamp"`
 	ExpiresAtMs     int64  `json:"expiresAtMs"`
+}
+
+type MessageGroupEvent struct {
+	MessageID    int64   `json:"messageId"`
+	TargetUserID *int64  `json:"targetUserId"`
+	Name         *string `json:"name"`
+	IconRemoved  int64   `json:"iconRemoved"`
 }
 
 type MessageMention struct {

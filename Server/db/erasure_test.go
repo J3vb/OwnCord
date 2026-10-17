@@ -180,6 +180,23 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed call log: %v", err)
 	}
+	// Group DM rows and owner (migration 065): a group the subject owns, with a
+	// row another member authored naming the subject, so classes 11c and 14e
+	// are proved non-empty too.
+	grp, err := database.CreateGroupDMChannel(ctx, "", sub.id, []int64{sub.id, sub.other, caller})
+	if err != nil {
+		t.Fatalf("seed group DM: %v", err)
+	}
+	res, err := database.ExecContext(ctx,
+		`INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, 'added', 2)`, grp.ID, caller)
+	if err != nil {
+		t.Fatalf("seed group event: %v", err)
+	}
+	evID, _ := res.LastInsertId()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO message_group_events (message_id, target_user_id) VALUES (?, ?)`, evID, sub.id); err != nil {
+		t.Fatalf("seed group event target: %v", err)
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
