@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -263,7 +264,7 @@ func TestConfigCLI_ResetAllRemovesFile(t *testing.T) {
 func TestConfigCLI_ResetAllMovesUnparseableFileAside(t *testing.T) {
 	f := newConfigFixture(t)
 	body := []byte("{\"voice.livekit_api_secret\": \"" + strings.Repeat("z", 40) + "\", ")
-	if err := os.WriteFile(f.overridesPath, body, 0o600); err != nil {
+	if err := os.WriteFile(f.overridesPath, body, 0o644); err != nil { //nolint:gosec // widened on purpose: the command must tighten it
 		t.Fatal(err)
 	}
 
@@ -289,7 +290,7 @@ func TestConfigCLI_ResetAllMovesUnparseableFileAside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("aside mode = %o, want 600", info.Mode().Perm())
 	}
 	if !strings.Contains(stdout, filepath.Base(matches[0])) {
@@ -461,5 +462,65 @@ func TestConfigCLI_HonoursDataDirEnv(t *testing.T) {
 	}
 	if left := f.saved(t); left["server.port"] != 9443 {
 		t.Errorf("the config.yaml data_dir file was touched: %v", left)
+	}
+}
+
+func TestConfigCLI_MissingDatabaseDirectoryCountsAsNoHolder(t *testing.T) {
+	f := newConfigFixture(t)
+	gone := filepath.Join(f.dir, "vanished", "deeper", "chatserver.db")
+	f.seed(t, map[string]any{"database.path": gone, "server.port": 9443})
+
+	code, _, stderr := f.run(t, "reset-overrides")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	if left := f.saved(t); len(left) != 0 {
+		t.Fatalf("keys still saved: %v", sortedKeys(left))
+	}
+}
+
+// A running server holds the lock at the path it booted with (the base path);
+// a panel save of a new database.path only takes effect at the next restart.
+func TestConfigCLI_RefusesWhileBasePathLockHeldAndPathMoved(t *testing.T) {
+	f := newConfigFixture(t)
+	moved := filepath.Join(f.dir, "moved", "chatserver.db")
+	f.seed(t, map[string]any{"database.path": moved, "server.port": 9443})
+	hash := fileHash(t, f.overridesPath)
+	holdLock(t, f.dbPath)
+
+	code, _, stderr := f.run(t, "reset-overrides")
+	if code != 1 || !strings.Contains(stderr, "stop the server first") {
+		t.Fatalf("exit %d, stderr %q; want a refusal on the base path", code, stderr)
+	}
+	if fileHash(t, f.overridesPath) != hash {
+		t.Error("overrides file changed while the base path lock was held")
+	}
+}
+
+func TestConfigCLI_AsideNameNeverOverwrites(t *testing.T) {
+	f := newConfigFixture(t)
+	for i := range 3 {
+		body := []byte("not json " + strings.Repeat("x", i+1))
+		if err := os.WriteFile(f.overridesPath, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if code, _, stderr := f.run(t, "reset-overrides", "--all"); code != 0 {
+			t.Fatalf("run %d: exit %d, stderr: %s", i, code, stderr)
+		}
+	}
+	matches, err := filepath.Glob(f.overridesPath + ".unreadable-*")
+	if err != nil || len(matches) != 3 {
+		t.Fatalf("aside files = %v (err %v), want 3 distinct", matches, err)
+	}
+}
+
+func TestConfigCLI_HelpPrintsUsageAndNamesCheckedPath(t *testing.T) {
+	f := newConfigFixture(t)
+	if code, _, stderr := f.run(t, "reset-overrides", "--help"); code != 0 || !strings.Contains(stderr, "usage: chatserver config reset-overrides") {
+		t.Errorf("--help: exit %d, stderr %q", code, stderr)
+	}
+	code, stdout, _ := f.run(t, "reset-overrides")
+	if code != 0 || !strings.Contains(stdout, f.overridesPath) {
+		t.Errorf("exit %d, stdout %q; want the full overrides path", code, stdout)
 	}
 }

@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// errAlreadyLocked reports that another live process holds the database's
+// ErrAlreadyLocked reports that another live process holds the database's
 // single-process lock. The locks used here (flock on Unix, an exclusive file
 // handle on Windows) are released by the OS when their holder exits, so a
 // held lock always means a running process, never a stale file.
-var errAlreadyLocked = errors.New("database lock held by another process")
+var ErrAlreadyLocked = errors.New("database lock held by another process")
 
 // AcquireProcessLock takes the database's single-process lock for dbPath and
 // returns its release. It is the exported front door for short-lived tooling —
@@ -21,9 +21,12 @@ var errAlreadyLocked = errors.New("database lock held by another process")
 // operator running the command wants a fast refusal, not the restart-handoff
 // wait acquireProcessLock exists for. The returned error is descriptive, not a
 // sentinel callers must match.
+// A refusal wraps ErrAlreadyLocked; any other error means the lock file could
+// not be opened at all (for example its directory is missing), so no process
+// can hold it.
 func AcquireProcessLock(dbPath string) (release func(), err error) {
 	release, err = tryLockFile(lockFilePath(dbPath))
-	if errors.Is(err, errAlreadyLocked) {
+	if errors.Is(err, ErrAlreadyLocked) {
 		return nil, fmt.Errorf("database %s is in use by another process (stop the server first): %w", dbPath, err)
 	}
 	if err != nil {
@@ -36,7 +39,7 @@ func AcquireProcessLock(dbPath string) (release func(), err error) {
 func lockFilePath(dbPath string) string { return dbPath + ".lock" }
 
 // acquireProcessLock takes the single-process lock for dbPath, retrying for
-// a bounded window before giving up with errAlreadyLocked.
+// a bounded window before giving up with ErrAlreadyLocked.
 //
 // The restart handoff no longer overlaps by design — the old process closes
 // the database (releasing this lock) before its replacement is started, in
@@ -57,7 +60,7 @@ func acquireProcessLock(dbPath string) (release func(), err error) {
 	logged := false
 	for {
 		release, err = tryLockFile(lockFilePath(dbPath))
-		if err == nil || !errors.Is(err, errAlreadyLocked) {
+		if err == nil || !errors.Is(err, ErrAlreadyLocked) {
 			return release, err
 		}
 		if time.Now().After(deadline) {

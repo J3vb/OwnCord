@@ -404,8 +404,16 @@ A wrong port, TLS mode, admin allowlist, trusted-proxies list, path or restart
 mode can put the panel out of reach. `chatserver config reset-overrides` drops
 the saved panel settings so `config.yaml` and the environment apply again. Run
 it with the server stopped: it takes the database's process lock and refuses
-while a server is running. It does not read or write `config.yaml`, and it
-prints the names of the keys it removed, never their values.
+while a server is running. It never writes `config.yaml`, and it
+prints the names of the keys it removed, never their values, and the full path
+of the overrides file it checked.
+
+It finds the file the same way the server does, so run it the way you run the
+server. On bare metal, run it from the server's working directory (where
+`config.yaml` is) with the same `OWNCORD_SERVER_DATA_DIR` and
+`OWNCORD_DATABASE_PATH` values, if you set them. For a bare `docker run`, pass
+the same `-e` flags as the server container. If the path it prints is not the
+one you expected, it was looking in the wrong place.
 
 ```bash
 chatserver config reset-overrides                  # the settings that can lock you out

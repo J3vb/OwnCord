@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,12 @@ func runConfigCLI(cfgPath string, args []string) int {
 }
 
 func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
+	// The config package logs one INFO line per override it applies; those are
+	// noise here. Warnings and the command's own output stay.
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(prev)
+
 	if len(args) == 0 || args[0] != "reset-overrides" {
 		fmt.Fprintln(stderr, "error: config takes one subcommand: reset-overrides")
 		configUsage(stderr)
@@ -39,8 +46,12 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 
 	fs := flag.NewFlagSet("config reset-overrides", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { configUsage(stderr) }
 	all := fs.Bool("all", false, "drop every saved panel setting (an unreadable file is moved aside, never deleted)")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	keys := fs.Args()
@@ -66,29 +77,35 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	overridesPath := config.OverridesPath(base.Server.DataDir)
 
 	if _, err := os.Stat(overridesPath); errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(stdout, "no saved panel settings (%s does not exist); nothing to reset\n", config.OverridesFileName)
+		fmt.Fprintf(stdout, "no saved panel settings (%s does not exist); nothing to reset\n", overridesPath)
 		return 0
 	} else if err != nil {
 		fmt.Fprintf(stderr, "error: could not read %s: %v\n", config.OverridesFileName, err)
 		return 1
 	}
 
-	// The panel can move database.path, so the lock goes where the server
-	// would put it. When the file does not parse, no server can have booted
-	// on it, so the base path cannot disagree with a running one.
-	dbPath := base.Database.Path
-	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {
-		dbPath = effective.Database.Path
+	// The panel can move database.path, and a running server holds the lock at
+	// the path it booted with, which is the base path unless an earlier save
+	// has since been applied by a restart. Lock both the base path and the
+	// path the overrides now name (base first, always), so a pending move
+	// cannot let this command rewrite the file under a live server. A saved
+	// chain A -> B -> C with no restart in between is not covered: the server
+	// does not record the path it is running on. When the file does not parse,
+	// no server can have booted on it, so only the base path applies.
+	lockPaths := []string{base.Database.Path}
+	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil && effective.Database.Path != base.Database.Path {
+		lockPaths = append(lockPaths, effective.Database.Path)
 	}
-	if dbPath == "" {
-		dbPath = filepath.Join("data", "chatserver.db")
+	for _, p := range lockPaths {
+		if p == "" {
+			p = filepath.Join("data", "chatserver.db")
+		}
+		release, ok := lockDatabase(stderr, p)
+		if !ok {
+			return 1
+		}
+		defer release()
 	}
-	release, err := db.AcquireProcessLock(dbPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	defer release()
 
 	// Read under the lock, so the file cannot change between the read and the
 	// write.
@@ -103,6 +120,23 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 		return 1
 	}
 	return resetKeys(stdout, stderr, overridesPath, current, keys)
+}
+
+// lockDatabase takes the process lock for dbPath. It fails (ok=false, after
+// printing why) only when another process holds the lock. Any other error
+// means the lock file could not be created, for example because the directory
+// is missing, and no process can hold a lock that does not exist, so that
+// counts as no holder and the reset may proceed.
+func lockDatabase(stderr io.Writer, dbPath string) (release func(), ok bool) {
+	release, err := db.AcquireProcessLock(dbPath)
+	if errors.Is(err, db.ErrAlreadyLocked) {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return nil, false
+	}
+	if err != nil {
+		return func() {}, true
+	}
+	return release, true
 }
 
 // resetKeys removes the named keys, or, with none named, every key whose wrong
@@ -128,7 +162,7 @@ func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[strin
 		}
 	}
 	if len(changes) == 0 {
-		fmt.Fprintln(stdout, "none of those settings is saved in the overrides file; nothing to reset")
+		fmt.Fprintf(stdout, "none of those settings is saved in %s; nothing to reset\n", overridesPath)
 		return 0
 	}
 	if err := config.SaveOverrides(overridesPath, changes); err != nil {
@@ -137,6 +171,7 @@ func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[strin
 	}
 
 	removed := sortedKeys(changes)
+	fmt.Fprintf(stdout, "checked %s\n", overridesPath)
 	fmt.Fprintf(stdout, "reset %d saved panel setting(s); config.yaml and the environment apply again for:\n", len(removed))
 	for _, key := range removed {
 		fmt.Fprintf(stdout, "  %s\n", key)
@@ -153,6 +188,12 @@ func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[strin
 func resetAll(stdout, stderr io.Writer, overridesPath string, current map[string]any, readErr error) int {
 	if readErr != nil {
 		aside := overridesPath + ".unreadable-" + time.Now().UTC().Format("20060102T150405Z")
+		for n := 2; ; n++ {
+			if _, err := os.Lstat(aside); errors.Is(err, os.ErrNotExist) {
+				break
+			}
+			aside = fmt.Sprintf("%s.unreadable-%s-%d", overridesPath, time.Now().UTC().Format("20060102T150405Z"), n)
+		}
 		if err := os.Rename(overridesPath, aside); err != nil {
 			fmt.Fprintf(stderr, "error: could not move %s aside: %v\n", config.OverridesFileName, err)
 			return 1
