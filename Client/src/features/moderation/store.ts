@@ -37,3 +37,8 @@ export function setMemberTimeouts(list: readonly MemberTimeoutEntry[] | undefine
     list === undefined ? null : new Map(list.map((e) => [e.user_id, e.expires_at])),
   );
 }
+
+/** Forget the last server's view on sign-out or server switch. */
+export function resetMemberTimeouts(): void {
+  memberTimeoutsStore.setState(() => null);
+}

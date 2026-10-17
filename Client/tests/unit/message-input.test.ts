@@ -39,6 +39,7 @@ import {
 } from "@components/MessageInput";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 import { authStore } from "@stores/auth.store";
+import { canMention, mentionInComposer } from "../../src/features/messaging/activeComposer";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
 const stubGifApi: GifApi & GifFavoritesApi = {
@@ -2369,5 +2370,48 @@ describe("MessageInput insertMention", () => {
     const { comp } = mountInput();
     comp.destroy?.();
     expect(comp.insertMention("Dave")).toBe(false);
+  });
+});
+
+// (23) MessageInput claims the active-composer slot the member menu reads (WP 3C-3)
+describe("MessageInput active composer", () => {
+  let a: HTMLDivElement;
+  let b: HTMLDivElement;
+
+  beforeEach(() => {
+    a = document.createElement("div");
+    b = document.createElement("div");
+    document.body.append(a, b);
+  });
+
+  afterEach(() => {
+    a.remove();
+    b.remove();
+  });
+
+  it("is claimed on mount, follows the disabled state and is released on destroy", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(a);
+    expect(canMention()).toBe(true);
+    expect(mentionInComposer("Dave")).toBe(true);
+    expect((a.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@Dave ");
+    comp.setDisabled("You cannot send messages here");
+    expect(canMention()).toBe(false);
+    comp.setDisabled(null);
+    comp.destroy?.();
+    expect(canMention()).toBe(false);
+    expect(mentionInComposer("Dave")).toBe(false);
+  });
+
+  it("keeps the newer composer when the older one is destroyed after it mounts", () => {
+    const first = createMessageInput(makeOptions());
+    const second = createMessageInput(makeOptions());
+    first.mount(a);
+    second.mount(b);
+    first.destroy?.();
+    expect(mentionInComposer("Dave")).toBe(true);
+    expect((b.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@Dave ");
+    expect((a.querySelector("textarea") as HTMLTextAreaElement | null)?.value ?? "").toBe("");
+    second.destroy?.();
   });
 });
