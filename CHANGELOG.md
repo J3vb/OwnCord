@@ -65,6 +65,7 @@ and only when it changes something a contributor or fork holder must do
 - The member list sorts each role group A–Z, with Idle and Do Not Disturb people among the Online ones and offline people last. Letter avatars use a fixed colour per person instead of the role colour, role names keep their capitals in the Change Role menu, status tooltips say "Do Not Disturb" instead of "dnd", and the bans list appears as soon as your role is given Ban Members.
 - The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
 - Right-clicking a member now opens the full menu in Discord's order: Profile, Mention (adds @name to your message box), Message, Call, Server Mute, Deafen and Disconnect for someone in a voice channel, Change Role, **Timeout** (60 seconds to 1 week) or **Remove Timeout**, Force Logout, Ban, Copy User ID and Block. Right-clicking yourself offers Profile and Mention.
+- The member list now updates in place: when someone goes online or offline only their row moves, and nothing else jumps or loses focus. Everyone who is offline sits in one **Offline** group at the bottom, and each role's count shows only the people online.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
@@ -100,6 +101,7 @@ and only when it changes something a contributor or fork holder must do
 - Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
 - Linux (Wayland): push to talk and the Mute and Deafen shortcuts now work while another app is in front on GNOME 48 or newer and KDE Plasma. Settings → Keybinds has **Set up global shortcuts**, which opens your desktop's own dialog, then shows the keys it set; your desktop reserves those keys for OwnCord in every app, and push to talk is limited to function keys. GNOME 47 and older, Sway and other desktops without this service keep the note that global keys are unavailable, and the tray items still work.
+- Windows: unread mentions and DMs now also show on the tray icon as a red dot, as on Linux, and the dot comes back on the next update if the first swap failed.
 
 **Desktop UI (Linux)**
 
