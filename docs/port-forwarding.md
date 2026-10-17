@@ -84,6 +84,11 @@ guide uses.
 | `7881`        | TCP      | LiveKit TCP fallback |
 | `50000-60000` | UDP      | LiveKit media        |
 
+**On Docker** (the compose stack or the single image) the media port is
+`7882/UDP`, not the range. Compose publishes exactly `8443/TCP`, `7881/TCP` and
+`7882/UDP`. If you used to forward `50000-60000/UDP` for compose, forward
+`7882/UDP` instead and close the old range.
+
 **Do not forward `7880/TCP`.** Clients reach LiveKit's signalling through
 OwnCord's own `:8443/livekit` path (see
 [deployment.md](deployment.md#reverse-proxy-topology)). Forwarding 7880 only
@@ -111,25 +116,19 @@ instead.
 2. OwnCord writes `rtc.udp_port: 7882` into the `livekit.yaml` it generates.
 3. Forward just that one port.
 
-**On the Docker compose stack**, you edit LiveKit's file yourself:
+**On Docker**, you do not need to do anything. The compose stack, the
+single-container image and the Unraid template already use one UDP port,
+`7882`. Compose pins it with flags, so an older `livekit.yaml` that still names
+a port range cannot bring the range back.
 
-1. In `livekit.yaml`, replace `port_range_start` and `port_range_end` with
-   `udp_port: 7882`.
-2. In `docker-compose.yml`, publish `7882/udp` in place of the range.
-3. On the `owncord` service, set `OWNCORD_VOICE_UDP_PORT: "7882"`. It ships as
-   `"0"`. This makes the admin connectivity report name that port instead of
-   the range.
-
-The single-container Docker image and the Unraid template already use one UDP
-port, `7882`.
-
-LiveKit ignores the range once `udp_port` is set. Use one form or the other,
-never both.
+On bare LiveKit that you configure yourself, LiveKit prefers a
+`port_range_start/end` in `livekit.yaml` to `udp_port`. Delete the range when
+you set `udp_port`, and use one form or the other, never both.
 
 ### Two things voice needs together
 
 1. **Forward the media ports.** That is `50000-60000/UDP` by default, or your
-   single UDP port. Also forward `7881/TCP`.
+   single UDP port (`7882/UDP` on Docker). Also forward `7881/TCP`.
 2. **Give LiveKit an address that remote clients can reach.** LiveKit tells
    clients this address in its connection offers (ICE candidates).
    - **Best: leave `voice.node_ip` empty.** OwnCord's generated `livekit.yaml`
@@ -156,7 +155,8 @@ A reverse proxy cannot carry voice media. No HTTP proxy can.
 3. Give your server machine a fixed (static or reserved) LAN address.
 4. Add a rule that forwards `8443/TCP` to that address.
 5. For voice and video, also forward `7881/TCP` and `50000-60000/UDP`. Or
-   forward your single UDP port instead of the range.
+   forward your single UDP port instead of the range. On Docker, forward
+   `7881/TCP` and `7882/UDP`.
 6. Save and apply the rules.
 
 ## Connect Address to Share
@@ -302,7 +302,8 @@ on, an admin action, or LiveKit's own behaviour.
   "what is my IP" website.
 - Test from a different network, such as a phone hotspot. Never test from the
   same network.
-- For voice, check that `50000-60000/UDP` (or your single UDP port) is
+- For voice, check that `50000-60000/UDP` (or your single UDP port, `7882/UDP`
+  on Docker) is
   forwarded, **and** that LiveKit advertises your current public address.
   Leave `voice.node_ip` empty, or set it to your current public IP. "Joins but
   no sound" is almost always one of these two.
