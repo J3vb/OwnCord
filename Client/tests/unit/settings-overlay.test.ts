@@ -39,13 +39,22 @@ vi.mock("@lib/logger", () => ({
 const mockSetTheme = vi.fn();
 const mockUiState = vi.hoisted(() => ({
   settingsOpen: false,
-  settingsTab: null as "Safety" | null,
+  settingsTab: null as "Safety" | "Notifications" | null,
+  settingsTabSeq: 0,
+}));
+const uiSubscriptions = vi.hoisted(() => ({
+  all: [] as Array<{ sel: (s: Record<string, unknown>) => unknown; listener: () => void }>,
 }));
 vi.mock("@stores/ui.store", () => ({
   uiStore: {
     getState: () => mockUiState,
     subscribe: () => () => {},
-    subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
+    subscribeSelector: vi.fn(
+      (sel: (s: Record<string, unknown>) => unknown, listener: () => void) => {
+        uiSubscriptions.all.push({ sel, listener });
+        return () => {};
+      },
+    ),
   },
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
@@ -100,6 +109,7 @@ describe("SettingsOverlay", () => {
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),
@@ -126,6 +136,8 @@ describe("SettingsOverlay", () => {
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
     mockUiState.settingsOpen = false;
     mockUiState.settingsTab = null;
+    mockUiState.settingsTabSeq = 0;
+    uiSubscriptions.all.length = 0;
   });
 
   afterEach(() => {
@@ -1586,6 +1598,68 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
+    describe("a tab requested while Settings is already open", () => {
+      /** Fire the tab-request subscription: the one selecting `settingsTabSeq`. */
+      function requestTab(tab: "Notifications" | "Safety"): void {
+        mockUiState.settingsTab = tab;
+        mockUiState.settingsTabSeq += 1;
+        const sub = uiSubscriptions.all.find(
+          ({ sel }) => sel({ settingsTabSeq: 7, settingsOpen: false, settingsTab: null }) === 7,
+        );
+        expect(sub).toBeDefined();
+        sub!.listener();
+      }
+      const active = (): string | null =>
+        container.querySelector(".settings-nav-item.active")?.id ?? null;
+
+      it("switches to Notifications", () => {
+        mockUiState.settingsOpen = true;
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+        expect(active()).toBe("settings-tab-account");
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-notifications");
+        overlay.destroy?.();
+      });
+
+      it("switches again when the user has tabbed away since the same request", () => {
+        mockUiState.settingsOpen = true;
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+        requestTab("Notifications");
+        clickEl(container.querySelector("#settings-tab-appearance"));
+        expect(active()).toBe("settings-tab-appearance");
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-notifications");
+        overlay.destroy?.();
+      });
+
+      it("ignores a request while the panel is closed (show() reads it on open)", () => {
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-account");
+        overlay.destroy?.();
+      });
+    });
+
+    it("opens straight onto Notifications when asked", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Notifications";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe(
+        "settings-tab-notifications",
+      );
+      overlay.destroy?.();
+    });
+
     it("ignores a request for a tab it does not show", () => {
       mockUiState.settingsOpen = true;
       mockUiState.settingsTab = "Safety";
@@ -1648,6 +1722,7 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onChangePassword: vi.fn().mockResolvedValue(undefined),
       onUpdateProfile: vi.fn().mockResolvedValue(undefined),
       onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+      onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
       onLogout: vi.fn(),
       onDeleteAccount: vi.fn().mockResolvedValue(undefined),
       onStatusChange: vi.fn(),

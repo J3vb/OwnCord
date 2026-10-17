@@ -32,6 +32,7 @@ import {
   createVoiceModerationCallbacks,
 } from "./VoiceCallbacks";
 import { createSidebarMemberSection } from "./SidebarMemberSection";
+import { attachServerMenu } from "./ServerMenu";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
   selectDmConversation,
@@ -48,7 +49,7 @@ import type { ModalInstance } from "@lib/modalFactory";
 import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
 import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
-import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
+import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
@@ -215,11 +216,24 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const serverHeader = createElement("div", { class: "unified-sidebar-header" });
   const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC"); // i18n-exempt: logo monogram, not copy
   const serverInfoCol = createElement("div", { class: "server-info" });
-  const serverNameEl = createElement(
+  // The server name is the menu's button (Discord's server menu). The text sits
+  // in its own span so a rename replaces only the text, never the chevron.
+  const serverNameEl = createElement("button", {
+    type: "button",
+    class: "server-name",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "data-testid": "server-name",
+  });
+  const serverNameText = createElement(
     "span",
-    { class: "server-name" },
+    { class: "server-name-text" },
     authStore.getState().serverName ?? shellText("common.serverFallback"),
   );
+  const serverNameChevron = createIcon("chevron-down", 14);
+  serverNameChevron.classList.add("server-name-chevron");
+  serverNameEl.appendChild(serverNameText);
+  serverNameEl.appendChild(serverNameChevron);
   const onlineCount = getOnlineMembers().length;
   const serverOnlineEl = createElement(
     "span",
@@ -299,16 +313,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "scroll-text",
     "audit-log-btn",
   );
-  auditBtn.addEventListener("click", () => {
+  // The Audit Log button and the server menu's Server Settings share this.
+  const openAdmin = (section?: string): void => {
     const host = api.getConfig().host ?? "";
     if (host === "") {
       getToast()?.show(shellText("audit.notConnected"), "error");
       return;
     }
-    void openAdminPanel(host, "audit").catch(() => {
+    void openAdminPanel(host, section).catch(() => {
       getToast()?.show(shellText("audit.openFailed"), "error");
     });
-  });
+  };
+  auditBtn.addEventListener("click", () => openAdmin("audit"));
 
   // The Moderation Center entry (B9-4, Q2): beside Audit Log, only with
   // MODERATE_MEMBERS, and only once the Moderation Center ships.
@@ -353,6 +369,23 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   sidebarWrapper.appendChild(serverHeader);
 
+  // The server menu. Its rows are decided each time it opens (ServerMenu.ts).
+  const serverMenuOwner = new Disposable();
+  unsubscribers.push(() => serverMenuOwner.destroy());
+  attachServerMenu(
+    serverNameEl,
+    {
+      onInvite: () => {
+        void headerInviteCtrl.open();
+      },
+      onMarkRead: () => markAllRead({ includeDms: false }),
+      onNotificationSettings: () => openSettings("Notifications"), // i18n-exempt: settings tab id, not copy
+      onCreateChannel: () => openCreateChannelModal(""),
+      onServerSettings: () => openAdmin(),
+    },
+    serverMenuOwner.signal,
+  );
+
   // Load per-server collapsed category state from localStorage, scoped to
   // the connected host (not the display name) — the same convention as
   // setChannelMutesHost/setAudioVolumeHost. The display name
@@ -364,7 +397,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const unsubServerName = authStore.subscribeSelector(
     (s) => s.serverName,
     (name) => {
-      setText(serverNameEl, name ?? shellText("common.serverFallback"));
+      setText(serverNameText, name ?? shellText("common.serverFallback"));
     },
   );
   unsubscribers.push(unsubServerName);
@@ -386,6 +419,33 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const contentSlot = createElement("div", { class: "sidebar-content" });
   sidebarWrapper.appendChild(contentSlot);
 
+  // The category "+", the empty-state button and the server menu share this.
+  function openCreateChannelModal(category: string): void {
+    if (activeModal !== null) return;
+    const modal = createCreateChannelModal({
+      category,
+      onCreate: async (data) => {
+        try {
+          await api.adminCreateChannel(data);
+          modal.destroy?.();
+          activeModal = null;
+        } catch (err) {
+          const msg = errorText(err, shellText("channel.createFailed"));
+          getToast()?.show(msg, "error");
+          // The modal's own catch re-enables its submit button and renders
+          // the inline error, so the failure must propagate to it.
+          throw err;
+        }
+      },
+      onClose: () => {
+        modal.destroy?.();
+        activeModal = null;
+      },
+    });
+    activeModal = modal;
+    modal.mount(document.body);
+  }
+
   // ---------------------------------------------------------------------------
   // Channel sidebar builder (channels mode)
   // ---------------------------------------------------------------------------
@@ -400,31 +460,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onInviteFromChannel: () => {
         void headerInviteCtrl.open();
       },
-      onCreateChannel: (category) => {
-        if (activeModal !== null) return;
-        const modal = createCreateChannelModal({
-          category,
-          onCreate: async (data) => {
-            try {
-              await api.adminCreateChannel(data);
-              modal.destroy?.();
-              activeModal = null;
-            } catch (err) {
-              const msg = errorText(err, shellText("channel.createFailed"));
-              getToast()?.show(msg, "error");
-              // The modal's own catch re-enables its submit button and renders
-              // the inline error, so the failure must propagate to it.
-              throw err;
-            }
-          },
-          onClose: () => {
-            modal.destroy?.();
-            activeModal = null;
-          },
-        });
-        activeModal = modal;
-        modal.mount(document.body);
-      },
+      onCreateChannel: openCreateChannelModal,
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
         // The editor is admin-only and never on first paint, so it loads on

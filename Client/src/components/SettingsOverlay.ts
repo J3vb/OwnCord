@@ -67,6 +67,8 @@ export interface SettingsOverlayOptions {
   }): Promise<void>;
   /** Upload an avatar image. Resolves with the URL the server stored. */
   onUploadAvatar(file: File): Promise<string>;
+  /** Remove the avatar (3C-7a). Resolves once the server has cleared it. */
+  onRemoveAvatar(): Promise<void>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   /** The server-default retention sentence for the Account tab, or null when
@@ -182,6 +184,7 @@ export function createSettingsOverlay(
   let restoreFocus: (() => void) | null = null;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
+  let unsubTabRequest: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
   let unsubUpdate: (() => void) | null = null;
   /** Closes the open Log Out prompt without confirming; null when none is open. */
@@ -303,15 +306,19 @@ export function createSettingsOverlay(
     renderActiveTab();
   }
 
-  function show(): void {
-    const wasOpen = root?.classList.contains("open") ?? false;
-    root?.classList.add("open");
-    // Another surface asked for a tab (a Q4 notice links to Safety). A tab
-    // that is not shown here is ignored.
+  /** Another surface asked for a tab (a Q4 notice links to Safety, the server
+   *  menu to Notifications). A tab that is not shown here is ignored. */
+  function applyRequestedTab(): void {
     const requested = uiStore.getState().settingsTab;
     if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
       setActiveTab(requested);
     }
+  }
+
+  function show(): void {
+    const wasOpen = root?.classList.contains("open") ?? false;
+    root?.classList.add("open");
+    applyRequestedTab();
     // Closing tore down the live parts of the active tab (mic meter, camera
     // preview, log listener). Rebuild it so a reopened panel shows live state
     // instead of a frozen snapshot — and so every tab re-reads current prefs.
@@ -627,6 +634,16 @@ export function createSettingsOverlay(
       },
     );
 
+    // A tab requested while the panel is already open (show() only runs on the
+    // closed-to-open transition). Each request bumps `settingsTabSeq`, so a
+    // repeat of the same tab is heard too.
+    unsubTabRequest = uiStore.subscribeSelector(
+      (s) => s.settingsTabSeq,
+      () => {
+        if (root?.classList.contains("open") === true) applyRequestedTab();
+      },
+    );
+
     // Attach before syncing initial state: show() moves focus into the panel
     // via focusDialog(), and .focus() on a still-detached subtree is a
     // silent no-op. Callers that mount while settingsOpen is already true
@@ -648,6 +665,8 @@ export function createSettingsOverlay(
       unsubUi();
       unsubUi = null;
     }
+    unsubTabRequest?.();
+    unsubTabRequest = null;
     unsubUpdate?.();
     unsubUpdate = null;
     if (unsubAuth !== null) {

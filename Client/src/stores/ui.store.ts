@@ -40,10 +40,17 @@ export interface UiState {
   readonly activeView: ContentViewId | null;
   /** The Settings tab the next open should land on (a Q4 notice links to Safety). */
   readonly settingsTab: SettingsTabRequest | null;
+  /**
+   * Counts the `openSettings(tab)` calls that named a tab. `settingsTab` alone
+   * cannot say "asked again": a second request for the same tab leaves it
+   * unchanged, so an already-open panel the user has since tabbed away from
+   * would never hear it. Absent until the first request.
+   */
+  readonly settingsTabSeq?: number;
 }
 
 /** Settings tabs another surface may open directly. */
-export type SettingsTabRequest = "Safety" | "About";
+export type SettingsTabRequest = "Safety" | "About" | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
@@ -80,6 +87,7 @@ export function openSettings(tab?: SettingsTabRequest): void {
     ...prev,
     settingsOpen: true,
     settingsTab: tab ?? null,
+    ...(tab !== undefined ? { settingsTabSeq: (prev.settingsTabSeq ?? 0) + 1 } : {}),
   }));
 }
 
