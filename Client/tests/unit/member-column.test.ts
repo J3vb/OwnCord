@@ -331,6 +331,24 @@ describe("MemberColumn", () => {
       spy.mockRestore();
     });
 
+    it("a drag whose capture is lost ends, saves, and the next drag works", () => {
+      ctrl = make();
+      handle().setPointerCapture = vi.fn();
+      handle().releasePointerCapture = vi.fn();
+      pointer("pointerdown", { x: 500 });
+      pointer("pointermove", { x: 460 });
+      pointer("lostpointercapture", { x: 460 });
+      expect(localStorage.getItem("owncord:settings:memberListWidth")).toBe("280");
+      pointer("pointerdown", { x: 500, id: 2 });
+      pointer("pointermove", { x: 480, id: 2 });
+      expect(column.style.width).toBe("300px");
+    });
+
+    it("the handle controls the column", () => {
+      ctrl = make();
+      expect(handle().getAttribute("aria-controls")).toBe("member-column");
+    });
+
     it("pointercancel also ends the drag with one save", () => {
       ctrl = make();
       const spy = vi.spyOn(Storage.prototype, "setItem");
@@ -356,11 +374,11 @@ describe("MemberColumn", () => {
       key("ArrowRight");
       key("ArrowRight");
       expect(handle().getAttribute("aria-valuenow")).toBe("224");
-      key("Home");
+      key("End");
       expect(handle().getAttribute("aria-valuenow")).toBe("360");
       key("ArrowLeft");
       expect(handle().getAttribute("aria-valuenow")).toBe("360");
-      key("End");
+      key("Home");
       expect(handle().getAttribute("aria-valuenow")).toBe("200");
       expect(localStorage.getItem("owncord:settings:memberListWidth")).toBe("200");
       expect(key("a").defaultPrevented).toBe(false);
@@ -512,9 +530,14 @@ describe("MemberColumn", () => {
     });
 
     it("destroy stops listening to the media query", () => {
+      const add = vi.spyOn(mq, "addEventListener");
       ctrl = make();
       ctrl.toggle();
+      const opts = add.mock.calls.find(([type]) => type === "change")?.[2];
+      const signal = typeof opts === "object" ? opts.signal : undefined;
+      expect(signal?.aborted).toBe(false);
       ctrl.destroy();
+      expect(signal?.aborted).toBe(true);
       mq.set(false);
       expect(buildPanel).toHaveBeenCalledTimes(1);
     });

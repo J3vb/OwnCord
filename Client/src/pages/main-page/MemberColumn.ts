@@ -86,6 +86,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   handle.setAttribute("aria-label", shellText("members.resize"));
   handle.setAttribute("aria-valuemin", String(MEMBER_WIDTH_MIN));
   handle.setAttribute("aria-valuemax", String(MEMBER_WIDTH_MAX));
+  handle.setAttribute("aria-controls", "member-column");
   handle.tabIndex = 0;
   column.prepend(handle);
 
@@ -130,12 +131,14 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   });
   owner.onEvent(handle, "pointerup", endDrag);
   owner.onEvent(handle, "pointercancel", endDrag);
+  // Hiding the column mid-drag drops capture and the pointerup never arrives.
+  owner.onEvent(handle, "lostpointercapture", endDrag);
   owner.onEvent(handle, "keydown", (e) => {
     let next: number;
     if (e.key === "ArrowLeft") next = width + KEY_STEP;
     else if (e.key === "ArrowRight") next = width - KEY_STEP;
-    else if (e.key === "Home") next = MEMBER_WIDTH_MAX;
-    else if (e.key === "End") next = MEMBER_WIDTH_MIN;
+    else if (e.key === "Home") next = MEMBER_WIDTH_MIN;
+    else if (e.key === "End") next = MEMBER_WIDTH_MAX;
     else return;
     e.preventDefault();
     applyWidth(next);
