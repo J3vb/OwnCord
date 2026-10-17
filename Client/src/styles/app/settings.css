@@ -1167,3 +1167,54 @@ details.disclose[open] > summary .icon {
 .changelog-body a {
   color: var(--text-link);
 }
+
+/* ── Settings search (3E-3b) ── */
+.settings-nav-item[hidden],
+.settings-cat[hidden],
+.settings-search-clear[hidden],
+.settings-search-empty[hidden] {
+  display: none;
+}
+.settings-search {
+  position: relative;
+  margin: 0 4px 8px;
+}
+.settings-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 28px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.settings-search-input::placeholder {
+  color: var(--text-muted);
+}
+.settings-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-search-clear:hover {
+  color: var(--text-normal);
+}
+.settings-search-empty {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.settings-search-hit {
+  background: color-mix(in srgb, var(--yellow) 40%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
