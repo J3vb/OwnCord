@@ -14,6 +14,7 @@
  */
 
 import { createLogger } from "@lib/logger";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ReactionUser } from "@lib/types";
 
 const log = createLogger("reaction-tooltip");
@@ -70,6 +71,8 @@ export function clearReactionUsersCache(): void {
   cache.clear();
   inFlight.clear();
 }
+
+void registerSessionReset("reactions:users", clearReactionUsersCache, { phase: "cache" }); // app-lifetime
 
 /** Cached reactor list for a message+emoji, or undefined when not fetched. */
 export function getCachedReactionUsers(

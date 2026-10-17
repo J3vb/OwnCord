@@ -1,0 +1,233 @@
+{
+  "_doc": "Top-level per-server-looking state that registers no session reset (tests/unit/session-state-ownership.test.ts). This list only shrinks: the test fails an entry whose binding is gone or whose file now registers a reset. Keys are file + binding, never a line number. Categories: app-lifetime, host-keyed, dom-owned, pure-cache, transient, reset-elsewhere.",
+  "entries": [
+    {
+      "file": "components/MemberList.ts",
+      "binding": "ownPopupClosers",
+      "category": "dom-owned",
+      "reason": "Close callbacks of popups the list owns; each popup removes its own on close"
+    },
+    {
+      "file": "components/channel-sidebar/drag-reorder.ts",
+      "binding": "listenerOwners",
+      "category": "dom-owned",
+      "reason": "AbortSignals of mounted sidebars; removed when the sidebar's signal aborts"
+    },
+    {
+      "file": "components/message-list/avatar.ts",
+      "binding": "visibilityCallbacks",
+      "category": "dom-owned",
+      "reason": "Keyed by live avatar element; removed when the element leaves the page"
+    },
+    {
+      "file": "components/message-list/content-parser.ts",
+      "binding": "parseCache",
+      "category": "pure-cache",
+      "reason": "Parse result keyed by the message text itself, so it holds no server identity"
+    },
+    {
+      "file": "components/message-list/quick-reactions.ts",
+      "binding": "passCache",
+      "category": "pure-cache",
+      "reason": "Derived from the emoji and preferences, not from server data"
+    },
+    {
+      "file": "components/settings/settingsSearch.ts",
+      "binding": "searchTextCache",
+      "category": "pure-cache",
+      "reason": "Derived from the static settings catalog"
+    },
+    {
+      "file": "features/blocks/blockActions.ts",
+      "binding": "inFlight",
+      "category": "transient",
+      "reason": "User ids with a request in flight; removed in the request's finally"
+    },
+    {
+      "file": "features/messaging/emojiCatalog.ts",
+      "binding": "byName",
+      "category": "app-lifetime",
+      "reason": "Lookup built from the bundled unicode catalog"
+    },
+    {
+      "file": "features/messaging/emojiStill.ts",
+      "binding": "stills",
+      "category": "pure-cache",
+      "reason": "Keyed by emoji glyph; the still is derived from the bundled catalog"
+    },
+    {
+      "file": "features/messaging/wsHandlers.ts",
+      "binding": "dmPreviewRefetches",
+      "category": "transient",
+      "reason": "Documented in the 5.2 design note: endSession drops the stale answer, so the leftover entry is harmless"
+    },
+    {
+      "file": "features/updates/availableUpdate.ts",
+      "binding": "listeners",
+      "category": "app-lifetime",
+      "reason": "Subscribers of the app update state, which is not per server"
+    },
+    {
+      "file": "features/voice/decodeCaps.ts",
+      "binding": "memo",
+      "category": "app-lifetime",
+      "reason": "Codec support of this device"
+    },
+    {
+      "file": "features/whats-new/changelogSource.ts",
+      "binding": "cached",
+      "category": "app-lifetime",
+      "reason": "The bundled changelog, not server data"
+    },
+    {
+      "file": "lib/channel-navigation.ts",
+      "binding": "reselectListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the disposer each subscriber holds"
+    },
+    {
+      "file": "lib/formatting.ts",
+      "binding": "parsedTimestampCache",
+      "category": "pure-cache",
+      "reason": "Parse result keyed by the timestamp string itself"
+    },
+    {
+      "file": "lib/identity.ts",
+      "binding": "identityKeyPairCache",
+      "category": "host-keyed",
+      "reason": "Keyed by host and user, so a second server never reads the first's pair"
+    },
+    {
+      "file": "lib/legacyKeyMigration.ts",
+      "binding": "unsettled",
+      "category": "host-keyed",
+      "reason": "Keyed by the legacy storage key; each claim names the host-scoped key that owns it"
+    },
+    {
+      "file": "lib/media-visibility.ts",
+      "binding": "allTracked",
+      "category": "dom-owned",
+      "reason": "Weak references to live images"
+    },
+    {
+      "file": "lib/notificationSound.ts",
+      "binding": "ringInterval",
+      "category": "transient",
+      "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
+    },
+    {
+      "file": "lib/notificationSound.ts",
+      "binding": "ringbackInterval",
+      "category": "transient",
+      "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "liveTailOutOfView",
+      "category": "dom-owned",
+      "reason": "Scroll state of mounted lists; each list sets it again from its scroll handler"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "markQueue",
+      "category": "reset-elsewhere",
+      "reason": "Emptied when the mark sender is re-registered (new connection)"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "markSentAt",
+      "category": "reset-elsewhere",
+      "reason": "Emptied when the mark sender is re-registered (new connection)"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "markTimer",
+      "category": "reset-elsewhere",
+      "reason": "Emptied when the mark sender is re-registered (new connection)"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "pendingLiveSeen",
+      "category": "reset-elsewhere",
+      "reason": "Emptied when the mark sender is re-registered (new connection)"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "highestSeen",
+      "category": "reset-elsewhere",
+      "reason": "Emptied by resetReadPointerState in the dispatcher cleanup, which also runs when wirePostAuth retries"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "unreadHold",
+      "category": "reset-elsewhere",
+      "reason": "Emptied by resetReadPointerState in the dispatcher cleanup, which also runs when wirePostAuth retries"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "pendingMarkUnread",
+      "category": "reset-elsewhere",
+      "reason": "Emptied by resetReadPointerState in the dispatcher cleanup, which also runs when wirePostAuth retries"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "markUnreadFailListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the disposer each mounted list holds"
+    },
+    {
+      "file": "lib/screenShare.ts",
+      "binding": "pendingVideoEnables",
+      "category": "transient",
+      "reason": "Request-id keyed bookkeeping for an enable in flight; a newer enable of the same kind supersedes it"
+    },
+    {
+      "file": "lib/sessionRegistry.ts",
+      "binding": "entries",
+      "category": "app-lifetime",
+      "reason": "The registry itself"
+    },
+    {
+      "file": "lib/themes.ts",
+      "binding": "systemPaintListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the disposer each subscriber holds"
+    },
+    {
+      "file": "lib/themes.ts",
+      "binding": "roleTextCache",
+      "category": "pure-cache",
+      "reason": "Keyed by colour and theme, not by server"
+    },
+    {
+      "file": "platform/desktop/logFiles.ts",
+      "binding": "buffer",
+      "category": "app-lifetime",
+      "reason": "Client log lines, not server data"
+    },
+    {
+      "file": "platform/desktop/logFiles.ts",
+      "binding": "flushTimer",
+      "category": "app-lifetime",
+      "reason": "Client log lines, not server data"
+    },
+    {
+      "file": "platform/desktop/nativeProxies.ts",
+      "binding": "pending",
+      "category": "host-keyed",
+      "reason": "In-flight tunnel start keyed by host"
+    },
+    {
+      "file": "platform/desktop/pushToTalkService.ts",
+      "binding": "releaseTimer",
+      "category": "app-lifetime",
+      "reason": "Key-release debounce of the local push-to-talk binding"
+    },
+    {
+      "file": "platform/desktop/updater.ts",
+      "binding": "installListeners",
+      "category": "app-lifetime",
+      "reason": "Subscribers of the app update install state"
+    }
+  ]
+}

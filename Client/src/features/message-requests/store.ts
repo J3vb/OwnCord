@@ -15,7 +15,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { onAuthCleared } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MessageRequest } from "./api";
 
 export type RequestsStatus = "loading" | "ready" | "unavailable";
@@ -99,7 +99,7 @@ export function resetMessageRequests(): void {
   messageRequestsStore.setState((prev) => ({ ...INITIAL, snapshotSeq: prev.snapshotSeq + 1 }));
 }
 
-void onAuthCleared(resetMessageRequests); // app-lifetime reset hook, registered at module load
+void registerSessionReset("message-requests:store", resetMessageRequests, { phase: "session" }); // app-lifetime reset hook, registered at module load
 
 /** N for "Message Requests (N)" and the DM header badge (a navigation CountSource). */
 export const pendingRequestCount = {

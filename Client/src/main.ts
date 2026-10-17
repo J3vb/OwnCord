@@ -75,7 +75,6 @@ import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
-import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setInviteJoinHandler } from "@lib/invite-navigation";
 
 import { desktop } from "./platform/desktop";
@@ -1486,12 +1485,6 @@ void authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
-      // The per-server scope (channel mutes, notification-level override) is
-      // set by MainPage on mount and never cleared by clearAuth; without this
-      // the connect page's Settings still offers the departed server's
-      // override and writes its key (F13). A server switch re-sets it when the
-      // next MainPage mounts.
-      setChannelMutesHost(null);
       // Clear stored credential on logout. (A server restart never gets
       // here: it keeps the session and reconnects.)
       const host = api.getConfig().host;
