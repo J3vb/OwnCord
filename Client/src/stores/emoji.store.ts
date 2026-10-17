@@ -14,6 +14,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 
 /** One custom emoji as the server describes it. */
 export interface CustomEmoji {
@@ -107,6 +108,7 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
 export function clearCustomEmoji(): void {
   emojiStore.setState((prev) => ({ ...INITIAL, rev: (prev.rev ?? 0) + 1 }));
 }
+void registerSessionReset("emoji:store", clearCustomEmoji); // app-lifetime
 
 /**
  * The emoji owning `shortcode`, or null. Accepts the bare name or the `:name:`

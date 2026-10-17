@@ -6205,3 +6205,28 @@ describe("wireConnectionStatus", () => {
     unsub();
   });
 });
+
+describe("WS Dispatcher cleanup isolation (ARCH-012)", () => {
+  it("a throwing cleanup entry still unsubscribes every other handler", () => {
+    const m = createMockWs();
+    const realOn = m.ws.on.bind(m.ws);
+    let first = true;
+    m.ws.on = ((type: ServerMessage["type"], listener: WsListener<ServerMessage["type"]>) => {
+      const unsub = realOn(type, listener);
+      if (!first) return unsub;
+      first = false;
+      return () => {
+        throw new Error("boom");
+      };
+    }) as WsClient["on"];
+    const stop = wireDispatcher(m.ws);
+    const remaining = (): number => [...m.listeners.values()].reduce((n, set) => n + set.size, 0);
+    expect(remaining()).toBeGreaterThan(1);
+
+    expect(() => stop()).not.toThrow();
+    expectConsole("error", /Dispatcher cleanup step failed/);
+
+    // Only the entry whose unsubscribe threw is left registered.
+    expect(remaining()).toBe(1);
+  });
+});
