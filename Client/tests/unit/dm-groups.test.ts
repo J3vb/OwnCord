@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  getChannelMute,
+  invalidateMuteCache,
+  isChannelMuted,
+  muteChannel,
+  toggleChannelMute,
+  unmuteChannel,
+} from "@lib/channel-mutes";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
@@ -280,6 +288,133 @@ describe("DmSidebar — muted rows", () => {
     expect(onToggleMute).toHaveBeenCalledWith(7);
 
     sidebar.destroy?.();
+  });
+
+  it("DM menu offers durations", () => {
+    const onToggleMute = vi.fn();
+    const onMuteFor = vi.fn();
+    const sidebar = mount([convo({ channelId: 7 })], { onToggleMute, onMuteFor });
+
+    const item = container.querySelector(".dm-item") as HTMLElement;
+    item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+
+    const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+    const flyout = entry.nextElementSibling as HTMLElement;
+    expect([...flyout.querySelectorAll('[role="menuitem"]')].map((r) => r.textContent)).toEqual([
+      "For 15 Minutes",
+      "For 1 Hour",
+      "For 3 Hours",
+      "For 8 Hours",
+      "For 24 Hours",
+      "Until I turn it back on",
+    ]);
+    (flyout.querySelector('[data-testid="dm-mute-for-3600000-7"]') as HTMLElement).click();
+    expect(onMuteFor).toHaveBeenCalledWith(7, 3_600_000);
+    expect(onToggleMute).not.toHaveBeenCalled();
+
+    sidebar.destroy?.();
+  });
+
+  it("DM menu: Until I turn it back on and the row itself both mute until turned off", () => {
+    const onToggleMute = vi.fn();
+    const sidebar = mount([convo({ channelId: 7 })], { onToggleMute, onMuteFor: vi.fn() });
+    const open = (): HTMLElement => {
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      return document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+    };
+    open();
+    (document.querySelector('[data-testid="dm-mute-for-forever-7"]') as HTMLElement).click();
+    expect(onToggleMute).toHaveBeenCalledTimes(1);
+    open().click();
+    expect(onToggleMute).toHaveBeenCalledTimes(2);
+    sidebar.destroy?.();
+  });
+
+  it("DM menu: Unmute after the mute ended while the menu was open does not mute forever", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
+    localStorage.clear();
+    invalidateMuteCache();
+    try {
+      muteChannel(7, 900_000);
+      // Same wiring as SidebarArea: toggle flips whatever it finds, set is outright.
+      const sidebar = mount(
+        [convo({ channelId: 7, muted: true, mutedUntil: Date.now() + 900_000 })],
+        {
+          onToggleMute: (id: number) => toggleChannelMute(id),
+          onSetMute: (id: number, muted: boolean) => (muted ? muteChannel(id) : unmuteChannel(id)),
+        },
+      );
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+      expect(entry.textContent).toContain("Unmute Conversation");
+
+      vi.setSystemTime(new Date(2026, 9, 17, 12, 20, 0));
+      entry.click();
+      expect(isChannelMuted(7)).toBe(false);
+      expect(getChannelMute(7)).toBeNull();
+      sidebar.destroy?.();
+    } finally {
+      vi.useRealTimers();
+      localStorage.clear();
+      invalidateMuteCache();
+    }
+  });
+
+  it("DM menu: reads the live mute as it opens, not the last-drawn flag", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
+    localStorage.clear();
+    invalidateMuteCache();
+    try {
+      // Drawn as muted-for-15-minutes; by the time the menu opens it has ended.
+      const sidebar = mount(
+        [convo({ channelId: 7, muted: true, mutedUntil: Date.now() + 900_000 })],
+        { onToggleMute: vi.fn() },
+      );
+      vi.setSystemTime(new Date(2026, 9, 17, 12, 20, 0));
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      expect(document.querySelector('[data-testid="dm-mute-7"]')!.textContent).toBe(
+        "Mute Conversation",
+      );
+      sidebar.destroy?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("DM menu: a timed mute shows its end under Unmute Conversation", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
+    localStorage.clear();
+    invalidateMuteCache();
+    try {
+      muteChannel(7, 10_800_000);
+      const until = Date.now() + 10_800_000;
+      const sidebar = mount([convo({ channelId: 7, muted: true, mutedUntil: until })], {
+        onToggleMute: vi.fn(),
+        onMuteFor: vi.fn(),
+      });
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+      expect(entry.querySelector(".context-menu-item__detail")!.textContent).toBe(
+        "Muted until 3:00 PM",
+      );
+      expect(entry.nextElementSibling?.classList.contains("context-menu__submenu")).toBeFalsy();
+      sidebar.destroy?.();
+    } finally {
+      vi.useRealTimers();
+      localStorage.clear();
+      invalidateMuteCache();
+    }
   });
 
   it("says Unmute when the conversation is already muted", () => {

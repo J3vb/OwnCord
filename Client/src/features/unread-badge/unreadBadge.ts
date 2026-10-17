@@ -8,8 +8,9 @@
  *     exactly as the sidebar's DM header total does. A mute drops chatter and
  *     never a mention, so a muted channel's mentions still count
  *     (`channel-mutes.ts`);
- *   - the `nothing` notification level drops the guild channels' mentions but
- *     never the DMs: a DM is a person writing to you, not server chatter.
+ *   - a guild channel whose notification level is `nothing` (its own, else the
+ *     server's) drops its mentions but never the DMs: a DM is a person writing
+ *     to you, not server chatter.
  *
  * The count is pushed to the native host when it changes, and again when the
  * window is shown or focused (Windows drops the overlay when the taskbar
@@ -19,7 +20,7 @@
 import { channelsStore } from "../../stores/channels.store";
 import { dmStore } from "../../stores/dm.store";
 import { isChannelMuted } from "../../lib/channel-mutes";
-import { effectiveNotificationLevel } from "../../lib/notificationLevel";
+import { channelLevelResolver } from "../../lib/notificationLevel";
 import { Disposable } from "../../lib/disposable";
 import { loadPref } from "../../lib/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
@@ -35,13 +36,12 @@ export function unreadBadgeEnabled(): boolean {
 /** The badge count for the connected server, from the stores as they are now. */
 export function unreadBadgeCount(): number {
   let count = 0;
-  if (effectiveNotificationLevel() !== "nothing") {
-    for (const ch of channelsStore.getState().channels.values()) {
-      // DMs are counted from dmStore below; their channels-store row is a mirror.
-      // Muted or not, a guild channel's mentions count: "excluding muted
-      // channels" in D6 excludes their plain unread, never their mentions.
-      if (ch.type !== "dm") count += ch.mentionCount;
-    }
+  const levelOf = channelLevelResolver();
+  for (const ch of channelsStore.getState().channels.values()) {
+    // DMs are counted from dmStore below; their channels-store row is a mirror.
+    // Muted or not, a guild channel's mentions count: "excluding muted
+    // channels" in D6 excludes their plain unread, never their mentions.
+    if (ch.type !== "dm" && levelOf(ch.id) !== "nothing") count += ch.mentionCount;
   }
   for (const dm of dmStore.getState().channels) {
     count += isChannelMuted(dm.channelId) ? dm.mentionCount : dm.unreadCount;

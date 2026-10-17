@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { showContextMenu } from "../../src/lib/context-menu";
+import { showContextMenu, createSubmenuTrigger } from "../../src/lib/context-menu";
 
 describe("showContextMenu", () => {
   let ac: AbortController;
@@ -738,5 +738,250 @@ describe("showContextMenu", () => {
       expect(onClick).toHaveBeenCalledOnce();
       expect(document.querySelector(".context-menu")).toBeNull();
     });
+  });
+});
+
+describe("submenus and radio rows (3D-3a)", () => {
+  let ac: AbortController;
+
+  beforeEach(() => {
+    ac = new AbortController();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+  afterEach(() => {
+    ac.abort();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+
+  function open(onClick = vi.fn(), onPick = vi.fn()) {
+    showContextMenu({
+      x: 0,
+      y: 0,
+      signal: ac.signal,
+      items: [
+        {
+          label: "Mute",
+          testId: "trigger",
+          onClick,
+          submenu: [
+            { label: "One", testId: "sub-one", onClick: onPick },
+            { label: "Two", testId: "sub-two", onClick: vi.fn() },
+          ],
+        },
+        { label: "Other", onClick: vi.fn() },
+      ],
+    });
+    const trigger = document.querySelector('[data-testid="trigger"]') as HTMLElement;
+    return { trigger, flyout: trigger.nextElementSibling as HTMLElement };
+  }
+
+  const key = (el: Element, k: string): void => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  };
+
+  it("submenu item opens on hover and ArrowRight", () => {
+    const { trigger, flyout } = open();
+    expect(trigger.textContent).toBe("Mute");
+    expect(flyout.style.display).toBe("none");
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.display).toBe("");
+    trigger.dispatchEvent(new MouseEvent("mouseleave"));
+    expect(flyout.style.display).toBe("none");
+
+    trigger.focus();
+    key(trigger, "ArrowRight");
+    expect(flyout.style.display).toBe("");
+    expect(document.activeElement).toBe(flyout.querySelector('[data-testid="sub-one"]'));
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    key(document.activeElement!, "ArrowDown");
+    expect(document.activeElement).toBe(flyout.querySelector('[data-testid="sub-two"]'));
+    key(document.activeElement!, "ArrowLeft");
+    expect(flyout.style.display).toBe("none");
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("Enter on an activating trigger clicks it", () => {
+    const onClick = vi.fn();
+    const { trigger, flyout } = open(onClick);
+    trigger.focus();
+    key(trigger, "Enter");
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(flyout.isConnected).toBe(false); // the menu closed
+  });
+
+  it("Enter on a plain trigger still opens it", () => {
+    const onActivate = vi.fn();
+    const menu = document.createElement("div");
+    menu.className = "context-menu plain";
+    const { trigger, flyout } = createSubmenuTrigger(
+      "Plain",
+      "context-menu-item",
+      { onActivate },
+      ac.signal,
+    );
+    const row = document.createElement("button");
+    row.setAttribute("role", "menuitem");
+    flyout.appendChild(row);
+    menu.append(trigger, flyout);
+    document.body.appendChild(menu);
+    // Same keyboard model every menu gets.
+    return import("../../src/lib/context-menu").then(({ enableMenuKeyboard }) => {
+      enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+      trigger.focus();
+      key(trigger, "Enter");
+      expect(onActivate).not.toHaveBeenCalled();
+      expect(flyout.style.display).toBe("");
+      expect(document.activeElement).toBe(row);
+    });
+  });
+
+  it("Space on a plain trigger opens it, as Enter does", () => {
+    const onActivate = vi.fn();
+    const menu = document.createElement("div");
+    menu.className = "context-menu plain";
+    const { trigger, flyout } = createSubmenuTrigger(
+      "Plain",
+      "context-menu-item",
+      { onActivate },
+      ac.signal,
+    );
+    const row = document.createElement("button");
+    row.setAttribute("role", "menuitem");
+    flyout.appendChild(row);
+    menu.append(trigger, flyout);
+    document.body.appendChild(menu);
+    // Same keyboard model every menu gets.
+    return import("../../src/lib/context-menu").then(({ enableMenuKeyboard }) => {
+      enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+      trigger.focus();
+      key(trigger, " ");
+      expect(onActivate).not.toHaveBeenCalled();
+      expect(flyout.style.display).toBe("");
+      expect(document.activeElement).toBe(row);
+    });
+  });
+
+  it("a flyout row click does not fire the trigger", () => {
+    const onClick = vi.fn();
+    const onPick = vi.fn();
+    const { flyout } = open(onClick, onPick);
+    (flyout.querySelector('[data-testid="sub-one"]') as HTMLElement).click();
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("a click on the trigger runs its own action", () => {
+    const onClick = vi.fn();
+    const { trigger } = open(onClick);
+    trigger.click();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("onActivate ignores a click that comes from inside the flyout", () => {
+    const onActivate = vi.fn();
+    const { trigger, flyout } = createSubmenuTrigger(
+      "Nested",
+      "context-menu-item",
+      { onActivate },
+      ac.signal,
+    );
+    const inside = document.createElement("button");
+    flyout.appendChild(inside);
+    // Nested the other way round (flyout inside the trigger), the click bubbles.
+    trigger.appendChild(flyout);
+    inside.click();
+    expect(onActivate).not.toHaveBeenCalled();
+    trigger.click();
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("the flyout flips to the left when it would run off the right edge", () => {
+    const { trigger, flyout } = open();
+    Object.defineProperty(trigger, "offsetLeft", { value: 100 });
+    Object.defineProperty(trigger, "offsetWidth", { value: 180 });
+    flyout.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 40, right: window.innerWidth + 50 }) as DOMRect;
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.left).toBe("-100px");
+
+    flyout.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 40, right: 300 }) as DOMRect;
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.left).toBe("280px");
+  });
+
+  it("menuitemradio rows are keyboard navigable and report aria-checked", async () => {
+    showContextMenu({
+      x: 0,
+      y: 0,
+      signal: ac.signal,
+      items: [
+        { label: "A", checked: false, radio: true, onClick: vi.fn() },
+        { label: "B", checked: true, radio: true, onClick: vi.fn() },
+        { label: "C", onClick: vi.fn() },
+      ],
+    });
+    const rows = [...document.querySelectorAll(".context-menu-item")] as HTMLElement[];
+    expect(rows[0]!.getAttribute("role")).toBe("menuitemradio");
+    expect(rows[0]!.getAttribute("aria-checked")).toBe("false");
+    expect(rows[1]!.getAttribute("aria-checked")).toBe("true");
+    expect(rows[2]!.getAttribute("role")).toBe("menuitem");
+    expect(rows[2]!.hasAttribute("aria-checked")).toBe(false);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(rows[0]);
+    key(rows[0]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows[1]);
+    key(rows[1]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows[2]);
+  });
+
+  it("shows a detail line under the label", () => {
+    showContextMenu({
+      x: 0,
+      y: 0,
+      signal: ac.signal,
+      items: [{ label: "Unmute", detail: "Muted until 15:30", onClick: vi.fn() }],
+    });
+    expect(document.querySelector(".context-menu-item__detail")!.textContent).toBe(
+      "Muted until 15:30",
+    );
+  });
+});
+
+describe("submenu a11y and placement (3D-3a review)", () => {
+  let ac: AbortController;
+  beforeEach(() => {
+    ac = new AbortController();
+  });
+  afterEach(() => ac.abort());
+
+  it("links the trigger and flyout by id", () => {
+    const { trigger, flyout } = createSubmenuTrigger("T", "context-menu-item", {}, ac.signal);
+    expect(trigger.id).not.toBe("");
+    expect(trigger.getAttribute("aria-controls")).toBe(flyout.id);
+    expect(flyout.getAttribute("aria-labelledby")).toBe(trigger.id);
+    const other = createSubmenuTrigger("U", "context-menu-item", {}, ac.signal);
+    expect(other.trigger.id).not.toBe(trigger.id);
+  });
+
+  it("slides the flyout up when it would run off the bottom edge", () => {
+    showContextMenu({
+      x: 0,
+      y: 0,
+      signal: ac.signal,
+      items: [
+        { label: "M", testId: "t", onClick: vi.fn(), submenu: [{ label: "A", onClick: vi.fn() }] },
+      ],
+    });
+    const trigger = document.querySelector('[data-testid="t"]') as HTMLElement;
+    const flyout = trigger.nextElementSibling as HTMLElement;
+    Object.defineProperty(trigger, "offsetTop", { value: 300 });
+    flyout.getBoundingClientRect = () =>
+      ({ left: 0, width: 100, right: 100, top: 300, bottom: window.innerHeight + 60 }) as DOMRect;
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.top).toBe("232px");
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
   });
 });

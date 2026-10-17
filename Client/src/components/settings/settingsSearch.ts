@@ -180,6 +180,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("notifications.level.desc"),
     s("notifications.muted.title"),
     s("notifications.muted.desc"),
+    s("notifications.channelLevels.title"),
+    s("notifications.channelLevels.desc"),
   ],
   Keybinds: () => [
     s("keybinds.pushToTalk"),

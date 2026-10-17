@@ -20,6 +20,14 @@
 
 import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
 
+/**
+ * The timed-mute choices, shortest first. "Until I turn it back on" is the
+ * absence of a duration (`undefined`), never a number in this list.
+ */
+export const MUTE_DURATIONS_MS: readonly number[] = [
+  900_000, 3_600_000, 10_800_000, 28_800_000, 86_400_000,
+];
+
 /** localStorage key (under the shared settings prefix). */
 const MUTED_KEY = "mutedChannels";
 
@@ -31,7 +39,7 @@ const MUTED_KEY = "mutedChannels";
  */
 export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
 
-function announceMuteChange(channelId: number): void {
+export function announceMuteChange(channelId: number): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(CHANNEL_MUTE_CHANGED, { detail: { channelId } }));
 }
@@ -60,7 +68,7 @@ function mutedKey(): string {
  * `savePref` already dispatches, so a mute set in another part of the app (or
  * another tab, via `storage`) is picked up without a reload.
  */
-let cache: ReadonlySet<number> | null = null;
+let cache: ReadonlyMap<number, number | null> | null = null;
 
 /**
  * Point mute reads/writes at a specific server's key and drop the cache so
@@ -82,16 +90,32 @@ export function getChannelMutesHost(): string | null {
   return currentHost;
 }
 
-function parseMutedIds(raw: unknown): Set<number> {
-  const ids = new Set<number>();
+function validId(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
+/**
+ * Parse the stored list. An element is a bare id (muted until turned off, the
+ * original format) or `{ id, until }` (a timed mute, `until` in epoch ms). The
+ * map value is `null` for "until turned off". A later duplicate wins.
+ */
+function parseMuted(raw: unknown): Map<number, number | null> {
+  const entries = new Map<number, number | null>();
   if (Array.isArray(raw)) {
     for (const v of raw) {
       // Corrupted storage is treated as absent rather than fatal: a bad entry
       // must not cost the user their other mutes.
-      if (typeof v === "number" && Number.isInteger(v) && v > 0) ids.add(v);
+      if (validId(v)) {
+        entries.set(v, null);
+      } else if (typeof v === "object" && v !== null) {
+        const { id, until } = v as { id?: unknown; until?: unknown };
+        if (validId(id) && typeof until === "number" && Number.isFinite(until) && until > 0) {
+          entries.set(id, until);
+        }
+      }
     }
   }
-  return ids;
+  return entries;
 }
 
 /** Whether a raw localStorage entry exists at all under `key` (prefixed) —
@@ -102,12 +126,18 @@ function keyExists(key: string): boolean {
   return localStorage.getItem(STORAGE_PREFIX + key) !== null;
 }
 
-function readMuted(): ReadonlySet<number> {
+/** The stored entries (`null` = until turned off), expired ones included.
+ *  For the expiry module, which prunes them; callers ask `isChannelMuted`. */
+export function readMutedEntries(): ReadonlyMap<number, number | null> {
+  return readMuted();
+}
+
+function readMuted(): ReadonlyMap<number, number | null> {
   if (cache !== null) return cache;
 
   const scopedKey = mutedKey();
   if (currentHost === null || keyExists(scopedKey)) {
-    cache = parseMutedIds(loadPref<unknown[]>(scopedKey, []));
+    cache = parseMuted(loadPref<unknown[]>(scopedKey, []));
     return cache;
   }
 
@@ -124,19 +154,44 @@ function readMuted(): ReadonlySet<number> {
   // its own (OC-0288) — every host after that falls through to `new Set()`
   // instead.
   if (keyExists(MUTED_KEY)) {
-    const legacy = parseMutedIds(loadPref<unknown[]>(MUTED_KEY, []));
+    const legacy = parseMuted(loadPref<unknown[]>(MUTED_KEY, []));
     writeMuted(legacy);
     localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);
     return legacy;
   }
 
-  cache = new Set();
+  cache = new Map();
   return cache;
 }
 
-function writeMuted(ids: ReadonlySet<number>): void {
-  cache = ids;
-  savePref(mutedKey(), [...ids]);
+/** Write the list, dropping entries that have already expired. A forever mute
+ *  is written as a bare id, so a list without timed mutes is byte-identical
+ *  to the original format. */
+function writeMuted(entries: ReadonlyMap<number, number | null>, now = Date.now()): void {
+  // Dropped expired entries are not announced one by one here; the writers that
+  // matter announce, and listeners redraw everything from the store.
+  const live = new Map<number, number | null>();
+  const out: Array<number | { id: number; until: number }> = [];
+  for (const [id, until] of entries) {
+    if (until !== null && until <= now) continue;
+    live.set(id, until);
+    out.push(until === null ? id : { id, until });
+  }
+  cache = live;
+  savePref(mutedKey(), out);
+}
+
+/** Replace the stored list (expired entries are dropped). For the expiry module. */
+export function replaceMutedEntries(
+  entries: ReadonlyMap<number, number | null>,
+  now: number,
+): void {
+  writeMuted(entries, now);
+}
+
+/** Whether an entry still mutes at `now`. */
+function active(until: number | null | undefined, now: number): boolean {
+  return until === null || (until !== undefined && now < until);
 }
 
 /** Drop the cached parse. Exported for tests and for logout. */
@@ -153,33 +208,52 @@ if (typeof window !== "undefined") {
   window.addEventListener("storage", () => invalidateMuteCache());
 }
 
-/** Whether a channel (or DM) is muted. */
+/**
+ * Whether a channel (or DM) is muted. Expiry is decided here, at read time, so
+ * the notify gates and the badge are right even if no timer ever fired.
+ */
 export function isChannelMuted(channelId: number): boolean {
-  return readMuted().has(channelId);
+  return active(readMuted().get(channelId), Date.now());
 }
 
-/** Every muted channel id, ascending — a stable order for the settings list. */
+/** A channel's active mute, for labels: `until` is null for "until turned off". */
+export function getChannelMute(channelId: number): { until: number | null } | null {
+  const until = readMuted().get(channelId);
+  return active(until, Date.now()) && until !== undefined ? { until } : null;
+}
+
+/** Every actively muted channel id, ascending — a stable order for the settings list. */
 export function listMutedChannels(): readonly number[] {
-  return [...readMuted()].toSorted((a, b) => a - b);
+  const now = Date.now();
+  return [...readMuted()]
+    .filter(([, until]) => active(until, now))
+    .map(([id]) => id)
+    .toSorted((a, b) => a - b);
 }
 
-/** Mute a channel. Idempotent. */
-export function muteChannel(channelId: number): void {
-  const next = new Set(readMuted());
-  next.add(channelId);
+/**
+ * Mute a channel, replacing any existing mute so the latest choice wins.
+ * Without `durationMs` the mute lasts until turned off. A duration that is not
+ * one of `MUTE_DURATIONS_MS` is refused (returns false, nothing changes).
+ */
+export function muteChannel(channelId: number, durationMs?: number): boolean {
+  if (durationMs !== undefined && !MUTE_DURATIONS_MS.includes(durationMs)) return false;
+  const next = new Map(readMuted());
+  next.set(channelId, durationMs === undefined ? null : Date.now() + durationMs);
   writeMuted(next);
   announceMuteChange(channelId);
+  return true;
 }
 
 /** Unmute a channel. Idempotent. */
 export function unmuteChannel(channelId: number): void {
-  const next = new Set(readMuted());
+  const next = new Map(readMuted());
   next.delete(channelId);
   writeMuted(next);
   announceMuteChange(channelId);
 }
 
-/** Flip a channel's mute and report the new state. */
+/** Flip a channel's mute (until turned off) and report the new state. */
 export function toggleChannelMute(channelId: number): boolean {
   if (isChannelMuted(channelId)) {
     unmuteChannel(channelId);

@@ -29,10 +29,18 @@ export interface ContextMenuItem {
   readonly title?: string;
   /** Rendered in place of the text label (an emoji). */
   readonly content?: Node;
-  /** Makes the row a checkbox (`role="menuitemcheckbox"`); the value is its
-   *  `aria-checked`. A click still closes the menu, so the caller flips the
-   *  state it reads from and the next open shows the new value. */
+  /** Makes the row a checkbox (`role="menuitemcheckbox"`), or a radio row
+   *  (`role="menuitemradio"`) with `radio`; the value is its `aria-checked`.
+   *  A click still closes the menu, so the caller flips the state it reads
+   *  from and the next open shows the new value. */
   readonly checked?: boolean;
+  /** With `checked`, a radio row instead of a checkbox. */
+  readonly radio?: boolean;
+  /** A second, smaller line under the label ("Muted until 15:30"). */
+  readonly detail?: string;
+  /** A row that owns a flyout. Hover or ArrowRight shows the rows; a click or
+   *  Enter on the row itself runs `onClick`, which is the default action. */
+  readonly submenu?: readonly ContextMenuItem[];
 }
 
 /** A divider between two rows. */
@@ -80,7 +88,7 @@ export function registerSidebarMenu(close: () => void): () => void {
 }
 
 /** Actionable menu rows, in any menu. Disabled rows are not navigable. */
-const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox"]
+const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox", "menuitemradio"]
   .map((role) => `[role="${role}"]:not([aria-disabled="true"]):not([disabled])`)
   .join(", ");
 
@@ -212,11 +220,30 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
       const owner = target.closest<HTMLElement>(`[role="menu"], ${SUBMENU_SELECTOR}`);
       if (owner === null) return;
 
-      if (e.key === "ArrowRight" || e.key === "Enter") {
-        const sub = target.querySelector<HTMLElement>(`:scope > ${SUBMENU_SELECTOR}`);
+      // ArrowLeft inside a sibling flyout closes it and returns to its trigger.
+      if (e.key === "ArrowLeft" && owner.matches(SUBMENU_SELECTOR)) {
+        const trigger = owner.previousElementSibling;
+        if (trigger instanceof HTMLElement && trigger.getAttribute("aria-haspopup") === "menu") {
+          e.preventDefault();
+          hideFlyout(owner);
+          trigger.focus();
+          return;
+        }
+      }
+
+      if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
+        const sub = ownedSubmenu(target);
+        // A trigger that is itself an action (Mute Channel) runs it on Enter
+        // or Space; only ArrowRight opens its flyout.
+        if (sub !== null && e.key !== "ArrowRight" && target.dataset["activates"] === "true") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          target.click();
+          return;
+        }
         if (sub !== null) {
           e.preventDefault();
-          // Enter would otherwise also fire the trigger's click; stop it so the
+          // Enter or Space would otherwise also fire the trigger's click; stop it so the
           // submenu opens instead of the row activating.
           e.stopImmediatePropagation();
           revealSubmenu(sub);
@@ -251,12 +278,135 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
   return restore;
 }
 
+/** The flyout a menu row owns: a child (the hand-built menus) or the next
+ *  sibling (`createSubmenuTrigger`, which keeps the row's own text clean). */
+function ownedSubmenu(row: HTMLElement): HTMLElement | null {
+  const child = row.querySelector<HTMLElement>(`:scope > ${SUBMENU_SELECTOR}`);
+  if (child !== null) return child;
+  const next = row.nextElementSibling;
+  return next instanceof HTMLElement && next.matches(SUBMENU_SELECTOR) ? next : null;
+}
+
+/** Show a sibling flyout beside its trigger, flipping to the trigger's left
+ *  when it would run off the right edge. A child flyout is placed by CSS. */
+function placeFlyout(flyout: HTMLElement): void {
+  const trigger = flyout.previousElementSibling;
+  if (!(trigger instanceof HTMLElement) || trigger.getAttribute("aria-haspopup") !== "menu") return;
+  flyout.style.top = `${trigger.offsetTop}px`;
+  flyout.style.left = `${trigger.offsetLeft + trigger.offsetWidth}px`;
+  const rect = flyout.getBoundingClientRect();
+  const margin = 8;
+  if (rect.right > window.innerWidth - margin) {
+    flyout.style.left = `${trigger.offsetLeft - rect.width}px`;
+  }
+  // Near the bottom edge, slide up just enough to stay on screen (never past
+  // the top margin).
+  const overflow = rect.bottom - (window.innerHeight - margin);
+  if (overflow > 0) {
+    const shift = Math.min(overflow, Math.max(0, rect.top - margin));
+    flyout.style.top = `${trigger.offsetTop - shift}px`;
+  }
+  trigger.setAttribute("aria-expanded", "true");
+}
+
+function hideFlyout(flyout: HTMLElement): void {
+  flyout.style.display = "none";
+  flyout.previousElementSibling?.setAttribute("aria-expanded", "false");
+}
+
+let submenuSeq = 0;
+
+export interface SubmenuTriggerOptions {
+  readonly testId?: string;
+  /** True when a click or Enter on the row itself is an action (Mute Channel
+   *  mutes until turned off). False: Enter opens the flyout instead. */
+  readonly activates?: boolean;
+  /** Runs for a click on the row itself, never for a click inside the flyout. */
+  readonly onActivate?: (e: MouseEvent) => void;
+}
+
+/**
+ * A menu row that owns a hover flyout, shared by every menu that needs one.
+ * Append `trigger`, then `flyout`, to the menu in that order: the flyout is the
+ * trigger's next sibling, so the row's own text stays just its label.
+ */
+export function createSubmenuTrigger(
+  label: string,
+  className: string,
+  opts: SubmenuTriggerOptions,
+  signal: AbortSignal,
+): { readonly trigger: HTMLElement; readonly flyout: HTMLElement } {
+  const trigger = createMenuItem(
+    label,
+    `${className} context-menu-item--submenu context-menu-item--flyout`,
+    {
+      submenu: true,
+      ...(opts.testId !== undefined ? { testId: opts.testId } : {}),
+    },
+  );
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+  const seq = ++submenuSeq;
+  trigger.id = `ctx-submenu-trigger-${seq}`;
+  if (opts.activates === true) trigger.setAttribute("data-activates", "true");
+  const flyout = createElement("div", { class: "context-menu__submenu" });
+  flyout.style.display = "none";
+  flyout.setAttribute("role", "menu");
+  flyout.id = `ctx-submenu-${seq}`;
+  flyout.setAttribute("aria-labelledby", trigger.id);
+  trigger.setAttribute("aria-controls", flyout.id);
+
+  const show = (): void => {
+    flyout.style.display = "";
+    placeFlyout(flyout);
+  };
+  const hide = (e: MouseEvent): void => {
+    const to = e.relatedTarget;
+    if (to instanceof Node && (trigger.contains(to) || flyout.contains(to))) return;
+    hideFlyout(flyout);
+  };
+  trigger.addEventListener("mouseenter", show, { signal });
+  flyout.addEventListener("mouseenter", show, { signal });
+  trigger.addEventListener("mouseleave", hide, { signal });
+  flyout.addEventListener("mouseleave", hide, { signal });
+  const onActivate = opts.onActivate;
+  if (onActivate !== undefined) {
+    trigger.addEventListener(
+      "click",
+      (e) => {
+        if (e.target instanceof Node && flyout.contains(e.target)) return;
+        onActivate(e);
+      },
+      { signal },
+    );
+  }
+  return { trigger, flyout };
+}
+
 /** Reveal a submenu and focus its first row. */
 function revealSubmenu(submenu: HTMLElement): void {
   submenu.style.display = "";
+  placeFlyout(submenu);
   submenu.setAttribute("role", "menu");
   setRovingTabindex(submenu, MENU_ITEM_SELECTOR);
   menuItems(submenu)[0]?.focus();
+}
+
+/** The class list of a plain row. */
+function rowClassOf(item: ContextMenuItem): string {
+  return [
+    "context-menu-item",
+    item.danger ? "danger" : "",
+    item.disabled === true ? "disabled" : "",
+    item.content !== undefined ? "context-menu-item--content" : "",
+  ]
+    .filter((c) => c !== "")
+    .join(" ");
+}
+
+/** Put a muted second line under a row's label. */
+function appendDetail(row: HTMLElement, text: string): void {
+  row.appendChild(createElement("span", { class: "context-menu-item__detail" }, text));
 }
 
 /** No-op default until the keyboard model installs the real restorer. */
@@ -321,6 +471,37 @@ export function showContextMenu(opts: ContextMenuOptions): void {
 
   if (opts.onClosed !== undefined) dismiss.addCleanup(opts.onClosed);
 
+  /** One plain row: a focusable button that closes the menu, then acts. */
+  const buildRow = (item: ContextMenuItem): HTMLElement => {
+    const disabled = item.disabled === true;
+    const el = createMenuItem(
+      item.label,
+      rowClassOf(item),
+      item.testId !== undefined ? { testId: item.testId } : {},
+    );
+    if (item.content !== undefined) {
+      el.replaceChildren(item.content);
+      el.setAttribute("aria-label", item.label);
+    }
+    if (item.detail !== undefined) appendDetail(el, item.detail);
+    if (item.checked !== undefined) {
+      el.setAttribute("role", item.radio === true ? "menuitemradio" : "menuitemcheckbox");
+      el.setAttribute("aria-checked", String(item.checked));
+    }
+    if (item.title !== undefined) el.title = item.title;
+    if (disabled) el.setAttribute("aria-disabled", "true");
+    el.addEventListener(
+      "click",
+      (e) => {
+        if (disabled) return;
+        closeMenu();
+        item.onClick(e);
+      },
+      { signal },
+    );
+    return el;
+  };
+
   let hasSeparator = false;
   let groupRow: HTMLElement | null = null;
   items.forEach((item, index) => {
@@ -334,37 +515,30 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     }
 
     const disabled = item.disabled === true;
-    const el = createMenuItem(
-      item.label,
-      [
-        "context-menu-item",
-        item.danger ? "danger" : "",
-        disabled ? "disabled" : "",
-        item.content !== undefined ? "context-menu-item--content" : "",
-      ]
-        .filter((c) => c !== "")
-        .join(" "),
-      item.testId !== undefined ? { testId: item.testId } : {},
-    );
-    if (item.content !== undefined) {
-      el.replaceChildren(item.content);
-      el.setAttribute("aria-label", item.label);
+    const rowClass = rowClassOf(item);
+    const activate = (e: MouseEvent): void => {
+      if (disabled) return;
+      closeMenu();
+      item.onClick(e);
+    };
+    if (item.submenu !== undefined && !disabled) {
+      const { trigger, flyout } = createSubmenuTrigger(
+        item.label,
+        rowClass,
+        {
+          ...(item.testId !== undefined ? { testId: item.testId } : {}),
+          activates: true,
+          onActivate: activate,
+        },
+        dismiss.signal,
+      );
+      if (item.detail !== undefined) appendDetail(trigger, item.detail);
+      for (const sub of item.submenu) flyout.appendChild(buildRow(sub));
+      menu.append(trigger, flyout);
+      hasSeparator = !item.danger;
+      return;
     }
-    if (item.title !== undefined) el.title = item.title;
-    if (item.checked !== undefined) {
-      el.setAttribute("role", "menuitemcheckbox");
-      el.setAttribute("aria-checked", String(item.checked));
-    }
-    if (disabled) el.setAttribute("aria-disabled", "true");
-    el.addEventListener(
-      "click",
-      (e) => {
-        if (disabled) return;
-        closeMenu();
-        item.onClick(e);
-      },
-      { signal },
-    );
+    const el = buildRow(item);
     if (group !== undefined && index >= group.start && index < group.start + group.count) {
       if (groupRow === null) {
         groupRow = createElement("div", { class: "context-menu-group", role: "group" });

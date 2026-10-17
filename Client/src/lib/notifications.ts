@@ -5,7 +5,7 @@
 
 import { loadPref } from "./preferences";
 import { getChannelMutesHost, notificationAllowed } from "./channel-mutes";
-import { effectiveNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
+import { channelNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
@@ -163,7 +163,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // unlike a channel mute, which deliberately lets a direct mention through.
   // A DM passes every level; its own mute and Do Not Disturb still apply.
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
-  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm })) return;
+  if (!shouldNotifyForLevel(channelNotificationLevel(payload.channel_id), { mentioned, isDm }))
+    return;
 
   // A muted channel stops making noise entirely — popup, chime AND taskbar
   // flash, because a flashing taskbar is exactly the interruption the mute was
@@ -253,7 +254,9 @@ export function notifyMention(channelId: number): void {
   if (focused && channelId === activeChannelId && !isWindowDetached(channelId)) return;
   const focusedElsewhere = focused && channelId !== activeChannelId;
 
-  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned: true, isDm: false })) {
+  if (
+    !shouldNotifyForLevel(channelNotificationLevel(channelId), { mentioned: true, isDm: false })
+  ) {
     return;
   }
   if (!notificationAllowed(channelId, true)) return;
@@ -308,7 +311,13 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
   }
   const focusedElsewhere = focused && entry.channel_id !== activeChannelId;
 
-  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm: false })) return;
+  if (
+    !shouldNotifyForLevel(channelNotificationLevel(entry.channel_id), {
+      mentioned,
+      isDm: false,
+    })
+  )
+    return;
   if (!notificationAllowed(entry.channel_id, mentioned)) return;
 
   const dnd = loadUserStatus() === "dnd";
