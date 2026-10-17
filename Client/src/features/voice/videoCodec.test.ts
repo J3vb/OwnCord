@@ -7,7 +7,7 @@ vi.mock("./native/platform", () => ({
 
 const nativeH264 = vi.hoisted(() => ({ value: false }));
 vi.mock("./native/videoCodecs", () => ({
-  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value }),
+  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value, vp9: false, decode: [] }),
 }));
 
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));

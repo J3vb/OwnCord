@@ -409,6 +409,20 @@
     color var(--transition-fast);
 }
 
+/* An invite for the server already open: informational, not a control. */
+.message-link-chip.invite-chip-here {
+  cursor: default;
+}
+.message-link-chip.invite-chip-here:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.message-link-chip.invite-chip-here:hover .mlc-channel {
+  color: var(--text-link);
+}
+.message-link-chip.invite-chip-here:hover .mlc-action {
+  color: var(--text-muted);
+}
+
 .message-link-chip .mlc-channel {
   color: var(--text-link);
   font-weight: 500;

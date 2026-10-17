@@ -12,6 +12,7 @@ import type {
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
+import { normalizeHostForCertCompare } from "./hostNormalize";
 
 const log = createLogger("ws");
 
@@ -186,14 +187,7 @@ function uuid(): string {
  *  is "443" — e.g. "fd00::443" — would have that hextet eaten as if it were
  *  a port, truncating it to "fd00:" and missing the cert_store_key it's
  *  compared against (OC-0215/OC-0417). */
-export function normalizeHostForCertCompare(host: string): string {
-  let stripped = host;
-  if (host.endsWith(":443")) {
-    const rest = host.slice(0, -":443".length);
-    if (!rest.includes(":") || rest.endsWith("]")) stripped = rest;
-  }
-  return stripped.replace(/^\[(.*)\]$/, "$1").toLowerCase();
-}
+export { normalizeHostForCertCompare };
 
 /**
  * Wrap a bare (unbracketed) IPv6 literal in brackets so it can be embedded in
