@@ -14,7 +14,7 @@ was removed or loosened); that revision was re-run in CI at the PR head
 `Client E2E (real server and media)` and `Client E2E (Windows native)` jobs
 both passed. B9-26 merged as [#1797](https://github.com/J3vb/OwnCord/pull/1797).
 **Branch:** `fm/b9-26-impl`
-**Plan:** [`.claude/plans/b9-26-cross-feature-journeys.plan.md`](../../../.claude/plans/b9-26-cross-feature-journeys.plan.md)
+**Plan:** [`docs/archive/plans/claude/b9-26-cross-feature-journeys.plan.md`](claude/b9-26-cross-feature-journeys.plan.md)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 **Requirements:** BPR-052/BPR-054 client half, BPR-060, BPR-061, BPR-062,
 BPR-063, BPR-064, BPR-070, BPR-071, BPR-072, BPR-073, BPR-090, BPR-091,

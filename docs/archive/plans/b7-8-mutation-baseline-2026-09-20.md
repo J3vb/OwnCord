@@ -3,7 +3,7 @@
 **Measured:** 2026-09-20
 **Base commit:** `7682c4c5` (`dev`, after PR #1641)
 **Branch:** `fm/b7-8-impl`
-**Plan:** `.claude/plans/b7-8-mutation-baseline.plan.md`, Task 4
+**Plan:** `docs/archive/plans/claude/b7-8-mutation-baseline.plan.md`, Task 4
 
 The headline number this milestone exists to record:
 
@@ -223,7 +223,7 @@ Score uses `(killed + timeout) / (total − errors)`; "no cov" is Stryker's
 
 ## B7-9a post-split measurement (evidence append, 2026-09-21)
 
-B7-9a (plan `.claude/plans/b7-9-decompose-voice.plan.md`, Tasks 0–6) split
+B7-9a (plan `docs/archive/plans/claude/b7-9-decompose-voice.plan.md`, Tasks 0–6) split
 `src/lib/livekitSession.ts` into a facade plus five ownership modules under
 `src/features/voice/`: `sessionState.ts`, `joinOrchestration.ts`,
 `roomLifecycle.ts`, `mediaControl.ts` and `remoteTracks.ts`. The before and
@@ -295,7 +295,7 @@ lines 403, 434, 495, 1031, 1116, 1291, 2442, 2808, 2887, 2998, 3330, 3389,
 
 ## B7-9b post-split measurement (evidence append, 2026-09-21)
 
-B7-9b (plan `.claude/plans/b7-9-decompose-voice.plan.md`, Tasks 7–12) split
+B7-9b (plan `docs/archive/plans/claude/b7-9-decompose-voice.plan.md`, Tasks 7–12) split
 `src/lib/livekitE2EE.ts` into the `E2EEManager` facade plus five ownership
 modules under `src/features/voice/`: `e2eeIdentity.ts`, `e2eeEpoch.ts`,
 `e2eePeerState.ts`, `e2eeWorker.ts` and `e2eeOffer.ts`. Same machine, Node
@@ -386,7 +386,7 @@ then reverted:
 
 ## B7-10a post-split measurement (evidence append, 2026-09-21)
 
-B7-10a (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+B7-10a (plan `docs/archive/plans/claude/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
 Tasks 0–8) moved the WebSocket handler bodies out of `src/lib/dispatcher.ts`
 into plain functions in `src/features/{connection,direct-messages,channels,messaging,voice}/wsHandlers.ts`
 plus `src/features/connection/dispatchContext.ts`. `dispatcher.ts` keeps every
@@ -459,7 +459,7 @@ at `be7a0594`; 264 / 5 955 + 140 after.
 
 ## B7-10b post-split measurement (evidence append, 2026-09-22)
 
-B7-10b (plan `.claude/plans/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
+B7-10b (plan `docs/archive/plans/claude/b7-10-decompose-dispatcher-messaging-stores.plan.md`,
 Tasks 9–14) moved `src/stores/messages.store.ts`'s reducer bodies into pure
 `(prev, …) => next` functions under `src/features/messaging/`:
 `messageModel.ts` (types, converters, cap, initial state), `echoReconcile.ts`,

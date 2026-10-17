@@ -3,7 +3,7 @@
 **Measured:** 2026-09-23
 **Base commit:** `3c55f811f1fe225bb0c54b5c213da8e5dcee6d3b` (`dev`, after B9-1's PR #1731), with `dev` `c94f0198` merged in before validation (it touches no file in this change)
 **Branch:** `fm/b9-2-impl`
-**Plan:** `.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md` (B9-2)
+**Plan:** `docs/archive/plans/claude/b9-2-shared-accessibility-and-tokens.plan.md` (B9-2)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md), owner decisions Q1 and Q8, and the 2026-09-23 Q8 clarification
 **Contract:** [docs/architecture/b9-ui-contract.md](../../architecture/b9-ui-contract.md)
 **Requirements:** BPR-090, BPR-091

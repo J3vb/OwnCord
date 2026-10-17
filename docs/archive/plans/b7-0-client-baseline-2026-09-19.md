@@ -3,7 +3,7 @@
 **Measured:** 2026-09-19
 **Base commit:** `058fbabb` (`dev`, after PR #1625)
 **Branch:** `feat/b7-0-verify-and-baseline`
-**Plan:** `.claude/plans/b7-0-verify-and-baseline.plan.md`, Task 1
+**Plan:** `docs/archive/plans/claude/b7-0-verify-and-baseline.plan.md`, Task 1
 **Startup and memory amendment (2026-09-20):** measured from `dev` at `d8dce49d`, not at the base commit above.
 **Supersedes, for the client only:** the client rows and the bundle table in
 [b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md)

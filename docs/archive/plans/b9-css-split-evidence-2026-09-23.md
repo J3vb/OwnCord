@@ -4,7 +4,7 @@
 **Base commit:** `c80c809401ce264eda56b83003536be775ccfa5e` (`origin/dev`, after PR #1726), where the split was first measured
 **Merge base:** `3c7dd486` (`dev`, after PRs #1727 and #1725); emitted CSS re-run there, see [Equality proof](#equality-proof)
 **Branch:** `fm/b9-1-impl-2`
-**Plan:** `.claude/plans/b9-1-css-source-split.plan.md` (B9-1)
+**Plan:** `docs/archive/plans/claude/b9-1-css-source-split.plan.md` (B9-1)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 **Requirements:** BPR-090, BPR-091
 

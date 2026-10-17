@@ -3,7 +3,7 @@
 **Measured:** 2026-09-23
 **Base commit:** `f32149c47756b06f2400d484b3347fd782586ff3` (`origin/dev`, after PR #1724)
 **Branch:** `fm/b9-0-impl`
-**Plan:** `.claude/plans/b9-0-entry-evidence-and-decisions.plan.md` (B9-0)
+**Plan:** `docs/archive/plans/claude/b9-0-entry-evidence-and-decisions.plan.md` (B9-0)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 **Requirements:** BPR-064, BPR-090..092; client halves of BPR-060..063 and BPR-070..073
 
