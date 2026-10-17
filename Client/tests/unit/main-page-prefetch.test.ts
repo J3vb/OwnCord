@@ -6,7 +6,7 @@ vi.mock("@pages/MainPage", () => {
   return { createMainPage: vi.fn() };
 });
 
-import { prefetchMainPage } from "@lib/mainPagePrefetch";
+import { prefetchMainPage } from "@pages/mainPagePrefetch";
 
 describe("prefetchMainPage", () => {
   it("loads the MainPage module without returning a promise or throwing", async () => {

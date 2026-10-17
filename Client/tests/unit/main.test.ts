@@ -45,7 +45,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
-vi.mock("@lib/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
+vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },

@@ -9,7 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
-import { prefetchMainPage } from "@lib/mainPagePrefetch";
+import { prefetchMainPage } from "@pages/mainPagePrefetch";
 import { setOwnedTimeout, wantsNativeMenu } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { installFileDropGuard } from "./features/messaging/fileDropGuard";

@@ -188,7 +188,6 @@ export const shards = {
     "src/lib/logPersistence.ts",
   ], // 1249 measured with lib-rest-8 on run 38902717516, timed out at 96%
   "lib-rest-8": [
-    "src/lib/mainPagePrefetch.ts",
     "src/lib/mentions.ts",
     "src/lib/presence.ts",
     "src/lib/read-state.ts",

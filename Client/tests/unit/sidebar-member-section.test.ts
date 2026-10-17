@@ -470,13 +470,19 @@ describe("SidebarMemberSection", () => {
       const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
         throw new DOMException("quota", "QuotaExceededError");
       });
+      // jsdom reports a listener's exception as a window "error" event rather
+      // than throwing out of dispatchEvent, so watch for that.
+      const reported = vi.fn((e: Event) => e.preventDefault());
+      window.addEventListener("error", reported);
       const { section } = startDrag();
       document.dispatchEvent(new MouseEvent("mousemove", { clientY: 250, bubbles: true }));
 
-      expect(() =>
-        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })),
-      ).not.toThrow();
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
 
+      expect(setItem).toHaveBeenCalled();
+      expect(reported).not.toHaveBeenCalled();
+
+      window.removeEventListener("error", reported);
       section.destroy();
       setItem.mockRestore();
     });
