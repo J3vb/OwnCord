@@ -31,7 +31,12 @@ import {
   createSidebarVoiceCallbacks,
   createVoiceModerationCallbacks,
 } from "./VoiceCallbacks";
-import { createSidebarMemberSection, memberPanelUi } from "./SidebarMemberSection";
+import {
+  createSidebarMemberSection,
+  memberPanelUi,
+  type SidebarMemberSectionResult,
+} from "./SidebarMemberSection";
+import { loadMemberLayout } from "../../features/members/memberLayout";
 import { createMemberPanel, type MemberPanel } from "../../features/members/memberPanel";
 import { attachServerMenu } from "./ServerMenu";
 import { createInviteManagerController } from "./OverlayManagers";
@@ -150,6 +155,9 @@ export interface SidebarAreaResult {
    *  voice moderation). The one factory every host uses; the caller owns the
    *  result and must destroy it before another host builds one. */
   readonly buildMemberPanel: () => MemberPanel;
+  /** Add or remove the left member section to match the stored layout, in
+   *  place: the channel list is not remounted. Idempotent. */
+  readonly syncMemberSection: () => void;
   /** Rename a group DM through the sidebar's prompt (the header's name click). */
   readonly renameGroup: (channelId: number) => void;
 }
@@ -187,6 +195,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Track extra channel-mode components (member list) for cleanup on mode switch
   let channelModeExtras: MountableComponent[] = [];
   let channelModeUnsubs: Array<() => void> = [];
+  // The left member section: present only in channels mode with the "left"
+  // layout. Owned by syncMemberSection, never by channelModeUnsubs.
+  let memberSection: SidebarMemberSectionResult | null = null;
 
   // Profile manager for quick-switch overlay
   let profileManager: ProfileManager | null = null;
@@ -924,6 +935,33 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     });
   }
 
+  /** Create or destroy the left member section so it matches the mode and the
+   *  stored layout. It appends to `contentSlot`, so the channel list above it
+   *  keeps its DOM. */
+  function syncMemberSection(): void {
+    const wanted = uiStore.getState().sidebarMode === "channels" && loadMemberLayout() === "left";
+    if (wanted && memberSection === null) {
+      // The panel comes from the one factory every host shares, so the
+      // callback wiring exists once.
+      memberSection = createSidebarMemberSection({
+        api,
+        getToast,
+        buildPanel: buildMemberPanel,
+      });
+      contentSlot.appendChild(memberSection.element);
+    } else if (!wanted && memberSection !== null) {
+      destroyMemberSection();
+    }
+  }
+
+  function destroyMemberSection(): void {
+    if (memberSection === null) return;
+    const section = memberSection;
+    memberSection = null;
+    section.destroy();
+    section.element.remove();
+  }
+
   // ---------------------------------------------------------------------------
   // Mount sidebar content for current mode
   // ---------------------------------------------------------------------------
@@ -948,6 +986,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       unsub();
     }
     channelModeUnsubs = [];
+    destroyMemberSection();
 
     clearChildren(contentSlot);
 
@@ -981,17 +1020,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // Inject the channel sidebar content into contentSlot.
       contentSlot.appendChild(innerSlot);
 
-      // --- Member list (below DM section) ---
-      // The panel comes from the one factory every host shares, so the
-      // callback wiring exists once.
-      const memberSection = createSidebarMemberSection({
-        api,
-        getToast,
-        buildPanel: buildMemberPanel,
-      });
-      contentSlot.appendChild(memberSection.element);
-      channelModeExtras.push(memberSection.memberListComponent);
-      channelModeUnsubs.push(memberSection.destroy);
+      // --- Member list (below channels), only in the "left" layout ---
+      syncMemberSection();
     } else {
       // "Message Requests (N)" at the top of DM mode (B9-4, Q2). N is the
       // pending-request count and is never folded into unread.
@@ -1260,6 +1290,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       unsub();
     }
     channelModeUnsubs = [];
+    destroyMemberSection();
   });
 
   unsubscribers.push(() => {
@@ -1279,6 +1310,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
     buildMemberPanel,
+    syncMemberSection,
     renameGroup,
   };
 }

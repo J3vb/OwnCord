@@ -187,26 +187,60 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
   },
 }));
 
-const { mockReturnToChannel, mockRememberChannel, mockRenameGroup, inertModeration } = vi.hoisted(
-  () => ({
+const { mockReturnToChannel, mockRememberChannel, mockRenameGroup, inertModeration, memberPanels } =
+  vi.hoisted(() => ({
     mockReturnToChannel: vi.fn(),
     mockRenameGroup: vi.fn(),
     mockRememberChannel: vi.fn(),
     inertModeration: { signals: [] as AbortSignal[] },
-  }),
-);
+    // Every member-list instance either host built, and how many were destroyed.
+    memberPanels: { created: 0, destroyed: 0 },
+  }));
 
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
     mockCreateSidebarArea(...args);
+    const sidebarWrapper = document.createElement("div");
+    // One stand-in member list per panel: the factory both hosts share.
+    const buildMemberPanel = () => {
+      const element = document.createElement("div");
+      element.dataset["testid"] = "member-list";
+      memberPanels.created += 1;
+      let destroyed = false;
+      return {
+        element,
+        destroy: () => {
+          if (destroyed) return;
+          destroyed = true;
+          memberPanels.destroyed += 1;
+          element.remove();
+        },
+      };
+    };
+    // The left section as the real SidebarArea runs it: present in channels
+    // mode with the "left" layout, added and removed in place.
+    let leftPanel: ReturnType<typeof buildMemberPanel> | null = null;
+    const syncMemberSection = () => {
+      const left = localStorage.getItem("owncord:settings:memberListLayout") !== '"right"';
+      if (left && leftPanel === null) {
+        leftPanel = buildMemberPanel();
+        sidebarWrapper.appendChild(leftPanel.element);
+      } else if (!left && leftPanel !== null) {
+        leftPanel.destroy();
+        leftPanel = null;
+      }
+    };
+    syncMemberSection();
     return {
-      sidebarWrapper: document.createElement("div"),
+      sidebarWrapper,
       children: [],
-      unsubscribers: [],
+      unsubscribers: [() => leftPanel?.destroy()],
       openQuickSwitch: vi.fn(),
       rememberChannel: mockRememberChannel,
       forgetChannel: vi.fn(),
       returnToChannel: mockReturnToChannel,
+      buildMemberPanel,
+      syncMemberSection,
       renameGroup: mockRenameGroup,
     };
   },
@@ -280,6 +314,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         profileBtn,
+        memberListBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),
@@ -3923,7 +3958,9 @@ describe("MainPage — B9-4 content view wiring", () => {
     const view = container.querySelector("[data-testid='feature-view']");
     const chat = capturedChatAreaRef.current!;
     expect(view?.previousElementSibling).toBe(chat.chatArea);
-    expect(view?.nextElementSibling).toBe(chat.dmProfileSlot);
+    // The member column (3C-6b) sits between the content view and the DM panel.
+    expect(view?.nextElementSibling?.id).toBe("member-column");
+    expect(view?.nextElementSibling?.nextElementSibling).toBe(chat.dmProfileSlot);
   });
 
   it("opens in place of the chat, whose channel is torn down, and closes back", () => {
@@ -3951,6 +3988,110 @@ describe("MainPage — B9-4 content view wiring", () => {
 
     expect(inertModeration.signals[0]?.aborted).toBe(true);
     expect(uiStore.getState().activeView).toBeNull();
+  });
+});
+
+describe("MainPage — member list placement (3C-6b)", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  const memberLists = (): number => document.querySelectorAll('[data-testid="member-list"]').length;
+  const live = (): number => memberPanels.created - memberPanels.destroyed;
+  const flip = (layout: "right" | "left"): void => savePref("memberListLayout", layout);
+
+  beforeEach(async () => {
+    resetStores();
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeView: null }));
+    localStorage.removeItem("owncord:settings:memberListLayout");
+    localStorage.removeItem("owncord:settings:memberListOpen");
+    memberPanels.created = 0;
+    memberPanels.destroyed = 0;
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+    localStorage.removeItem("owncord:settings:memberListLayout");
+    localStorage.removeItem("owncord:settings:memberListOpen");
+  });
+
+  it("builds an always-present, labelled, hidden member column in the app row", () => {
+    const column = container.querySelector<HTMLElement>("#member-column")!;
+    expect(column.tagName).toBe("ASIDE");
+    expect(column.dataset["testid"]).toBe("member-column");
+    expect(column.getAttribute("aria-label")).toBe("Member list");
+    expect(column.hidden).toBe(true);
+    expect(column.parentElement).toBe(container.querySelector('[data-testid="app-layout"]'));
+    expect(column.querySelector(".member-column-body")).not.toBeNull();
+  });
+
+  it("switching layout leaves exactly one member-list in the document", () => {
+    // Default is left: the sidebar's section is the only instance.
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+
+    flip("right");
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).not.toBeNull();
+    expect(live()).toBe(1);
+
+    flip("left");
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+    expect(live()).toBe(1);
+
+    flip("right");
+    expect(memberLists()).toBe(1);
+    expect(live()).toBe(1);
+
+    flip("left");
+    expect(memberLists()).toBe(1);
+    expect(live()).toBe(1);
+  });
+
+  it("a flip with a DM on screen leaves no member list in either layout", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(2, dmChannel(2, "dm-with-bob"));
+      return { ...prev, channels: ch, activeChannelId: 2 };
+    });
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+    flip("right");
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+    expect(container.querySelector<HTMLElement>("#member-column")!.hidden).toBe(true);
+  });
+
+  it("destroy before the column's chunk loads mounts nothing", async () => {
+    page.destroy?.();
+    container.replaceChildren();
+    memberPanels.created = 0;
+    memberPanels.destroyed = 0;
+    localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    page.destroy?.();
+    await vi.dynamicImportSettled();
+
+    expect(memberPanels.created).toBe(0);
+    expect(document.querySelectorAll('[data-testid="member-list"]').length).toBe(0);
+  });
+
+  it("tearing the page down destroys the column's panel", () => {
+    flip("right");
+    expect(live()).toBe(1);
+    page.destroy?.();
+    expect(live()).toBe(0);
   });
 });
 

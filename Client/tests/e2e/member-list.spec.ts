@@ -1,9 +1,16 @@
 import { test, expect } from "./fixtures";
 import {
+  buildTauriMockScript,
   mockTauriFullSession,
   mockTauriFullSessionWithMessages,
   navigateToMainPage,
   emitWsMessage,
+  openSettings,
+  switchSettingsTab,
+  waitForWsReady,
+  MOCK_LOGIN_RESPONSE,
+  MOCK_MESSAGES,
+  MOCK_PINNED_MESSAGES,
 } from "./helpers";
 
 test.describe("Member List", () => {
@@ -153,5 +160,109 @@ test.describe("Member List — Multi-role", () => {
     // Offline members should have the offline class
     const offlineMembers = page.locator(".member-item.offline");
     await expect(offlineMembers.first()).toBeAttached({ timeout: 5000 });
+  });
+});
+
+// 3C-6b: the right-hand column, its header toggle and the Appearance setting.
+test.describe("Member List — right column (3C-6b)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+        ],
+        simulateWsFlow: true,
+        readyOverrides: {
+          dm_channels: [
+            {
+              channel_id: 100,
+              recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
+              last_message_id: 500,
+              last_message: "Hey there!",
+              last_message_at: "2026-03-15T12:00:00Z",
+              unread_count: 0,
+            },
+          ],
+        },
+      }),
+    );
+    await page.addInitScript(() => {
+      // Only on the first load: a reload must keep what the test changed.
+      if (sessionStorage.getItem("e2e-seeded") !== null) return;
+      sessionStorage.setItem("e2e-seeded", "1");
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("right"));
+    });
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+  });
+
+  test("shows the seeded members in the column; the toggle hides it and the choice survives a reload", async ({
+    page,
+  }) => {
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+    await expect(column.locator("[data-testid='member-1']")).toBeVisible();
+    await expect(column.locator(".mi-name", { hasText: "otheruser" })).toBeVisible();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toHaveAttribute("aria-controls", "member-column");
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(column).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await page.reload();
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(column).toBeHidden();
+
+    await toggle.click();
+    await expect(column).toBeVisible();
+    await expect(column.locator("[data-testid='member-1']")).toBeVisible();
+  });
+
+  test("in a DM the toggle and the column are gone", async ({ page }) => {
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+
+    await page.locator("[data-testid='dm-entry']").first().click();
+    await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
+    await expect(toggle).toBeHidden();
+    await expect(column).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(0);
+  });
+
+  test("Appearance > Member list position moves the list under the channels, with one list throughout", async ({
+    page,
+  }) => {
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    const group = page.locator("[data-testid='member-layout']");
+    await expect(group.locator("[aria-checked='true']")).toHaveAttribute("data-value", "right");
+
+    await page.locator("[data-testid='member-layout-left']").click();
+    await expect(page.locator("[data-testid='sidebar-members']")).toBeAttached();
+    await expect(page.locator("[data-testid='member-column']")).toBeHidden();
+    await expect(page.locator("[data-testid='member-list-toggle']")).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
+
+    await page.locator("[data-testid='member-layout-right']").click();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+    await expect(
+      page.locator("[data-testid='member-column'] [data-testid='member-list']"),
+    ).toHaveCount(1);
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
   });
 });

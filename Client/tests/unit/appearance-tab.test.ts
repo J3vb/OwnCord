@@ -502,6 +502,56 @@ describe("AppearanceTab — Accessibility", () => {
   });
 });
 
+describe("AppearanceTab - member list position (3C-6b)", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("member layout radiogroup saves memberListLayout", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const group = container.querySelector('[data-testid="member-layout"]')!;
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    expect(group.getAttribute("aria-label")).toBe("Member list position");
+    const checked = () =>
+      group.querySelector<HTMLElement>("[aria-checked='true']")!.dataset["value"];
+    expect(checked()).toBe("left");
+
+    const events: string[] = [];
+    const onPref = (e: Event): void => {
+      events.push((e as CustomEvent<{ key: string }>).detail.key);
+    };
+    window.addEventListener("owncord:pref-change", onPref);
+    container.querySelector<HTMLElement>('[data-testid="member-layout-right"]')!.click();
+    window.removeEventListener("owncord:pref-change", onPref);
+
+    expect(localStorage.getItem("owncord:settings:memberListLayout")).toBe('"right"');
+    expect(events).toContain("memberListLayout");
+    expect(checked()).toBe("right");
+
+    container.querySelector<HTMLElement>('[data-testid="member-layout-left"]')!.click();
+    expect(localStorage.getItem("owncord:settings:memberListLayout")).toBe('"left"');
+    expect(checked()).toBe("left");
+  });
+
+  it("loads a stored right layout as the active option", () => {
+    localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const selected = container
+      .querySelector('[data-testid="member-layout"]')!
+      .querySelector<HTMLElement>("[aria-checked='true']")!;
+    expect(selected.dataset["value"]).toBe("right");
+  });
+});
+
 describe("AppearanceTab - system theme", () => {
   let container: HTMLDivElement;
   let ac: AbortController;

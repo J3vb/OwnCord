@@ -6,7 +6,6 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
 import { buildVoiceModOptions } from "@components/ChannelSidebar";
 import { shellText } from "../../i18n/shell";
@@ -44,8 +43,6 @@ export interface SidebarMemberSectionOptions extends Omit<MemberPanelOptions, "u
 export interface SidebarMemberSectionResult {
   /** The root element to insert into the DOM. */
   readonly element: HTMLDivElement;
-  /** The member list MountableComponent (for external cleanup tracking). */
-  readonly memberListComponent: MountableComponent;
   /** Clean up event listeners and abort controller. */
   readonly destroy: () => void;
 }
@@ -192,7 +189,6 @@ export function createSidebarMemberSection(
 
   return {
     element: memberListContainer,
-    memberListComponent: { mount: () => undefined, destroy: panel.destroy },
     destroy: () => {
       for (const unsub of unsubs) {
         unsub();
