@@ -96,6 +96,52 @@
   font-size: var(--font-size-xs);
   color: var(--text-normal);
 }
+/* The role picker: the badge becomes a button, and its list opens in the flow
+   below it (the card body scrolls, so an absolutely placed list would clip). */
+.upp-role-btn {
+  border: 1px solid transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.upp-role-btn:hover,
+.upp-role-btn[aria-expanded="true"] {
+  border-color: var(--border);
+}
+.upp-role-menu {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  padding: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.upp-role-option {
+  display: block;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.upp-role-option:hover,
+.upp-role-option:focus-visible {
+  background: var(--bg-hover);
+}
+.upp-role-option[aria-checked="true"] {
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.upp-role-option[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: progress;
+}
 .upp-status-line {
   display: flex;
   align-items: center;

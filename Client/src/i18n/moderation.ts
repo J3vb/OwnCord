@@ -141,6 +141,38 @@ export const moderationText = defineCatalog("moderation", {
     "They're disconnected now and can't sign in again. You can't undo a ban from the Moderation Center.",
   "confirm.ban.confirm": "Ban",
   "confirm.cancel": "Cancel",
+  "banDialog.forever": "Forever",
+  "banDialog.oneHour": "1 hour",
+  "banDialog.oneDay": "1 day",
+  "banDialog.sevenDays": "7 days",
+  "banDialog.thirtyDays": "30 days",
+  "banDialog.title": "Ban {name}?",
+  "banDialog.body": "They will not be able to sign in until the ban ends or is lifted.",
+  "banDialog.reasonLabel": "Reason (optional)",
+  "banDialog.durationLabel": "Ban length",
+  "banDialog.deleteLabel": "Delete message history",
+  "banDialog.delete.none": "Don't delete any",
+  "banDialog.delete.1h": "Previous hour",
+  "banDialog.delete.6h": "Previous 6 hours",
+  "banDialog.delete.12h": "Previous 12 hours",
+  "banDialog.delete.24h": "Previous 24 hours",
+  "banDialog.delete.3d": "Previous 3 days",
+  "banDialog.delete.7d": "Previous 7 days",
+  "banDialog.confirm": "Ban",
+  "banDialog.banning": "Banning...",
+  "banDialog.retry": "Retry",
+  "banDialog.retrying": "Retrying...",
+  "banDialog.purgeIncomplete": {
+    one: "{name} is banned, but only {count} message has been deleted so far. Retry to delete the rest.",
+    other:
+      "{name} is banned, but only {count} messages have been deleted so far. Retry to delete the rest.",
+  },
+  "banDialog.purgeUnsupported":
+    "Banned {username}. This server cannot delete message history, so their messages were kept.",
+  "banDialog.purgeDone": {
+    one: "Banned {username} and deleted {count} message",
+    other: "Banned {username} and deleted {count} messages",
+  },
   "act.refusedEnforce":
     "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
   "act.refusedRemoval":

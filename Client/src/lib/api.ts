@@ -275,6 +275,13 @@ export function serverErrorText(code: string, message: string, fallback: string)
   return message ? capitalise(message) : fallback;
 }
 
+/** The ban response's own part: `purge` is present only when messages were
+ *  asked for and the server handled the field. Its shape is not checked here;
+ *  the Ban dialog reads it defensively. */
+export interface BanMemberResponse {
+  readonly purge?: unknown;
+}
+
 /** A failed request's text: friendly copy for a `TransportError`, `serverErrorText`
  *  for an `ApiClientError`, else the error's own message. */
 export function errorText(err: unknown, fallback: string): string {
@@ -1664,13 +1671,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return memberRequest<void>("DELETE", `/${userId}/sessions`, undefined, signal);
     },
 
+    /**
+     * Ban a member. `deleteMessageSeconds` (0-604800) also deletes their recent
+     * messages and is sent only above 0. The result carries `purge` only when a
+     * server that supports the field acted on it; an older server ignores the
+     * field and answers without one. A role change is never combined with it.
+     */
     adminBanMember(
       userId: number,
       reason?: string,
       durationHours?: number,
       signal?: AbortSignal,
-    ): Promise<void> {
-      return memberRequest<void>(
+      deleteMessageSeconds?: number,
+    ): Promise<BanMemberResponse> {
+      return memberRequest<BanMemberResponse>(
         "PATCH",
         `/${userId}`,
         {
@@ -1680,6 +1694,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           ...(durationHours !== undefined && durationHours > 0
             ? { ban_duration_hours: durationHours }
             : {}),
+          ...(deleteMessageSeconds ? { delete_message_seconds: deleteMessageSeconds } : {}),
         },
         signal,
       );

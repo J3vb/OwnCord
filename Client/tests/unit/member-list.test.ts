@@ -487,11 +487,11 @@ describe("MemberList", () => {
     }
   });
 
-  // Opening Ban swaps one item for the reason/duration/Confirm Ban row, about
-  // 90 px taller. A menu opened top-anchored in the band just above the fit
-  // limit then ran past the bottom of the 940x500 window, taking Confirm Ban
-  // and Block with it; a bottom-anchored one can likewise grow past the top.
-  it("re-clamps the context menu into the viewport when the ban form expands", async () => {
+  // A menu that grows after it opened (it once did when Ban expanded into an
+  // inline form, about 90 px taller) opened top-anchored in the band just above
+  // the fit limit ran past the bottom of the 940x500 window, taking its last
+  // rows with it; a bottom-anchored one can likewise grow past the top.
+  it("re-clamps the context menu into the viewport when it grows", async () => {
     let menuHeight = 144;
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => menuHeight);
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
@@ -511,9 +511,6 @@ describe("MemberList", () => {
       let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
       expect(menu.style.top).toBe("320px");
 
-      const banItem = Array.from(menu.children).find((el) => el.textContent === "Ban")!;
-      banItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      expect(menu.querySelector('[data-testid="ban-confirm"]')).not.toBeNull();
       menuHeight = 234;
       lastResizeCallback!();
       // Re-anchored by its bottom edge at the pointer: spans y 86..320.

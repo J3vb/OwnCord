@@ -11,7 +11,7 @@ import { createMemberList } from "@components/MemberList";
 import { buildVoiceModOptions, type VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
-import { channelsStore, getRoleIdByName } from "@stores/channels.store";
+import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
@@ -20,6 +20,7 @@ import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
 import type { BlockDeps } from "../../features/blocks/blockActions";
+import { changeMemberRole, type RoleChangeDeps } from "../../features/moderation/roleAssignment";
 import { TIMEOUT_PRESETS } from "../../features/moderation/timeoutPresets";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
   const { api, getToast, onMessageUser, onCallUser, onVoiceModerate } = opts;
+  const roleDeps: RoleChangeDeps = { api, notify: (msg, type) => getToast()?.show(msg, type) };
   const blockDeps: BlockDeps = { api, notify: (msg, type) => getToast()?.show(msg, type) };
   const unsubs: Array<() => void> = [];
 
@@ -349,22 +351,33 @@ export function createSidebarMemberSection(
         getToast()?.show(msg, "error");
       }
     },
-    onBan: async (userId, username, reason, durationHours) => {
-      try {
-        await api.adminBanMember(userId, reason, durationHours);
-        getToast()?.show(
-          durationHours > 0
-            ? shellText("members.bannedFor", { username, hours: durationHours })
-            : shellText("members.banned", { username }),
-          "success",
-        );
-        // The row is about to vanish from the roster; the ban has to appear
-        // somewhere or it cannot be undone from here.
-        await refreshBanned();
-      } catch (err) {
-        const msg = errorText(err, shellText("members.banFailed"));
-        getToast()?.show(msg, "error");
-      }
+    // Loaded on first use: the dialog stays out of MainPage. It lives as long
+    // as this section, like the report dialog.
+    onBan: (userId, username, displayName) => {
+      import("../../features/moderation/BanDialog").then(
+        ({ openBanDialog }) => {
+          if (resizeOwner.signal.aborted) return;
+          openBanDialog({
+            name: displayName,
+            username,
+            submit: (req) =>
+              api.adminBanMember(
+                userId,
+                req.reason,
+                req.durationHours,
+                undefined,
+                req.deleteMessageSeconds,
+              ),
+            // The row is about to vanish from the roster; the ban has to appear
+            // somewhere or it cannot be undone from here.
+            onBanned: () => void refreshBanned(),
+            notify: (msg, type) => getToast()?.show(msg, type),
+            signal: resizeOwner.signal,
+            fallbackFocus: () => memberContent.querySelector<HTMLElement>(".member-item"),
+          });
+        },
+        () => getToast()?.show(shellText("members.banFailed"), "error"),
+      );
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.
     onToggleBlock: async (userId, username, block) => {
@@ -388,21 +401,8 @@ export function createSidebarMemberSection(
           ),
       );
     },
-    onChangeRole: async (userId, username, newRole) => {
-      const roleId = getRoleIdByName(newRole);
-      if (roleId === undefined) {
-        // No silent failures: the role vanished from the server's list.
-        getToast()?.show(shellText("members.unknownRole", { role: newRole }), "error");
-        return;
-      }
-      try {
-        await api.adminChangeRole(userId, roleId);
-        getToast()?.show(shellText("members.roleChanged", { username, role: newRole }), "success");
-      } catch (err) {
-        const msg = errorText(err, shellText("members.roleChangeFailed"));
-        getToast()?.show(msg, "error");
-      }
-    },
+    onChangeRole: (userId, username, newRole) =>
+      changeMemberRole(roleDeps, userId, username, newRole),
     // No reason dialog yet: the menu sends an empty reason, which the server accepts.
     onTimeoutMember: async (userId, username, seconds) => {
       try {

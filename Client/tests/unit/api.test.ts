@@ -1401,6 +1401,27 @@ describe("API Client", () => {
       expect(body).toEqual({ banned: true, ban_reason: "" });
     });
 
+    it("adminBanMember sends delete_message_seconds only above 0 and never a role_id", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 42, purge: { deleted: 3, complete: true } }));
+      const res = await api.adminBanMember(42, "spam", 24, undefined, 3600);
+      // The response is handed back untouched; the Ban dialog reads `purge`.
+      const body = JSON.parse(fetchCallOpts().body as string);
+      expect(body).toEqual({
+        banned: true,
+        ban_reason: "spam",
+        ban_duration_hours: 24,
+        delete_message_seconds: 3600,
+      });
+      expect(res).toMatchObject({ purge: { deleted: 3, complete: true } });
+
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue(jsonResponse({ id: 42 }));
+      await api.adminBanMember(42, "spam", 0, undefined, 0);
+      expect(JSON.parse(fetchCallOpts().body as string)).not.toHaveProperty(
+        "delete_message_seconds",
+      );
+    });
+
     it("adminUnbanMember calls PATCH /api/v1/moderation/members/{id} with banned:false", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminUnbanMember(42);

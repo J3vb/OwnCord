@@ -21,11 +21,6 @@ export const shellText = defineCatalog("shell", {
   "common.serverNameFallback": "Server Name",
   "common.online": "{count} online",
 
-  "ban.forever": "Forever",
-  "ban.oneHour": "1 hour",
-  "ban.oneDay": "1 day",
-  "ban.sevenDays": "7 days",
-  "ban.thirtyDays": "30 days",
   "member.copyId": "Copy User ID",
   "member.profile": "Profile",
   "member.mention": "Mention",
@@ -49,10 +44,6 @@ export const shellText = defineCatalog("shell", {
   "member.forceLogoutConfirm": "Log them out?",
   "member.loggingOut": "Logging out...",
   "member.ban": "Ban",
-  "member.banReason": "Reason (optional)",
-  "member.banDuration": "Ban duration",
-  "member.banConfirm": "Confirm Ban",
-  "member.banning": "Banning...",
 
   "channel.edit": "Edit Channel",
   "channel.create": "Create Channel",
