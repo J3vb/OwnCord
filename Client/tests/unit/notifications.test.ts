@@ -219,6 +219,24 @@ describe("notifyIncomingMessage", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
+  it("makes no sound and no OS toast for a call log row", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    mockOscillator.start.mockClear();
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("notificationSounds", true);
+    notifyIncomingMessage(
+      makePayload({
+        kind: "call",
+        call: { started_at: "2026-03-15 10:00:00", ended_at: null, participants: [2] },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    expect(mockOscillator.start).not.toHaveBeenCalled();
+  });
+
   it("does not notify when window is focused and message is in active channel", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();
@@ -352,6 +370,84 @@ describe("notifyIncomingMessage", () => {
     notifyIncomingMessage(payload);
     await vi.waitFor(() => {
       expect(sendNotification).toHaveBeenCalled();
+    });
+  });
+
+  describe("a blocked author", () => {
+    async function alerts() {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", true);
+      testPrefs.set("notificationSounds", true);
+      return {
+        popup: sendNotification as ReturnType<typeof vi.fn>,
+        flash: win.requestUserAttention as ReturnType<typeof vi.fn>,
+        chime: mockOscillator.start,
+      };
+    }
+
+    afterEach(() => {
+      setBlockedByMe([]);
+    });
+
+    for (const level of ["all", "mentions"]) {
+      it(`raises no popup, flash or chime for a group DM message at the ${level} level`, async () => {
+        const a = await alerts();
+        testPrefs.set("notificationLevel", level);
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 7,
+              recipient: { id: 2, username: "TestUser", avatar: null, status: "online" },
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+              isGroup: true,
+              members: [],
+            } as unknown as DmChannel,
+          ],
+        }));
+        setBlockedByMe([2]);
+        notifyIncomingMessage(
+          makePayload({ channel_id: 7, content: "hi @everyone", mentions_everyone: true }),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(a.popup).not.toHaveBeenCalled();
+        expect(a.flash).not.toHaveBeenCalled();
+        expect(a.chime).not.toHaveBeenCalled();
+      });
+    }
+
+    it("raises nothing in the active channel while the window is away", async () => {
+      const a = await alerts();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setBlockedByMe([2]);
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(a.popup).not.toHaveBeenCalled();
+      expect(a.flash).not.toHaveBeenCalled();
+      expect(a.chime).not.toHaveBeenCalled();
+    });
+
+    it("unblocking restores the alerts", async () => {
+      const a = await alerts();
+      setBlockedByMe([2]);
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(a.popup).not.toHaveBeenCalled();
+
+      setBlockedByMe([]);
+      resetNotificationCoalescing();
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await vi.waitFor(() => expect(a.popup).toHaveBeenCalled());
+      expect(a.chime).toHaveBeenCalled();
     });
   });
 

@@ -12,7 +12,7 @@
 import { appLogDir, join } from "@tauri-apps/api/path";
 import { mkdir, writeTextFile, readDir, readTextFile, remove, exists } from "@tauri-apps/plugin-fs";
 import { type LogEntry, addLogListener, createLogger, getLogBuffer } from "@lib/logger";
-import type { LogFiles } from "../contracts/logFiles";
+import type { LogFiles, OpenLogFolderResult } from "../contracts/logFiles";
 
 const log = createLogger("logPersistence");
 const MAX_LOG_FILES = 5;
@@ -288,6 +288,18 @@ async function readAll(): Promise<{ name: string; text: string }[]> {
   }
 }
 
+/** Open the Rust log directory (`open_log_folder` in `src-tauri/src/tray.rs`). */
+async function openFolder(): Promise<OpenLogFolderResult> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_log_folder");
+    return { ok: true };
+  } catch (err) {
+    log.warn("opening the log folder failed", err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export const logFiles: LogFiles = {
   init,
   flush,
@@ -300,4 +312,5 @@ export const logFiles: LogFiles = {
   clearAll,
   readAll,
   readNative,
+  openFolder,
 };

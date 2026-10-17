@@ -5,6 +5,7 @@ import type { SearchResultItem, SearchResponse } from "../../src/lib/types";
 import { setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
+import { resetBlocksStore, setBlockedByMe } from "../../src/stores/blocks.store";
 
 function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
@@ -65,6 +66,7 @@ describe("createSearchOverlay", () => {
     vi.useRealTimers();
     container.remove();
     setDmChannels([]);
+    resetBlocksStore();
     localStorage.removeItem("owncord:settings:timeFormat");
     window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
   });
@@ -537,6 +539,33 @@ describe("createSearchOverlay", () => {
 
     expect(onSelectResult).toHaveBeenCalledWith(result);
     expect(opts.onClose).not.toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("a blocked author's hit shows a placeholder with no highlight, and Enter still selects it", async () => {
+    setBlockedByMe([1]);
+    const result = makeResult({ message_id: 9, content: "secret hello" });
+    const onSearch = vi.fn().mockResolvedValue({ results: [result] });
+    const onSelectResult = vi.fn();
+    const overlay = createSearchOverlay(makeOptions({ onSearch, onSelectResult }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const item = container.querySelector("[data-testid='search-result-0']") as HTMLElement;
+    const body = item.querySelector(".search-result-content") as HTMLElement;
+    expect(body.classList.contains("search-result-content--blocked")).toBe(true);
+    expect(body.textContent).toBe("Blocked message");
+    expect(item.querySelector("mark, .search-hit")).toBeNull();
+    expect(item.textContent).not.toContain("secret");
+    expect(item.querySelector(".search-result-author")!.textContent).toBe("alice");
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onSelectResult).toHaveBeenCalledWith(result);
 
     overlay.destroy?.();
   });

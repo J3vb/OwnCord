@@ -14,6 +14,9 @@ import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
+import { voiceStore } from "@stores/voice.store";
+import { dmCallText } from "../../i18n/dmCall";
+import type { CallInfo } from "../../lib/types";
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -62,11 +65,46 @@ import {
 } from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 
+/** What a row render reads beyond the list's own options. */
+export interface MessageRenderOptions extends MessageListOptions {
+  /** Authors whose messages are hidden, so a reply quoting one shows no content. */
+  readonly blockedUsers?: ReadonlySet<number>;
+}
+
 // -- Composite rendering functions --------------------------------------------
 
 /** Weekday, date and time for a tooltip, in Discord's "F" style. */
 export function fullDateTimeTitle(iso: string): string {
   return formatFullDateTime(parseTimestamp(iso));
+}
+
+/** The header over a run of blocked users' messages, with its Show/Hide toggle. */
+export function renderBlockedRun(
+  item: { readonly firstId: number; readonly count: number; readonly expanded: boolean },
+  onToggle: () => void,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const toggle = createElement(
+    "button",
+    {
+      type: "button",
+      class: "msg-blocked-toggle",
+      "aria-expanded": String(item.expanded),
+      "data-testid": `msg-blocked-toggle-${item.firstId}`,
+    },
+    messagingText(item.expanded ? "blocked.hide" : "blocked.show"),
+  );
+  toggle.addEventListener("click", onToggle, { signal });
+  const run = createElement("div", {
+    class: "msg-blocked-run",
+    "data-testid": `msg-blocked-run-${item.firstId}`,
+  });
+  appendChildren(
+    run,
+    createElement("span", { class: "msg-blocked-text" }, messagingText("blocked.run", item)),
+    toggle,
+  );
+  return run;
 }
 
 export function renderDayDivider(iso: string): HTMLDivElement {
@@ -187,7 +225,7 @@ function renderReplyRef(
   replyToId: number,
   referenced: Message["referencedMessage"],
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
@@ -220,7 +258,11 @@ function renderReplyRef(
     },
     { signal },
   );
-  if (ref) {
+  const parentAuthorId = ref?.user.id ?? referenced?.user?.id;
+  if (parentAuthorId !== undefined && opts.blockedUsers?.has(parentAuthorId) === true) {
+    bar.classList.add("msg-reply-ref--blocked");
+    setText(bar, messagingText("blocked.message"));
+  } else if (ref) {
     const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
       .slice(0, 100)
       .join("");
@@ -275,6 +317,78 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   text.appendChild(renderMentions(msg.content));
   const time = createElement("span", { class: "sm-time" }, formatMessageTimestamp(msg.timestamp));
   appendChildren(el, icon, text, time);
+  return el;
+}
+
+/**
+ * A DM call log row (WP 3B-9c), drawn from `kind` and `call` only, never from
+ * `content`. Live calls offer Join; an ended call reads "lasted N minutes" to
+ * the author and anyone who joined, and "You missed a call" to everyone else.
+ */
+function renderCallRow(
+  msg: Message,
+  call: CallInfo,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const name = resolveDisplayName(resolveAuthor(msg.user));
+  const live = call.ended_at === null;
+  const missed =
+    !live && msg.user.id !== opts.currentUserId && !call.participants.includes(opts.currentUserId);
+  const el = createElement("div", {
+    class: "message call-row" + (missed ? " call-missed" : ""),
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "cr-icon" });
+  icon.appendChild(createIcon(missed ? "phone-off" : "phone", 16));
+  const text = createElement("span", { class: "cr-text" });
+  if (live) {
+    setText(text, dmCallText("rowLive", { name }));
+  } else {
+    const seconds = Math.max(
+      0,
+      (parseTimestamp(call.ended_at).getTime() - parseTimestamp(call.started_at).getTime()) / 1000,
+    );
+    const count = Math.floor(seconds / 60);
+    const few = count < 1;
+    if (missed) {
+      setText(
+        text,
+        few
+          ? dmCallText("rowMissedSeconds", { name })
+          : dmCallText("rowMissedMinutes", { name, count }),
+      );
+    } else {
+      setText(
+        text,
+        few
+          ? dmCallText("rowLastedSeconds", { name })
+          : dmCallText("rowLastedMinutes", { name, count }),
+      );
+    }
+  }
+  const time = createElement(
+    "span",
+    { class: "cr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, text);
+  const inThisCall = voiceStore.getState().currentChannelId === msg.channelId;
+  if (live && opts.onJoinCall !== undefined && !inThisCall) {
+    const join = createElement(
+      "button",
+      {
+        class: "cr-join",
+        "data-testid": `call-join-${msg.id}`,
+        "aria-label": dmCallText("rowJoinLabel"),
+      },
+      dmCallText("rowJoin"),
+    );
+    const onJoinCall = opts.onJoinCall;
+    join.addEventListener("click", () => onJoinCall(msg.channelId), { signal });
+    el.appendChild(join);
+  }
+  el.appendChild(time);
   return el;
 }
 
@@ -363,7 +477,7 @@ export function renderMessage(
   msg: Message,
   isGrouped: boolean,
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
   /** The inline editor to host in place of the message body (WP 3A-8). */
   editor?: HTMLElement,
@@ -376,6 +490,17 @@ export function renderMessage(
   // server notice.
   if (msg.user.id === 0 && msg.user.username === "System") {
     return renderSystemMessage(msg);
+  }
+
+  // A call log row is drawn from kind + call alone. Any other kind (a future
+  // one) falls back to plain system text; so does a call row with no `call`.
+  if (msg.kind !== undefined) {
+    if (msg.kind === "call" && msg.call !== undefined) {
+      return renderCallRow(msg, msg.call, opts, signal);
+    }
+    const fallback = renderSystemMessage(msg);
+    fallback.dataset["testid"] = `message-${msg.id}`;
+    return fallback;
   }
 
   const statusClass =

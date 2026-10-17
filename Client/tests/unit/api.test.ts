@@ -109,6 +109,21 @@ describe("API Client", () => {
     });
   });
 
+  describe("moderation endpoints", () => {
+    // (20)
+    it("timeoutMember POSTs the length and reason to /moderation/users/{id}/timeout", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 12, voice: "skipped" }, 201));
+      const res = await api.timeoutMember(7, 300, "");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/users/7/timeout");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        reason: "",
+        duration_seconds: 300,
+      });
+      expect(res).toEqual({ id: 12, voice: "skipped" });
+    });
+  });
+
   describe("auth endpoints", () => {
     it("register sends invite_code", async () => {
       mockFetch.mockResolvedValue(

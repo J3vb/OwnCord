@@ -59,7 +59,9 @@ export function isActionableMessage(msg: Message): boolean {
 }
 
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
-  const on = isActionableMessage(msg);
+  const sent = isActionableMessage(msg);
+  // A call log row is read-only: only Copy ID (developer mode) applies.
+  const on = sent && msg.kind !== "call";
   const own = msg.user.id === opts.currentUserId;
   const channel = channelsStore.getState().channels.get(msg.channelId);
   const isDm = opts.channelType === "dm";
@@ -77,7 +79,7 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
     report: gate(on && opts.onReportClick !== undefined && !own),
-    copyId: gate(on && isDeveloperMode()),
+    copyId: gate(sent && isDeveloperMode()),
   };
 }
 

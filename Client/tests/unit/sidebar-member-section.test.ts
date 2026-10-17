@@ -32,6 +32,7 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { ApiClientError } from "../../src/lib/api";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -1014,6 +1015,85 @@ describe("SidebarMemberSection", () => {
       // Still listed: the ban is still in force.
       expect(container.querySelectorAll(".banned-row")).toHaveLength(1);
 
+      section.destroy();
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Timeout actions (3C-3)
+  // -------------------------------------------------------------------------
+
+  describe("timeout actions", () => {
+    function setup(api: Record<string, unknown>) {
+      const show = vi.fn();
+      const section = createSidebarMemberSection({
+        api: api as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show }),
+      });
+      container.appendChild(section.element);
+      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+      const callbacks = calls[calls.length - 1]![0] as {
+        onTimeoutMember: (userId: number, username: string, seconds: number) => Promise<void>;
+        onRemoveTimeout: (userId: number, username: string) => Promise<void>;
+      };
+      return { show, section, callbacks };
+    }
+
+    // (18)
+    it("onTimeoutMember sends the length with an empty reason and toasts success", async () => {
+      const timeoutMember = vi.fn().mockResolvedValue({ id: 1, voice: "skipped" });
+      const { show, section, callbacks } = setup({ timeoutMember });
+
+      await callbacks.onTimeoutMember(4, "Dave", 3600);
+
+      expect(timeoutMember).toHaveBeenCalledWith(4, 3600, "");
+      expect(show).toHaveBeenCalledWith("Timed out Dave (1 Hour)", "success");
+      section.destroy();
+    });
+
+    it("onTimeoutMember shows the server's message as an error toast on failure", async () => {
+      const timeoutMember = vi.fn().mockRejectedValue(new Error("Cannot time out that member"));
+      const { show, section, callbacks } = setup({ timeoutMember });
+
+      await callbacks.onTimeoutMember(4, "Dave", 60);
+
+      expect(show).toHaveBeenCalledWith("Cannot time out that member", "error");
+      section.destroy();
+    });
+
+    it("onRemoveTimeout lifts the timeout and toasts success", async () => {
+      const liftTimeout = vi.fn().mockResolvedValue(undefined);
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(liftTimeout).toHaveBeenCalledWith(4);
+      expect(show).toHaveBeenCalledWith("Removed Dave's timeout", "success");
+      section.destroy();
+    });
+
+    // (19) edge case 2: stale timeout state
+    it("a 404 from Remove Timeout is an info toast, not an error", async () => {
+      const liftTimeout = vi
+        .fn()
+        .mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "no active timeout"));
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(show).toHaveBeenCalledTimes(1);
+      expect(show).toHaveBeenCalledWith("Dave is not timed out", "info");
+      section.destroy();
+    });
+
+    it("any other Remove Timeout failure is an error toast", async () => {
+      const liftTimeout = vi
+        .fn()
+        .mockRejectedValue(new ApiClientError(403, "FORBIDDEN", "Not allowed"));
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(show).toHaveBeenCalledWith("Not allowed", "error");
       section.destroy();
     });
   });

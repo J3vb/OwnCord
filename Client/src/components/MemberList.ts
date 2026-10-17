@@ -16,7 +16,11 @@ import {
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
-import { createMemberContextMenu } from "@components/AdminActions";
+import { voiceStore, type VoiceUser } from "@stores/voice.store";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import { withMemberMenu } from "./member-menu-loader";
+import { memberTimeoutsStore } from "../features/moderation/store";
+import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
@@ -47,6 +51,17 @@ export interface MemberListOptions {
   readonly onCallUser?: (userId: number) => void;
   /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
   readonly onReportUser?: (userId: number, name: string) => void;
+  /** Time a member out for `seconds` (MODERATE_MEMBERS); absent hides Timeout. */
+  readonly onTimeoutMember?: (userId: number, username: string, seconds: number) => Promise<void>;
+  /** End a member's timeout early; absent hides Remove Timeout. */
+  readonly onRemoveTimeout?: (userId: number, username: string) => Promise<void>;
+  /** Voice moderation rows for a member in a server voice channel: the options,
+   *  a string saying why they are unavailable, or undefined for none. Absent
+   *  hides the rows. */
+  readonly voiceModFor?: (
+    channelId: number,
+    user: VoiceUser,
+  ) => VoiceModMenuOptions | string | undefined;
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
@@ -76,6 +91,7 @@ interface ModerationGates {
   readonly canKick: boolean;
   readonly canBan: boolean;
   readonly canManageRoles: boolean;
+  readonly canTimeout: boolean;
 }
 
 /**
@@ -90,7 +106,31 @@ function moderationGates(roleName: string): ModerationGates {
     canKick: roleHasPermission(roleName, Permission.KICK_MEMBERS),
     canBan: roleHasPermission(roleName, Permission.BAN_MEMBERS),
     canManageRoles: roleHasPermission(roleName, Permission.MANAGE_ROLES),
+    canTimeout: roleHasPermission(roleName, Permission.MODERATE_MEMBERS),
   };
+}
+
+/** Where a member is connected, when that is a server voice channel (a DM call
+ *  is excluded: its participants are not moderated from the roster). */
+function serverVoiceTarget(
+  userId: number,
+): { readonly channelId: number; readonly user: VoiceUser } | undefined {
+  const channels = channelsStore.getState().channels;
+  for (const [channelId, users] of voiceStore.getState().voiceUsers) {
+    const user = users.get(userId);
+    if (user !== undefined && channels.get(channelId)?.type === "voice") {
+      return { channelId, user };
+    }
+  }
+  return undefined;
+}
+
+/** Whether the server says the member is timed out: `unknown` when it publishes
+ *  no view (an older server). An entry is the answer; the clock is never read. */
+function timeoutStateOf(userId: number): "active" | "none" | "unknown" {
+  const map = memberTimeoutsStore.getState();
+  if (map === null) return "unknown";
+  return map.has(userId) ? "active" : "none";
 }
 
 interface RoleGroup {
@@ -191,7 +231,13 @@ function isAwayStatus(status: UserStatus): boolean {
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
 
+/** Bumped by every open, close and list teardown. The menu module loads lazily
+ *  on the first right-click; a load that finishes after a newer open or a
+ *  destroy sees a changed value and renders nothing. */
+let menuOpenSeq = 0;
+
 function closeActiveMenu(): void {
+  menuOpenSeq += 1;
   if (activeMenu !== null) {
     activeMenu.destroy();
     activeMenu = null;
@@ -323,9 +369,7 @@ function createMemberItem(
   // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
   // row's own edge instead of a pointer position.
   const openContextMenu = (clientX: number, clientY: number): void => {
-    // Don't show context menu for yourself
-    const currentUserId = authStore.getState().user?.id ?? 0;
-    if (member.id === currentUserId) return;
+    const isSelf = member.id === (authStore.getState().user?.id ?? 0);
 
     // Moderation actions are permission-gated per item (a role name told us
     // nothing about what its bits allow); block/unblock is open to everyone.
@@ -351,71 +395,68 @@ function createMemberItem(
       canKick: baseGates.canKick && outranks,
       canBan: baseGates.canBan && outranks,
       canManageRoles: baseGates.canManageRoles && outranks && availableRoles.length > 0,
+      canTimeout: baseGates.canTimeout && outranks,
     };
-    const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
+    const showAdminActions =
+      !isSelf && (gates.canKick || gates.canBan || gates.canManageRoles || gates.canTimeout);
 
     closeActiveMenu();
     releaseMenuDismiss();
+    const seq = menuOpenSeq;
 
     const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
+    const voiceTarget = isSelf || !outranks ? undefined : serverVoiceTarget(member.id);
+    const voiceMod =
+      voiceTarget === undefined || opts.voiceModFor === undefined
+        ? undefined
+        : opts.voiceModFor(voiceTarget.channelId, voiceTarget.user);
+    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser } = opts;
 
-    activeMenu = createMemberContextMenu({
-      userId: member.id,
-      username: member.username,
-      currentRole: member.role,
-      availableRoles,
-      showAdminActions,
-      canKick: gates.canKick,
-      canBan: gates.canBan,
-      canManageRoles: gates.canManageRoles,
-      isBlocked,
-      onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
-      onKick: () => opts.onKick(member.id, member.username),
-      onBan: (reason: string, durationHours: number) =>
-        opts.onBan(member.id, member.username, reason, durationHours),
-      onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+    withMemberMenu(({ createMemberContextMenu }) => {
+      if (seq !== menuOpenSeq || signal.aborted || !item.isConnected) return;
+      const created = createMemberContextMenu({
+        userId: member.id,
+        username: member.username,
+        currentRole: member.role,
+        availableRoles,
+        showAdminActions,
+        canKick: gates.canKick,
+        canBan: gates.canBan,
+        canManageRoles: gates.canManageRoles,
+        canTimeout: gates.canTimeout,
+        isSelf,
+        isBlocked,
+        timeoutState: timeoutStateOf(member.id),
+        onProfile: () => openProfile(clientX, clientY),
+        onMention: () => {
+          mentionInComposer(member.username);
+        },
+        ...(canMention() ? {} : { mentionDisabledReason: shellText("member.mentionUnavailable") }),
+        ...(onMessageUser === undefined ? {} : { onMessage: () => onMessageUser(member.id) }),
+        ...(onCallUser === undefined ? {} : { onCall: () => onCallUser(member.id) }),
+        ...(voiceMod === undefined ? {} : { voiceMod }),
+        ...(onTimeoutMember === undefined
+          ? {}
+          : {
+              onTimeout: (seconds: number) => onTimeoutMember(member.id, member.username, seconds),
+            }),
+        ...(onRemoveTimeout === undefined
+          ? {}
+          : { onRemoveTimeout: () => onRemoveTimeout(member.id, member.username) }),
+        onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
+        onKick: () => opts.onKick(member.id, member.username),
+        onBan: (reason: string, durationHours: number) =>
+          opts.onBan(member.id, member.username, reason, durationHours),
+        onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+        onClosed: () => {
+          if (activeMenu !== created) return;
+          activeMenu = null;
+          releaseMenuDismiss();
+        },
+      });
+      activeMenu = created;
+      placeMenu(created.element, clientX, clientY);
     });
-
-    // Position at the anchor, kept on screen: a member low in the list at the
-    // 940x500 minimum window opened the menu past the bottom edge, leaving
-    // Force Logout, Ban and Block unreachable. When it does not fit below
-    // the anchor it is anchored by its bottom edge instead. The placement
-    // is re-run whenever the menu resizes, so the ban form expanding later
-    // cannot push Confirm Ban and Block off-screen from either anchor.
-    const menuEl = activeMenu.element;
-    menuEl.style.position = "fixed";
-    menuEl.style.zIndex = "1000";
-    document.body.appendChild(menuEl);
-    const margin = 8;
-    const place = (): void => {
-      const { innerWidth: vw, innerHeight: vh } = window;
-      const height = menuEl.offsetHeight;
-      const left = Math.min(clientX, vw - menuEl.offsetWidth - margin);
-      menuEl.style.left = `${Math.max(margin, left)}px`;
-      if (clientY + height > vh - margin) {
-        const bottom = Math.min(vh - clientY, vh - height - margin);
-        menuEl.style.top = "";
-        menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
-      } else {
-        menuEl.style.bottom = "";
-        menuEl.style.top = `${clientY}px`;
-      }
-    };
-    place();
-
-    // Close on outside click (deferred so this click doesn't close it)
-    const dismiss = new Disposable();
-    menuDismiss = dismiss;
-    const resizeObserver = new ResizeObserver(place);
-    resizeObserver.observe(menuEl);
-    dismiss.addCleanup(() => resizeObserver.disconnect());
-    setOwnedTimeout(
-      dismiss.signal,
-      () => {
-        document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
-      },
-      0,
-    );
   };
   item.addEventListener(
     "contextmenu",
@@ -430,6 +471,49 @@ function createMemberItem(
   openMenuOnKeyboard(item, openContextMenu, signal);
 
   return item;
+}
+
+/** Mount the menu at the anchor and arrange its dismissal. */
+function placeMenu(menuEl: HTMLDivElement, clientX: number, clientY: number): void {
+  // Position at the anchor, kept on screen: a member low in the list at the
+  // 940x500 minimum window opened the menu past the bottom edge, leaving
+  // Force Logout, Ban and Block unreachable. When it does not fit below
+  // the anchor it is anchored by its bottom edge instead. The placement
+  // is re-run whenever the menu resizes, so the ban form expanding later
+  // cannot push Confirm Ban and Block off-screen from either anchor.
+  menuEl.style.position = "fixed";
+  menuEl.style.zIndex = "1000";
+  document.body.appendChild(menuEl);
+  const margin = 8;
+  const place = (): void => {
+    const { innerWidth: vw, innerHeight: vh } = window;
+    const height = menuEl.offsetHeight;
+    const left = Math.min(clientX, vw - menuEl.offsetWidth - margin);
+    menuEl.style.left = `${Math.max(margin, left)}px`;
+    if (clientY + height > vh - margin) {
+      const bottom = Math.min(vh - clientY, vh - height - margin);
+      menuEl.style.top = "";
+      menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
+    } else {
+      menuEl.style.bottom = "";
+      menuEl.style.top = `${clientY}px`;
+    }
+  };
+  place();
+
+  // Close on outside click (deferred so this click doesn't close it)
+  const dismiss = new Disposable();
+  menuDismiss = dismiss;
+  const resizeObserver = new ResizeObserver(place);
+  resizeObserver.observe(menuEl);
+  dismiss.addCleanup(() => resizeObserver.disconnect());
+  setOwnedTimeout(
+    dismiss.signal,
+    () => {
+      document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
+    },
+    0,
+  );
 }
 
 function renderList(

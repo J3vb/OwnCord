@@ -161,3 +161,45 @@ describe("reply snippet (referenced_message)", () => {
     expect("referencedMessage" in chatPayloadToMessage(live)).toBe(false);
   });
 });
+
+describe("call log rows (WP 3B-9c)", () => {
+  const call = { started_at: "2026-03-15 10:00:00", ended_at: null, participants: [2] };
+
+  it("carries kind and call from a live chat_message", () => {
+    const row = chatPayloadToMessage({
+      id: 7,
+      channel_id: 3,
+      user,
+      content: "started a call.",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "call",
+      call,
+    });
+    expect(row).toMatchObject({ kind: "call", call });
+  });
+
+  it("carries kind and call from the history mapper, and omits both for an ordinary row", () => {
+    const base: MessageResponse = {
+      id: 8,
+      channel_id: 4,
+      user,
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    expect(messageResponseToMessage({ ...base, kind: "call", call })).toMatchObject({
+      kind: "call",
+      call,
+    });
+    const plain = messageResponseToMessage(base);
+    expect("kind" in plain).toBe(false);
+    expect("call" in plain).toBe(false);
+  });
+});

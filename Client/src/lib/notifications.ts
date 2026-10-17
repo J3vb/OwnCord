@@ -14,6 +14,7 @@ import { isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
+import { ChatMessageKind } from "./protocolTypes";
 import { mentionsCurrentUser } from "./mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
@@ -99,15 +100,22 @@ function chimeEnabled(mentioned: boolean): boolean {
  * taskbar, and play sound based on user preferences.
  *
  * Should be called from the dispatcher when a chat_message arrives.
- * Skips notifications for the current user's own messages and when
- * the window is focused on the message's channel; while focused on another
+ * Skips notifications for the current user's own messages, for authors the
+ * user has blocked, and when the window is focused on the message's channel; while focused on another
  * channel, only the chime may play.
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const currentUser = authStore.getState().user;
 
+  // A call log row is a record, not a message: the ring was the live signal, so
+  // it gets no chime and no toast (the unread badge still counts it).
+  if (payload.kind === ChatMessageKind.CALL) return;
+
   // Don't notify for own messages
   if (currentUser !== null && payload.user.id === currentUser.id) return;
+
+  // Nor for a blocked author: no popup, flash or chime at any level
+  if (blocksStore.getState().blockedByMe.has(payload.user.id)) return;
 
   // Don't notify if the window is focused AND the message is in the active
   // channel — UNLESS that channel is showing a detached around-window

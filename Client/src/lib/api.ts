@@ -1056,6 +1056,21 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /** Time out a member (MODERATE_MEMBERS, outrank). 60..2419200 s; 403/400 as warn. */
+    timeoutMember(
+      userId: number,
+      durationSeconds: number,
+      reason: string,
+      signal?: AbortSignal,
+    ): Promise<{ readonly id: number; readonly voice: "applied" | "skipped" }> {
+      return request<{ readonly id: number; readonly voice: "applied" | "skipped" }>(
+        "POST",
+        `/moderation/users/${userId}/timeout`,
+        { reason, duration_seconds: durationSeconds },
+        signal,
+      );
+    },
+
     /** End a member's active timeout early: 404 when they have none. */
     liftTimeout(userId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);
