@@ -37,7 +37,7 @@ const NAMED_KEYS = [
 ] as const;
 const VK_KEYS: ReadonlyMap<number, (typeof NAMED_KEYS)[number][1]> = new Map(NAMED_KEYS);
 
-// i18n-exempt: F1-F16 and punctuation key labels have no English words; the named
+// i18n-exempt: F1-F24 and punctuation key labels have no English words; the named
 // keys above resolve through the voice catalog.
 const VK_SYMBOLS: ReadonlyMap<number, string> = new Map([
   [0x70, "F1"],
@@ -56,6 +56,14 @@ const VK_SYMBOLS: ReadonlyMap<number, string> = new Map([
   [0x7d, "F14"],
   [0x7e, "F15"],
   [0x7f, "F16"],
+  [0x80, "F17"],
+  [0x81, "F18"],
+  [0x82, "F19"],
+  [0x83, "F20"],
+  [0x84, "F21"],
+  [0x85, "F22"],
+  [0x86, "F23"],
+  [0x87, "F24"],
   [0xc0, "`"],
   [0xbd, "-"],
   [0xbb, "="],

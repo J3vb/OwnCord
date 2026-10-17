@@ -567,9 +567,10 @@ const pttPollingListeners = new Set<() => void>();
 /** Report whether the PTT key-polling backend can actually observe key state.
  *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
  *  Tauri command), not merely whether a key is bound in preferences: on macOS
- *  `is_key_down` is a stub returning false and on pure-Wayland Linux
- *  `DeviceState::checked_new()` returns None, so no `ptt-state` event can ever
- *  arrive to lift a join-time mute. */
+ *  `is_key_down` is a stub returning false and on pure-Wayland Linux key
+ *  polling cannot observe keys, so no `ptt-state` event arrives to lift a
+ *  join-time mute unless the portal backend is live. This flag reflects
+ *  whichever backend is live. */
 export function setPttPollingLive(live: boolean): void {
   if (pttPollingLive === live) return;
   pttPollingLive = live;
