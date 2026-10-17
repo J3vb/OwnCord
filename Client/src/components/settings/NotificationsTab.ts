@@ -507,6 +507,7 @@ function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
   let rows = new Disposable();
   signal.addEventListener("abort", () => rows.destroy(), { once: true });
   let drawnKey: string | null = null;
+  let drawn: readonly number[] = [];
 
   function render(): void {
     if (signal.aborted) return;
@@ -514,6 +515,34 @@ function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
     const key = [...overrides].map(([id, level]) => `${id}:${level}`).join(",");
     if (key === drawnKey) return;
     drawnKey = key;
+
+    // Where focus was, so a removed Reset button hands it on instead of
+    // dropping it to <body> (same hand-off as the muted list).
+    const active = document.activeElement;
+    const focusedId = list.contains(active)
+      ? (drawn.find((id) => active?.getAttribute("data-testid") === `channel-level-reset-${id}`) ??
+        null)
+      : null;
+    const before = drawn;
+    drawn = [...overrides.keys()];
+    if (focusedId !== null) {
+      const at = before.indexOf(focusedId);
+      const next =
+        before.slice(at + 1).find((id) => overrides.has(id)) ??
+        before
+          .slice(0, at)
+          .toReversed()
+          .find((id) => overrides.has(id));
+      queueMicrotask(() => {
+        if (signal.aborted || list.contains(document.activeElement)) return;
+        const target =
+          next === undefined
+            ? list
+            : (list.querySelector<HTMLElement>(`[data-testid="channel-level-reset-${next}"]`) ??
+              list);
+        target.focus();
+      });
+    }
     rows.destroy();
     rows = new Disposable();
     clearChildren(list);
@@ -537,6 +566,9 @@ function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
           class: "btn btn-secondary",
           type: "button",
           "data-testid": `channel-level-reset-${channelId}`,
+          "aria-label": t("notifications.channelLevels.resetLabel", {
+            name: mutedChannelName(channelId),
+          }),
         },
         t("notifications.channelLevels.reset"),
       );
@@ -549,7 +581,7 @@ function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
         createElement(
           "span",
           { class: "settings-muted-until", "data-testid": `channel-level-${channelId}` },
-          t(`notifications.channelLevels.${level}`),
+          LEVEL_LABELS[level](),
         ),
         btn,
       );
@@ -659,6 +691,7 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
           class: "btn btn-secondary",
           type: "button",
           "data-testid": `unmute-${channelId}`,
+          "aria-label": t("notifications.muted.unmuteLabel", { name: mutedChannelName(channelId) }),
         },
         t("notifications.muted.unmute"),
       );

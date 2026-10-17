@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { attachChannelContextMenu } from "@components/channel-sidebar/context-menu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { invalidateMuteCache, setChannelMutesHost } from "@lib/channel-mutes";
+import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/channel-mutes";
 import {
   getChannelNotificationLevel,
   setChannelNotificationLevel,
@@ -143,9 +143,44 @@ describe("Settings - channel notification overrides", () => {
     expect(q("channel-level-empty")).not.toBeNull();
   });
 
+  it("Reset hands focus to the next Reset button, then the list when none is left", async () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([
+        [5, channel()],
+        [6, channel({ id: 6, name: "random" })],
+      ]),
+    }));
+    setChannelNotificationLevel(5, "nothing");
+    setChannelNotificationLevel(6, "all");
+    container.appendChild(buildNotificationsTab(ac.signal));
+    q("channel-level-reset-5")!.focus();
+    q("channel-level-reset-5")!.click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(q("channel-level-reset-6"));
+    q("channel-level-reset-6")!.click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(q("channel-level-list"));
+  });
+
+  it("names the channel on each Reset and Unmute button", () => {
+    setChannelNotificationLevel(5, "nothing");
+    muteChannel(5);
+    mount();
+    expect(q("channel-level-reset-5")!.getAttribute("aria-label")).toBe("Reset #general");
+    expect(q("unmute-5")!.getAttribute("aria-label")).toBe("Unmute #general");
+  });
+
+  it("uses the same level wording as the channel menu", () => {
+    setChannelNotificationLevel(5, "mentions");
+    mount();
+    expect(q("channel-level-5")!.textContent).toBe("Only @mentions");
+    expect(q("notification-level-all")!.textContent).toBe("All Messages");
+  });
+
   it("picks up an override set from a menu while the tab is open", () => {
     mount();
     setChannelNotificationLevel(5, "all");
-    expect(q("channel-level-5")!.textContent).toBe("All messages");
+    expect(q("channel-level-5")!.textContent).toBe("All Messages");
   });
 });

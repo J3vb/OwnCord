@@ -836,6 +836,32 @@ describe("submenus and radio rows (3D-3a)", () => {
     });
   });
 
+  it("Space on a plain trigger opens it, as Enter does", () => {
+    const onActivate = vi.fn();
+    const menu = document.createElement("div");
+    menu.className = "context-menu plain";
+    const { trigger, flyout } = createSubmenuTrigger(
+      "Plain",
+      "context-menu-item",
+      { onActivate },
+      ac.signal,
+    );
+    const row = document.createElement("button");
+    row.setAttribute("role", "menuitem");
+    flyout.appendChild(row);
+    menu.append(trigger, flyout);
+    document.body.appendChild(menu);
+    // Same keyboard model every menu gets.
+    return import("../../src/lib/context-menu").then(({ enableMenuKeyboard }) => {
+      enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+      trigger.focus();
+      key(trigger, " ");
+      expect(onActivate).not.toHaveBeenCalled();
+      expect(flyout.style.display).toBe("");
+      expect(document.activeElement).toBe(row);
+    });
+  });
+
   it("a flyout row click does not fire the trigger", () => {
     const onClick = vi.fn();
     const onPick = vi.fn();

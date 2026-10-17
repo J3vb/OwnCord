@@ -20,6 +20,11 @@
  * by host (ids are only unique per server, and one webview origin shares one
  * localStorage) and an absent override falls through to the global level.
  *
+ * A channel can carry its own level (`channelNotificationLevels:<host>`), which
+ * beats the server level in both directions. It is read uncached on purpose:
+ * there is no cross-window invalidation to get wrong, and the read is one small
+ * JSON parse (the badge reads it once per count via `channelLevelResolver`).
+ *
  * This module only decides *whether* a level permits a notification; the
  * per-channel mute (`channel-mutes.ts`) and the focused-window check stay
  * where they are. A level of `nothing` is the one case that also silences a

@@ -241,9 +241,9 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
           target.click();
           return;
         }
-        if (sub !== null && e.key !== " ") {
+        if (sub !== null) {
           e.preventDefault();
-          // Enter would otherwise also fire the trigger's click; stop it so the
+          // Enter or Space would otherwise also fire the trigger's click; stop it so the
           // submenu opens instead of the row activating.
           e.stopImmediatePropagation();
           revealSubmenu(sub);
