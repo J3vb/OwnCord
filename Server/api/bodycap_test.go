@@ -21,25 +21,34 @@ func TestBodyCapExemptions_RouteEnvelopesReachable(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	h := MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...)(drain)
+	h := MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...)(drain)
 
 	body := bytes.Repeat([]byte("a"), 2<<20) // 2 MiB — over the global cap
 	cases := []struct {
-		path string
-		want int
+		path   string
+		method string // "" is POST
+		want   int
 	}{
-		{"/api/v1/uploads", http.StatusOK},
-		{"/api/v1/admin/plugins/install", http.StatusOK},
-		{"/api/v1/users/me/avatar", http.StatusOK},
-		{"/api/v1/dms/12/icon", http.StatusOK},
+		{"/api/v1/uploads", "", http.StatusOK},
+		{"/api/v1/admin/plugins/install", "", http.StatusOK},
+		{"/api/v1/users/me/avatar", "", http.StatusOK},
+		{"/api/v1/dms/12/icon", "", http.StatusOK},
 		// Everything else keeps the global cap.
-		{"/api/v1/dms/12/members", http.StatusRequestEntityTooLarge},
-		{"/api/v1/dms/12/icon/x", http.StatusRequestEntityTooLarge},
-		{"/api/v1/dms/x/icon", http.StatusRequestEntityTooLarge},
-		{"/api/v1/channels/1/messages", http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/12/members", "", http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/12/icon/x", "", http.StatusRequestEntityTooLarge},
+		// The exemption covers only the upload route.
+		{"/api/v1/dms/12%2Ficon", "", http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/12/icon", http.MethodDelete, http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/12/icon", http.MethodPatch, http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/x/icon", "", http.StatusRequestEntityTooLarge},
+		{"/api/v1/channels/1/messages", "", http.StatusRequestEntityTooLarge},
 	}
 	for _, tc := range cases {
-		req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(body))
+		method := tc.method
+		if method == "" {
+			method = http.MethodPost
+		}
+		req := httptest.NewRequest(method, tc.path, bytes.NewReader(body))
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, req)
 		if rr.Code != tc.want {

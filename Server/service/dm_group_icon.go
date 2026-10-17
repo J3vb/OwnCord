@@ -35,6 +35,11 @@ func (s *DMService) SetGroupIcon(ctx context.Context, userID, channelID int64, i
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
+	// Re-checked here: the upload between AuthorizeGroupIcon and this write is
+	// long enough for a timeout to land.
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
 	actor, _ := s.st.GetUserByID(ctx, userID) //nolint:errcheck // a failed lookup only changes the fallback text
 	change, err := s.st.SetGroupDMIcon(ctx, channelID, userID, iconID, groupIconContent(actor, iconID == nil))
 	if err != nil {

@@ -398,7 +398,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	proxyNets := parseCIDRList(cfg.Server.TrustedProxies)
 	r.Use(requestLogger(proxyNets)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...))
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {

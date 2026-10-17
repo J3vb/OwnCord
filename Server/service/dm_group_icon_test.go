@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 func TestAuthorizeGroupIcon_GateOrder(t *testing.T) {
@@ -65,5 +67,32 @@ func TestSetGroupIcon_RowFallbackTextAndAuthor(t *testing.T) {
 	}
 	if _, err = f.dms.SetGroupIcon(ctx, fixturePeerMod, f.dm, &icon); !errors.Is(err, ErrNotFound) {
 		t.Errorf("non-member set = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetGroupIcon_TimedOutRefusedAndWritesNothing(t *testing.T) {
+	f := newGroupMembershipFixture(t)
+	ctx := context.Background()
+	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
+		t.Fatalf("Timeout: %v", err)
+	}
+	if _, err := f.dms.SetGroupIcon(ctx, fixtureMember, f.dm, nil); !errors.Is(err, ErrTimedOut) {
+		t.Errorf("clear while timed out = %v, want ErrTimedOut", err)
+	}
+	if f.rowCount(t) != 0 {
+		t.Errorf("a refused icon change wrote a row")
+	}
+}
+
+// The service builds icon URLs with AvatarFileURL and the db layer with
+// GroupIconURL (db cannot import service): the two must agree.
+func TestGroupIconURL_MatchesAvatarFileURL(t *testing.T) {
+	for _, id := range []string{"a", "0f8e-4c", "icon.png"} {
+		if got, want := db.GroupIconURL(id), AvatarFileURL(id); got != want {
+			t.Errorf("GroupIconURL(%q) = %q, AvatarFileURL = %q", id, got, want)
+		}
+	}
+	if db.GroupIconURL("") != "" {
+		t.Errorf("GroupIconURL(\"\") must be empty")
 	}
 }
