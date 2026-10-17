@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
