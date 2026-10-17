@@ -994,8 +994,9 @@ test("a native screen share's audio decodes in the browser and survives a video 
   expect(before.rms, "the audio decodes with the right key before the republish").toBeGreaterThan(
     0.01,
   );
-  // LP-8d: the Rust SDK cannot signal stereo, so viewers may decode mono.
-  // Assert that audio decoded, log what channel count did.
+  // LP-8d: the vendored SDK signals stereo for the share audio, so the
+  // publisher's opus is stereo; the channel count the browser reports for the
+  // track is logged, the stereo assertions are the LP-8d test's and below.
   console.log(
     `browser decoded native screen-share audio: rms ${before.rms.toFixed(3)}, ` +
       `channelCount ${before.shareAudio?.channels}, peak left ${before.shareAudio?.left.toFixed(3)} ` +
@@ -1014,6 +1015,11 @@ test("a native screen share's audio decodes in the browser and survives a video 
   await page.waitForTimeout(3_000);
   const after = await readBrowserPeer(page, audio);
   await peer.done;
+  // LP-8d: the republish keeps the stereo publisher (the SDK re-sends the
+  // stored publish options), so the sender's opus is still two channels.
+  const republished = events.find((e) => e.type === "screenAudio" && e.phase === "after-republish");
+  expect(republished?.channels, "the share audio is still stereo after the republish").toBe(2);
+  expect(String(republished?.sdpFmtpLine), "stereo=1 survives the republish").toContain("stereo=1");
   expect(after.shareAudio?.sid).toBe(before.shareAudio?.sid);
   expect(after.shareAudio?.sid).toBe(published()?.sid);
   // The cycles before it subscribed earlier publications; the republish adds none.
@@ -1053,6 +1059,7 @@ test("a native share's audio reaches the browser as stereo with the channels apa
 }) => {
   const key = randomBytes(32).toString("base64");
   const url = `ws://127.0.0.1:${livekitPort}`;
+  const events: Array<Record<string, unknown> & { type: string }> = [];
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
   const peer = runNativePeer(
@@ -1069,7 +1076,9 @@ test("a native share's audio reaches the browser as stereo with the channels apa
       "1280x720",
       "--screen-audio",
     ],
-    () => undefined,
+    ({ event }) => {
+      events.push(event);
+    },
   );
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
@@ -1114,6 +1123,14 @@ test("a native share's audio reaches the browser as stereo with the channels apa
       { hz: 0, db: -Infinity },
       { hz: 0, db: -Infinity },
     ];
+    // Each channel's level at the two source tones (the strongest of the bin
+    // and its neighbours over the whole window): the left must hold 440 Hz and
+    // lack 660 Hz, the right the reverse. A mono downmix has both tones, at
+    // the same level, in both channels.
+    const tone = [
+      { at440: -Infinity, at660: -Infinity },
+      { at440: -Infinity, at660: -Infinity },
+    ];
     for (let n = 0; n < 30; n++) {
       await new Promise((r) => setTimeout(r, 100));
       analysers.forEach((a, i) => {
@@ -1123,24 +1140,51 @@ test("a native share's audio reaches the browser as stereo with the channels apa
         for (let b = 1; b < bins.length; b++) if (bins[b]! > bins[top]!) top = b;
         if (bins[top]! > best[i]!.db)
           best[i] = { hz: (top * ctx.sampleRate) / a.fftSize, db: bins[top]! };
+        const level = (hz: number) => {
+          const c = Math.round((hz * a.fftSize) / ctx.sampleRate);
+          return Math.max(bins[c - 1]!, bins[c]!, bins[c + 1]!);
+        };
+        tone[i]!.at440 = Math.max(tone[i]!.at440, level(440));
+        tone[i]!.at660 = Math.max(tone[i]!.at660, level(660));
       });
     }
     await ctx.close();
-    return { fmtp, channels, left: best[0]!, right: best[1]! };
+    return { fmtp, channels, left: best[0]!, right: best[1]!, tone };
   });
   await peer.done;
 
   expect(reading, "the browser has the native share audio track").not.toBeNull();
-  const { fmtp, channels, left, right } = reading!;
+  const { fmtp, channels, left, right, tone } = reading!;
+  const [leftTone, rightTone] = [tone[0]!, tone[1]!];
+  const published = events.find((e) => e.type === "screenAudio" && e.phase === "published");
   const state =
     `sdpFmtpLine="${fmtp}" codec channels=${channels} ` +
     `left peak ${left.hz.toFixed(0)} Hz (${left.db.toFixed(0)} dB) ` +
-    `right peak ${right.hz.toFixed(0)} Hz (${right.db.toFixed(0)} dB)`;
+    `right peak ${right.hz.toFixed(0)} Hz (${right.db.toFixed(0)} dB) ` +
+    `left 440/660 ${leftTone.at440.toFixed(0)}/${leftTone.at660.toFixed(0)} dB ` +
+    `right 440/660 ${rightTone.at440.toFixed(0)}/${rightTone.at660.toFixed(0)} dB ` +
+    `publisher channels=${String(published?.channels)} fmtp="${String(published?.sdpFmtpLine)}"`;
   console.log(`LP-8d native share audio as received: ${state}`);
   expect(fmtp, `stereo=1 is negotiated for the share audio: ${state}`).toContain("stereo=1");
   expect(channels, `the opus codec is stereo: ${state}`).toBe(2);
   expect(Math.abs(left.hz - 440), `left channel carries 440 Hz: ${state}`).toBeLessThan(30);
   expect(Math.abs(right.hz - 660), `right channel carries 660 Hz: ${state}`).toBeLessThan(30);
+  // Publisher side: the native sender itself negotiated stereo opus, so the
+  // channels were never downmixed before they left.
+  expect(published?.channels, `the publisher's opus is stereo: ${state}`).toBe(2);
+  expect(String(published?.sdpFmtpLine), `the publisher's fmtp has stereo=1: ${state}`).toContain(
+    "stereo=1",
+  );
+  // Downmix versus duplicate: with the channels truly apart, each side's other
+  // tone sits at least 20 dB below its own.
+  expect(
+    leftTone.at440 - leftTone.at660,
+    `left 660 Hz is 20 dB under its 440 Hz: ${state}`,
+  ).toBeGreaterThanOrEqual(20);
+  expect(
+    rightTone.at660 - rightTone.at440,
+    `right 440 Hz is 20 dB under its 660 Hz: ${state}`,
+  ).toBeGreaterThanOrEqual(20);
 });
 
 // WP M-12a: a live quality change re-caps the running capture and republishes

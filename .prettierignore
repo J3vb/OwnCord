@@ -45,6 +45,9 @@ Client/test-results/
 Client/.vite/
 Client/src-tauri/target/
 Client/src-tauri/gen/
+# The vendored livekit crate (WP LP-8d): upstream's tree plus a marked patch,
+# kept byte-identical to the crates.io package so a reviewer can diff it.
+Client/src-tauri/vendor/
 .serena/
 .superpowers/sdd/
 

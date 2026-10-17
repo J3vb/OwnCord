@@ -198,6 +198,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.
 - On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
+- Linux: screen-share audio now reaches viewers in stereo instead of mono.
 
 ## v2.3.0-beta.1
 
