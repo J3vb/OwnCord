@@ -92,14 +92,15 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	// chain A -> B -> C with no restart in between is not covered: the server
 	// does not record the path it is running on. When the file does not parse,
 	// no server can have booted on it, so only the base path applies.
-	lockPaths := []string{base.Database.Path}
-	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil && effective.Database.Path != base.Database.Path {
-		lockPaths = append(lockPaths, effective.Database.Path)
+	lockPaths := []string{lockTarget(base.Database.Path)}
+	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {
+		// One file can be named two ways (relative and absolute); a second
+		// lock on it would fail against our own first one.
+		if p := lockTarget(effective.Database.Path); p != lockPaths[0] {
+			lockPaths = append(lockPaths, p)
+		}
 	}
 	for _, p := range lockPaths {
-		if p == "" {
-			p = filepath.Join("data", "chatserver.db")
-		}
 		release, ok := lockDatabase(stderr, p)
 		if !ok {
 			return 1
@@ -122,21 +123,35 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	return resetKeys(stdout, stderr, overridesPath, current, keys)
 }
 
-// lockDatabase takes the process lock for dbPath. It fails (ok=false, after
-// printing why) only when another process holds the lock. Any other error
-// means the lock file could not be created, for example because the directory
-// is missing, and no process can hold a lock that does not exist, so that
-// counts as no holder and the reset may proceed.
+// lockTarget is the absolute, cleaned database path the lock is taken for,
+// so two spellings of one file compare equal.
+func lockTarget(dbPath string) string {
+	if dbPath == "" {
+		dbPath = filepath.Join("data", "chatserver.db")
+	}
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		return abs
+	}
+	return filepath.Clean(dbPath)
+}
+
+// lockDatabase takes the process lock for dbPath. When the database's
+// directory does not exist, no process can hold the lock, so the reset may
+// proceed (a server cannot boot there either). Any other failure, including
+// another process holding the lock, refuses (ok=false, after printing why).
 func lockDatabase(stderr io.Writer, dbPath string) (release func(), ok bool) {
 	release, err := db.AcquireProcessLock(dbPath)
-	if errors.Is(err, db.ErrAlreadyLocked) {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return nil, false
+	if err == nil {
+		return release, true
 	}
-	if err != nil {
-		return func() {}, true
+	if !errors.Is(err, db.ErrAlreadyLocked) {
+		if _, statErr := os.Stat(filepath.Dir(dbPath)); errors.Is(statErr, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "note: %s does not exist, so no server can be using %s\n", filepath.Dir(dbPath), dbPath)
+			return func() {}, true
+		}
 	}
-	return release, true
+	fmt.Fprintf(stderr, "error: %v\n", err)
+	return nil, false
 }
 
 // resetKeys removes the named keys, or, with none named, every key whose wrong
@@ -189,8 +204,13 @@ func resetAll(stdout, stderr io.Writer, overridesPath string, current map[string
 	if readErr != nil {
 		aside := overridesPath + ".unreadable-" + time.Now().UTC().Format("20060102T150405Z")
 		for n := 2; ; n++ {
-			if _, err := os.Lstat(aside); errors.Is(err, os.ErrNotExist) {
+			_, err := os.Lstat(aside)
+			if errors.Is(err, os.ErrNotExist) {
 				break
+			}
+			if err != nil || n > 100 {
+				fmt.Fprintf(stderr, "error: could not choose a name to move %s aside to\n", config.OverridesFileName)
+				return 1
 			}
 			aside = fmt.Sprintf("%s.unreadable-%s-%d", overridesPath, time.Now().UTC().Format("20060102T150405Z"), n)
 		}

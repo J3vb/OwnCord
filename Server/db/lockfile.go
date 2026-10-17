@@ -19,8 +19,7 @@ var ErrAlreadyLocked = errors.New("database lock held by another process")
 // running against the file, rather than swapping it underneath a live process.
 // It tries ONCE and reports the lock immediately, with no retry window: an
 // operator running the command wants a fast refusal, not the restart-handoff
-// wait acquireProcessLock exists for. The returned error is descriptive, not a
-// sentinel callers must match.
+// wait acquireProcessLock exists for.
 // A refusal wraps ErrAlreadyLocked; any other error means the lock file could
 // not be opened at all (for example its directory is missing), so no process
 // can hold it.

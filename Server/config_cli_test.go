@@ -481,6 +481,37 @@ func TestConfigCLI_MissingDatabaseDirectoryCountsAsNoHolder(t *testing.T) {
 
 // A running server holds the lock at the path it booted with (the base path);
 // a panel save of a new database.path only takes effect at the next restart.
+func TestConfigCLI_SameDatabaseNamedTwoWaysLocksOnce(t *testing.T) {
+	f := newConfigFixture(t)
+	t.Chdir(f.dir)
+	f.seed(t, map[string]any{"database.path": filepath.Join("data", "chatserver.db"), "server.port": 9443})
+
+	code, _, stderr := f.run(t, "reset-overrides")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	if left := f.saved(t); len(left) != 0 {
+		t.Fatalf("keys still saved: %v", sortedKeys(left))
+	}
+}
+
+func TestConfigCLI_RefusesWhenLockCannotBeTaken(t *testing.T) {
+	f := newConfigFixture(t)
+	if err := os.Mkdir(f.dbPath+".lock", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	f.seed(t, map[string]any{"server.port": 9443})
+	before := fileHash(t, f.overridesPath)
+
+	code, _, stderr := f.run(t, "reset-overrides")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1; stderr: %s", code, stderr)
+	}
+	if fileHash(t, f.overridesPath) != before {
+		t.Fatal("overrides file changed although the lock was not taken")
+	}
+}
+
 func TestConfigCLI_RefusesWhileBasePathLockHeldAndPathMoved(t *testing.T) {
 	f := newConfigFixture(t)
 	moved := filepath.Join(f.dir, "moved", "chatserver.db")
