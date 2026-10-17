@@ -405,8 +405,14 @@ export function wireDispatcher(
   );
 
   return () => {
+    // Each entry is isolated: one that throws must not leave the rest of the
+    // socket handlers subscribed to a connection that is being torn down.
     for (const unsub of unsubs) {
-      unsub();
+      try {
+        unsub();
+      } catch (err) {
+        log.error("Dispatcher cleanup step failed", err);
+      }
     }
   };
 }

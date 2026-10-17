@@ -337,7 +337,7 @@ afterEach(() => {
 });
 import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
+import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { wireConnectionStatus } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -3017,7 +3017,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });
 
-  it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
+  it("clears every external-content cache on sign-out so one server's previews never reach the next (B7-16)", async () => {
     const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
@@ -3054,6 +3054,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       expect(fetched(imageUrl)).toBe(1);
       const partitionBefore = externalPartition();
 
+      // The caches reset with the session (sessionRegistry, cache phase); the
+      // page itself only tears down its DOM and controllers.
+      clearAuth("server_switch");
       page.destroy?.();
 
       // Every one of them is asked for again, under a fresh broker partition.
@@ -4196,5 +4199,62 @@ describe("MainPage — focus fallback when the channel is declined", () => {
 
     expect(document.activeElement).not.toBe(document.body);
     expect(document.activeElement).toBe(shown);
+  });
+});
+
+describe("MainPage — destroy isolates every teardown step (ARCH-012)", () => {
+  /** Live subscriptions on a store: every subscribe minus its unsubscribe. */
+  function trackSubscriptions(store: {
+    subscribe: (...a: never[]) => () => void;
+    subscribeSelector: (...a: never[]) => () => void;
+  }): () => number {
+    let live = 0;
+    for (const method of ["subscribe", "subscribeSelector"] as const) {
+      const original = store[method].bind(store) as (...a: unknown[]) => () => void;
+      (store as Record<string, unknown>)[method] = (...args: unknown[]) => {
+        live += 1;
+        const unsub = original(...args);
+        let done = false;
+        return () => {
+          if (!done) live -= 1;
+          done = true;
+          unsub();
+        };
+      };
+    }
+    return () => live;
+  }
+
+  it("a throwing early step still runs every later step and every store unsubscription", async () => {
+    resetStores();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const stores = [uiStore, channelsStore, voiceStore, dmStore, membersStore, authStore];
+    const originals = stores.map((s) => [s.subscribe, s.subscribeSelector] as const);
+    const counts = stores.map((s) => trackSubscriptions(s as never));
+    const lk = await import("@lib/livekitSession");
+    const page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    try {
+      page.mount(container);
+      mockDestroyChannel.mockClear();
+      const live = counts.reduce((n, c) => n + c(), 0);
+      expect(live).toBeGreaterThan(0);
+
+      // voiceCleanupAll sits early in destroy: everything after it must still run.
+      vi.mocked(lk.cleanupAll).mockImplementationOnce(() => {
+        throw new Error("boom");
+      });
+      expect(() => page.destroy?.()).not.toThrow();
+
+      expect(counts.map((c) => c())).toEqual(counts.map(() => 0));
+      expect(mockDestroyChannel).toHaveBeenCalled();
+      expect(container.querySelector("[data-testid='app-layout']")).toBeNull();
+    } finally {
+      stores.forEach((s, i) => {
+        s.subscribe = originals[i]![0];
+        s.subscribeSelector = originals[i]![1];
+      });
+      container.remove();
+    }
   });
 });
