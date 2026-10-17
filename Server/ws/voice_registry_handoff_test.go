@@ -303,6 +303,57 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 	}
 }
 
+// blockingLeaveStore holds LeaveIfMatch until release is closed.
+type blockingLeaveStore struct {
+	VoiceStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingLeaveStore) LeaveIfMatch(ctx context.Context, userID, chID int64, joinedAt string) (bool, error) {
+	close(s.entered)
+	<-s.release
+	return s.VoiceStore.LeaveIfMatch(ctx, userID, chID, joinedAt)
+}
+
+// A grace expiry whose teardown already started when shutdown runs: close
+// waits for it, so it cannot write after GracefulStopContext returns.
+func TestVoiceRegistry_CloseWaitsForInFlightExpiry(t *testing.T) {
+	withGraceWindow(t, 20*time.Millisecond)
+	f := newTxnFixture(t, nil)
+	store := &blockingLeaveStore{VoiceStore: f.h.voice, entered: make(chan struct{}), release: make(chan struct{})}
+	f.h.voice = store
+	f.join(t)
+
+	txn := f.h.begin(f.uid)
+	if _, handled := txn.park(f.c); !handled {
+		t.Fatal("a completed membership was not parked")
+	}
+	txn.end()
+
+	select {
+	case <-store.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the grace expiry never reached the row delete")
+	}
+	closed := make(chan struct{})
+	go func() {
+		f.h.voiceGrace.close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("close returned while an expiry teardown was still writing")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(store.release)
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("close did not return after the expiry finished")
+	}
+}
+
 func canceledContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

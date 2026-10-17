@@ -175,7 +175,7 @@ func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (
 // timer. A zero chID or an empty token matches any entry; otherwise the entry
 // must park exactly that join. Taking under the member lock is what keeps a
 // resuming socket's inherit and the expiry teardown from both running
-// (expireVoiceGrace's takeIfSame).
+// (expireVoiceGrace's takeForExpiry).
 func (t *voiceTxn) takeParked(chID int64, token string) *voiceGraceEntry {
 	return t.h.voiceGrace.takeJoin(t.userID, chID, token)
 }

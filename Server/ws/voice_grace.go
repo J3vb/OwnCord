@@ -25,6 +25,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -53,6 +54,9 @@ type voiceGraceState struct {
 	mu      syncutil.Mutex
 	entries map[int64]*voiceGraceEntry
 	closed  bool // set by close at shutdown: put arms nothing from then on
+	// expiring counts expiry teardowns past takeForExpiry, so close can wait
+	// for one already writing to the database.
+	expiring sync.WaitGroup
 }
 
 // isClosed reports whether close has run.
@@ -65,15 +69,17 @@ func (s *voiceGraceState) isClosed() bool {
 // close stops every parked entry's timer and drops the entries, without any
 // teardown or database write, and refuses all later put calls. A timer that
 // already fired and is waiting on the member lock finds its entry gone
-// (takeIfSame) and does nothing.
+// (takeForExpiry) and does nothing; one whose teardown already started is
+// waited for, so no expiry writes after close returns.
 func (s *voiceGraceState) close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closed = true
 	for uid, e := range s.entries {
 		e.timer.Stop()
 		delete(s.entries, uid)
 	}
+	s.mu.Unlock()
+	s.expiring.Wait()
 }
 
 // put parks e for userID and starts its expiry timer under the lock, so no
@@ -135,6 +141,20 @@ func (s *voiceGraceState) takeIfSame(userID int64, e *voiceGraceEntry) bool {
 	}
 	delete(s.entries, userID)
 	e.timer.Stop()
+	return true
+}
+
+// takeForExpiry is takeIfSame for the expiry timer, also counting the
+// teardown in flight; the caller calls s.expiring.Done when it ends.
+func (s *voiceGraceState) takeForExpiry(userID int64, e *voiceGraceEntry) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entries[userID] != e {
+		return false
+	}
+	delete(s.entries, userID)
+	e.timer.Stop()
+	s.expiring.Add(1)
 	return true
 }
 
@@ -209,16 +229,17 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 
 // expireVoiceGrace tears down a parked membership whose window elapsed. Under
 // the member lock it takes the entry back only if it is still this one
-// (takeIfSame), so exactly one of this teardown and a resuming socket's
+// (takeForExpiry), so exactly one of this teardown and a resuming socket's
 // voiceTxn.inherit runs when the two land together, and a superseded window's
 // timer never tears down a newer session. The entry is removed before the
 // slow finishVoiceLeave, which never runs with the grace lock held.
 func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	txn := h.begin(userID)
 	defer txn.end()
-	if !h.voiceGrace.takeIfSame(userID, entry) {
+	if !h.voiceGrace.takeForExpiry(userID, entry) {
 		return
 	}
+	defer h.voiceGrace.expiring.Done()
 	h.leaveParkedVoice(context.Background(), entry, voiceLeaveReasonGraceExpired)
 }
 
@@ -257,7 +278,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 // The parked snap carries the completed join's token and E2EE key; adopting it
 // lets registerNow's subscribe block restore the voice topic exactly as the
 // still-registered-old-client transfer does. Taking the entry stops its expiry
-// timer, and expireVoiceGrace's takeIfSame under the same member lock finds it
+// timer, and expireVoiceGrace's takeForExpiry under the same member lock finds it
 // gone, so inheriting and tearing down can never both run. It returns the
 // inherited channel id, or 0.
 //
