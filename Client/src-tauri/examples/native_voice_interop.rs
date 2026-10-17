@@ -391,8 +391,6 @@ mod linux {
         Ok(capture)
     }
 
-    /// Publish running capture `capture`'s video. `width` and `height` are
-    /// the synthetic source's own size. Returns the publication's sid.
     /// The publisher-side opus codec of the share audio `sid`: the SFU's
     /// answer carries `stereo=1` only when the track was published as stereo
     /// (LP-8d). The sender's stats appear once the transport is up, so retry
@@ -410,6 +408,8 @@ mod linux {
         (0, last)
     }
 
+    /// Publish running capture `capture`'s video. `width` and `height` are
+    /// the synthetic source's own size. Returns the publication's sid.
     async fn publish_screen_video(
         session: &mut NativeSession,
         capture: u64,

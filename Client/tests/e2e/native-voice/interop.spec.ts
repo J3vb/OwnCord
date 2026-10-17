@@ -1015,8 +1015,9 @@ test("a native screen share's audio decodes in the browser and survives a video 
   await page.waitForTimeout(3_000);
   const after = await readBrowserPeer(page, audio);
   await peer.done;
-  // LP-8d: the republish keeps the stereo publisher (the SDK re-sends the
-  // stored publish options), so the sender's opus is still two channels.
+  // LP-8d: the video republish renegotiates the publisher, and the share
+  // audio keeps stereo=1 through it. (A full reconnect republishes with the
+  // stored publish options; that path is covered by reading, not here.)
   const republished = events.find((e) => e.type === "screenAudio" && e.phase === "after-republish");
   expect(republished?.channels, "the share audio is still stereo after the republish").toBe(2);
   expect(String(republished?.sdpFmtpLine), "stereo=1 survives the republish").toContain("stereo=1");

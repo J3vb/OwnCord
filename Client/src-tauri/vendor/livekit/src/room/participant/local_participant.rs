@@ -1185,6 +1185,9 @@ impl LocalParticipant {
 // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.9.5. Marks an audio
 // track's AddTrackRequest as stereo, both ways livekit-client does, so the
 // SFU's publisher answer carries `stereo=1`. Video tracks are left alone.
+// `AddTrackRequest.stereo` is deprecated in favour of TF_STEREO, but the
+// server still reads it, so both are set.
+#[allow(deprecated)]
 fn apply_stereo_request(
     req: &mut proto::AddTrackRequest,
     options: &TrackPublishOptions,
@@ -1202,6 +1205,7 @@ mod tests {
     use crate::options::FrameMetadataFeatures;
 
     #[test]
+    #[allow(deprecated)]
     fn stereo_is_signalled_for_audio_only() {
         let stereo = TrackPublishOptions { stereo: true, ..Default::default() };
         let mono = TrackPublishOptions::default();

@@ -1439,7 +1439,7 @@ impl NativeSession {
             .local_participant()
             .track_publications()
             .into_values()
-            .find(|p| p.sid().to_string() == sid)
+            .find(|p| p.sid().as_str() == sid)
             .ok_or_else(|| format!("screen audio {sid} is not published"))?;
         let Some(LocalTrack::Audio(track)) = publication.track() else {
             return Err(format!("screen audio {sid} has no audio track"));
