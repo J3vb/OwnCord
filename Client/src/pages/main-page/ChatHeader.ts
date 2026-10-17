@@ -7,6 +7,7 @@ import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";
 import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
+import { requestsText } from "../../i18n/requests";
 import { shellText } from "../../i18n/shell";
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,9 @@ export interface ChatHeaderRefs {
   readonly callBtn: HTMLButtonElement;
   /** The DM video call button: the same call, with the camera on once joined. */
   readonly videoCallBtn: HTMLButtonElement;
+  /** The "Show User Profile" toggle for the DM profile panel. Shown only in a
+   *  1:1 DM (a group has no profile); the page owns its `aria-pressed`. */
+  readonly profileBtn: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -159,6 +163,20 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const start = opts.onStartVideoCall;
     videoCallBtn.addEventListener("click", () => start());
   }
+  const profileBtn = createElement("button", {
+    type: "button",
+    class: "profile-btn",
+    title: requestsText("dm.showProfile"),
+    "aria-label": requestsText("dm.showProfile"),
+    "aria-pressed": "false",
+    "data-testid": "dm-profile-btn",
+  });
+  profileBtn.appendChild(createIcon("user", 18));
+  profileBtn.style.display = "none";
+  if (opts.onToggleDmProfile !== undefined) {
+    const toggle = opts.onToggleDmProfile;
+    profileBtn.addEventListener("click", () => toggle());
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -183,7 +201,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       searchInput.blur();
     });
   }
-  appendChildren(tools, searchInput, callBtn, videoCallBtn, pinBtn);
+  appendChildren(tools, searchInput, callBtn, videoCallBtn, profileBtn, pinBtn);
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
   return {
@@ -194,6 +212,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       topicEl,
       callBtn,
       videoCallBtn,
+      profileBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
@@ -300,6 +319,7 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     setText(refs.topicEl, recipient.status);
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
+    refs.profileBtn.style.display = recipient.isGroup === true ? "none" : "";
   } else {
     setChatHeaderChannelType(refs, undefined);
     refs.hashEl.style.display = "";
@@ -308,5 +328,6 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     delete refs.nameGroupEl.dataset["dmGroup"];
     refs.callBtn.style.display = "none";
     refs.videoCallBtn.style.display = "none";
+    refs.profileBtn.style.display = "none";
   }
 }

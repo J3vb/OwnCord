@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- A 1:1 DM now opens with its profile panel showing and remembers if you close it (a **Show User Profile** button in the header brings it back), the panel stays when you switch between DMs and updates a changed avatar, Escape closes only an open confirm, an empty DM list says "No direct messages yet" with a Start one button, and the DM preview above the channels gets the in-call phone icon and the same right-click menu.
 - You can now Block or Unblock someone from their profile card, from a DM's profile panel and from a DM's right-click menu, a Block asks once and an Unblock is one click. That menu also has Mark As Read, Profile, Call and Copy User ID (Developer Mode), and Message and Call on a profile card are greyed out, with the reason, while you're offline or either of you has blocked the other.
 - DM calls now leave a line in the chat: who started it and how long it lasted, or "You missed a call from X" if you didn't pick up. A call that is still going has a Join button. The line can't be edited, replied to or reacted to, and makes no message sound.
 - The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
