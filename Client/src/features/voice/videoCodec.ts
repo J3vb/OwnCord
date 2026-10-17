@@ -215,10 +215,11 @@ async function probeEncoder(
 }
 
 /** A saved H.264 off Linux: VP8 when the browser answers that H.264 is not
- *  encoded in hardware at this size and rate (the fallback is OpenH264, which
- *  WebRTC runs on one thread), and H.264 on no answer, which is no reason to
- *  override the choice. The live check in `codecSwitch` covers a probe that
- *  says hardware and an encoder that falls back anyway. */
+ *  encoded in hardware (the fallback is OpenH264, which WebRTC runs on one
+ *  thread), and H.264 on no answer, which is no reason to override the choice.
+ *  The browser may not weigh the frame size in its answer, so the live check
+ *  in `codecSwitch` covers an encoder that refuses a large frame and falls
+ *  back anyway. */
 function h264PublishCodec(probe: MediaCapabilitiesInfo | null): PublishCodec {
   if (probe === null) return "h264";
   return probe.supported && probe.powerEfficient ? "h264" : "vp8";

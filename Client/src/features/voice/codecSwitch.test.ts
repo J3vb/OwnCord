@@ -223,6 +223,35 @@ describe("CodecSwitchController software H.264 check", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("looks once more when the first sample names no encoder", async () => {
+    const opts: { screen: PublishCodec; preferred: PublishCodec; sample: ShareSenderSample } = {
+      screen: "h264",
+      preferred: "h264",
+      sample: { sentFps: 2 },
+    };
+    const r = rig(opts);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual([]);
+    opts.sample = { encoder: "OpenH264" };
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not carry an OpenH264 share's VP8 over to the next share", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    const next = {} as LocalVideoTrack;
+    r.screen.manualScreenTracks = [next];
+    r.screen.announced = next;
+    r.screen.preferred = "vp9";
+    r.screen.published = "vp9";
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS * 2);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
   it("does not check on the Linux desktop", async () => {
     isLinuxDesktop.mockReturnValue(true);
     const r = h264Rig({ encoder: "OpenH264" });
