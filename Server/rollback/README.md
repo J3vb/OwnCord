@@ -118,5 +118,5 @@ running all of them returns the test database's schema, `schema_versions`,
 settings and row counts exactly.
 
 The first reversals were drafted before their migrations, in
-`docs/plans/hp-4-drafts/`. Those drafts are the design record. The files here
+`docs/archive/plans/hp-4-drafts/`. Those drafts are the design record. The files here
 are what runs.

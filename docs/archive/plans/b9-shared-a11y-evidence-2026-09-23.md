@@ -5,7 +5,7 @@
 **Branch:** `fm/b9-2-impl`
 **Plan:** `.claude/plans/b9-2-shared-accessibility-and-tokens.plan.md` (B9-2)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md), owner decisions Q1 and Q8, and the 2026-09-23 Q8 clarification
-**Contract:** [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md)
+**Contract:** [docs/architecture/b9-ui-contract.md](../../architecture/b9-ui-contract.md)
 **Requirements:** BPR-090, BPR-091
 
 Every result below came from the command next to it, run during this session.

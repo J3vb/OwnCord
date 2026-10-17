@@ -14,9 +14,9 @@ re-testing against a moved base.
 Primary inputs:
 
 - [B0 measured baseline](b0-baseline-2026-08-25.md)
-- [repository-layout audit](../audits/2026-08-23-repository-layout.md) (RL-01…RL-22)
+- [repository-layout audit](../../audits/2026-08-23-repository-layout.md) (RL-01…RL-22)
 - [beta roadmap](repo-health-roadmap-2026-08-23.md), B1 section and HP-1
-- [issue register](repo-health-issue-register-2026-08-23.md) (L-01…L-16)
+- [issue register](../../plans/repo-health-issue-register-2026-08-23.md) (L-01…L-16)
 
 ## Context
 
@@ -56,7 +56,7 @@ documents rather than the single artifact the hold point requires.
 
 ### B1-0 — what accepting HP-0 requires
 
-1. **Write the scorecard.** New `docs/plans/hp-0-scorecard-2026-08-25.md` using
+1. **Write the scorecard.** New `docs/archive/plans/hp-0-scorecard-2026-08-25.md` using
    the roadmap's `## Phase scorecard` table shape, one row per metric, each cell
    linking to its B0 evidence. Part-closes `R-08`.
 2. **Pin required status checks on `dev`.** B0's own leftover. The trap is
@@ -89,7 +89,7 @@ Tests`, `Client E2E (Playwright)`, `Client E2E (parity subset, blocking)`,
    Re-observe with `gh pr checks <n>` on a dev PR before writing the list: a
    name that never reports deadlocks every future PR.
 
-   Extend [`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh) with a
+   Extend [`b0-dev-branch-protection.sh`](../../plans/b0-dev-branch-protection.sh) with a
    `required_status_checks` block rather than adding a second script.
 
 3. **Resolve the two unverified baseline rows.** Rust clippy + 115 tests is
@@ -151,7 +151,7 @@ that changes the work.
 | **RL-13** module namespace                                    | **Confirmed, bounded**                | `Server/go.mod` declares `github.com/owncord/server`: **722 occurrences across 344 Go files**, plus six non-Go (go.mod, a `sed` in `Server/Makefile`, two docs, the ledger pair). **Zero** in any workflow or Dockerfile; no `.goreleaser` exists.                                                                                                                                                                                                                                                                                     |
 | **RL-19** format/lint gaps                                    | **Confirmed, all sub-claims**         | No `.editorconfig` anywhere. Prettier is scoped to the client's `src/` and `tests/` TypeScript, so root Markdown, all of `docs/`, every YAML/JSON and all CSS are formatted by nothing. `.golangci.yml` enables 19 linters but no `gofmt`/`gofumpt`/`goimports`. No `cargo fmt --check`. No shellcheck/actionlint/yamllint.                                                                                                                                                                                                            |
 | **RL-21** intake                                              | **Confirmed, understated**            | `feature_request.md` still exists. Both templates are **Markdown, not YAML issue forms** — no `body:`, no `validations: required`, so nothing is structured or enforced. The Environment block hardcodes one OS.                                                                                                                                                                                                                                                                                                                       |
-| **RL-22** paid automation authorization                       | **Confirmed; done in B1-7**           | Insufficient. The earlier note that impact was bounded by read-only content permissions understated it: the workflow's own token block is least-privilege, but that is not the only identity a run can hold. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../security.md). Tracked as `L-16` only.                                                                                                                                                                          |
+| **RL-22** paid automation authorization                       | **Confirmed; done in B1-7**           | Insufficient. The earlier note that impact was bounded by read-only content permissions understated it: the workflow's own token block is least-privilege, but that is not the only identity a run can hold. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../../security.md). Tracked as `L-16` only.                                                                                                                                                                       |
 
 Net effect: **RL-09 and RL-10 shrink to near-nothing; RL-08 grows a toolchain
 constraint; RL-05, RL-07, RL-20 and RL-21 are each worse than written.**
@@ -490,7 +490,7 @@ behaviour rather than adopting workspaces on principle.
   regression test inside the pinned hygiene gate. The earlier claim that impact
   was bounded by read-only content permissions understated it — a run's effective
   identity is not only the workflow's token block. Mechanism and fix are
-  coordinated privately per [docs/security.md](../security.md); they do not
+  coordinated privately per [docs/security.md](../../security.md); they do not
   appear in public commits, issues, or PR descriptions.
 - **`RL-16/R-09`** — tag publication consumes exact-SHA gate evidence.
 
@@ -500,7 +500,7 @@ behaviour rather than adopting workspaces on principle.
 (`Client/src/platform/{contracts,browser,desktop}`) and their owners. **No native
 behaviour moves in B1.** Adapter extraction is B7 and must not be smuggled in.
 
-**Done** — [docs/architecture/platform-contracts.md](../architecture/platform-contracts.md).
+**Done** — [docs/architecture/platform-contracts.md](../../architecture/platform-contracts.md).
 Two corrections to what this item assumed:
 
 - **`Client/src/platform/` does not exist**, and never has: no commits, no

@@ -24,30 +24,30 @@ baseline is **truthful, reproducible, and sufficient to begin B1**.
 
 ## Question 1 — what is green, red, unavailable, and unverified
 
-| Metric                                | Baseline                     | Target             | Actual                                         | Evidence                                                            |
-| ------------------------------------- | ---------------------------- | ------------------ | ---------------------------------------------- | ------------------------------------------------------------------- |
-| Required checks green                 | refresh in B0                | 100%               | **green** — 10 pinned checks pass              | PR #1410 on `dev`; pinned set below                                 |
-| Open P0                               | 4 (G-01, G-02, G-03, C-06)   | 0 for B0           | **0** — all four closed                        | [b0-baseline](b0-baseline-2026-08-25.md) dispositions               |
-| Open P1                               | 45                           | 0 by B10           | **45**, none in B0 scope                       | [register](repo-health-issue-register-2026-08-23.md), phases B1–B10 |
-| Unresolved security findings          | private count                | 0 by B10           | **7**, all publicly owned, 0 unmapped          | Question 4 below                                                    |
-| Requirement rows release-qualified    | 0                            | 100% by B10        | **0**                                          | [traceability](beta-requirements-traceability-2026-08-23.md)        |
-| Server aggregate coverage             | 74.6%                        | ratchet in B3      | **74.6%** measured                             | b0-baseline, measured                                               |
-| Client honest coverage                | refresh in B0                | ratchet in B7      | **not measured** — see gaps                    | `C-03`, B7                                                          |
-| Static-analysis warnings              | 471 Oxlint                   | 0 unapproved by B7 | **471**, unchanged                             | `C-02`, B7                                                          |
-| Server builds (4 tag variants)        | —                            | pass               | **pass** ×4                                    | measured                                                            |
-| `go vet` / `-race` / `-tags deadlock` | —                            | pass               | **pass**                                       | measured                                                            |
-| `golangci-lint`                       | claimed broken (G-05)        | pass               | **0 issues**, 19 linters, 1.18s                | G-05 **refuted**                                                    |
-| Client unit + integration             | 2 failing                    | green              | **5257 passed / 0 failed**                     | G-01, G-02 fixed                                                    |
-| Client `tsc` / `lint` / `prettier`    | —                            | pass               | **pass**                                       | measured                                                            |
-| Playwright                            | never terminated             | green and exits    | **293 passed, exit 0, 37s**                    | `C-06` fixed                                                        |
-| Rust tests + clippy                   | **carried, not re-measured** | pass               | **115 passed, clippy `-D warnings` exit 0**    | **re-measured 2026-08-25**; CI `Rust Unit Tests` green on Linux     |
-| Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                     |
-| Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                            |
-| Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                  |
-| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 348 records**                 | re-verified at `6a1561fa`                                           |
-| Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                               |
-| 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                          |
-| Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                  |
+| Metric                                | Baseline                     | Target             | Actual                                         | Evidence                                                                        |
+| ------------------------------------- | ---------------------------- | ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Required checks green                 | refresh in B0                | 100%               | **green** — 10 pinned checks pass              | PR #1410 on `dev`; pinned set below                                             |
+| Open P0                               | 4 (G-01, G-02, G-03, C-06)   | 0 for B0           | **0** — all four closed                        | [b0-baseline](b0-baseline-2026-08-25.md) dispositions                           |
+| Open P1                               | 45                           | 0 by B10           | **45**, none in B0 scope                       | [register](../../plans/repo-health-issue-register-2026-08-23.md), phases B1–B10 |
+| Unresolved security findings          | private count                | 0 by B10           | **7**, all publicly owned, 0 unmapped          | Question 4 below                                                                |
+| Requirement rows release-qualified    | 0                            | 100% by B10        | **0**                                          | [traceability](../../plans/beta-requirements-traceability-2026-08-23.md)        |
+| Server aggregate coverage             | 74.6%                        | ratchet in B3      | **74.6%** measured                             | b0-baseline, measured                                                           |
+| Client honest coverage                | refresh in B0                | ratchet in B7      | **not measured** — see gaps                    | `C-03`, B7                                                                      |
+| Static-analysis warnings              | 471 Oxlint                   | 0 unapproved by B7 | **471**, unchanged                             | `C-02`, B7                                                                      |
+| Server builds (4 tag variants)        | —                            | pass               | **pass** ×4                                    | measured                                                                        |
+| `go vet` / `-race` / `-tags deadlock` | —                            | pass               | **pass**                                       | measured                                                                        |
+| `golangci-lint`                       | claimed broken (G-05)        | pass               | **0 issues**, 19 linters, 1.18s                | G-05 **refuted**                                                                |
+| Client unit + integration             | 2 failing                    | green              | **5257 passed / 0 failed**                     | G-01, G-02 fixed                                                                |
+| Client `tsc` / `lint` / `prettier`    | —                            | pass               | **pass**                                       | measured                                                                        |
+| Playwright                            | never terminated             | green and exits    | **293 passed, exit 0, 37s**                    | `C-06` fixed                                                                    |
+| Rust tests + clippy                   | **carried, not re-measured** | pass               | **115 passed, clippy `-D warnings` exit 0**    | **re-measured 2026-08-25**; CI `Rust Unit Tests` green on Linux                 |
+| Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                                 |
+| Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                                        |
+| Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                              |
+| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 348 records**                 | re-verified at `6a1561fa`                                                       |
+| Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                                           |
+| 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                                      |
+| Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                              |
 
 ### Accepted with known gaps
 
@@ -95,7 +95,7 @@ client path are a **sequencing input to B1-1**, not a blocker: the flatten must
 re-point their recorded paths, and the same dead-path check above is the proof.
 
 Planning rows by phase are in the
-[register](repo-health-issue-register-2026-08-23.md). The 45 open P1 rows are
+[register](../../plans/repo-health-issue-register-2026-08-23.md). The 45 open P1 rows are
 distributed across B1–B10; the B1-owned ones are `L-01`, `L-10`, `L-16`, `C-01`,
 `R-04`, `R-09`, and are the subject of
 [b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md).
@@ -104,7 +104,7 @@ distributed across B1–B10; the B1-owned ones are `L-01`, `L-10`, `L-16`, `C-01
 
 `dev` is protected and **status checks are now pinned** (2026-08-25), closing
 B0's one outstanding step. Applied by
-[`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh); verified against
+[`b0-dev-branch-protection.sh`](../../plans/b0-dev-branch-protection.sh); verified against
 the live API.
 
 | Setting                  | Value               |
@@ -155,7 +155,7 @@ Two consequences to carry into B1:
 
 The independent source review of `5cc08889` is reconciled. Its detailed reports
 stay untracked and gitignored (`docs/security-findings/`, 0 tracked files); this
-section is deliberately content-free per [docs/security.md](../security.md).
+section is deliberately content-free per [docs/security.md](../../security.md).
 
 |                                          |                                                |
 | ---------------------------------------- | ---------------------------------------------- |

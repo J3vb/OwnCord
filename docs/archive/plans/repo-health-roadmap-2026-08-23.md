@@ -38,16 +38,16 @@ open: C-10's B7 half, the client voice-join budget, and the decision on
 budget was recorded and enforced on 2026-09-23, so one remains. The
 [B7 PRD](b7-shared-client-platform-desktop-parity.prd.md#b7-18-reconciliation-2026-09-23)
 records them, and the B7 section below summarizes them.
-[README.md](README.md) is the status authority when this header and a README
+[README.md](../../plans/README.md) is the status authority when this header and a README
 row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
 
-- [beta product requirements](beta-product-requirements-2026-08-23.md)
-- [requirement traceability](beta-requirements-traceability-2026-08-23.md)
-- [repository-layout audit](../audits/2026-08-23-repository-layout.md)
-- [repository-health issue register](repo-health-issue-register-2026-08-23.md)
+- [beta product requirements](../../plans/beta-product-requirements-2026-08-23.md)
+- [requirement traceability](../../plans/beta-requirements-traceability-2026-08-23.md)
+- [repository-layout audit](../../audits/2026-08-23-repository-layout.md)
+- [repository-health issue register](../../plans/repo-health-issue-register-2026-08-23.md)
 
 ## Decision
 
@@ -228,10 +228,10 @@ rediscover it.
    start, and a scorecard, `docs/plans/hp-N-scorecard-<date>.md`, at its hold
    point. The plan re-verifies this roadmap's claims against HEAD before
    implementing anything — B1 refuted several audit findings on contact — and
-   records each verdict. [README.md](README.md) rows are the status authority;
+   records each verdict. [README.md](../../plans/README.md) rows are the status authority;
    a plan header that disagrees with its README row is stale.
 2. A phase cannot exit while any `OC-*` finding tagged to it in the
-   [issue register](repo-health-issue-register-2026-08-23.md) is open, unless
+   [issue register](../../plans/repo-health-issue-register-2026-08-23.md) is open, unless
    the finding is re-tagged to a later phase with a written reason in the
    scorecard. The tags exist today; this rule is what enforces them, and it is
    what makes "zero open P0/P1 at B10" a measured fact rather than a hope.
@@ -548,7 +548,7 @@ for every later requirement.
     B6's upgrade rehearsal and B10's in-place upgrade all consume it; until B3
     builds it, nobody owns it.
 13. _(added 2026-08-28)_ Workstreams 2 and 3 are the design already written in
-    [bug-detection-improvements.md](bug-detection-improvements.md), Tiers 3a,
+    [bug-detection-improvements.md](../../plans/bug-detection-improvements.md), Tiers 3a,
     3b and 3c. Execute that design; do not write another.
 14. _(added 2026-08-28)_ Workstream 1's coverage floor starts at B0's measured
     74.6% CI aggregate and ratchets from there.
@@ -1036,7 +1036,7 @@ All B7-tagged `OC-*` findings are fixed, so rule 2 is met.
     using native Windows ARM64 evidence and declared Linux ARM64 evidence.
 13. _(added 2026-08-28)_ Delete the two Rust commands nothing invokes,
     `probe_credential_store` and `ptt_get_key`
-    ([platform-contracts.md](../architecture/platform-contracts.md)).
+    ([platform-contracts.md](../../architecture/platform-contracts.md)).
 14. _(added 2026-08-28; amended 2026-08-31)_ Workstream 8 consumes B2's
     `protocol_epoch_unsupported` frame and the `GET /api/v1/server-info`
     endpoint B6 workstream 16 adds (B2-2 shipped without it); it defines no
@@ -1198,7 +1198,7 @@ behavior.
     isolation.
 11. _(added 2026-08-28)_ No certificate pinning in a browser. Workstream 7's
     LAN/offline path uses publicly trusted or local-CA certificates only —
-    never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
+    never a TOFU shim ([platform-contracts.md](../../architecture/platform-contracts.md),
     hard case one).
 12. _(added 2026-08-28; amended 2026-08-31)_ The browser client reads
     `GET /api/v1/server-info` (endpoint and flag from B6 workstream 16 —
@@ -1635,7 +1635,7 @@ and re-enter the scorecard when it does._
 _Current slice, 2026-09-25:_ B0–B5 are accepted; B6 is built with its exit open
 at HP-6; B7 is built with HP-7 signed and its exit open on `tauri-build` for PRs
 into `dev`; B8 is deferred post-beta; **B9 is complete through B9-27** (the B9
-row in [plans/README.md](README.md) is the status authority); B10 (beta
+row in [plans/README.md](../../plans/README.md) is the status authority); B10 (beta
 qualification and publication) is next, and B11 is the beta-to-stable gate the
 moved B10 rows land in. The dated notes below are retained as historical
 execution evidence, not today's instruction to start B2/B3.

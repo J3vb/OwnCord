@@ -13,9 +13,9 @@ Primary inputs:
 - [beta roadmap](repo-health-roadmap-2026-08-23.md), B2 section and HP-2
 - [HP-1 scorecard](hp-1-scorecard-2026-08-27.md), "Hand-off to B2" and "Open
   items carried past B1"
-- [issue register](repo-health-issue-register-2026-08-23.md) — every row
+- [issue register](../../plans/repo-health-issue-register-2026-08-23.md) — every row
   tagged `B2`
-- [requirement traceability](beta-requirements-traceability-2026-08-23.md) —
+- [requirement traceability](../../plans/beta-requirements-traceability-2026-08-23.md) —
   BPR-031, 032, 040, 050, 051, 080–083
 
 ## Context

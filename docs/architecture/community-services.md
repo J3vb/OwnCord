@@ -109,7 +109,7 @@ It answers three questions for each of the seven services B5 adds or changes:
    retention sweeps.
 
 It is **not** an implementation plan (that is
-[the B5 plan](../plans/b5-community-content-moderation-2026-09-04.md)), and
+[the B5 plan](../archive/plans/b5-community-content-moderation-2026-09-04.md)), and
 it is **not** a threat report on shipped code. Analysis that would name an
 exploitable weakness in shipped code stays out of this repository
 ([docs/security.md](../security.md), "What stays private") and is counted,

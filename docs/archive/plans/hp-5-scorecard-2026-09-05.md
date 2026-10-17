@@ -10,7 +10,7 @@
 **Measured:** 2026-09-06 (drafted overnight; the B5-4, B5-5 and B5-12 rows
 carry their PR numbers)
 **Evidence base:**
-[community-services.md](../architecture/community-services.md) (the abuse
+[community-services.md](../../architecture/community-services.md) (the abuse
 cases, data ownership and lifecycle for every B5 service, and its HP-5 topic
 index); the plan's B5-0..B5-5 evidence blocks; the adversarial suites named
 per topic below; the schema drafts in [hp-5-drafts/](hp-5-drafts/README.md)
@@ -69,7 +69,7 @@ on draft pull requests marked `[behind HP-5]`, on the branches below.
 Each verdict cites the test that would go red if the control were removed.
 "Server" means the paths the server itself fetches or stores; the desktop
 client's own fetches are C-09/B7 and are inventoried, not claimed
-([rich-content-inventory.md](../architecture/rich-content-inventory.md)).
+([rich-content-inventory.md](../../architecture/rich-content-inventory.md)).
 
 | Topic                          | Verdict                                 | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

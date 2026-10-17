@@ -47,7 +47,7 @@ Acceptance:
 
 ### RI-02 — Support bundles
 
-Implement the [support-bundle contract](../architecture/diagnostics.md#support-bundle-data-contract):
+Implement the [support-bundle contract](../../architecture/diagnostics.md#support-bundle-data-contract):
 an administrator requests a preview, reviews its exact contents, size and
 redaction report, then explicitly downloads the frozen bundle. The preview
 and download are bound to the requesting authenticated session and expire.
@@ -384,7 +384,7 @@ rejects body responses returned after cancellation. Both published JavaScript
 entry points pass 34 actual-SDK boundary regressions; unpatched negative
 controls fail. Two native-collector tests ensure unexpected cleanup errors
 still fail CI. Patch application, version drift, and removal criteria are
-documented in [the patch notes](../../Client/patches/README.md).
+documented in [the patch notes](../../../Client/patches/README.md).
 
 Open at the time of writing:
 
@@ -406,7 +406,7 @@ Open at the time of writing:
 The initial support bundle covers the server only. A combined desktop bundle
 remains a separate extension of the existing privacy contract. Pending-send
 recovery limits are described above and in
-[credential-storage.md](../credential-storage.md).
+[credential-storage.md](../../credential-storage.md).
 
 Implementation is merged into `dev` in
 [PR #1573](https://github.com/J3vb/OwnCord/pull/1573) (commit `3221fe9e`).

@@ -8,7 +8,7 @@
 below); every step of the chain has merged since measurement
 **Measured at:** `dev` `b5e9d4a` (#1510, B4-8), branch `docs/hp-4-scorecard`
 **Measured:** 2026-09-02
-**Evidence base:** [data-lifecycle.md](../architecture/data-lifecycle.md)
+**Evidence base:** [data-lifecycle.md](../../architecture/data-lifecycle.md)
 (the failure models, the data-class inventory, the drill protocol and its
 appendix); the plan's B4-0..B4-8 evidence blocks; the drills in
 `Server/db/hp4_drills_test.go`; the schema drafts in

@@ -42,28 +42,28 @@ capture and the support-bundle contract — BPR-055's server half); **B4-12 batc
 closed — the login lockout key folds like the account lookup); **B4-5 merged 2026-09-02** (PR #1512 = `52f3df7`; the argon2id-verified recovery kit, one-transaction redemption without the second factor, lockouts and the hygiene proof — BG-09's server half); **B4-6 merged 2026-09-02** (PR #1513 = `33f82a8`; owner-issued
 15-minute single-use credentials with fixed-wording verification, redeemed
 through the recovery route — BPR-045); **HP-4 scorecard opened 2026-09-02** (branch `docs/hp-4-scorecard`; the five baseline drills green on snapshot copies, the schema drafts with rollbacks, the failure-model map and six recorded decisions); **HP-4 accepted 2026-09-03** — the owner merged the scorecard as #1515 (`9598c51`) with all six decisions standing; **B4-9 merged 2026-09-03** (PR #1516 = `c9f06da`, branch `feat/b4-9-account-erasure` from `dev` `9598c51`; the Codex review fix — the replay-pipeline purge and the persisted-envelope predicate — merged separately as #1517; complete account erasure — every inventory class hard-deleted in one `secure_delete` transaction, the file half journaled and resumed, the reconciliation pass, the admin route; lineage checklist green on the alpha copy). **B4-10 merged 2026-09-03** (PR #1520 = `87ad997`, its Codex review fixes following as #1522; branch `feat/b4-10-deletion-markers`, stacked on #1517; deletion markers in `data/erasure/markers.sqlite` under `erasure.key`, replayed on every open before anything serves; audit rows unlinked to the marker token; the post-restore proof green on the alpha copy). **B4-11 opened 2026-09-03** (PR #1521, branch `feat/b4-11-retention`, stacked on #1520; indefinite by default, server and per-channel windows, pinned exempt, no DMs, no holds, a bounded restart-safe sweep with a file journal and a `messages` marker per channel replayed on open, the effect preview and the audited policy). **B4-11 merged 2026-09-03** (PR #1521 = `607fd4d`; its review fixes followed as #1522 = `15ba7c9`, #1523 = `b973d21`, #1524 = `5263b13` and #1525 = `1133a26`, eleven Codex findings in all, each with a test). **B4 exit prepared 2026-09-03** at `dev` `1133a26` — the dated "B4 exit" section of the [HP-4 scorecard](hp-4-scorecard-2026-09-02.md): the seven roadmap conditions and rule 2 met, the gate re-run on the exit SHA, and the migration and rollback rehearsal report, which is where the exit found real work — nine of the twelve B4 migrations had no reversal and two of the four that existed were defective, so `Server/rollback/` and its rehearsal test close condition 7. **B4 exit accepted 2026-09-03** — the owner merged the exit PR #1528 as `dev` `0a14554`; next HP-5. _Update this line — not only the step table — as steps
-land; the [README.md](README.md) row is the status authority._
+land; the [README.md](../../plans/README.md) row is the status authority._
 
 Primary inputs:
 
 - [beta roadmap](repo-health-roadmap-2026-08-23.md), B4 section (15
   workstreams, three of them dated scope notes) and HP-4
-- [beta product requirements](beta-product-requirements-2026-08-23.md):
+- [beta product requirements](../../plans/beta-product-requirements-2026-08-23.md):
   BPR-041 through BPR-046 and BPR-052 through BPR-055
-- [traceability](beta-requirements-traceability-2026-08-23.md) rows for those
+- [traceability](../../plans/beta-requirements-traceability-2026-08-23.md) rows for those
   ten requirements — each step's evidence list is drawn from its row
-- [issue register](repo-health-issue-register-2026-08-23.md) — every row
+- [issue register](../../plans/repo-health-issue-register-2026-08-23.md) — every row
   tagged `B4` first: OC-0313, OC-0314, OC-0321, OC-0324, OC-0329, OC-0340,
   OC-0341, OC-0354; SEC-01; S-13; the B4/B9 halves of BG-08, BG-09, BG-10,
   BG-11, BG-12 (S-10 and OC-0345 closed in B3; OC-0329 and OC-0313 carry
   `B4/B7`, OC-0314 and OC-0354 `B4/B9` or `B4/B7` — the B2-8 precedent is
   that the first tag's phase fixes a contained defect even client-side)
-- [docs/trust-model.md](../trust-model.md) — the public disclosure the B4
+- [docs/trust-model.md](../../trust-model.md) — the public disclosure the B4
   work must keep true (its "No secure deletion" limitation is what B4-9 and
   B4-10 remove)
 - `Server/testdata/snapshots/README.md` — the B3-7 alpha dataset whose first
   named consumer is "B4 — HP-4 drills"
-- [docs/security.md](../security.md) "What stays private" — the rule B4-0 and
+- [docs/security.md](../../security.md) "What stays private" — the rule B4-0 and
   HP-4 follow for destructive-operation threat content
 
 B4's primary product requirements are BPR-041–046 and BPR-052–055. The phase
@@ -112,12 +112,12 @@ record pre-squash `refs/pull/<n>/head` SHAs at merge time.
 
 ## Entry gate
 
-| Condition                                                            | State 2026-09-01                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| B3 domain, database, audit, and lifecycle boundaries are established | **Met.** Evidence block below: the B3-0 inventory is live and green at `39019e7f` with zero `move` rows; lifecycle owns start/stop/drain in `Server/internal/app/`; the settings/audit, auth, session, token, upload, user and voice families sit behind `Server/service/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Backup/restore fixtures and representative alpha data are captured   | **Met.** Evidence block below: admin backup create/list/delete/restore handlers with a restore round-trip test; scheduled backup + retention pruning in the maintenance loop; the B3-7 anonymised snapshot `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` with its standing migration canary, whose README names "B4 — HP-4 drills" as its first consumer.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Destructive operations have private threat and failure models        | **Not evidenced.** Nothing in the repository is or points at such a model: HP-2's threat work covered protocol, trust, E2EE and predicates; `docs/trust-model.md` discloses operator powers and today's deletion limits but is a disclosure, not a failure model; B3 produced none. Whether private owner-side material exists cannot be verified from the repository — owner question 6. **B4-0 closes this item** (the B3-0 precedent: B3's entry-gate item 3 did not exist either and became the phase's first step). _2026-09-01: B4-0 opened — the public half is [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md); the private half needed no new advisory (that document's last section); owner question 6 stays open for owner-side material._ |
-| _(context)_ B3 exit signed; `dev` at or past `39019e7f`              | **Met.** `git merge-base --is-ancestor 39019e7f HEAD` exits 0 on `dev`; `39019e7` is "docs(b3): exit signed" (PR #1495).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Condition                                                            | State 2026-09-01                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B3 domain, database, audit, and lifecycle boundaries are established | **Met.** Evidence block below: the B3-0 inventory is live and green at `39019e7f` with zero `move` rows; lifecycle owns start/stop/drain in `Server/internal/app/`; the settings/audit, auth, session, token, upload, user and voice families sit behind `Server/service/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Backup/restore fixtures and representative alpha data are captured   | **Met.** Evidence block below: admin backup create/list/delete/restore handlers with a restore round-trip test; scheduled backup + retention pruning in the maintenance loop; the B3-7 anonymised snapshot `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` with its standing migration canary, whose README names "B4 — HP-4 drills" as its first consumer.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Destructive operations have private threat and failure models        | **Not evidenced.** Nothing in the repository is or points at such a model: HP-2's threat work covered protocol, trust, E2EE and predicates; `docs/trust-model.md` discloses operator powers and today's deletion limits but is a disclosure, not a failure model; B3 produced none. Whether private owner-side material exists cannot be verified from the repository — owner question 6. **B4-0 closes this item** (the B3-0 precedent: B3's entry-gate item 3 did not exist either and became the phase's first step). _2026-09-01: B4-0 opened — the public half is [docs/architecture/data-lifecycle.md](../../architecture/data-lifecycle.md); the private half needed no new advisory (that document's last section); owner question 6 stays open for owner-side material._ |
+| _(context)_ B3 exit signed; `dev` at or past `39019e7f`              | **Met.** `git merge-base --is-ancestor 39019e7f HEAD` exits 0 on `dev`; `39019e7` is "docs(b3): exit signed" (PR #1495).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 **Entry evidence, 2026-09-01, measured at `39019e7f`:**
 
@@ -153,7 +153,7 @@ boundary 18. Move targets: .` — zero `move` rows, matching the B3 exit.
 - **Threat/failure models (item 3).** `grep -rni "threat" docs/ --include="*.md" -l`
   returns the plans that cite HP-2 and `docs/trust-model.md`; none models
   failure or abuse of account erasure, retention cleanup, backup restore, or
-  recovery rotation. `docs/plans/hp-2-scorecard-2026-08-29.md` has no
+  recovery rotation. `docs/archive/plans/hp-2-scorecard-2026-08-29.md` has no
   destructive-operation section (its seven questions are protocol/trust/E2EE/
   predicates/deferred-systems/strict). Not met; B4-0 is the closure.
 
@@ -322,7 +322,7 @@ binding (drills run on the B3-7 dataset) is designed here.
 2. **Threat content, private.** Abuse cases that discuss exploitable gaps
    (who can trigger someone else's deletion, recovery-flow takeover shapes,
    admission-budget exhaustion) go to private GitHub Security Advisories per
-   [docs/security.md](../security.md), each with its opaque public owner
+   [docs/security.md](../../security.md), each with its opaque public owner
    (SEC-01 already has one; new ones get register rows only as opaque
    families). The public doc references that they exist, nothing more.
 3. **Data-class inventory.** The same document tables every user-attributable
@@ -350,7 +350,7 @@ private material, the evidence block records that instead of new advisories.
 `aabac60`; PR #1497 to `dev` (the squash SHA is recorded by the next step's
 PR, as B3 did). Closes entry-gate item 3's public half.
 
-- **Document:** [docs/architecture/data-lifecycle.md](../architecture/data-lifecycle.md),
+- **Document:** [docs/architecture/data-lifecycle.md](../../architecture/data-lifecycle.md),
   linked from `docs/architecture/README.md`. Eight operations (O1 account
   deletion, O2 message deletion/purge, O3 orphan sweep, O4 backup/restore,
   O5 replay-event retention, O6 session sweeps, O7 TOTP key lifecycle, O8
@@ -1191,7 +1191,7 @@ Owner decision 10: the data contract, the inventory and the proof; the
 export endpoint and UX stay with BG-15 in B6/B9.
 
 - **Diagnostics inventory:**
-  [docs/architecture/diagnostics.md](../architecture/diagnostics.md) — the
+  [docs/architecture/diagnostics.md](../../architecture/diagnostics.md) — the
   health probe, connectivity diagnostics, JSON metrics, the Prometheus
   exporter, OTLP, logs and the admin log stream, the audit log, backups and
   the healthcheck CLI, each with who reads it and that it stays local (OTLP
@@ -2014,6 +2014,6 @@ every CI run. **Accepted 2026-09-03** — the owner merged the exit PR #1528 as
   (HP-2 obs #96): every B4-2 absence proof and B4-9 lineage assertion is
   RED-proven with a probe before it counts.
 - **`check:docs` counts are watched.** B4-12's ledger flips keep
-  [README.md](README.md)'s enumeration exact in the same PR.
+  [README.md](../../plans/README.md)'s enumeration exact in the same PR.
 - **The shell cwd persists between commands** — subshell `cd`s (the
   pre-bash hook now enforces this).

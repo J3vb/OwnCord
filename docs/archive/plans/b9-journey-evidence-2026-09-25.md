@@ -14,7 +14,7 @@ was removed or loosened); that revision was re-run in CI at the PR head
 `Client E2E (real server and media)` and `Client E2E (Windows native)` jobs
 both passed. B9-26 merged as [#1797](https://github.com/J3vb/OwnCord/pull/1797).
 **Branch:** `fm/b9-26-impl`
-**Plan:** [`.claude/plans/b9-26-cross-feature-journeys.plan.md`](../../.claude/plans/b9-26-cross-feature-journeys.plan.md)
+**Plan:** [`.claude/plans/b9-26-cross-feature-journeys.plan.md`](../../../.claude/plans/b9-26-cross-feature-journeys.plan.md)
 **PRD:** [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 **Requirements:** BPR-052/BPR-054 client half, BPR-060, BPR-061, BPR-062,
 BPR-063, BPR-064, BPR-070, BPR-071, BPR-072, BPR-073, BPR-090, BPR-091,
@@ -222,7 +222,7 @@ ahead of B9-27. `Client/bundle-budgets.json` records the rule once and each
 figure in its note.
 
 **Startup.** The accepted B7 baseline is a Windows 11 desktop with
-`npm run tauri dev` (`docs/plans/b7-0-client-baseline-2026-09-19.md`): 598 ms to
+`npm run tauri dev` (`docs/archive/plans/b7-0-client-baseline-2026-09-19.md`): 598 ms to
 the connect form, 380 MB WebView RSS. That method needs a real desktop session
 and is **not measurable on this headless Linux host** (B9-0 records the same
 limit). The automatable proxy measured here is the production bundle: build:budget

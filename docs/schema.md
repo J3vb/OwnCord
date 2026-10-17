@@ -5,10 +5,10 @@ OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-
 > **Data-access layers:** most `Server/db` methods delegate to the
 > sqlc-generated layer (`Server/db/dbgen`, from `Server/db/queries/`) per
 > decision D2 in
-> [plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md);
+> [archive/plans/audit-2026-07-19-decisions.md](archive/plans/audit-2026-07-19-decisions.md);
 > a deliberate remainder (variable `IN` lists, FTS, multi-statement
 > transactions) still runs as hand-written SQL — tracked in
-> [plans/sqlc-adoption.md](plans/sqlc-adoption.md). See
+> [archive/plans/sqlc-adoption.md](archive/plans/sqlc-adoption.md). See
 > [architecture/data-model.md](architecture/data-model.md) for the full
 > picture.
 

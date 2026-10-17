@@ -4,8 +4,8 @@
 **Decisions:** owner Q1 (accessibility acceptance), Q8 (theme and custom
 accent), with the 2026-09-23 Q8 clarification, and Q13 (visual direction: Refined
 Neon), in
-[b9-unified-experience-accessibility-polish.prd.md](../plans/b9-unified-experience-accessibility-polish.prd.md#open-questions).
-**Evidence:** [b9-shared-a11y-evidence-2026-09-23.md](../plans/b9-shared-a11y-evidence-2026-09-23.md).
+[b9-unified-experience-accessibility-polish.prd.md](../archive/plans/b9-unified-experience-accessibility-polish.prd.md#open-questions).
+**Evidence:** [b9-shared-a11y-evidence-2026-09-23.md](../archive/plans/b9-shared-a11y-evidence-2026-09-23.md).
 
 Every B9 feature PR builds its screens from the tokens and patterns below and
 runs the shared checks in `Client/tests/e2e/support/b9-accessibility.ts`

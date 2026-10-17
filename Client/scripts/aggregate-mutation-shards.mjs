@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Sums the nightly mutation shards into the one full-surface score the B7-8
-// baseline records (docs/plans/b7-8-mutation-baseline-2026-09-20.md). Averaging
+// baseline records (docs/archive/plans/b7-8-mutation-baseline-2026-09-20.md). Averaging
 // shard percentages would be wrong: shards differ in size and errored mutants
 // leave the denominator.
 //

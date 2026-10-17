@@ -16,7 +16,7 @@ OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner (PR #1461 =
 owner** — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md), all six
 conditions met. The per-step trail lives in
-[README.md](README.md)'s B3 row.
+[README.md](../../plans/README.md)'s B3 row.
 
 Primary inputs:
 
@@ -25,11 +25,11 @@ Primary inputs:
 - [layout-refactor supplement](developer-experience-layout-refactor-2026-08-29.md),
   Phases 1–3, "Pull-request and commit strategy", Phase 8, "First actionable
   slice" — bound into the roadmap as B3 workstream 17
-- [bug-detection-improvements.md](bug-detection-improvements.md), Tier 3 —
+- [bug-detection-improvements.md](../../plans/bug-detection-improvements.md), Tier 3 —
   the design behind workstreams 2 and 3 (roadmap workstream 13)
 - [HP-2 scorecard](hp-2-scorecard-2026-08-29.md), "Open items carried past
   B2" and question 5's residue table
-- [issue register](repo-health-issue-register-2026-08-23.md) — every row
+- [issue register](../../plans/repo-health-issue-register-2026-08-23.md) — every row
   tagged `B3`: S-03, S-04, S-06, S-08, S-09, S-10, S-11, OC-0323, OC-0345,
   OC-0346 (S-12 closed in B2-5)
 
@@ -442,7 +442,7 @@ Exit: HP-3.
   (comment and failure message), `invariants/db_import_boundary_test.go`
   (fixture path). `auth_characterization_test.go` and `totp_handler_test.go`:
   untouched. No assertion, row or expected value moved.
-- **Graph tables:** [server-boundaries.md](../architecture/server-boundaries.md)
+- **Graph tables:** [server-boundaries.md](../../architecture/server-boundaries.md)
   §"Auth slice" — before at `ad4defc2`, after at `fe1d11b8`. `api` `db`
   importers **12 → 10**, `move` rows 28 → 26, 51 → 49 files. The handlers
   import `service` (the interface's types, the `Err*` categories,
@@ -673,7 +673,7 @@ App`, `undefined: New`, `undefined: LoadConfig`, `undefined: Deps`). Each
   Six `api_test` files and `cmd/gendocs` were updated at the call site only —
   wiring, no assertion changes — and `gendocs` still emits a byte-identical
   route index (its drift check is in the gate). Before/after tables:
-  [server-boundaries.md](../architecture/server-boundaries.md#hub-lifecycle-inventory).
+  [server-boundaries.md](../../architecture/server-boundaries.md#hub-lifecycle-inventory).
 
 - **Build and packaging** (item 4). `Server/Makefile`, `Server/Dockerfile`
   and `.github/workflows/release.yml` are untouched, and B2-7's

@@ -43,9 +43,9 @@ accepted.**
 services"](repo-health-roadmap-2026-08-23.md) — objective, entry gate, eleven
 workstreams, HP-5, exit gate, required evidence, safe parallelism.  
 **Primary requirements:** BPR-060..BPR-063 and BPR-070..BPR-073
-([requirements](beta-product-requirements-2026-08-23.md),
-[traceability](beta-requirements-traceability-2026-08-23.md)).  
-[README.md](README.md) is the status authority; if this header and the README
+([requirements](../../plans/beta-product-requirements-2026-08-23.md),
+[traceability](../../plans/beta-requirements-traceability-2026-08-23.md)).  
+[README.md](../../plans/README.md) is the status authority; if this header and the README
 row disagree, this header is stale.
 
 **Objective, restated from the roadmap:** complete the **server-side**
@@ -188,7 +188,7 @@ and opens as B5-0**, the B3-0 / B4-0 precedent.
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | B4 identity, audit, deletion, retention, and session behavior is stable | **Met.** B4's exit was accepted by the owner on 2026-09-03 (PR #1528, `dev` `0a14554`); the "B4 exit" section of [hp-4-scorecard-2026-09-02.md](hp-4-scorecard-2026-09-02.md) records the seven roadmap conditions and pattern rule 2 met, with the gates re-run on the exit SHA.                                                                    |
 | Canonical permission predicates and bounded-work primitives exist       | **Met, on the primitives — not on the invariants.** `Server/permissions/` holds `predicates.go` and `checker.go` with unit, fuzz and user-override suites (B2-5, PR #1440). Two runtime bounded-work primitives exist and run by default: `auth.AdmissionBudget` (B4-4) and `ws.TopicRateLimiter`. See the evidence block for what does _not_ count. |
-| Abuse cases and data ownership for each service are documented          | **Met, 2026-09-04, by B5-0** ([community-services.md](../architecture/community-services.md)). At the base commit no repository document modelled abuse of, or named the data owner for, message requests, external retrieval, uploads and quota, reports, moderator actions, appeals or push; B5-0 is that document.                                |
+| Abuse cases and data ownership for each service are documented          | **Met, 2026-09-04, by B5-0** ([community-services.md](../../architecture/community-services.md)). At the base commit no repository document modelled abuse of, or named the data owner for, message requests, external retrieval, uploads and quota, reports, moderator actions, appeals or push; B5-0 is that document.                             |
 | _(context)_ `dev` is at or past B4's exit commit                        | **Met.** `git merge-base --is-ancestor 0a14554 HEAD` exits 0 on `dev`; `e1781086` is three CI-gate commits past it (#1535, #1536, #1537 — none touching a B5 surface).                                                                                                                                                                               |
 
 **Entry evidence, 2026-09-04, measured at `e1781086`:**
@@ -446,7 +446,7 @@ retention and erasure obligations. **Size:** 2 days. **Protocol effects:**
 none. **Parallel with:** everything — documentation, no production code.
 
 **Deliverable:** `docs/architecture/community-services.md`, in the shape
-B4-0's [data-lifecycle.md](../architecture/data-lifecycle.md) established,
+B4-0's [data-lifecycle.md](../../architecture/data-lifecycle.md) established,
 covering the seven services B5 adds or changes:
 
 1. Message Requests and trusted-sender relationships
@@ -491,7 +491,7 @@ module).
 B3 and B4 did). Closes entry-gate item 3.
 
 - **Document:**
-  [docs/architecture/community-services.md](../architecture/community-services.md),
+  [docs/architecture/community-services.md](../../architecture/community-services.md),
   linked from `docs/architecture/README.md`. All seven services, each with the
   three tables the deliverable asks for — abuse cases (adversary, goal,
   mechanism, control, tested at), data ownership (read, write, delete, subject
@@ -2624,7 +2624,7 @@ itself gained one.
   `TestAppealQueries_DecideAppealTxAppliesEachReversalKind`,
   `TestAppeal_UpholdChangesNothing`).
 
-> **Superseded 2026-10-01 by the security-review fix in `fm/sec-appeal-rank`.** The claim above that a decider holding `MODERATE_MEMBERS` but not the standalone bits "still overturns", and the cited `TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers` (deleted), no longer hold: overturning now requires the decider to strictly outrank the sanctioned target and, for a ban, to hold `BAN_MEMBERS`, and the rank half is re-checked live inside the decision transaction. The current rule is owned by [`docs/api.md`](../api.md#post-apiv1moderationappealsiddecide); the historical prose above is left unchanged.
+> **Superseded 2026-10-01 by the security-review fix in `fm/sec-appeal-rank`.** The claim above that a decider holding `MODERATE_MEMBERS` but not the standalone bits "still overturns", and the cited `TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers` (deleted), no longer hold: overturning now requires the decider to strictly outrank the sanctioned target and, for a ban, to hold `BAN_MEMBERS`, and the rank half is re-checked live inside the decision transaction. The current rule is owned by [`docs/api.md`](../../api.md#post-apiv1moderationappealsiddecide); the historical prose above is left unchanged.
 
 - **Protocol.** One new server→client type, `appeal_status`, to the
   appellant's own sockets — every device currently registered, with the
@@ -3096,7 +3096,7 @@ owner accepted it 2026-09-24; see the exit-SHA measurement).
 | 6          | Follow-up proven; **accepted by the owner 2026-09-24**                                                | B5-4 [#1545](https://github.com/J3vb/OwnCord/pull/1545), B5-11 [#1548](https://github.com/J3vb/OwnCord/pull/1548); per-attempt revalidation, #1629 (OC-0450); the proof, [#1742](https://github.com/J3vb/OwnCord/pull/1742) (`TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt`)                                     | Exit-SHA measurement; `TestNoAutomaticTelemetry_Capture` and `TestEgressAllowIsLive` green at the exit SHA                                                                                                                                                            |
 | 7          | **Met — closed by the owner 2026-09-24**                                                              | SEC-04 fixed by B5-2 ([#1543](https://github.com/J3vb/OwnCord/pull/1543)); the owner closed condition 7 without publishing an advisory and retired the placeholder ID                                                                                                                                                                 | None                                                                                                                                                                                                                                                                  |
 | **rule 2** | Satisfied                                                                                             | All five B5-tagged `OC-*` rows are `fixed` (#1546). The ledger's one open entry, OC-0445, is an operational delivery-budget finding owned by B6 (B6-10), not B5                                                                                                                                                                       | None                                                                                                                                                                                                                                                                  |
-| B5-12      | Register corrections 1–5 and the three roadmap amendments done; both audit-carryover prose items done | #1546; this reconciliation corrects `docs/api.md`'s `nsfw` field and channel-admin prose to B5-7's enforcement, and gives the safe-fetch rows in [diagnostics.md](../architecture/diagnostics.md) push dispatch's gate                                                                                                                | The final pass on the measured exit SHA: this header, the README row, the roadmap, the register's B5 halves (SEC-04, BG-05, BG-12, BG-13, BG-14, BG-18, BG-19) and the traceability rows BPR-060..063 and BPR-070..073 (exit PR author · ~1 day, the step's own size) |
+| B5-12      | Register corrections 1–5 and the three roadmap amendments done; both audit-carryover prose items done | #1546; this reconciliation corrects `docs/api.md`'s `nsfw` field and channel-admin prose to B5-7's enforcement, and gives the safe-fetch rows in [diagnostics.md](../../architecture/diagnostics.md) push dispatch's gate                                                                                                             | The final pass on the measured exit SHA: this header, the README row, the roadmap, the register's B5 halves (SEC-04, BG-05, BG-12, BG-13, BG-14, BG-18, BG-19) and the traceability rows BPR-060..063 and BPR-070..073 (exit PR author · ~1 day, the step's own size) |
 
 The required rollback evidence is present at `6fd8cc0c`: `Server/rollback/`
 carries a `.down.sql` for each of `044`–`050` (and for `051`–`053`); the

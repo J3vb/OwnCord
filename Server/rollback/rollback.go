@@ -6,7 +6,7 @@
 // one. These files are what that operator runs, against a database no server
 // is holding open, after taking a backup. The reversals were written with the
 // migrations (the B4 data contracts drafted theirs in
-// docs/plans/hp-4-drafts/) rather than improvised during an incident.
+// docs/archive/plans/hp-4-drafts/) rather than improvised during an incident.
 //
 // Each file reverses exactly one migration and ends by deleting that
 // migration's row from schema_versions, so the next server start applies the

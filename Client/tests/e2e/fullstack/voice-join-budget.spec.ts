@@ -14,7 +14,7 @@
  * straight after a leave queues behind the server's LiveKit participant
  * removal, which can take seconds, and would measure that instead. The median is held to the budget in
  * Client/voice-join-budget.json; every sample is attached to the report. The
- * baseline is recorded in docs/plans/b7-0-client-baseline-2026-09-19.md.
+ * baseline is recorded in docs/archive/plans/b7-0-client-baseline-2026-09-19.md.
  */
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";

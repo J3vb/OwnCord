@@ -268,7 +268,7 @@ Live protection on `dev`, read from the API rather than inferred:
 | `strict`                 | **false**                                                                                   |
 
 The twelfth was pinned on 2026-08-27 by running
-[`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh), which B1-6 landed
+[`b0-dev-branch-protection.sh`](../../plans/b0-dev-branch-protection.sh), which B1-6 landed
 but deliberately did not run — repository-settings writes need a person. Until
 that run, the FINDINGS.md drift gate reported but could not block a merge.
 
@@ -314,7 +314,7 @@ Two things that read-back surfaced, neither blocking:
   so the B1-7 guard is stopping them before the missing secret would matter.
   The paid-automation surface `RL-22` hardens is therefore inert today.
 
-`RL-22` is coordinated privately per [security.md](../security.md) and does not
+`RL-22` is coordinated privately per [security.md](../../security.md) and does not
 appear in public commits, issues, or PR descriptions — so that part of this row
 is closed by B1-7's merge plus the private record, not by anything visible here.
 
@@ -336,7 +336,7 @@ Recorded, not fixed. Nothing here blocks B2's entry gate.
 | `RL-08` — WASM artifact gate           | **blocked.** The pinned TinyGo rejects Go 1.26, so a compile-and-compare job needs a second Go SDK. B1-6 judged the cheaper honest option to be untracking the prebuilt artifact and documenting the build. Unresolved.                    |
 | `dev` `strict: false`                  | **open.** Condition 6 above.                                                                                                                                                                                                               |
 | 38 open `OC-*` findings                | **counted, non-stale, assigned.** 11 medium / 27 low, zero high or critical, none assigned to B1. Accepted at HP-0; re-stated here, not re-adjudicated.                                                                                    |
-| Two unreferenced Rust commands         | `probe_credential_store` and `ptt_get_key` are registered in `lib.rs` and invoked from nowhere. Dead-surface candidates for B7, recorded in [platform-contracts.md](../architecture/platform-contracts.md).                                |
+| Two unreferenced Rust commands         | `probe_credential_store` and `ptt_get_key` are registered in `lib.rs` and invoked from nowhere. Dead-surface candidates for B7, recorded in [platform-contracts.md](../../architecture/platform-contracts.md).                             |
 | Human owners for `platform/`           | **none exist.** Ownership is recorded by phase (B7/B8/B2) because there is nothing else to record.                                                                                                                                         |
 | `environment: release` in the workflow | **open, deliberately.** `.github/workflows/release.yml` does not name the environment. The key stalls a release if the environment does not exist, so B1-7 left it out; the environment now exists, so this is a separate two-line change. |
 | `release` env admin bypass             | **open.** `can_admins_bypass: true` (GitHub default). The ruleset has zero bypass actors, but the reviewer gate does not. Matters only once the sole admin stops being the sole reviewer.                                                  |

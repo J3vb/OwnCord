@@ -16,7 +16,7 @@ What OwnCord is, who it is for, and what the public beta must do. Requirement ID
 
 Group chat with voice and video usually means accounts on a service someone else runs. OwnCord is for a group that wants a server it actually owns: run the server, hand your friends an invite code, and that is the whole thing ([README.md](../../README.md)). There is no central identity, directory or relay (BPR-012, BPR-040, BPR-083).
 
-For the beta, the problem is proving that holds for strangers: that someone with no access to the codebase or its authors can deploy, upgrade, recover and operate a server unaided on every supported mode, and that the desktop client is one contract-bound application whose update, profile, session and recovery flows are proven end to end ([B6 PRD](../plans/b6-server-deployment-operations-capacity.prd.md), [B7 PRD](../plans/b7-shared-client-platform-desktop-parity.prd.md)). Feature-complete server behaviour is not the same thing as a server a stranger can host, and a working client is not the same thing as a client whose failure paths are proven. Shipping without that proof means a beta that works on the maintainer's machine and fails, silently or confusingly, on everyone else's.
+For the beta, the problem is proving that holds for strangers: that someone with no access to the codebase or its authors can deploy, upgrade, recover and operate a server unaided on every supported mode, and that the desktop client is one contract-bound application whose update, profile, session and recovery flows are proven end to end ([B6 PRD](../archive/plans/b6-server-deployment-operations-capacity.prd.md), [B7 PRD](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md)). Feature-complete server behaviour is not the same thing as a server a stranger can host, and a working client is not the same thing as a client whose failure paths are proven. Shipping without that proof means a beta that works on the maintainer's machine and fails, silently or confusingly, on everyone else's.
 
 ## Goal
 
@@ -24,9 +24,9 @@ Ship a public beta that a self-hosting owner with ordinary sysadmin skill can de
 
 ## Target users
 
-- **Self-hosting server owner:** ordinary sysadmin skill, no access to the codebase or its authors; stands up a server on a domain, a public IP, a home LAN, or fully offline ([B6 PRD](../plans/b6-server-deployment-operations-capacity.prd.md) "Users").
+- **Self-hosting server owner:** ordinary sysadmin skill, no access to the codebase or its authors; stands up a server on a domain, a public IP, a home LAN, or fully offline ([B6 PRD](../archive/plans/b6-server-deployment-operations-capacity.prd.md) "Users").
 - **Release engineer:** produces signed, traceable release artifacts for every supported architecture (same source).
-- **Desktop member** of a self-hosted server: reads and sends messages, joins voice/video, manages their own account and devices ([B7 PRD](../plans/b7-shared-client-platform-desktop-parity.prd.md) and [B9 PRD](../plans/b9-unified-experience-accessibility-polish.prd.md) "Users").
+- **Desktop member** of a self-hosted server: reads and sends messages, joins voice/video, manages their own account and devices ([B7 PRD](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md) and [B9 PRD](../archive/plans/b9-unified-experience-accessibility-polish.prd.md) "Users").
 - **First-contact recipients, reporters and moderated members:** the Message Requests, reporting and appeals flows exist for them (B9 PRD "Users").
 - **Narrowly authorized local moderators and the server owner:** day-to-day moderation and owner-only operational controls such as TLS, backups and updates (BPR-072, B9 PRD).
 - **Client contributor:** moves existing client behaviour behind typed platform contracts without regressing it (B7 PRD "Users").
@@ -118,30 +118,30 @@ Budgets may only be tightened from data, never loosened. The capacity target its
 
 ### Platform
 
-- **Desktop only for beta.** Officially supported targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64 (BPR-010). CI smoke covers install, boot, connect, media and recovery on all four; update and rollback run only at release time, on signed artifacts ([B7 PRD](../plans/b7-shared-client-platform-desktop-parity.prd.md)).
+- **Desktop only for beta.** Officially supported targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64 (BPR-010). CI smoke covers install, boot, connect, media and recovery on all four; update and rollback run only at release time, on signed artifacts ([B7 PRD](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md)).
 - **Server matrix:** Windows x64/ARM64 executables, Linux x64/ARM64 archives, and multi-architecture Docker images for `linux/amd64` and `linux/arm64`. Docker is the primary deployment path; standalone binaries remain fully tested release assets (BPR-011).
 - Each server is independently owner-hosted; there is no OwnCord-operated community server or identity service (BPR-012). A reverse proxy is supported but never required for direct port-forward operation (BPR-013).
-- **TLS:** `tls.mode` offers `self_signed` (the default and only qualified mode), `acme`, `manual` and `off`. Built-in domain ACME is implemented but unqualified, and renewal is the owner's responsibility. There is no public-IP HTTPS and no guided LAN/offline device trust (B6-3–B6-5 were deferred on 2026-09-11 and accepted as a limitation on 2026-09-20). For a public domain, the recommended setup is a reverse proxy terminating TLS, with OwnCord on `tls.mode: "off"` ([B6 PRD](../plans/b6-server-deployment-operations-capacity.prd.md), [docs/deployment.md](../deployment.md)).
+- **TLS:** `tls.mode` offers `self_signed` (the default and only qualified mode), `acme`, `manual` and `off`. Built-in domain ACME is implemented but unqualified, and renewal is the owner's responsibility. There is no public-IP HTTPS and no guided LAN/offline device trust (B6-3–B6-5 were deferred on 2026-09-11 and accepted as a limitation on 2026-09-20). For a public domain, the recommended setup is a reverse proxy terminating TLS, with OwnCord on `tls.mode: "off"` ([B6 PRD](../archive/plans/b6-server-deployment-operations-capacity.prd.md), [docs/deployment.md](../deployment.md)).
 
 ## Success metrics
 
 Beta readiness is defined by each phase's exit gates and the owner's hold-point sign-offs (HP-6, HP-7, HP-9), not by usage metrics; OwnCord collects no telemetry to measure usage with (BPR-055). The status of every phase gate is in [docs/plans/README.md](../plans/README.md); B10 and B11 were not run as phases (the betas shipped after B9), and current status is in [docs/STATUS.md](../STATUS.md).
 
-**B6: server deployment, operations, capacity** ([B6 PRD](../plans/b6-server-deployment-operations-capacity.prd.md) "Success Metrics"):
+**B6: server deployment, operations, capacity** ([B6 PRD](../archive/plans/b6-server-deployment-operations-capacity.prd.md) "Success Metrics"):
 
 - Capacity: ≥250 registered users, ≥100 simultaneous connections (180 s sustain) and ≥25 concurrent voice participants on published reference hardware, with latency budgets tightened from measured data.
 - Artifact matrix: every server artifact installs, migrates, heals, drains, restarts and restores, proven on a release tag.
 - TLS mode matrix: not measured; B6-3–B6-5 were deferred, and the owner accepted that on 2026-09-20 as a limitation HP-6 signs around.
 - Operator usability: signed by the owner at HP-6.
 
-**B7: shared client platform and desktop parity** ([B7 PRD](../plans/b7-shared-client-platform-desktop-parity.prd.md) "Success Metrics"):
+**B7: shared client platform and desktop parity** ([B7 PRD](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md) "Success Metrics"):
 
 - 0 native imports outside `platform/desktop` and bootstrap; 0 unapproved oxlint warnings; 0 import cycles, or each one boundary-tested.
 - The client statement-coverage floor only ratchets upward (`Client/coverage-floor.json`), and bundle budgets are enforced in CI (`Client/bundle-budgets.json`).
 - BPR-033, BPR-034 and BPR-035 each have a passing traceability row.
 - Desktop artifact matrix: install, boot, connect, media and recovery pass CI smoke on all four targets; update and rollback pass at release time on signed artifacts.
 
-**B9: unified feature experience, accessibility, polish** ([B9 PRD](../plans/b9-unified-experience-accessibility-polish.prd.md) "Success metrics"):
+**B9: unified feature experience, accessibility, polish** ([B9 PRD](../archive/plans/b9-unified-experience-accessibility-polish.prd.md) "Success metrics"):
 
 | Outcome                  | Gate                                                                                                                                                                                                                                        |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -153,7 +153,7 @@ Beta readiness is defined by each phase's exit gates and the owner's hold-point 
 | Identity and performance | Desktop visual review passes; existing B7 budgets are not weakened.                                                                                                                                                                         |
 | Phase closure            | The owner accepts HP-9 and the exact-SHA evidence; every exit row passes.                                                                                                                                                                   |
 
-**B10: beta qualification and public release.** The shortened release checklist ([roadmap B10](../plans/repo-health-roadmap-2026-08-23.md#b10--qualify-and-publish-the-public-beta), owner direction 2026-09-18, confirmed at HP-9 on 2026-09-25): the RC matrix on one SHA; in-place alpha upgrade and rollback; the protocol-epoch re-run; the desktop/server/Docker matrix; one capacity comparison at the RC; zero open P0/P1 and zero unresolved advisory; packaging, provenance, signing and update checks; safe release notes; the BPR-051 comprehension read (Q11); and the HP-10 owner go/no-go. Publication is the `v2.0.0-beta.1` tag on `main`, with the two release-environment approvals. It sits above the published `v1.2.0-alpha.*` releases, so semver auto-update still carries existing servers onto it; protocol compatibility is keyed on `protocol_epoch`, not the major version.
+**B10: beta qualification and public release.** The shortened release checklist ([roadmap B10](../archive/plans/repo-health-roadmap-2026-08-23.md#b10--qualify-and-publish-the-public-beta), owner direction 2026-09-18, confirmed at HP-9 on 2026-09-25): the RC matrix on one SHA; in-place alpha upgrade and rollback; the protocol-epoch re-run; the desktop/server/Docker matrix; one capacity comparison at the RC; zero open P0/P1 and zero unresolved advisory; packaging, provenance, signing and update checks; safe release notes; the BPR-051 comprehension read (Q11); and the HP-10 owner go/no-go. Publication is the `v2.0.0-beta.1` tag on `main`, with the two release-environment approvals. It sits above the published `v1.2.0-alpha.*` releases, so semver auto-update still carries existing servers onto it; protocol compatibility is keyed on `protocol_epoch`, not the major version.
 
 **B11: beta-to-stable.** The beta-to-stable gate the 2026-09-18 direction left unnamed, given the id B11 by owner decision Q12 (2026-09-25). It carries the moved work: thirty consecutive green integration runs (with `main` exempt from `cancel-in-progress`), the fourteen-day soak on the named hosts, the moved documentation half, post-beta TLS (B6-3..B6-5), the D-03 certificate-verifier change, the Linux voice device test, the `chatserver restore` CLI (OP-10) and the setup-time recovery kit (D-17).
 
@@ -172,14 +172,14 @@ From [beta-product-requirements-2026-08-23.md](../plans/beta-product-requirement
 
 Named by individual phase PRDs:
 
-- **B6:** the signed browser client bundle itself (only the disabled-by-default hosting switch and its origin/path contract ship); any client-side experience; reverse-proxy-specific tuning beyond documenting honest limits; new performance targets beyond closing the existing BPR-030 promise; redesigning the retained audit-token erasure model ([B6 PRD](../plans/b6-server-deployment-operations-capacity.prd.md) "Scope").
-- **B7:** browser adapters, `build:web`, and PWA/mobile surfaces (moved to B8); the CSS source split and later feature UX (Message Requests, moderation UX and translation-ready strings moved to B9; phone/tablet layouts are post-beta with B8 under the 2026-09-18 deferral); the render-gate/consent UI for external content (B9); server work beyond two small `server-info` additions ([B7 PRD](../plans/b7-shared-client-platform-desktop-parity.prd.md) "Scope").
-- **B9:** browser adapters, PWA hosting/push, phone/tablet layouts, touch qualification, new content providers, a second shipping language, centralized moderation, unrelated server policy, a dependency major-version bump, a release-pipeline redesign, or a visual rebrand; no operational TLS/backup/update powers are added to moderation roles ([B9 PRD](../plans/b9-unified-experience-accessibility-polish.prd.md) "Explicitly out of scope").
+- **B6:** the signed browser client bundle itself (only the disabled-by-default hosting switch and its origin/path contract ship); any client-side experience; reverse-proxy-specific tuning beyond documenting honest limits; new performance targets beyond closing the existing BPR-030 promise; redesigning the retained audit-token erasure model ([B6 PRD](../archive/plans/b6-server-deployment-operations-capacity.prd.md) "Scope").
+- **B7:** browser adapters, `build:web`, and PWA/mobile surfaces (moved to B8); the CSS source split and later feature UX (Message Requests, moderation UX and translation-ready strings moved to B9; phone/tablet layouts are post-beta with B8 under the 2026-09-18 deferral); the render-gate/consent UI for external content (B9); server work beyond two small `server-info` additions ([B7 PRD](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md) "Scope").
+- **B9:** browser adapters, PWA hosting/push, phone/tablet layouts, touch qualification, new content providers, a second shipping language, centralized moderation, unrelated server policy, a dependency major-version bump, a release-pipeline redesign, or a visual rebrand; no operational TLS/backup/update powers are added to moderation roles ([B9 PRD](../archive/plans/b9-unified-experience-accessibility-polish.prd.md) "Explicitly out of scope").
 
 ## Sources
 
 - [docs/plans/beta-product-requirements-2026-08-23.md](../plans/beta-product-requirements-2026-08-23.md), [docs/plans/README.md](../plans/README.md), [README.md](../../README.md)
-- [docs/plans/b6-server-deployment-operations-capacity.prd.md](../plans/b6-server-deployment-operations-capacity.prd.md), [docs/plans/b7-shared-client-platform-desktop-parity.prd.md](../plans/b7-shared-client-platform-desktop-parity.prd.md), [docs/plans/b9-unified-experience-accessibility-polish.prd.md](../plans/b9-unified-experience-accessibility-polish.prd.md)
+- [docs/archive/plans/b6-server-deployment-operations-capacity.prd.md](../archive/plans/b6-server-deployment-operations-capacity.prd.md), [docs/archive/plans/b7-shared-client-platform-desktop-parity.prd.md](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md), [docs/archive/plans/b9-unified-experience-accessibility-polish.prd.md](../archive/plans/b9-unified-experience-accessibility-polish.prd.md)
 - [docs/capacity.md](../capacity.md), [docs/deployment.md](../deployment.md), [docs/trust-model.md](../trust-model.md), [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md)
 - [docs/architecture/ux/README.md](../architecture/ux/README.md), [connection-and-auth.md](../architecture/ux/connection-and-auth.md), [messaging.md](../architecture/ux/messaging.md), [channels-members-dms.md](../architecture/ux/channels-members-dms.md), [voice-and-e2ee.md](../architecture/ux/voice-and-e2ee.md), [settings-and-admin.md](../architecture/ux/settings-and-admin.md)
 - [Client/src/pages/connect-page/LoginForm.ts](../../Client/src/pages/connect-page/LoginForm.ts), [Client/src/components/SettingsOverlay.ts](../../Client/src/components/SettingsOverlay.ts), [Client/src-tauri/src/tofu.rs](../../Client/src-tauri/src/tofu.rs)

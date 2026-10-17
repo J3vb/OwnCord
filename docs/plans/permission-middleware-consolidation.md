@@ -5,7 +5,7 @@ deliberately-unfixed copy disclosed at the end of this document,
 `ws.channelCanSend`, still exists as a hand-rolled resolution (now at
 `Server/ws/serve_ready.go:119`, feeding the ready payload's `can_send` flag) —
 the disclosed follow-up remains open.
-**Decision:** D13 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
+**Decision:** D13 in [audit-2026-07-19-decisions.md](../archive/plans/audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-16 (new, HIGH). Closes **none** of backlog §6
 item 12's findings — A-2026-07-06, A-2026-07-10 and A-2026-07-11 all remain
 exactly as recorded; row 12 stays unstruck and unannotated.
@@ -76,7 +76,7 @@ see Non-goals.
   `VisibleChannelIDs`.
 - Docs: `docs/audits/2026-07-19-architecture-spec-conformance.md` — new §1 + §3 rows for A-2026-07-16
   (RESOLVED 2026-07-23 (D13)); amend the A-2026-07-07 rows to record the missed
-  fifth site; row 12 untouched. `docs/plans/audit-2026-07-19-decisions.md` — D13
+  fifth site; row 12 untouched. `docs/archive/plans/audit-2026-07-19-decisions.md` — D13
   row + status clause. `docs/architecture/server.md` — D3 prose (§"enforced
   inconsistently") and the source-of-truth list.
 

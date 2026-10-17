@@ -4,7 +4,7 @@
 [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md)
 §HP-9 and the roadmap
 [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md), B9.
-**Prepared by:** B9-27 ([.claude/plans/b9-27-hp9-freeze-and-exit.plan.md](../../.claude/plans/b9-27-hp9-freeze-and-exit.plan.md)).
+**Prepared by:** B9-27 ([.claude/plans/b9-27-hp9-freeze-and-exit.plan.md](../../../.claude/plans/b9-27-hp9-freeze-and-exit.plan.md)).
 **Date:** 2026-09-25.
 **Integration SHA:** `origin/dev` `84778e3d0ebbefb503029121379d30f154e92cce`
 ("feat(admin): apply Refined Neon tokens and accessibility floor to admin panel"),
@@ -217,10 +217,10 @@ that boundary; a change outside it needs its own freeze-impact review.
 
 - [b9-unified-experience-accessibility-polish.prd.md](b9-unified-experience-accessibility-polish.prd.md),
   [b9-journey-evidence-2026-09-25.md](b9-journey-evidence-2026-09-25.md),
-  [b9-27 plan](../../.claude/plans/b9-27-hp9-freeze-and-exit.plan.md)
+  [b9-27 plan](../../../.claude/plans/b9-27-hp9-freeze-and-exit.plan.md)
 - [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md),
-  [beta-requirements-traceability-2026-08-23.md](beta-requirements-traceability-2026-08-23.md),
-  [repo-health-issue-register-2026-08-23.md](repo-health-issue-register-2026-08-23.md)
+  [beta-requirements-traceability-2026-08-23.md](../../plans/beta-requirements-traceability-2026-08-23.md),
+  [repo-health-issue-register-2026-08-23.md](../../plans/repo-health-issue-register-2026-08-23.md)
 - `Client/bundle-budgets.json`, `Client/tests/e2e/b9-zoom.spec.ts`,
   `Client/tests/e2e/fullstack/b9-journeys.spec.ts`,
   `Client/tests/e2e/native/b9-journeys.spec.ts`, `.superpowers/findings-ledger.json`

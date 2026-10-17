@@ -4,7 +4,7 @@ The data contracts for the five B5 services that sit behind HP-5's abuse and
 privacy review, as migration drafts with their rollbacks. They are **not**
 applied migrations: `Server/migrations/` gains them only when B5-6 through
 B5-10 land. Migration numbers 046-050 are reserved for them in the B5 plan
-(`docs/plans/b5-community-content-moderation-2026-09-04.md`); B5-11 (push
+(`docs/archive/plans/b5-community-content-moderation-2026-09-04.md`); B5-11 (push
 dispatch) needs no migration at all, which is why it gets a short note
 instead of a `.sql` pair. Each `up` file is what the step's `db-change`
 migration will contain; each `down` file is the rollback an operator runs by

@@ -9,8 +9,8 @@
 after-state inventory), branch `feat/b3-2-auth-slice` off `dev` `71d867cb`
 **Measured:** 2026-08-30
 **Evidence base:** the plan's B3-0, B3-1 and B3-2 evidence blocks;
-[server-boundaries.md](../architecture/server-boundaries.md) §"Auth slice";
-[server.md](../architecture/server.md) §D4
+[server-boundaries.md](../../architecture/server-boundaries.md) §"Auth slice";
+[server.md](../../architecture/server.md) §D4
 
 **Decision: ACCEPTED — 2026-08-30 by J3vb (repository owner).**
 
@@ -158,7 +158,7 @@ green in the `-race` run above.
 ## Question 4 — is the pattern repeatable?
 
 Written down as the rule for B3-8 in
-[server.md](../architecture/server.md) §"D4 — The vertical-slice pattern":
+[server.md](../../architecture/server.md) §"D4 — The vertical-slice pattern":
 interface beside the consumer → service owns every decision → handler is
 decode, one call, encode → the allowlist row leaves with the import → the
 limits and converters move with the code that reads them → the composition
