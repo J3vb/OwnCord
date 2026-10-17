@@ -862,6 +862,12 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
+        // LP-8d: the SDK only adds `stereo=1` to the opus fmtp in single
+        // peer connection mode, so record which mode the server granted.
+        log::info!(
+            "[native_voice] single peer connection active: {}",
+            room.is_single_peer_connection_active()
+        );
         // The join's grant raises no change event, so the webview hears it
         // here, before any event the forwarder sends.
         if let Some(permission) = room.local_participant().permission() {

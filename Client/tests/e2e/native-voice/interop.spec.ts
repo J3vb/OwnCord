@@ -1043,6 +1043,106 @@ test("a native screen share's audio decodes in the browser and survives a video 
   expect(left.screenCaptures).toBe(0);
 });
 
+// WP LP-8d: does a Linux share's audio reach a viewer as stereo? The native
+// source puts 440 Hz on the left and 660 Hz on the right. The assertion is the
+// outcome we want (stereo negotiated, channels kept apart); a failure prints
+// the negotiated fmtp line and the per-channel peaks, so CI shows the real
+// state without a hand test.
+test("a native share's audio reaches the browser as stereo with the channels apart", async ({
+  page,
+}) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "25",
+      "--screen",
+      "1280x720",
+      "--screen-audio",
+    ],
+    () => undefined,
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
+      timeout: 60_000,
+    })
+    .toBeGreaterThan(0);
+  await page.waitForTimeout(2_000);
+
+  const reading = await page.evaluate(async () => {
+    const room = (window as unknown as { __room: import("livekit-client").Room }).__room;
+    const lk = (window as unknown as { LivekitClient: typeof import("livekit-client") })
+      .LivekitClient;
+    const remote = [...room.remoteParticipants.values()].find((p) => p.identity === "user-2");
+    const pub = remote?.getTrackPublication(lk.Track.Source.ScreenShareAudio);
+    const track = pub?.track;
+    if (track === undefined) return null;
+
+    // (a) The negotiated codec of the inbound audio.
+    let fmtp = "";
+    let channels = 0;
+    const report = await track.getRTCStatsReport();
+    report?.forEach((s: { type: string; kind?: string; codecId?: string }) => {
+      if (s.type !== "inbound-rtp" || s.kind !== "audio" || s.codecId === undefined) return;
+      const codec = report.get(s.codecId) as
+        { sdpFmtpLine?: string; channels?: number } | undefined;
+      fmtp = codec?.sdpFmtpLine ?? "";
+      channels = codec?.channels ?? 0;
+    });
+
+    // (b) The dominant frequency of each channel of the received track.
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    await ctx.resume();
+    const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+    const splitter = ctx.createChannelSplitter(2);
+    source.connect(splitter);
+    const analysers = [ctx.createAnalyser(), ctx.createAnalyser()];
+    analysers.forEach((a, i) => {
+      a.fftSize = 8192;
+      splitter.connect(a, i);
+    });
+    const best = [
+      { hz: 0, db: -Infinity },
+      { hz: 0, db: -Infinity },
+    ];
+    for (let n = 0; n < 30; n++) {
+      await new Promise((r) => setTimeout(r, 100));
+      analysers.forEach((a, i) => {
+        const bins = new Float32Array(a.frequencyBinCount);
+        a.getFloatFrequencyData(bins);
+        let top = 0;
+        for (let b = 1; b < bins.length; b++) if (bins[b]! > bins[top]!) top = b;
+        if (bins[top]! > best[i]!.db)
+          best[i] = { hz: (top * ctx.sampleRate) / a.fftSize, db: bins[top]! };
+      });
+    }
+    await ctx.close();
+    return { fmtp, channels, left: best[0]!, right: best[1]! };
+  });
+  await peer.done;
+
+  expect(reading, "the browser has the native share audio track").not.toBeNull();
+  const { fmtp, channels, left, right } = reading!;
+  const state =
+    `sdpFmtpLine="${fmtp}" codec channels=${channels} ` +
+    `left peak ${left.hz.toFixed(0)} Hz (${left.db.toFixed(0)} dB) ` +
+    `right peak ${right.hz.toFixed(0)} Hz (${right.db.toFixed(0)} dB)`;
+  console.log(`LP-8d native share audio as received: ${state}`);
+  expect(fmtp, `stereo=1 is negotiated for the share audio: ${state}`).toContain("stereo=1");
+  expect(channels, `the opus codec is stereo: ${state}`).toBe(2);
+  expect(Math.abs(left.hz - 440), `left channel carries 440 Hz: ${state}`).toBeLessThan(30);
+  expect(Math.abs(right.hz - 660), `right channel carries 660 Hz: ${state}`).toBeLessThan(30);
+});
+
 // WP M-12a: a live quality change re-caps the running capture and republishes
 // it (livekit 0.9.5 cannot change a sender's encoding). The browser re-subscribes
 // at the new size with the same key, and the share audio keeps flowing.
