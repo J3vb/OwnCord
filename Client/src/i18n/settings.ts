@@ -322,6 +322,8 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleNote":
     "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
+  "logs.openFolder": "Open Log Folder",
+  "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":
     "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
