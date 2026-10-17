@@ -197,6 +197,8 @@ export const shellText = defineCatalog("shell", {
   "members.empty": "No members online",
   "members.groupHeader": "{role} — {count}",
   "members.offlineGroup": "OFFLINE",
+  "members.search": "Search members",
+  "members.searchEmpty": "No members match your search",
   "members.role.owner": "OWNER",
   "members.role.admin": "ADMIN",
   "members.role.moderator": "MODERATOR",

@@ -367,6 +367,32 @@ describe("global keybinds", () => {
     expect(h.onSearch).not.toHaveBeenCalled();
   });
 
+  it("typing in the member search does not move focus to the composer", () => {
+    detach = attachGlobalKeybinds(makeHandlers());
+    const composer = document.createElement("textarea");
+    composer.className = "msg-textarea";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "member-search";
+    document.body.append(composer, search);
+    onTestFinished(() => {
+      composer.remove();
+      search.remove();
+    });
+
+    // Control: from an idle page the same key does reach the composer.
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(composer);
+
+    search.focus();
+    search.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(search);
+  });
+
   // DP-35: Alt+↑/↓ steps to the previous/next channel, Alt+Shift+↑/↓ to the
   // previous/next unread channel (Discord's shortcuts).
   it("steps channels on Alt+ArrowDown / Alt+ArrowUp", () => {

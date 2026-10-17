@@ -19,9 +19,10 @@
   flex-direction: column;
   /* Fills whatever the channel list above leaves, instead of claiming its full
      content height and starving that list (P1-01). The min-height keeps about
-     three member rows in view; past that, the channel list scrolls instead. */
+     three member rows in view; past that, the channel list scrolls instead.
+     The 2em over the old 11em is the member search box above the rows. */
   flex: 1 1 0;
-  min-height: calc(var(--font-size, 16px) * 11);
+  min-height: calc(var(--font-size, 16px) * 13);
 }
 /* A definite height — restored from storage, dragged, or collapsed — is not a
    share of the column: the section keeps that size and the channel list above
@@ -41,6 +42,16 @@
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+}
+.member-search-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 2px 8px;
+  background: var(--bg-secondary);
+}
+.member-search-wrap .member-search {
+  padding: 2px 8px;
 }
 .sidebar-resize-handle {
   height: 4px;
